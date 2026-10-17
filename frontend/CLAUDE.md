@@ -14,7 +14,11 @@ When building or editing any page, conform to all of these.
 
 ## Progressive disclosure (verdict-first)
 - Every page answers its ONE question in the first screen: a `VerdictBanner` +
-  a stat row + the primary view. Everything else is behind tabs / drawers / `Collapse`.
+  a stat row + the primary view. The shared verdict is a compact, unboxed status
+  row; supporting explanation stays behind its Details control. Keep essential
+  action consequences and stale-edit instructions inline when needed. Do not
+  reintroduce large explanatory status panels (October 12 user correction).
+  Everything else is behind tabs / drawers / `Collapse`.
 - Keep pushing disclosure further everywhere — if a page shows everything at once, it's wrong.
 
 ## Tabs
@@ -44,11 +48,30 @@ When building or editing any page, conform to all of these.
   labeled for what they DO. If a page's purpose isn't obvious, that's a bug.
 
 ## Reusable primitives (build on these, keep consistent)
+- `ui/data-table.tsx` is the canonical inventory table. Declare a semantic column
+  `kind` (name, text, status, count, date, actions, etc.); shared
+  `ui/data-table-layout.ts` owns sizing and alignment, and `src/index.css` owns
+  table spacing, typography, wrapping and overflow. Names/descriptions may grow;
+  counts/statuses/actions stay bounded. Use explicit dimensions only for real
+  content needs, such as a formatted timestamp or multiple action buttons.
+- Headers and cells must share alignment and column geometry. Never attach
+  `::before`/`::after` decorations to table rows: they can create anonymous cells
+  and shift body columns away from headers. Use inset shadows for row hover.
+- Use `wrap: true` for evidence and version lists that must remain fully visible.
+  Shared cell clipping exposes the full value on hover/keyboard focus. Avoid
+  page-specific truncation or width rules that compete with these defaults.
+  Narrow tables scroll inside the shared wrapper; do not clip their actions with
+  a page-level `overflow-hidden` table implementation.
+- Semantic tables share column resizing, ordering and left/right pinning. The
+  shared layout menu and resize handles support keyboard input; do not add a
+  page-specific layout editor. Widths, order and pins use the same tenant/user
+  preference namespace as density/visibility. Reset table preferences resets all
+  of them. Narrow layouts temporarily suspend pins to keep every column reachable.
 - `ui/verdict-banner.tsx` — the top-line verdict (ok/degraded/critical/info).
 - `ui/collapse.tsx` — "Advanced"/detail disclosure.
 - `ui/tabs.tsx` — URL-synced tabs.
 - `ui/drawer.tsx` — DEPRECATED for forms; do not use for add/edit (see Forms above).
-- `ui/stat-card.tsx` — the metric tile; use in a full-width grid.
+- `ui/stat-card.tsx` — use `StatGrid` with `StatCard` for metric rows. Use `valueKind="text"` for timestamps and other metadata so shared typography keeps text readable without inflating numeric KPI rows. Global CSS fits columns to available content width, including beside the sidebar; avoid fixed viewport-based column counts that squeeze labels.
 - `components/SettingsShell.tsx` — the grouped settings surface.
 - Match the Astronomer-cloned design system (Inter, cool-gray, blue→violet, 8px,
   CSS-var tokens `var(--color-*)`).

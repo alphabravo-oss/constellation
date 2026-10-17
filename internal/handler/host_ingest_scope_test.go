@@ -82,7 +82,7 @@ VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`,
 					if err != nil {
 						t.Fatal(err)
 					}
-					req := httptest.NewRequest(http.MethodPost, "/api/v1/host-"+endpoint.name+":report", bytes.NewReader(body))
+					req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/host-"+endpoint.name+":report", bytes.NewReader(body))
 					req.Header.Set("Authorization", "Bearer "+rawToken)
 					rec := httptest.NewRecorder()
 					RuntimeAgentTokenMiddleware(pool)(endpoint.report).ServeHTTP(rec, req)

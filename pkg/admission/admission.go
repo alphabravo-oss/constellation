@@ -23,7 +23,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/alphabravocompany/constellation/pkg/quarantine"
 )
@@ -525,6 +524,7 @@ type EvidenceGate struct {
 	DeniedCVEs                   []string // vulnerability: deny if any of these CVE ids is present, regardless of severity/count (NeuVector CriteriaKeyCVENames). Normalized upper-case.
 	CVEGraceDays                 *int     // vulnerability: ignore CVEs published within this many days when counting/denying (NeuVector SubCriteriaPublishDays). nil/<=0 = no grace window.
 	RequireKnownScanResult       bool
+	RequiredSuccessfulEngines    []string
 	HonorActiveExceptions        bool
 	MaxScanAgeSeconds            int64
 	RequireVulnDBBundle          bool
@@ -1510,6 +1510,3 @@ func explicitImageTag(image string) (string, bool) {
 	}
 	return ref[lastColon+1:], true
 }
-
-// runtimeScheme is exported only so the webhook server can register types when wiring TLS.
-var runtimeScheme = runtime.NewScheme()

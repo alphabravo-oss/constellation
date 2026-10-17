@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/db"
+	"github.com/alphabravocompany/constellation/internal/flowrollup"
 )
 
 // RollupRefresher incrementally folds raw network_flows into the per-hour
@@ -24,14 +25,14 @@ import (
 // OFF unless CONSTELLATION_NETWORK_FLOW_RETENTION_DAYS is set, so it never
 // deletes flow history without an operator opting in.
 type RollupRefresher struct {
-	db        *db.DB
-	interval  time.Duration
-	lag       time.Duration // don't fold flows newer than now()-lag, to tolerate clock skew / late arrivals
-	retention time.Duration // env-derived default; 0 = disabled
+	db         *db.DB
+	interval   time.Duration
+	lag        time.Duration // don't fold flows newer than now()-lag, to tolerate clock skew / late arrivals
+	retention  time.Duration // env-derived default; 0 = disabled
 	pruneBatch int64
 	// liveRetention, when set, returns the runtime-configured horizon (from system
-	// config) each pass; a value > 0 overrides the env default so an admin can set
-	// retention from the UI without a restart. 0 falls back to the env default.
+	// config) each pass and overrides the env default, including an explicit zero
+	// (retention disabled).
 	liveRetention func(ctx context.Context) time.Duration
 }
 
@@ -77,16 +78,15 @@ func (rr *RollupRefresher) Start(ctx context.Context) {
 func (rr *RollupRefresher) runOnce(ctx context.Context) {
 	start := time.Now()
 	if err := rr.refresh(ctx); err != nil {
-		slog.Warn("network flow rollup refresh", slog.String("err", err.Error()))
+		slog.Warn("network flow rollup refresh; retention skipped", slog.String("err", err.Error()))
+		return
 	} else if d := time.Since(start); d > 2*time.Second {
 		// Only noisy on the first-boot backfill; steady-state incremental passes are sub-second.
 		slog.Info("network flow rollup refresh", slog.Duration("took", d))
 	}
 	horizon := rr.retention
 	if rr.liveRetention != nil {
-		if live := rr.liveRetention(ctx); live > 0 {
-			horizon = live
-		}
+		horizon = rr.liveRetention(ctx)
 	}
 	if horizon > 0 {
 		if deleted, err := rr.prune(ctx, horizon); err != nil {
@@ -138,48 +138,7 @@ func (rr *RollupRefresher) refresh(ctx context.Context) error {
 // two can never drift apart. The (lo, hi] bound is exclusive-low so a flow is
 // never folded twice across successive incremental passes.
 func (rr *RollupRefresher) foldRange(ctx context.Context, tx pgx.Tx, lo, hi time.Time) error {
-	_, err := tx.Exec(ctx, `
-INSERT INTO network_flow_rollups (
-    org_id, cluster_id, src_workload, dst_workload, protocol, l7_protocol, dst_port, verdict, bucket,
-    sum_bytes, sum_packets, flow_count, max_at, min_src_addr, min_dst_addr, min_src_port,
-    has_dp, has_hubble, has_bpf, min_source, sum_client_bytes, sum_server_bytes, sum_sessions,
-    max_threat_id, max_severity, max_application, fqdn)
-SELECT f.org_id, f.cluster_id, f.src_workload, f.dst_workload, f.protocol,
-       COALESCE(f.l7_protocol, ''), COALESCE(f.dst_port, 0), COALESCE(f.verdict, ''),
-       date_trunc('hour', f.at),
-       SUM(COALESCE(f.bytes, 0))::bigint, SUM(COALESCE(f.packets, 0))::bigint, COUNT(*)::bigint, MAX(f.at),
-       COALESCE(MIN(f.src_addr), ''), COALESCE(MIN(f.dst_addr), ''), COALESCE(MIN(f.src_port), 0),
-       bool_or(f.source = 'dp'), bool_or(f.source = 'hubble'), bool_or(f.source = 'bpf'), COALESCE(MIN(f.source), ''),
-       SUM(COALESCE(f.client_bytes, 0))::bigint, SUM(COALESCE(f.server_bytes, 0))::bigint, SUM(COALESCE(f.sessions, 0))::bigint,
-       MAX(f.threat_id), MAX(f.severity), MAX(f.application), COALESCE(MIN(NULLIF(f.fqdn, '')), '')
-  FROM network_flows f
- WHERE f.cluster_id IS NOT NULL
-   AND f.at > $1 AND f.at <= $2
- GROUP BY f.org_id, f.cluster_id, f.src_workload, f.dst_workload, f.protocol,
-          COALESCE(f.l7_protocol, ''), COALESCE(f.dst_port, 0), COALESCE(f.verdict, ''),
-          date_trunc('hour', f.at)
-ON CONFLICT (org_id, cluster_id, src_workload, dst_workload, protocol, l7_protocol, dst_port, verdict, bucket)
-DO UPDATE SET
-    sum_bytes        = network_flow_rollups.sum_bytes + EXCLUDED.sum_bytes,
-    sum_packets      = network_flow_rollups.sum_packets + EXCLUDED.sum_packets,
-    flow_count       = network_flow_rollups.flow_count + EXCLUDED.flow_count,
-    max_at           = GREATEST(network_flow_rollups.max_at, EXCLUDED.max_at),
-    min_src_addr     = LEAST(network_flow_rollups.min_src_addr, EXCLUDED.min_src_addr),
-    min_dst_addr     = LEAST(network_flow_rollups.min_dst_addr, EXCLUDED.min_dst_addr),
-    min_src_port     = LEAST(network_flow_rollups.min_src_port, EXCLUDED.min_src_port),
-    has_dp           = network_flow_rollups.has_dp OR EXCLUDED.has_dp,
-    has_hubble       = network_flow_rollups.has_hubble OR EXCLUDED.has_hubble,
-    has_bpf          = network_flow_rollups.has_bpf OR EXCLUDED.has_bpf,
-    min_source       = LEAST(network_flow_rollups.min_source, EXCLUDED.min_source),
-    sum_client_bytes = network_flow_rollups.sum_client_bytes + EXCLUDED.sum_client_bytes,
-    sum_server_bytes = network_flow_rollups.sum_server_bytes + EXCLUDED.sum_server_bytes,
-    sum_sessions     = network_flow_rollups.sum_sessions + EXCLUDED.sum_sessions,
-    max_threat_id    = GREATEST(network_flow_rollups.max_threat_id, EXCLUDED.max_threat_id),
-    max_severity     = GREATEST(network_flow_rollups.max_severity, EXCLUDED.max_severity),
-    max_application  = GREATEST(network_flow_rollups.max_application, EXCLUDED.max_application),
-    fqdn             = COALESCE(NULLIF(network_flow_rollups.fqdn, ''), EXCLUDED.fqdn)`,
-		lo, hi)
-	return err
+	return flowrollup.FoldRange(ctx, tx, lo, hi)
 }
 
 // RefoldWindow rebuilds the hourly rollup buckets covering [from, to] from raw
@@ -202,28 +161,7 @@ func (rr *RollupRefresher) RefoldWindow(ctx context.Context, from, to time.Time)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	var watermark time.Time
-	if err := tx.QueryRow(ctx,
-		`SELECT watermark FROM network_flow_rollup_state FOR UPDATE`).Scan(&watermark); err != nil {
-		return err
-	}
-	hi := to
-	if watermark.Before(hi) {
-		hi = watermark // never re-fold ahead of the incremental watermark
-	}
-	// date_trunc('hour', from): buckets are hourly, so the whole hour must be rebuilt.
-	lo := from.UTC().Truncate(time.Hour)
-	if !hi.After(lo) {
-		return tx.Commit(ctx) // window is entirely ahead of the watermark; nothing settled to refold
-	}
-
-	if _, err := tx.Exec(ctx,
-		`DELETE FROM network_flow_rollups WHERE bucket >= $1 AND bucket <= $2`, lo, hi); err != nil {
-		return err
-	}
-	// foldRange's lower bound is exclusive (at > lo); step back 1µs so a flow landing
-	// exactly on the hour boundary is included in its rebuilt bucket.
-	if err := rr.foldRange(ctx, tx, lo.Add(-time.Microsecond), hi); err != nil {
+	if err := flowrollup.Rebuild(ctx, tx, from, to); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -231,21 +169,48 @@ func (rr *RollupRefresher) RefoldWindow(ctx context.Context, from, to time.Time)
 
 // prune deletes a bounded batch of raw flows older than the retention horizon.
 // Bounded so a backlog is worked off across cycles instead of one long lock.
-// ponytail: batched DELETE, not partition-drop. network_flows is a partitioned
-// table but everything currently lands in the default partition, so there are no
-// time partitions to DROP cheaply; a per-day partitioning + DROP is the upgrade
-// path once the ingest side rotates partitions.
+// Address rows by the partitioned table's (id, at) primary key, never by ctid
+// alone: two children can have the same physical tuple address.
 func (rr *RollupRefresher) prune(ctx context.Context, retention time.Duration) (int64, error) {
-	horizon := strconv.FormatInt(int64(retention/time.Second), 10)
-	tag, err := rr.db.Pool().Exec(ctx, `
-DELETE FROM network_flows
- WHERE ctid IN (
-     SELECT ctid FROM network_flows
-      WHERE at < now() - ($1::text || ' seconds')::interval
-      LIMIT $2
- )`, horizon, rr.pruneBatch)
+	if retention <= 0 || rr.pruneBatch <= 0 {
+		return 0, nil
+	}
+	tx, err := rr.db.Pool().Begin(ctx)
 	if err != nil {
 		return 0, err
 	}
-	return tag.RowsAffected(), nil
+	defer tx.Rollback(context.Background())
+	watermark, _, err := flowrollup.Lock(ctx, tx, true)
+	if err != nil {
+		return 0, err
+	}
+	// Keep at least an hour of replay grace and prune only completely folded hours.
+	cutoff := time.Now().UTC().Add(-retention).Truncate(time.Hour)
+	foldCutoff := watermark.UTC().Add(-time.Hour).Truncate(time.Hour)
+	if foldCutoff.Before(cutoff) {
+		cutoff = foldCutoff
+	}
+	var deleted int64
+	var through *time.Time
+	err = tx.QueryRow(ctx, `
+WITH removed AS (
+ DELETE FROM network_flows
+ WHERE (id, at) IN (
+   SELECT id, at FROM network_flows WHERE at < $1
+   ORDER BY at, id LIMIT $2 FOR UPDATE SKIP LOCKED
+ ) RETURNING at
+)
+SELECT count(*), date_trunc('hour', max(at) AT TIME ZONE 'UTC') AT TIME ZONE 'UTC' + interval '1 hour' FROM removed`, cutoff, rr.pruneBatch).Scan(&deleted, &through)
+	if err != nil {
+		return 0, err
+	}
+	if through != nil {
+		if _, err := tx.Exec(ctx, `UPDATE network_flow_rollup_state SET raw_pruned_before = GREATEST(raw_pruned_before, $1) WHERE id=true`, *through); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	return deleted, nil
 }

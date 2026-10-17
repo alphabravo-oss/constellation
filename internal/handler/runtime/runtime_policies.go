@@ -17,7 +17,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,7 +26,6 @@ import (
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/runtime/dp"
 	"github.com/alphabravocompany/constellation/pkg/audit"
-	"github.com/alphabravocompany/constellation/pkg/netpolicy"
 )
 
 // PolicyMode mirrors the CHECK constraint on runtime_policies.mode.
@@ -67,6 +66,7 @@ type RuntimePolicy struct {
 	DefAction  uint8           `json:"def_action"`
 	ApplyDir   int             `json:"apply_dir"`
 	Rules      json.RawMessage `json:"rules"`
+	Revision   string          `json:"revision"`
 	Version    int64           `json:"version"`
 	CreatedBy  *uuid.UUID      `json:"created_by,omitempty"`
 	CreatedAt  time.Time       `json:"created_at"`
@@ -83,6 +83,11 @@ func (p *RuntimePolicy) DecodeRules() ([]*dp.PolicyRule, error) {
 	var out []*dp.PolicyRule
 	if err := json.Unmarshal(p.Rules, &out); err != nil {
 		return nil, fmt.Errorf("decode rules: %w", err)
+	}
+	for _, rule := range out {
+		if rule == nil || rule.Action > dp.PolicyActionDeny {
+			return nil, errors.New("rules must contain supported non-null dataplane rules")
+		}
 	}
 	return out, nil
 }
@@ -111,6 +116,10 @@ func (p *RuntimePolicy) EncodeRules(rules []*dp.PolicyRule) error {
 // keeps `deny`. `disabled` mode returns an empty rule list so dp clears
 // the workload's table.
 func (p *RuntimePolicy) ToWorkloadPolicy(macs []string) (*dp.WorkloadPolicy, error) {
+	wireID, err := policyWireID(p.DPPolicyID)
+	if err != nil {
+		return nil, err
+	}
 	rules, err := p.DecodeRules()
 	if err != nil {
 		return nil, err
@@ -138,7 +147,6 @@ func (p *RuntimePolicy) ToWorkloadPolicy(macs []string) (*dp.WorkloadPolicy, err
 	// We deliberately overwrite any caller-supplied rule.ID — the runtime
 	// policy ID is the only stable bridge between our UUID + dp's uint32.
 	if p.DPPolicyID > 0 {
-		wireID := uint32(p.DPPolicyID)
 		for _, r := range rules {
 			r.ID = wireID
 		}
@@ -184,44 +192,11 @@ func snapshot(p *RuntimePolicy) audit.PolicySnapshot {
 // rules JSON before writing so a bad input fails fast with a 4xx-shaped error.
 // Writes a runtime.policy.create audit row.
 func (s *RuntimePolicyStore) Insert(ctx context.Context, p *RuntimePolicy, requestID string) (uuid.UUID, error) {
-	if !p.Mode.Valid() {
-		return uuid.Nil, fmt.Errorf("invalid mode %q", p.Mode)
-	}
-	if p.Workload == "" || p.Namespace == "" || p.Name == "" {
-		return uuid.Nil, errors.New("workload, namespace, and name are required")
-	}
-	if len(p.Rules) == 0 {
-		p.Rules = json.RawMessage("[]")
-	} else if !json.Valid(p.Rules) {
-		return uuid.Nil, errors.New("rules is not valid JSON")
-	}
-	var id uuid.UUID
-	var dpPolicyID int64
-	err := s.db.Pool().QueryRow(ctx, `
-INSERT INTO runtime_policies
-  (org_id, cluster_id, workload, namespace, name, mode,
-   def_action, apply_dir, rules, version, created_by, updated_by)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,1,$10,$10)
-RETURNING id, dp_policy_id`,
-		p.OrgID, p.ClusterID, p.Workload, p.Namespace, p.Name, string(p.Mode),
-		int16(p.DefAction), int16(p.ApplyDir), string(p.Rules), p.CreatedBy).Scan(&id, &dpPolicyID)
+	got, err := s.insertLegacyPolicy(ctx, p, requestID)
 	if err != nil {
 		return uuid.Nil, err
 	}
-	p.ID = id
-	p.DPPolicyID = dpPolicyID
-	p.Version = 1
-	if s.auditLog != nil {
-		if auditErr := s.auditLog.LogPolicyCreate(ctx, p.OrgID, p.CreatedBy, snapshot(p), requestID); auditErr != nil {
-			// Audit write failure does NOT roll back the policy — losing
-			// an audit row is preferable to refusing a legitimate edit. Log
-			// at warn so operators notice if it persists.
-			slog.Default().Warn("audit write failed; policy still committed",
-				slog.String("action", audit.ActionPolicyCreate),
-				slog.String("err", auditErr.Error()))
-		}
-	}
-	return id, nil
+	return got.ID, nil
 }
 
 // SetMode flips a policy's mode. The bump-version trigger handles the
@@ -232,39 +207,8 @@ RETURNING id, dp_policy_id`,
 // auto_rollback in that case).
 func (s *RuntimePolicyStore) SetMode(ctx context.Context, orgID, id uuid.UUID,
 	mode PolicyMode, by uuid.UUID, system bool, requestID string) error {
-	if !mode.Valid() {
-		return fmt.Errorf("invalid mode %q", mode)
-	}
-	// Snapshot before so the audit row can show the transition.
-	before, err := s.Get(ctx, orgID, id)
-	if err != nil {
-		return err
-	}
-	tag, err := s.db.Pool().Exec(ctx,
-		`UPDATE runtime_policies SET mode = $1, updated_by = $2
-		  WHERE id = $3 AND org_id = $4`,
-		string(mode), by, id, orgID)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return errors.New("not found")
-	}
-	if s.auditLog != nil {
-		after, err := s.Get(ctx, orgID, id)
-		if err == nil {
-			actor := &by
-			if system {
-				actor = nil // actor_id NULL for system-initiated transitions
-			}
-			if auditErr := s.auditLog.LogPolicyModeChange(ctx, orgID, actor,
-				snapshot(before), snapshot(after), system, requestID); auditErr != nil {
-				slog.Default().Warn("audit write failed for SetMode",
-					slog.String("err", auditErr.Error()))
-			}
-		}
-	}
-	return nil
+	_, err := s.setLegacyPolicyMode(ctx, orgID, id, mode, by, system, requestID)
+	return err
 }
 
 // policySelectCols is the canonical column list used by Get / List / etc.
@@ -279,6 +223,25 @@ func (s *RuntimePolicyStore) Get(ctx context.Context, orgID, id uuid.UUID) (*Run
 	row := s.db.Pool().QueryRow(ctx, `SELECT `+policySelectCols+
 		` FROM runtime_policies WHERE id = $1 AND org_id = $2`, id, orgID)
 	return scanPolicy(row)
+}
+
+// ListInventoryForCluster includes disabled policies so operators can review,
+// edit and re-enable them. The agent distribution method below remains filtered.
+func (s *RuntimePolicyStore) ListInventoryForCluster(ctx context.Context, orgID, clusterID uuid.UUID) ([]*RuntimePolicy, error) {
+	rows, err := s.db.Pool().Query(ctx, `SELECT `+policySelectCols+` FROM runtime_policies WHERE org_id=$1 AND cluster_id=$2 ORDER BY namespace,name,id`, orgID, clusterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*RuntimePolicy{}
+	for rows.Next() {
+		p, err := scanPolicy(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
 }
 
 // ListForCluster returns every policy that should drive dp on the given
@@ -310,97 +273,12 @@ func (s *RuntimePolicyStore) ListForCluster(ctx context.Context, orgID, clusterI
 // INSERT (always monitor for machine-seeded rows); an existing row's mode is
 // never changed here, so re-expansion cannot re-arm or disarm enforcement.
 // Returns the resulting policy ID.
-func (s *RuntimePolicyStore) UpsertLearnedPolicy(ctx context.Context, p *RuntimePolicy,
-	learned []*dp.PolicyRule, by *uuid.UUID) (uuid.UUID, error) {
-	tagged := netpolicy.Tag(learned, netpolicy.CfgTypeLearned)
-	existing, err := s.GetByName(ctx, p.OrgID, p.ClusterID, p.Workload, p.Name)
+func (s *RuntimePolicyStore) UpsertLearnedPolicy(ctx context.Context, p *RuntimePolicy, learned []*dp.PolicyRule, by *uuid.UUID) (uuid.UUID, error) {
+	saved, _, err := s.applyLearnedPolicy(ctx, p, learned, by, "")
 	if err != nil {
 		return uuid.Nil, err
 	}
-	if existing == nil {
-		enc, err := json.Marshal(tagged)
-		if err != nil {
-			return uuid.Nil, err
-		}
-		p.Rules = enc
-		if p.Mode == "" {
-			p.Mode = PolicyModeMonitor // SAFETY: seeded rows ship in monitor
-		}
-		return s.Insert(ctx, p, "")
-	}
-	prior, err := netpolicy.DecodeSourced(existing.Rules)
-	if err != nil {
-		return uuid.Nil, err
-	}
-	merged := netpolicy.MergeRules(prior, tagged)
-	enc, err := json.Marshal(merged)
-	if err != nil {
-		return uuid.Nil, err
-	}
-	if _, err := s.db.Pool().Exec(ctx,
-		`UPDATE runtime_policies SET rules = $1::jsonb, updated_by = $2
-		  WHERE id = $3 AND org_id = $4`,
-		string(enc), by, existing.ID, p.OrgID); err != nil {
-		return uuid.Nil, err
-	}
-	return existing.ID, nil
-}
-
-func (s *RuntimePolicyStore) upsertLearnedPolicyTx(ctx context.Context, tx pgx.Tx, policy *RuntimePolicy,
-	learned []*dp.PolicyRule, by *uuid.UUID) (uuid.UUID, bool, error) {
-	var existing *RuntimePolicy
-	row := tx.QueryRow(ctx, `SELECT `+policySelectCols+`
- FROM runtime_policies
- WHERE org_id=$1 AND cluster_id=$2 AND workload=$3 AND name=$4
- FOR UPDATE`, policy.OrgID, policy.ClusterID, policy.Workload, policy.Name)
-	current, err := scanPolicy(row)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return uuid.Nil, false, err
-	}
-	if err == nil {
-		existing = current
-	}
-	tagged := netpolicy.Tag(learned, netpolicy.CfgTypeLearned)
-	if existing == nil {
-		encoded, err := json.Marshal(tagged)
-		if err != nil {
-			return uuid.Nil, false, err
-		}
-		if policy.Mode == "" {
-			policy.Mode = PolicyModeMonitor
-		}
-		if !policy.Mode.Valid() || policy.Workload == "" || policy.Namespace == "" || policy.Name == "" {
-			return uuid.Nil, false, errors.New("invalid learned policy")
-		}
-		policy.Rules = encoded
-		var dpPolicyID int64
-		if err := tx.QueryRow(ctx, `
-INSERT INTO runtime_policies
-  (org_id, cluster_id, workload, namespace, name, mode, def_action, apply_dir, rules, version, created_by, updated_by)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,1,$10,$10)
-RETURNING id, dp_policy_id`, policy.OrgID, policy.ClusterID, policy.Workload, policy.Namespace,
-			policy.Name, string(policy.Mode), int16(policy.DefAction), int16(policy.ApplyDir), string(policy.Rules), by).
-			Scan(&policy.ID, &dpPolicyID); err != nil {
-			return uuid.Nil, false, err
-		}
-		policy.DPPolicyID = dpPolicyID
-		policy.Version = 1
-		return policy.ID, true, nil
-	}
-	prior, err := netpolicy.DecodeSourced(existing.Rules)
-	if err != nil {
-		return uuid.Nil, false, err
-	}
-	merged := netpolicy.MergeRules(prior, tagged)
-	encoded, err := json.Marshal(merged)
-	if err != nil {
-		return uuid.Nil, false, err
-	}
-	if _, err := tx.Exec(ctx, `UPDATE runtime_policies SET rules=$1::jsonb, updated_by=$2 WHERE id=$3 AND org_id=$4`,
-		string(encoded), by, existing.ID, policy.OrgID); err != nil {
-		return uuid.Nil, false, err
-	}
-	return existing.ID, false, nil
+	return saved.ID, nil
 }
 
 // GetByName fetches one policy by its natural key (org, cluster, workload,
@@ -437,6 +315,10 @@ func scanPolicy(s rowScanner) (*RuntimePolicy, error) {
 		return nil, err
 	}
 	p.Mode = PolicyMode(mode)
+	p.Revision = strconv.FormatInt(p.Version, 10)
+	if defAct < 0 || defAct > 255 {
+		return nil, errors.New("stored policy action exceeds the wire range")
+	}
 	p.DefAction = uint8(defAct)
 	p.ApplyDir = int(applyDir)
 	p.Rules = json.RawMessage(rulesText)
@@ -446,23 +328,5 @@ func scanPolicy(s rowScanner) (*RuntimePolicy, error) {
 // Delete removes one policy. Org-scoped. Writes a runtime.policy.delete
 // audit row using a snapshot taken before the DELETE.
 func (s *RuntimePolicyStore) Delete(ctx context.Context, orgID, id uuid.UUID, by *uuid.UUID, requestID string) error {
-	before, err := s.Get(ctx, orgID, id)
-	if err != nil {
-		return err
-	}
-	tag, err := s.db.Pool().Exec(ctx,
-		`DELETE FROM runtime_policies WHERE id = $1 AND org_id = $2`, id, orgID)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return errors.New("not found")
-	}
-	if s.auditLog != nil {
-		if auditErr := s.auditLog.LogPolicyDelete(ctx, orgID, by, snapshot(before), requestID); auditErr != nil {
-			slog.Default().Warn("audit write failed for Delete",
-				slog.String("err", auditErr.Error()))
-		}
-	}
-	return nil
+	return s.deleteLegacyPolicy(ctx, orgID, id, by, requestID)
 }

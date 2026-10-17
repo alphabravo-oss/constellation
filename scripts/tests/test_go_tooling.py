@@ -49,7 +49,8 @@ elif tool.endswith("gotestsum"):
         Path(args[args.index(flag) + 1]).write_text(content)
     sys.exit(int(os.environ.get("FAKE_TEST_EXIT", "0")))
 elif tool == "go":
-    sys.exit(int(os.environ.get("FAKE_TEST_EXIT", "0")))
+    key = "FAKE_SEED_EXIT" if args[0] == "run" else "FAKE_TEST_EXIT"
+    sys.exit(int(os.environ.get(key, "0")))
 '''
 
 
@@ -145,7 +146,7 @@ class GoToolingTests(unittest.TestCase):
     def test_clean_database_default_preserved(self):
         result = self.run_script(clean=True)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.calls("go")[0]["args"],
+        self.assertEqual(self.calls("go")[-1]["args"],
                          ["test", "-tags=integration", "-p", "1", "-count=2", "./..."])
         self.assertEqual(self.calls("gotestsum"), [])
         self.assertFalse((self.root / "artifacts").exists())
@@ -156,7 +157,7 @@ class GoToolingTests(unittest.TestCase):
         result = self.run_script("./pkg/...", "./internal/...", clean=True,
                                  GOTESTSUM_BIN=str(self.root / "missing"))
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.calls("go")[0]["args"][-2:], ["./pkg/...", "./internal/..."])
+        self.assertEqual(self.calls("go")[-1]["args"][-2:], ["./pkg/...", "./internal/..."])
         self.assertEqual(self.calls("gotestsum"), [])
         self.assert_cleaned()
 
@@ -188,7 +189,13 @@ class GoToolingTests(unittest.TestCase):
                          ["-tags=integration", "-p", "1", "-count=2", "-race", "-shuffle=on",
                           "./internal/...", "./pkg/..."])
         self.assert_migrations("custom goose")
-        self.assertEqual(self.calls("go"), [])
+        self.assertEqual([call["args"] for call in self.calls("go")], [["run", "./cmd/constellation-seed"]])
+        self.assert_cleaned()
+
+    def test_seed_failure_cleans_up_and_stops_tests(self):
+        result = self.run_script("integration", FAKE_SEED_EXIT="27")
+        self.assertEqual(result.returncode, 27, result.stderr)
+        self.assertEqual(self.calls("gotestsum"), [])
         self.assert_cleaned()
 
     def test_direct_gotestsum_opt_in(self):

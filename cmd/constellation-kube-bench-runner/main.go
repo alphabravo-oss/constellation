@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/alphabravocompany/constellation/internal/obslog"
+	compliancepkg "github.com/alphabravocompany/constellation/pkg/compliance"
 	"github.com/alphabravocompany/constellation/pkg/version"
 )
 
@@ -36,7 +37,7 @@ const (
 	benchRunTimeout  = 5 * time.Minute
 	maxReportBytes   = 16 << 20
 	componentName    = "kube-bench-runner"
-	ingestPathFormat = "/api/v1/compliance/ingest?profile=%s"
+	ingestPathFormat = "/api/v1/agent/compliance/ingest?profile=%s"
 )
 
 type config struct {
@@ -52,20 +53,32 @@ type config struct {
 	// watchInterval > 0 turns the runner into a resident poller for on-demand
 	// run requests (CMP-RUN-31). Zero = one-shot CronJob mode.
 	watchInterval time.Duration
+	durableWorker bool
+	spoolDir      string
+	runnerID      string
 }
 
-func main() {
+func main() { os.Exit(runMain()) }
+
+func runMain() int {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: obslog.Level()})).With("svc", "constellation-kube-bench-runner")
 	version.LogStartup(logger, componentName)
 
 	cfg, err := loadConfig()
 	if err != nil {
 		logger.Error("config", "err", err.Error())
-		os.Exit(2)
+		return 2
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
+	if cfg.durableWorker {
+		if err := runExecutionWorker(ctx, http.DefaultClient, cfg, logger); err != nil {
+			logger.Error("durable benchmark worker unavailable", "err", err.Error())
+			return 1
+		}
+		return 0
+	}
 
 	// CMP-RUN-31: watch mode. When BENCH_WATCH_INTERVAL is set the runner stays
 	// resident and polls the control plane for on-demand run requests
@@ -74,12 +87,12 @@ func main() {
 	// the historical one-shot CronJob behaviour.
 	if cfg.watchInterval > 0 {
 		watchLoop(ctx, http.DefaultClient, cfg, logger)
-		return
+		return 0
 	}
 
 	if err := runAndIngest(ctx, http.DefaultClient, cfg, logger); err != nil {
 		logger.Error("bench run", "err", err.Error())
-		os.Exit(1)
+		return 1
 	}
 
 	// Best-effort heartbeat so the runner shows up in the components table like
@@ -89,6 +102,7 @@ func main() {
 			logger.Warn("heartbeat failed", "err", err.Error())
 		}
 	}
+	return 0
 }
 
 // runAndIngest execs the benchmark and POSTs the report to /compliance/ingest,
@@ -137,10 +151,10 @@ func watchLoop(ctx context.Context, client *http.Client, cfg config, logger *slo
 			claimed, err := claimPendingRun(ctx, client, cfg)
 			if err != nil {
 				logger.Warn("claim poll failed", "err", err.Error())
-			} else if claimed {
-				logger.Info("claimed on-demand bench run; executing")
-				if err := runAndIngest(ctx, client, cfg, logger); err != nil {
-					logger.Error("on-demand bench run", "err", err.Error())
+			} else if claimed != nil {
+				logger.Info("claimed on-demand bench run; executing", "request_id", claimed.ID)
+				if err := runClaimedBenchmark(ctx, client, cfg, *claimed, logger); err != nil {
+					logger.Error("on-demand bench run failed; request remains claimed", "request_id", claimed.ID, "err", err.Error())
 				}
 			}
 			if version.HeartbeatConfigured(cfg.hbCfg) {
@@ -155,31 +169,40 @@ func watchLoop(ctx context.Context, client *http.Client, cfg config, logger *slo
 // claimPendingRun asks the control plane for the next pending run request for
 // this cluster+profile. HTTP 200 => a request was claimed (run it); 204 => queue
 // empty. The claim is atomic server-side (FOR UPDATE SKIP LOCKED).
-func claimPendingRun(ctx context.Context, client *http.Client, cfg config) (bool, error) {
+func claimPendingRun(ctx context.Context, client *http.Client, cfg config) (*claimedBenchRun, error) {
 	reqCtx, cancel := context.WithTimeout(ctx, postTimeout)
 	defer cancel()
-	endpoint := strings.TrimRight(cfg.apiURL, "/") + "/api/v1/compliance/bench/claim?profile=" + url.QueryEscape(cfg.profile)
+	endpoint := strings.TrimRight(cfg.apiURL, "/") + "/api/v1/agent/compliance/bench/claim?profile=" + url.QueryEscape(cfg.profile)
 	if cfg.clusterID != "" {
 		endpoint += "&cluster_id=" + url.QueryEscape(cfg.clusterID)
 	}
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, endpoint, nil)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+cfg.token)
-	resp, err := client.Do(req)
+	resp, err := benchmarkClient(client).Do(req)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, maxReportBytes))
-	switch {
-	case resp.StatusCode == http.StatusNoContent:
-		return false, nil
-	case resp.StatusCode == http.StatusOK:
-		return true, nil
+
+	switch resp.StatusCode {
+	case http.StatusNoContent:
+		return nil, nil
+	case http.StatusOK:
+		var envelope struct {
+			Request claimedBenchRun `json:"request"`
+		}
+		if err := decodeBenchmarkReceipt(resp.Body, &envelope); err != nil {
+			return nil, err
+		}
+		if _, err := claimedBenchmarkConfig(cfg, envelope.Request); err != nil {
+			return nil, err
+		}
+		return &envelope.Request, nil
 	default:
-		return false, fmt.Errorf("claim returned %d", resp.StatusCode)
+		return nil, fmt.Errorf("claim returned %d", resp.StatusCode)
 	}
 }
 
@@ -191,6 +214,10 @@ func loadConfig() (config, error) {
 	profile := strings.TrimSpace(os.Getenv("BENCH_PROFILE"))
 	if profile == "" {
 		profile = defaultProfile
+	}
+	profile, validProfile := compliancepkg.NormalizeBenchProfile(profile)
+	if !validProfile {
+		return config{}, errors.New("unsupported benchmark profile")
 	}
 	binary := strings.TrimSpace(os.Getenv("BENCH_BINARY"))
 	if binary == "" {
@@ -206,6 +233,9 @@ func loadConfig() (config, error) {
 	// ingest query so the parsed rows are tagged with the right CIS profile even
 	// if the JSON report omits a per-control version.
 	benchmark := strings.TrimSpace(os.Getenv("BENCH_VERSION"))
+	if !compliancepkg.ValidBenchmarkID(benchmark) {
+		return config{}, errors.New("invalid benchmark identifier")
+	}
 	if benchmark != "" && !hasBenchmarkFlag(args) {
 		args = append(args, "--benchmark", benchmark)
 	}
@@ -234,7 +264,7 @@ func loadConfig() (config, error) {
 		return config{}, errors.New("ingest token required (set CONSTELLATION_KUBE_BENCH_RUNNER_TOKEN or RUNTIME_AGENT_TOKEN[_FILE])")
 	}
 
-	return config{
+	cfg := config{
 		hbCfg:     hbCfg,
 		apiURL:    apiURL,
 		token:     token,
@@ -248,7 +278,11 @@ func loadConfig() (config, error) {
 		// cluster-level run — the ingest handler then keys on the cluster alone.
 		node:          strings.TrimSpace(os.Getenv("NODE_NAME")),
 		watchInterval: watchInterval,
-	}, nil
+	}
+	if err := configureExecutionWorker(&cfg); err != nil {
+		return config{}, err
+	}
+	return cfg, nil
 }
 
 // runBenchmark execs the upstream benchmark binary and returns its stdout (the
@@ -257,11 +291,14 @@ func runBenchmark(ctx context.Context, binary string, args []string) ([]byte, er
 	runCtx, cancel := context.WithTimeout(ctx, benchRunTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(runCtx, binary, args...)
-	var stdout, stderr bytes.Buffer
+	var stdout boundedBenchOutput
 	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	cmd.Stderr = io.Discard
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("%s %s: %w (stderr: %s)", binary, strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+		if runCtx.Err() != nil {
+			return nil, runCtx.Err()
+		}
+		return nil, errors.New("benchmark execution failed")
 	}
 	out := bytes.TrimSpace(stdout.Bytes())
 	if len(out) == 0 {
@@ -283,14 +320,22 @@ func postReport(ctx context.Context, client *http.Client, endpoint, token string
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := client.Do(req)
+	resp, err := benchmarkClient(client).Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		buf, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return fmt.Errorf("ingest returned %d: %s", resp.StatusCode, strings.TrimSpace(string(buf)))
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("ingest returned %d", resp.StatusCode)
+	}
+	var receipt struct {
+		Ingested *int `json:"ingested"`
+	}
+	if err := decodeBenchmarkReceipt(resp.Body, &receipt); err != nil {
+		return err
+	}
+	if receipt.Ingested == nil || *receipt.Ingested < 0 {
+		return errors.New("ingest has no confirmed receipt")
 	}
 	return nil
 }

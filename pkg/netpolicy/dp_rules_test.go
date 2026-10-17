@@ -1,13 +1,62 @@
 package netpolicy
 
 import (
+	"errors"
+	"math"
 	"testing"
 
 	"github.com/alphabravocompany/constellation/internal/runtime/dp"
 )
 
+func TestBuildDPRulesRejectsUnrepresentableFlows(t *testing.T) {
+	for _, tc := range []struct {
+		name, protocol string
+		port           int
+	}{
+		{"negative-port", "TCP", -1},
+		{"wrapped-wildcard", "TCP", 65536},
+		{"wrapped-port", "UDP", 65536 + 443},
+		{"max-int", "TCP", math.MaxInt},
+		{"unknown-protocol", "GRE", 443},
+		{"unsupported-sctp", "SCTP", 443},
+		{"missing-protocol", "", 443},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			flows := []Flow{
+				{SrcWorkload: "default/api", Port: 443, Protocol: "TCP"},
+				{SrcWorkload: "default/api", Port: tc.port, Protocol: tc.protocol},
+			}
+			rules, action, _, err := BuildDPRules("default/api", flows, BuildDPRulesOptions{AllowDNS: true, DefaultDeny: false})
+			if !errors.Is(err, ErrInvalidDPFlow) || len(rules) != 0 || action != dp.PolicyActionDeny {
+				t.Fatalf("invalid flow produced partial/permissive policy: rules=%v action=%d err=%v", rules, action, err)
+			}
+		})
+	}
+}
+
+func TestBuildDPRulesPreservesExplicitPortBoundaries(t *testing.T) {
+	for _, port := range []int{0, 1, 65535} {
+		rules, _, _, err := BuildDPRules("default/api", []Flow{{SrcWorkload: "default/api", Port: port, Protocol: "tcp"}}, DefaultBuildDPRulesOptions())
+		if err != nil || len(rules) != 2 {
+			t.Fatalf("port %d: rules=%v err=%v", port, rules, err)
+		}
+		var found bool
+		for _, rule := range rules {
+			if rule.IPProto == dp.IPProtoTCP && int(rule.Port) == port {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("port %d not preserved: %v", port, rules)
+		}
+	}
+}
+
 func TestBuildDPRules_DefaultDeny_AllowDNS(t *testing.T) {
-	rules, def, dir := BuildDPRules("default/api", nil, DefaultBuildDPRulesOptions())
+	rules, def, dir, err := BuildDPRules("default/api", nil, DefaultBuildDPRulesOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if def != dp.PolicyActionDeny {
 		t.Errorf("def_action = %d want %d (deny)", def, dp.PolicyActionDeny)
 	}
@@ -32,7 +81,10 @@ func TestBuildDPRules_DedupAndDirection(t *testing.T) {
 		// Ingress (api is dst).
 		{SrcWorkload: "external", DstWorkload: "default/api", DstIP: "10.0.0.5", Port: 8080, Protocol: "TCP"},
 	}
-	rules, _, _ := BuildDPRules("default/api", flows, DefaultBuildDPRulesOptions())
+	rules, _, _, err := BuildDPRules("default/api", flows, DefaultBuildDPRulesOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
 	// Expected: 1 DNS + 2 egress (1.1.1.1:80, 1.1.1.1:443) + 1 ingress (8080)
 	if len(rules) != 4 {
 		t.Fatalf("got %d rules: %+v", len(rules), rules)
@@ -54,9 +106,12 @@ func TestBuildDPRules_DedupAndDirection(t *testing.T) {
 
 func TestBuildDPRules_DefaultActionToggle(t *testing.T) {
 	opts := BuildDPRulesOptions{AllowDNS: false, DefaultDeny: false}
-	rules, def, _ := BuildDPRules("default/api", []Flow{
+	rules, def, _, err := BuildDPRules("default/api", []Flow{
 		{SrcWorkload: "default/api", DstWorkload: "external", Port: 443, Protocol: "TCP"},
 	}, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if def != dp.PolicyActionAllow {
 		t.Errorf("def_action with DefaultDeny=false: %d want %d", def, dp.PolicyActionAllow)
 	}
@@ -69,9 +124,12 @@ func TestBuildDPRules_SkipFlowsNotMatchingTarget(t *testing.T) {
 	flows := []Flow{
 		{SrcWorkload: "other/wl", DstWorkload: "another/wl", Port: 80, Protocol: "TCP"},
 	}
-	rules, _, _ := BuildDPRules("default/api", flows, DefaultBuildDPRulesOptions())
+	rules, _, _, err := BuildDPRules("default/api", flows, DefaultBuildDPRulesOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
 	// Only the DNS allow — the flow doesn't touch default/api.
-	if len(rules) != 1 || !(rules[0].Port == 53 && rules[0].IPProto == 17) {
+	if len(rules) != 1 || rules[0].Port != 53 || rules[0].IPProto != 17 {
 		t.Errorf("expected only DNS rule, got %+v", rules)
 	}
 }
@@ -87,7 +145,10 @@ func TestBuildDPRules_FqdnEgressPopulated(t *testing.T) {
 		// Ingress flow carrying a Fqdn → Fqdn must be ignored (egress-only).
 		{SrcWorkload: "external", DstWorkload: "default/api", Fqdn: "should.be.ignored", DstIP: "10.0.0.5", Port: 8080, Protocol: "TCP"},
 	}
-	rules, _, _ := BuildDPRules("default/api", flows, BuildDPRulesOptions{AllowDNS: false, DefaultDeny: true})
+	rules, _, _, err := BuildDPRules("default/api", flows, BuildDPRulesOptions{AllowDNS: false, DefaultDeny: true})
+	if err != nil {
+		t.Fatal(err)
+	}
 	// Expect: 1 ingress (8080, no fqdn) + 2 egress FQDN rules.
 	if len(rules) != 3 {
 		t.Fatalf("got %d rules: %+v", len(rules), rules)

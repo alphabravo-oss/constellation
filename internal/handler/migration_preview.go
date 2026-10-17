@@ -871,7 +871,7 @@ func (h *Enterprise) MigrationRollbackBundle(w http.ResponseWriter, r *http.Requ
 SELECT source, status, rollback_json
   FROM migration_imports
  WHERE id=$1 AND org_id=$2`, id, subj.OrgID).Scan(&source, &status, &rollbackRaw); err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			h.auditMigration(r, subj, "migration.import.rollback_bundle.failed", id.String(), map[string]any{"reason": "not_found"})
 			jsonError(w, http.StatusNotFound, "migration import not found")
 			return
@@ -939,7 +939,7 @@ func (h *Enterprise) MigrationApply(w http.ResponseWriter, r *http.Request) {
 
 	source, status, preview, err := h.loadMigrationImportForUpdate(r, tx, subj.OrgID, id)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			h.auditMigration(r, subj, "migration.import.apply.failed", id.String(), map[string]any{"reason": "not_found"})
 			jsonError(w, http.StatusNotFound, "migration import not found")
 			return
@@ -1115,7 +1115,7 @@ SELECT source, status, rollback_json
   FROM migration_imports
  WHERE id=$1 AND org_id=$2
  FOR UPDATE`, id, subj.OrgID).Scan(&source, &status, &rollbackRaw); err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			h.auditMigration(r, subj, "migration.import.rollback.failed", id.String(), map[string]any{"reason": "not_found"})
 			jsonError(w, http.StatusNotFound, "migration import not found")
 			return
@@ -1313,7 +1313,7 @@ func (h *Enterprise) convertMigrationRemaining(r *http.Request, orgID uuid.UUID,
 		profile := migrationPreviewVulnerabilityProfileDTO{Name: item.Name, Description: item.Description, Active: item.Active, Entries: item.Entries, DomainScope: item.DomainScope, ClusterID: clusterRaw, Imported: item.ImportedFrom, DiffAction: "create"}
 		if h != nil && h.db != nil {
 			_, _, before, err := migrationVulnerabilitySnapshot(r, h.db.Pool(), orgID, profile.Name, false)
-			if err != nil && err != pgx.ErrNoRows {
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return nil, nil, nil, fmt.Errorf("cannot inspect vulnerability profile destination")
 			}
 			if err == nil {
@@ -1340,7 +1340,7 @@ func (h *Enterprise) convertMigrationRemaining(r *http.Request, orgID uuid.UUID,
 		}
 		if h != nil && h.db != nil {
 			_, _, matches, err := migrationRegistrySnapshot(r, h.db.Pool(), orgID, registry, false)
-			if err != nil && err != pgx.ErrNoRows {
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return nil, nil, nil, fmt.Errorf("cannot inspect registry destination")
 			}
 			if err == nil {
@@ -1421,7 +1421,7 @@ func (h *Enterprise) applyMigrationRemaining(r *http.Request, tx pgx.Tx, subj Su
 			}
 		}
 		id, _, before, err := migrationVulnerabilitySnapshot(r, tx, subj.OrgID, profile.Name, true)
-		if err != nil && err != pgx.ErrNoRows {
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil, nil, fmt.Errorf("cannot inspect vulnerability profile")
 		}
 		rollback := migrationVulnerabilityRollbackDTO{ID: id, Action: "create"}
@@ -1458,7 +1458,7 @@ func (h *Enterprise) applyMigrationRemaining(r *http.Request, tx pgx.Tx, subj Su
 	}
 	for _, registry := range preview.Registries {
 		_, _, matches, err := migrationRegistrySnapshot(r, tx, subj.OrgID, registry, true)
-		if err != nil && err != pgx.ErrNoRows {
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil, nil, fmt.Errorf("cannot inspect registry")
 		}
 		if err == nil {
@@ -2231,7 +2231,7 @@ SELECT id, name
    AND (cluster_id IS NULL OR cluster_id=$3)
  ORDER BY CASE WHEN cluster_id=$3 THEN 0 ELSE 1 END, updated_at DESC
  LIMIT 1`, orgID, name, clusterID).Scan(&id, &targetName)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return uuid.Nil, "", false, nil
 	}
 	if err != nil {
@@ -3084,7 +3084,7 @@ SELECT id::text
  WHERE org_id=$1 AND group_id=$2 AND sensor_kind=$3
  ORDER BY created_at ASC
  LIMIT 1`, subj.OrgID, groupID, kind).Scan(&existingID)
-		if err != nil && err != pgx.ErrNoRows {
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil, err
 		}
 		if err == nil {
@@ -3124,7 +3124,7 @@ SELECT id::text, name, COALESCE(description,''), engine, category, spec_yaml, en
  WHERE org_id=$1 AND name=$2
  ORDER BY version DESC, updated_at DESC
  LIMIT 1`, orgID, name).Scan(&snap.ID, &snap.Name, &snap.Description, &snap.Engine, &snap.Category, &snap.SpecYAML, &snap.Enabled, &snap.Mode, &snap.Version, &snap.CfgType, &snap.Source)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return policyRollbackSnapshot{}, false, nil
 	}
 	if err != nil {
@@ -3147,7 +3147,7 @@ SELECT id::text, cluster_id::text, name, category, apply_dir, severity, mode,
 		&snap.ID, &snap.ClusterID, &snap.Name, &snap.Category, &snap.ApplyDir, &snap.Severity, &snap.Mode,
 		&patternsText, &scopeText, &snap.Description, &snap.Source, &snap.CfgType, &snap.SourcePath, &snap.Version,
 	)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return dpiRuleRollbackSnapshot{}, false, nil
 	}
 	if err != nil {
@@ -3175,7 +3175,7 @@ SELECT id::text, COALESCE(cluster_id::text,''), name, kind, COALESCE(comment,'')
 		&snap.ID, &snap.ClusterID, &snap.Name, &snap.Kind, &snap.Comment,
 		&criteriaText, &membersText, &snap.LearnedFrom, &snap.CfgType, &snap.PolicyMode, &snap.ProfileMode,
 	)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return groupRollbackSnapshot{}, false, nil
 	}
 	if err != nil {
@@ -3198,7 +3198,7 @@ SELECT id::text, cluster_id::text, from_group, to_group, ports::text, mode, COAL
  FOR UPDATE NOWAIT`, orgID, clusterID, fromGroup, toGroup).Scan(
 		&snap.ID, &snap.ClusterID, &snap.FromGroup, &snap.ToGroup, &portsText, &snap.Mode, &snap.Comment,
 	)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return networkRuleRollbackSnapshot{}, false, nil
 	}
 	if err != nil {
@@ -3219,7 +3219,7 @@ SELECT id::text, cluster_id::text, workload_id, namespace, name, mode,
 		&snap.ID, &snap.ClusterID, &snap.WorkloadID, &snap.Namespace, &snap.Name, &snap.Mode,
 		&snap.LearnStartedAt, &snap.MonitorStartedAt, &snap.EnforceStartedAt,
 	)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return fileProfileStateRollbackSnapshot{}, false, nil
 	}
 	if err != nil {
@@ -3239,7 +3239,7 @@ SELECT id::text, cluster_id::text, workload_id, filter, path, regex, recursive,
 		&snap.ID, &snap.ClusterID, &snap.WorkloadID, &snap.Filter, &snap.Path, &snap.Regex,
 		&snap.Recursive, &snap.Behavior, &snap.Applications, &snap.Enabled, &snap.Description,
 	)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return fileProfileRuleRollbackSnapshot{}, false, nil
 	}
 	if err != nil {
@@ -3259,7 +3259,7 @@ SELECT id::text, cluster_id::text, workload_id, namespace, name, mode,
 		&snap.ID, &snap.ClusterID, &snap.WorkloadID, &snap.Namespace, &snap.Name, &snap.Mode,
 		&snap.LearnStartedAt, &snap.MonitorStartedAt, &snap.EnforceStartedAt,
 	)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return processBaselineStateRollbackSnapshot{}, false, nil
 	}
 	if err != nil {
@@ -3280,7 +3280,7 @@ SELECT id::text, cluster_id::text, workload_id, name, path,
 		&snap.ID, &snap.ClusterID, &snap.WorkloadID, &snap.Name, &snap.Path, &snap.SHA256,
 		&snap.ParentName, &snap.Action, &snap.User, &snap.AllowUpdate, &snap.Enabled, &snap.Description,
 	)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return processProfileRuleRollbackSnapshot{}, false, nil
 	}
 	if err != nil {
@@ -3384,7 +3384,7 @@ SELECT members
    AND (cluster_id IS NULL OR cluster_id=$3)
  ORDER BY CASE WHEN cluster_id=$3 THEN 0 ELSE 1 END, updated_at DESC
  LIMIT 1`, orgID, strings.TrimSpace(groupName), clusterID).Scan(&raw)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, nil
 	}
 	if err != nil {
@@ -3407,7 +3407,7 @@ SELECT members
    AND (cluster_id IS NULL OR cluster_id=$3)
  ORDER BY CASE WHEN cluster_id=$3 THEN 0 ELSE 1 END, updated_at DESC
  LIMIT 1`, orgID, strings.TrimSpace(groupName), clusterID).Scan(&raw)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, nil
 	}
 	if err != nil {
@@ -3431,7 +3431,7 @@ SELECT namespace, name
   FROM deployments
  WHERE org_id=$1 AND cluster_id=$2 AND namespace=$3 AND name=$4
  LIMIT 1`, orgID, clusterID, namespace, name).Scan(&wl.Namespace, &wl.Name)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return migrationObservedWorkload{}, false, nil
 	}
 	if err != nil {
@@ -3661,7 +3661,7 @@ SELECT id
  WHERE org_id=$1 AND name=$2
  ORDER BY updated_at DESC
  LIMIT 1`, orgID, name).Scan(&groupID); err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return uuid.Nil, fmt.Errorf("DLP/WAF binding target group %s no longer exists", name)
 		}
 		return uuid.Nil, err

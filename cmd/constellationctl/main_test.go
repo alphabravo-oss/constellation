@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/alphabravocompany/constellation/internal/scanner"
 	"github.com/alphabravocompany/constellation/internal/serverless/awslambda"
 )
@@ -91,15 +93,15 @@ func TestPolicyCheckCommandEvaluatesRecord(t *testing.T) {
 
 func TestBuildBackupS3URI(t *testing.T) {
 	at := time.Date(2026, 6, 13, 12, 30, 0, 0, time.UTC)
-	got, err := buildBackupS3URI("s3://backups/prod", "acme", at)
+	got, err := buildBackupS3URI("s3://backups/prod", "acme", at, uuid.MustParse("00000000-0000-0000-0000-000000000123"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "s3://backups/prod/constellation-backup-acme-2026-06-13T12:30:00Z.tar.gz"
+	want := "s3://backups/prod/constellation-backup-acme-20260613T123000Z-00000000-0000-0000-0000-000000000123.tar.gz"
 	if got != want {
 		t.Fatalf("uri = %q want %q", got, want)
 	}
-	if _, err := buildBackupS3URI("backups/prod", "acme", at); err == nil {
+	if _, err := buildBackupS3URI("backups/prod", "acme", at, uuid.New()); err == nil {
 		t.Fatal("expected non-s3 destination to fail")
 	}
 }

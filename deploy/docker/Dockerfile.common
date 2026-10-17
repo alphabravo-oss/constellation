@@ -7,7 +7,7 @@
 # This file is NOT used directly as a Dockerfile target — it's `docker buildx build -f`'d
 # as a base by the role images via the buildkit `# syntax = ` heredoc.
 
-ARG GO_VERSION=1.26.8
+ARG GO_VERSION=1.26.9
 
 FROM golang:${GO_VERSION}-bookworm AS go-builder
 WORKDIR /src
@@ -18,7 +18,8 @@ RUN go mod download
 COPY . .
 
 ARG VERSION=dev
-ARG COMMIT=unknown
+ARG COMMIT=dev
+ARG BUILD_TIME=
 ENV CGO_ENABLED=0 \
     GOOS=linux
 
@@ -28,6 +29,6 @@ RUN set -eux; \
                constellation-discoverer constellation-k8s-compliance-collector \
                constellation-seed audit-archiver constellationctl; do \
       go build -trimpath \
-        -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
+        -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X github.com/alphabravocompany/constellation/pkg/version.Version=${VERSION} -X github.com/alphabravocompany/constellation/pkg/version.Commit=${COMMIT} -X github.com/alphabravocompany/constellation/pkg/version.BuildTime=${BUILD_TIME}" \
         -o "/out/${cmd}" "./cmd/${cmd}"; \
     done

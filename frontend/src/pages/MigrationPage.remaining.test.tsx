@@ -1,6 +1,8 @@
+/* global HTMLSelectElement */
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+import { createMemoryHistory, type RouterHistory } from "@tanstack/react-router";
+import { TestRouter } from "@/test/router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { toast } from "sonner";
@@ -25,6 +27,7 @@ let root: Root | undefined;
 let host: HTMLDivElement;
 let queryClient: QueryClient;
 let imports: MigrationImportListItem[];
+let routerHistory: RouterHistory;
 const exportText = JSON.stringify({
   vulnerability_profiles: [{ name: "reviewed-cves", entries: [{ name: "CVE-2026-1234" }] }],
   registries: [{ name: "internal-images", registry_type: "Docker Registry", registry: "https://registry.example.test" }],
@@ -75,13 +78,14 @@ async function settle() {
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 25)); });
 }
 
-async function render() {
+async function render(initialEntry = "/settings/migration") {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  routerHistory = createMemoryHistory({ initialEntries: [initialEntry] });
   await act(async () => root!.render(
-    <QueryClientProvider client={queryClient}><MemoryRouter><MigrationPage /></MemoryRouter></QueryClientProvider>,
+    <QueryClientProvider client={queryClient}><TestRouter history={routerHistory}><MigrationPage /></TestRouter></QueryClientProvider>,
   ));
   await settle();
 }
@@ -96,6 +100,15 @@ async function click(testId: string) {
   const button = element<HTMLButtonElement>(testId);
   expect(button.disabled, `${testId} must be enabled`).toBe(false);
   await act(async () => button.click());
+  await settle();
+}
+
+
+async function tab(label: string) {
+  const trigger = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(item => item.textContent === label);
+  expect(trigger, label).toBeDefined();
+  await act(async () => trigger!.focus());
+  await vi.waitFor(() => expect(trigger!.getAttribute("aria-selected")).toBe("true"));
   await settle();
 }
 
@@ -119,12 +132,14 @@ it("previews remaining families without a cluster and distinguishes create, upda
   await render();
   await previewExport();
   expect(enterprise.migrationPreview).toHaveBeenCalledWith({ source: "neuvector", export: exportText, cluster_id: undefined });
+  await tab("Vulnerability profiles");
   const profiles = element("migration-preview-vulnerability-profiles");
   expect(profiles.querySelectorAll('[data-testid="migration-preview-vulnerability-profile"]')).toHaveLength(2);
   expect(profiles.textContent).toContain("reviewed-cves");
   expect(profiles.textContent).toContain("update");
   expect(profiles.textContent).toContain("existing-cves");
   expect(profiles.textContent).toContain("unchanged");
+  await tab("Registries");
   const registries = element("migration-preview-registries");
   expect(registries.querySelectorAll('[data-testid="migration-preview-registry"]')).toHaveLength(1);
   expect(registries.textContent).toContain("internal-images");
@@ -149,7 +164,9 @@ it("loads an uploaded export into the editor and previews the same content", asy
   expect(element<HTMLTextAreaElement>("migration-export-input").value).toBe(exportText);
   await click("migration-preview-submit");
   expect(enterprise.migrationPreview).toHaveBeenCalledWith({ source: "neuvector", export: exportText, cluster_id: undefined });
+  await tab("Vulnerability profiles");
   expect(element("migration-preview-vulnerability-profiles").textContent).toContain("reviewed-cves");
+  await tab("Registries");
   expect(element("migration-preview-registries").textContent).toContain("internal-images");
 });
 
@@ -157,6 +174,7 @@ it("loads older import history pages without silently truncating at 25", async (
   imports = Array.from({ length: 27 }, (_, index) => ({ ...history(fixture()), id: `history-${index}` }));
   imports[0].target_cluster_id = "00000000-0000-0000-0000-000000000001";
   await render();
+  await tab("Import history");
   expect(enterprise.migrationImportsPage).toHaveBeenCalledWith({ limit: 25 });
   expect(element("migration-import-history").textContent).toContain("history-24");
   expect(element("migration-import-history").textContent).toContain("Target: 00000000-0000-0000-0000-000000000001");
@@ -169,6 +187,7 @@ it("loads older import history pages without silently truncating at 25", async (
 
 it("distinguishes loaded-row CSV from the full metadata history download", async () => {
   await render();
+  await tab("Import history");
   const link = element<HTMLAnchorElement>("migration-import-history-export-all");
   expect(link.getAttribute("href")).toBe("/api/v1/migration/imports/export");
   expect(link.getAttribute("download")).toBe("migration-imports.ndjson");
@@ -182,6 +201,7 @@ it("keeps same-kind redacted diagnostics visible across previews without present
   await previewExport();
   for (const iteration of [0, 1]) {
     if (iteration) await click("migration-preview-submit");
+    await tab("Diagnostics");
     const diagnostics = element("migration-preview-unsupported");
     expect(diagnostics.querySelectorAll("tbody tr")).toHaveLength(3);
     expect(diagnostics.textContent?.match(/REDACTED/g)).toHaveLength(3);
@@ -189,6 +209,7 @@ it("keeps same-kind redacted diagnostics visible across previews without present
     expect(diagnostics.textContent).toContain("Identity tokens cannot be imported");
     expect(diagnostics.textContent).toContain("Scoped vulnerability rules cannot be represented exactly");
     expect(diagnostics.textContent).toContain('"redacted":true');
+    await tab("Vulnerability profiles");
     expect(element("migration-preview-vulnerability-profiles").textContent).not.toContain("REDACTED");
     expect(diagnostics.parentElement?.textContent).not.toContain("These records were converted");
   }
@@ -219,16 +240,21 @@ it("refreshes partial apply and rollback history, downloads the bundle, and appl
   await click("migration-import-apply-active");
   expect(enterprise.migrationApply).toHaveBeenCalledWith("remaining-import-1");
   expect(element<HTMLButtonElement>("migration-import-apply-active").disabled).toBe(true);
+  await tab("Import history");
   expect(element("migration-import-history").textContent).toContain("partial applied");
   expect(element("migration-import-history").textContent).toContain("1 vulnerability profiles");
   expect(element("migration-import-history").textContent).toContain("1 registries");
+  await tab("Readiness");
   expect(element("migration-readiness-checklist").textContent).toContain("partially applied");
+  await tab("Import history");
   await click("migration-import-rollback-bundle-remaining-import-1");
   expect(downloadJson).toHaveBeenCalledWith("constellation-migration-rollback-remaining-import-1.json", bundle);
   await click("migration-import-rollback-remaining-import-1");
   expect(enterprise.migrationRollback).toHaveBeenCalledWith("remaining-import-1");
   expect(element("migration-import-history").textContent).toContain("rolled back");
+  await tab("Preview import");
   expect(element<HTMLButtonElement>("migration-import-apply-active").disabled).toBe(false);
+  await tab("Import history");
   expect(element<HTMLButtonElement>("migration-import-rollback-remaining-import-1").disabled).toBe(true);
   const updatedPreview = fixture();
   updatedPreview.import_id = "remaining-import-2";
@@ -240,9 +266,11 @@ it("refreshes partial apply and rollback history, downloads the bundle, and appl
     imports = [history(updatedPreview), ...imports];
     return updatedPreview;
   });
+  await tab("Preview import");
   await click("migration-preview-submit");
   await click("migration-import-apply-active");
   expect(enterprise.migrationApply).toHaveBeenLastCalledWith("remaining-import-2");
+  await tab("Import history");
   expect(element("migration-import-history").textContent).toContain("0 created · 1 updated");
   expect(host.textContent).not.toMatch(/undefined|NaN/);
 });
@@ -253,7 +281,7 @@ it.each([false, true])("handles rollback responses without counts (already rolle
     imports = imports.map((item) => ({ ...item, status: "rolled_back" }));
     return { id, status: "rolled_back", already_rolled_back: alreadyRolledBack };
   });
-  await render();
+  await render("/settings/migration?tab=history");
   await click("migration-import-rollback-remaining-import-1");
   expect(element("migration-import-history").textContent).toContain("rolled back");
   expect(toast.success).toHaveBeenCalledWith(alreadyRolledBack
@@ -281,6 +309,61 @@ it("supports older previews and histories with omitted remaining arrays and coun
   expect(statistic("Unchanged")).toBe("0");
   expect(host.querySelector('[data-testid="migration-preview-vulnerability-profile"]')).toBeNull();
   expect(host.querySelector('[data-testid="migration-preview-registry"]')).toBeNull();
+  await tab("Import history");
   expect(element("migration-import-history").textContent).toContain("0 created · 0 updated");
   expect(host.textContent).not.toMatch(/undefined|NaN/);
+});
+
+function deferred<T>() { let resolve!: (value: T) => void; let reject!: (reason: unknown) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
+async function editDraft(value: string) { const input = element<HTMLTextAreaElement>("migration-export-input"); await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); }); }
+async function chooseTarget(id: string) { const select = element<HTMLSelectElement>("migration-target-cluster-select"); await act(async () => { select.value = id; select.dispatchEvent(new Event("change", { bubbles: true })); }); }
+
+it("has five primary metrics, one URL workspace, and preserves a draft through Back and Forward", async () => {
+  await render("/settings/migration?context=keep"); expect(host.querySelectorAll(".app-stat-card")).toHaveLength(5);
+  expect(host.querySelector('[data-testid="migration-import-history"]')).toBeNull(); expect(host.querySelector('[data-testid="migration-readiness-checklist"]')).toBeNull();
+  await editDraft("Reviewed draft"); await tab("Import history"); expect(routerHistory.location.href).toBe("/settings/migration?context=keep&tab=history"); await tab("Report and follow-up");
+  await act(async () => routerHistory.back()); await vi.waitFor(() => expect(host.querySelector('[data-testid="migration-import-history"]')).not.toBeNull());
+  await act(async () => routerHistory.back()); await vi.waitFor(() => expect(host.querySelector<HTMLTextAreaElement>('[data-testid="migration-export-input"]')?.value).toBe("Reviewed draft"));
+  await act(async () => routerHistory.forward()); await vi.waitFor(() => expect(host.querySelector('[data-testid="migration-import-history"]')).not.toBeNull()); expect(routerHistory.location.href).toContain("context=keep");
+});
+it("invalidates an existing preview when the reviewed export changes", async () => {
+  await render(); await previewExport(); expect(element<HTMLButtonElement>("migration-import-apply-active").disabled).toBe(false); await editDraft("Changed export"); expect(host.querySelector('[data-testid="migration-preview-result"]')).toBeNull(); expect(host.textContent).toContain("The draft changed. Preview again before applying."); expect(enterprise.migrationApply).not.toHaveBeenCalled();
+});
+it("does not install an asynchronously completed preview over a newer draft", async () => {
+  const response = deferred<MigrationPreview>(); vi.mocked(enterprise.migrationPreview).mockReturnValue(response.promise); await render(); await editDraft(exportText); await click("migration-preview-submit"); await editDraft("Newer reviewed draft");
+  await act(async () => response.resolve(fixture())); await settle(); expect(element<HTMLTextAreaElement>("migration-export-input").value).toBe("Newer reviewed draft"); expect(host.querySelector('[data-testid="migration-preview-result"]')).toBeNull(); expect(enterprise.migrationApply).not.toHaveBeenCalled();
+});
+it("does not replace typed content with a late upload result", async () => {
+  const response = deferred<string>(); const file = new File([exportText], "slow.json"); Object.defineProperty(file, "text", { value: () => response.promise }); await render();
+  await act(async () => { const upload = element<HTMLInputElement>("migration-export-upload"); Object.defineProperty(upload, "files", { configurable: true, value: [file] }); upload.dispatchEvent(new Event("change", { bubbles: true })); });
+  await editDraft("New typed draft"); await act(async () => response.resolve(exportText)); await settle(); expect(element<HTMLTextAreaElement>("migration-export-input").value).toBe("New typed draft");
+});
+it("keeps target selection and draft through failed cluster refresh and rejects the stale target", async () => {
+  vi.mocked(clusters.list).mockResolvedValue({ clusters: [{ id: "cluster-a", name: "Cluster A" }] } as Awaited<ReturnType<typeof clusters.list>>);
+  await render(); await editDraft(exportText); await chooseTarget("cluster-a"); vi.mocked(clusters.list).mockRejectedValue(new Error("clusters failed")); await act(async () => { await queryClient.refetchQueries({ queryKey: ["clusters"] }); }); await settle();
+  expect(element<HTMLSelectElement>("migration-target-cluster-select").value).toBe("cluster-a"); expect(element<HTMLTextAreaElement>("migration-export-input").value).toBe(exportText); expect(element<HTMLButtonElement>("migration-preview-submit").disabled).toBe(true); expect(host.textContent).toContain("Target clusters are unavailable"); expect(enterprise.migrationPreview).not.toHaveBeenCalled();
+});
+it("does not reinterpret a missing selected cluster as organization-only import", async () => {
+  vi.mocked(clusters.list).mockResolvedValue({ clusters: [{ id: "cluster-a", name: "Cluster A" }] } as Awaited<ReturnType<typeof clusters.list>>); await render(); await editDraft(exportText); await chooseTarget("cluster-a");
+  await act(async () => queryClient.setQueryData(["clusters"], { clusters: [{ id: "cluster-b", name: "Cluster B" }] })); await settle(); expect(element<HTMLSelectElement>("migration-target-cluster-select").value).toBe("cluster-a"); expect(host.textContent).toContain("The selected cluster is unavailable"); expect(element<HTMLButtonElement>("migration-preview-submit").disabled).toBe(true); expect(enterprise.migrationPreview).not.toHaveBeenCalled();
+});
+it("retains current history during refresh, pauses actions, then hides evidence on failed refresh", async () => {
+  imports = [history(fixture())]; await render("/settings/migration?tab=history"); expect(element("migration-import-history").textContent).toContain("remaining-import-1"); const read = deferred<Awaited<ReturnType<typeof enterprise.migrationImportsPage>>>(); vi.mocked(enterprise.migrationImportsPage).mockReturnValue(read.promise);
+  await act(async () => { void queryClient.refetchQueries({ queryKey: ["migration-imports-pages"] }); }); await settle(); expect(element("migration-import-history").textContent).toContain("remaining-import-1"); expect(host.textContent).toContain("Refreshing import history"); expect(element<HTMLButtonElement>("migration-import-apply-remaining-import-1").disabled).toBe(true);
+  await act(async () => read.reject(new Error("history refresh failed"))); await settle(); expect(host.textContent).toContain("Import history is unavailable. Actions are paused"); expect(host.querySelector('[data-testid="migration-import-apply-remaining-import-1"]')).toBeNull(); expect(element("migration-import-history").textContent).not.toContain("remaining-import-1"); expect(host.textContent).not.toContain("No migration imports yet");
+});
+it("does not claim readiness or export a report when history failed", async () => {
+  vi.mocked(enterprise.migrationImportsPage).mockRejectedValue(new Error("history failed")); await render("/settings/migration?tab=readiness"); expect(host.textContent).toContain("Migration readiness evidence is unavailable"); expect(host.querySelector('[data-testid="migration-readiness-checklist"]')).toBeNull(); await tab("Report and follow-up"); expect(element<HTMLButtonElement>("migration-report-export").disabled).toBe(true); expect(host.textContent).toContain("Report history is unavailable");
+});
+it("reports failed preview and Apply inline and retains the draft", async () => {
+  vi.mocked(enterprise.migrationPreview).mockRejectedValueOnce(new Error("Cannot convert source")); await render(); await previewExport(); expect(host.textContent).toContain("Cannot convert source"); expect(element<HTMLTextAreaElement>("migration-export-input").value).toBe(exportText);
+  vi.mocked(enterprise.migrationApply).mockRejectedValueOnce(new Error("Import status changed")); await click("migration-preview-submit"); await click("migration-import-apply-active"); expect(host.textContent).toContain("Import status changed"); expect(element<HTMLTextAreaElement>("migration-export-input").value).toBe(exportText);
+});
+
+it("rejects a preview response for a different source or target", async () => {
+  const result = fixture(); result.target_cluster_id = "different-cluster"; vi.mocked(enterprise.migrationPreview).mockResolvedValue(result); await render(); await previewExport(); expect(host.textContent).toContain("Preview response did not confirm the reviewed source and target"); expect(host.querySelector('[data-testid="migration-import-apply-active"]')).toBeNull(); expect(enterprise.migrationApply).not.toHaveBeenCalled();
+});
+it("rechecks invalidated history before issuing Apply", async () => {
+  imports = [history(fixture())]; await render("/settings/migration?tab=history"); const apply = element<HTMLButtonElement>("migration-import-apply-remaining-import-1"); expect(apply.disabled).toBe(false);
+  await act(async () => { void queryClient.invalidateQueries({ queryKey: ["migration-imports-pages"], refetchType: "none" }); apply.click(); }); await settle(); expect(host.textContent).toContain("Import history changed or is unavailable"); expect(enterprise.migrationApply).not.toHaveBeenCalled();
 });

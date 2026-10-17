@@ -125,7 +125,7 @@ func exportConfigRows(ctx context.Context, pool *pgxpool.Pool, table, orgID stri
 	fd := rows.FieldDescriptions()
 	cols := make([]string, len(fd))
 	for i, f := range fd {
-		cols[i] = string(f.Name)
+		cols[i] = f.Name
 	}
 	var out []map[string]any
 	for rows.Next() {

@@ -37,12 +37,12 @@ command -v jq >/dev/null
 registry="${REGISTRY:-ghcr.io/alphabravo-oss/constellation}"
 identity="${COSIGN_IDENTITY_REGEXP:-^https://github.com/alphabravo-oss/constellation/\.github/workflows/.*@refs/tags/${release_tag}$}"
 issuer="${COSIGN_OIDC_ISSUER:-https://token.actions.githubusercontent.com}"
-roles=(api scanner operator discoverer audit-archiver frontend runtime-agent admission migrate bootstrap postgres)
+roles=(api scanner operator discoverer audit-archiver frontend runtime-agent admission migrate bootstrap kube-bench-runner postgres)
 
 for role in "${roles[@]}"; do
   image_tag="$release_tag"
   if [[ "$role" == "postgres" ]]; then
-    image_tag="16.10-$release_tag"
+    image_tag="16.14-$release_tag"
   fi
   ref="$registry/$role:$image_tag"
   cosign verify "$ref" \

@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
@@ -74,10 +75,9 @@ func fedTestSigner(t *testing.T, ctx context.Context, pool *pgxpool.Pool) *auth.
 func doJoin(t *testing.T, h *Federation, body fedJoinRequest) (int, map[string]any) {
 	t.Helper()
 	raw, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/federation/join", bytes.NewReader(raw))
-	// Production joins reach the controller over the ingress-terminated TLS connection; the
-	// mTLS-join guard (D2-3) treats X-Forwarded-Proto=https as that TLS evidence.
-	req.Header.Set("X-Forwarded-Proto", "https")
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/federation/join", bytes.NewReader(raw))
+	// Model a real TLS transport; forwarded headers alone do not establish TLS.
+	req.TLS = &tls.ConnectionState{}
 	rec := httptest.NewRecorder()
 	h.Join(rec, req)
 	var out map[string]any
@@ -165,7 +165,7 @@ func TestFedTrust_SyncTicketAuthenticates(t *testing.T) {
 	srv := httptest.NewServer(FedSyncTokenMiddleware(pool, signer, nil, "")(http.HandlerFunc(h.Sync)))
 	defer srv.Close()
 
-	req, _ := http.NewRequest(http.MethodGet, srv.URL+"?since=0", nil)
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+"?since=0", nil)
 	req.Header.Set("Authorization", "Bearer "+secret)
 	resp, err := srv.Client().Do(req)
 	if err != nil {
@@ -205,7 +205,7 @@ func TestFedTrust_RevokedJointCantSync(t *testing.T) {
 	srv := httptest.NewServer(FedSyncTokenMiddleware(pool, signer, nil, "")(http.HandlerFunc(h.Sync)))
 	defer srv.Close()
 	poll := func() int {
-		req, _ := http.NewRequest(http.MethodGet, srv.URL+"?since=0", nil)
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+"?since=0", nil)
 		req.Header.Set("Authorization", "Bearer "+secret)
 		resp, err := srv.Client().Do(req)
 		if err != nil {
@@ -253,7 +253,7 @@ func TestFedTrust_ReadFindingsJWTRejectedOnSync(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req, _ := http.NewRequest(http.MethodGet, srv.URL+"?since=0", nil)
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+"?since=0", nil)
 	req.Header.Set("Authorization", "Bearer "+userJWT)
 	resp, err := srv.Client().Do(req)
 	if err != nil {
@@ -315,7 +315,7 @@ func TestFedTrust_RejoinRotatesSecret(t *testing.T) {
 	srv := httptest.NewServer(FedSyncTokenMiddleware(pool, signer, nil, "")(http.HandlerFunc(h.Sync)))
 	defer srv.Close()
 	poll := func(secret string) int {
-		req, _ := http.NewRequest(http.MethodGet, srv.URL+"?since=0", nil)
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+"?since=0", nil)
 		req.Header.Set("Authorization", "Bearer "+secret)
 		resp, _ := srv.Client().Do(req)
 		resp.Body.Close()
@@ -343,7 +343,7 @@ func TestFedTrust_MintJoinTokenMasterOnly(t *testing.T) {
 	h := NewFederation(d, audit.New(pool)).WithFedTrust(signer, FedJoinConfig{JoinTokenTTL: time.Minute, SecretTTL: time.Hour})
 
 	mint := func() (int, map[string]any) {
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/federation/join-tokens", bytes.NewReader([]byte(`{}`)))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/federation/join-tokens", bytes.NewReader([]byte(`{}`)))
 		req = req.WithContext(WithSubject(req.Context(), Subject{OrgID: orgID, UserID: userID}))
 		rec := httptest.NewRecorder()
 		h.MintJoinToken(rec, req)

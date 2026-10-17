@@ -8,7 +8,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import {
   ArrowLeft,
@@ -27,9 +27,10 @@ import {
 } from "@/api/client";
 import { PageHeader } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
 
 export function ApiTokensPage() {
   const qc = useQueryClient();
@@ -60,15 +61,15 @@ export function ApiTokensPage() {
   });
 
   const busy = rotateMutation.isPending || revokeMutation.isPending;
-  const tokens = tokensQ.data ?? [];
+  const tokens = tokensQ.isSuccess ? tokensQ.data : [];
   const activeCount = tokens.filter((t) => t.status === "active").length;
   const expiredCount = tokens.filter((t) => t.status === "expired").length;
   const revokedCount = tokens.filter((t) => t.status === "revoked").length;
   const columns: Column<ApiTokenDTO>[] = [
-    { id: "name", header: "Name", cell: (t) => t.name, className: "font-medium" },
+    { id: "name", header: "Name", exportValue: (t) => t.name, kind: "name", wrap: true, cell: (t) => t.name, className: "font-medium" },
     {
       id: "scopes",
-      header: "Scopes",
+      header: "Scopes", exportValue: (t) => t.scopes.join("; "), kind: "text", wrap: true, size: 224, minSize: 160, maxSize: 320,
       cell: (t) => (
         <div className="flex flex-wrap gap-1">
           {t.scopes.map((s) => (
@@ -79,7 +80,7 @@ export function ApiTokensPage() {
     },
     {
       id: "attached",
-      header: "Attached to",
+      header: "Attached to", exportValue: (t) => `${t.attached_to_kind}: ${t.attached_to_label ?? ""}`, kind: "text", wrap: true, size: 192, minSize: 144, maxSize: 240,
       cell: (t) => (
         <>
           <div>{t.attached_to_kind}</div>
@@ -88,16 +89,16 @@ export function ApiTokensPage() {
       ),
       className: "text-xs text-muted-foreground",
     },
-    { id: "expires", header: "Expires", cell: (t) => (t.expires_at ? new Date(t.expires_at).toLocaleString() : "never"), className: "text-xs" },
-    { id: "last_used", header: "Last used", cell: (t) => (t.last_used_at ? new Date(t.last_used_at).toLocaleString() : "—"), className: "text-xs" },
+    { id: "expires", header: "Expires", exportValue: (t) => t.expires_at ?? "", kind: "date", size: 224, minSize: 208, maxSize: 240, cell: (t) => (t.expires_at ? new Date(t.expires_at).toLocaleString() : "never"), className: "text-xs" },
+    { id: "last_used", header: "Last used", exportValue: (t) => t.last_used_at ?? "", kind: "date", size: 224, minSize: 208, maxSize: 240, cell: (t) => (t.last_used_at ? new Date(t.last_used_at).toLocaleString() : "—"), className: "text-xs" },
     {
       id: "status",
-      header: "Status",
+      header: "Status", exportValue: (t) => t.status, kind: "status",
       cell: (t) => <span className={`rounded-md px-2 py-0.5 text-[10px] ${statusClasses(t.status)}`}>{t.status}</span>,
     },
     {
       id: "actions",
-      header: "Actions",
+      header: "Actions", exportable: false, kind: "actions", size: 208, minSize: 192, maxSize: 224,
       className: "text-right",
       cell: (t) => (
         <div className="inline-flex items-center gap-1">
@@ -147,7 +148,7 @@ export function ApiTokensPage() {
           <Button
             variant="primary"
             size="lg"
-            onClick={() => navigate("/settings/api-tokens/new")}
+            onClick={() => navigate({ href: "/settings/api-tokens/new" })}
             data-testid="api-tokens-create-button"
           >
             <Plus className="h-4 w-4" aria-hidden /> Create token
@@ -155,12 +156,14 @@ export function ApiTokensPage() {
         }
       />
 
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label="Tokens" value={tokens.length} icon={<KeyRound className="h-3.5 w-3.5" aria-hidden />} />
-        <StatCard label="Active" value={activeCount} tone="accent" />
-        <StatCard label="Expired" value={expiredCount} tone={expiredCount ? "medium" : "neutral"} />
-        <StatCard label="Revoked" value={revokedCount} tone={revokedCount ? "high" : "neutral"} />
-      </section>
+      <VerdictBanner status={tokensQ.isError ? "degraded" : "info"} title={tokensQ.isError ? "Token inventory unavailable" : tokensQ.isPending ? "Loading API tokens" : `${activeCount} active tokens reported`}
+        detail="Manage token access and expiration. Export includes token metadata only." actions={<Button variant="outline" disabled={tokensQ.isFetching} onClick={() => void tokensQ.refetch()}>Refresh</Button>} />
+      <StatGrid>
+        <StatCard label="Tokens" value={tokensQ.isSuccess ? tokens.length : "—"} icon={<KeyRound className="h-3.5 w-3.5" aria-hidden />} />
+        <StatCard label="Active" value={tokensQ.isSuccess ? activeCount : "—"} tone="accent" />
+        <StatCard label="Expired" value={tokensQ.isSuccess ? expiredCount : "—"} tone={expiredCount ? "medium" : "neutral"} />
+        <StatCard label="Revoked" value={tokensQ.isSuccess ? revokedCount : "—"} tone={revokedCount ? "high" : "neutral"} />
+      </StatGrid>
 
       <Card padded={false}>
         <div data-testid="api-tokens-table">
@@ -170,7 +173,10 @@ export function ApiTokensPage() {
             <div className="p-6 text-sm text-destructive">Failed to load tokens.</div>
           ) : (
             <DataTable
-              rows={tokensQ.data ?? []}
+              rows={tokens}
+              preferencesKey="api-tokens"
+              exportFileName="api-token-metadata"
+              exportLabel="Export token metadata CSV"
               columns={columns}
               rowKey={(t) => t.id}
               emptyState={<div className="p-6 text-sm text-muted-foreground">No API tokens yet. Click "Create token" to mint your first one.</div>}

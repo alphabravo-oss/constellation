@@ -70,7 +70,7 @@ type Group struct {
 	Kind        Kind        `json:"kind"`
 	Comment     string      `json:"comment,omitempty"`
 	Criteria    []Criterion `json:"criteria"`
-	Members     []string    `json:"members,omitempty"`     // workload ids (server-computed from criteria)
+	Members     []string    `json:"members,omitempty"`      // workload ids (server-computed from criteria)
 	LearnedFrom string      `json:"learned_from,omitempty"` // workload id template for learned
 	CfgType     string      `json:"cfg_type,omitempty"`     // user|learned|fed
 	PolicyMode  Mode        `json:"policy_mode,omitempty"`  // discover|monitor|protect

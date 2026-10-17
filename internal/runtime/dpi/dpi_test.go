@@ -222,16 +222,20 @@ func TestRedis(t *testing.T) {
 }
 
 func TestKafka(t *testing.T) {
-	var buf bytes.Buffer
-	binary.Write(&buf, binary.BigEndian, uint32(14)) // size
-	binary.Write(&buf, binary.BigEndian, int16(18))  // apiKey=ApiVersions
-	binary.Write(&buf, binary.BigEndian, int16(3))   // apiVersion=3
-	binary.Write(&buf, binary.BigEndian, int32(42))  // correlationID
-	cid := "test-client"
-	binary.Write(&buf, binary.BigEndian, int16(len(cid)))
-	buf.WriteString(cid)
+	const cid = "test-client"
+	header := struct {
+		Size            uint32
+		APIKey, Version int16
+		Correlation     int32
+		ClientLen       int16
+	}{uint32(10 + len(cid)), 18, 3, 42, int16(len(cid))}
+	payload, err := binary.Append(nil, binary.BigEndian, header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload = append(payload, cid...)
 
-	evt := NewEngine(nil).Process(Flow{}, DirRequest, buf.Bytes())
+	evt := NewEngine(nil).Process(Flow{}, DirRequest, payload)
 	if evt == nil || evt.Kafka == nil {
 		t.Fatalf("no Kafka event")
 	}

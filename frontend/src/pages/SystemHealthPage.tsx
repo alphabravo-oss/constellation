@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link } from "@tanstack/react-router";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -20,7 +20,7 @@ import {
   type SystemHealthHeartbeat,
   type SystemHealthLicense,
 } from "@/api/client";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { PageHeader } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
@@ -34,14 +34,14 @@ import { ScannerDbCapacity } from "@/components/ScannerDbCapacity";
 const heartbeatColumns: Column<SystemHealthHeartbeat>[] = [
   {
     id: "component",
-    header: "Component",
+    header: "Component", kind: "name", wrap: true,
     className: "font-medium",
     exportValue: (hb) => hb.component,
     cell: (hb) => {
       const role = nvRoleAlias({ component: hb.component });
       return (
         <Link
-          to={componentDiagnosticsHref({ clusterId: hb.cluster_id, component: hb.component, role: role.id })}
+          to="." href={componentDiagnosticsHref({ clusterId: hb.cluster_id, component: hb.component, role: role.id })}
           className="hover:text-[color:var(--color-primary)]"
           data-testid={`system-health-component-link-${safeTestID(hb.component)}`}
           title={`Open ${role.label.toLowerCase()} diagnostics`}
@@ -51,15 +51,15 @@ const heartbeatColumns: Column<SystemHealthHeartbeat>[] = [
       );
     },
   },
-  { id: "version", header: "Version", className: "font-mono", cell: (hb) => hb.version, exportValue: (hb) => hb.version },
-  { id: "commit", header: "Commit", className: "font-mono", cell: (hb) => <span title={hb.commit}>{hb.commit_short}</span>, exportValue: (hb) => hb.commit },
-  { id: "hostname", header: "Hostname", className: "font-mono", cell: (hb) => hb.hostname, exportValue: (hb) => hb.hostname },
-  { id: "cluster", header: "Cluster", cell: (hb) => hb.cluster_name ?? <span className="text-muted-foreground">(control-plane)</span>, exportValue: (hb) => hb.cluster_name ?? "control-plane" },
-  { id: "uptime", header: "Uptime", cell: (hb) => formatUptime(hb.uptime_seconds), exportValue: (hb) => formatUptime(hb.uptime_seconds) },
-  { id: "lastSeen", header: "Last seen", cell: (hb) => formatRelative(hb.last_seen_at), exportValue: (hb) => hb.last_seen_at },
-  { id: "restarts", header: "Restarts", cell: (hb) => hb.restart_count, exportValue: (hb) => hb.restart_count },
-  { id: "details", header: "Details", cell: (hb) => <HeartbeatDetails hb={hb} />, exportValue: (hb) => heartbeatDetailsText(hb) },
-  { id: "status", header: "Status", cell: (hb) => <StatusPill status={hb.status} reason={hb.drift_reason} />, exportValue: (hb) => hb.drift_reason ? `${hb.status}; ${hb.drift_reason}` : hb.status },
+  { id: "version", header: "Version", kind: "version", size: 160, minSize: 112, maxSize: 224, wrap: true, className: "font-mono", cell: (hb) => hb.version, exportValue: (hb) => hb.version },
+  { id: "commit", header: "Commit", kind: "id", size: 112, minSize: 104, maxSize: 144, className: "font-mono", cell: (hb) => <span title={hb.commit}>{hb.commit_short}</span>, exportValue: (hb) => hb.commit },
+  { id: "hostname", header: "Hostname", kind: "id", size: 176, minSize: 144, maxSize: 240, className: "font-mono", cell: (hb) => hb.hostname, exportValue: (hb) => hb.hostname },
+  { id: "cluster", header: "Cluster", kind: "text", wrap: true, size: 192, minSize: 152, maxSize: 240, cell: (hb) => hb.cluster_name ?? <span className="text-muted-foreground">(control-plane)</span>, exportValue: (hb) => hb.cluster_name ?? "control-plane" },
+  { id: "uptime", header: "Uptime", kind: "age", size: 128, minSize: 112, maxSize: 160, cell: (hb) => formatUptime(hb.uptime_seconds), exportValue: (hb) => formatUptime(hb.uptime_seconds) },
+  { id: "lastSeen", header: "Last seen", kind: "age", size: 160, minSize: 144, maxSize: 192, cell: (hb) => formatRelative(hb.last_seen_at), exportValue: (hb) => hb.last_seen_at },
+  { id: "restarts", header: "Restarts", kind: "count", cell: (hb) => hb.restart_count, exportValue: (hb) => hb.restart_count },
+  { id: "details", header: "Details", kind: "text", wrap: true, size: 264, minSize: 208, maxSize: 360, cell: (hb) => <HeartbeatDetails hb={hb} />, exportValue: (hb) => heartbeatDetailsText(hb) },
+  { id: "status", header: "Status", kind: "status", size: 192, minSize: 160, maxSize: 240, wrap: true, cell: (hb) => <StatusPill status={hb.status} reason={hb.drift_reason} />, exportValue: (hb) => hb.drift_reason ? `${hb.status}; ${hb.drift_reason}` : hb.status },
 ];
 
 /**
@@ -156,6 +156,7 @@ export function SystemHealthPage() {
             rows={heartbeats}
             columns={heartbeatColumns}
             rowKey={(hb) => `${hb.cluster_id ?? "control"}-${hb.component}@${hb.hostname}`}
+            preferencesKey="system-health-heartbeats"
             exportFileName="constellation-system-health-heartbeats"
             testId="system-health-heartbeats-table"
             emptyState={
@@ -216,7 +217,7 @@ export function SystemHealthPage() {
                   </div>
                   <p className="text-muted-foreground">Created {formatBundleTime(job.created_at)}{job.started_at ? ` · started ${formatBundleTime(job.started_at)}` : ""}{job.finished_at ? ` · finished ${formatBundleTime(job.finished_at)}` : ""}</p>
                   {job.bundle_id && <p className="font-mono text-muted-foreground">Bundle {job.bundle_id}</p>}
-                  {job.audit_event_id && <Link to={`/audit?support_bundle_job_id=${job.id}`} className="text-[color:var(--color-primary)] hover:underline">Audit history</Link>}
+                  {job.audit_event_id && <Link to="." href={`/audit?support_bundle_job_id=${job.id}`} className="text-[color:var(--color-primary)] hover:underline">Audit history</Link>}
                   {job.status === "queued" && <p className="text-muted-foreground">Waiting for a worker. Status refreshes automatically.</p>}
                   {job.status === "running" && <p className="text-muted-foreground">Preparing the redacted bundle. Status refreshes automatically.</p>}
                   {job.status === "ready" && job.expires_at && <p className="text-muted-foreground">Download before {formatBundleTime(job.expires_at)}.</p>}
@@ -324,8 +325,7 @@ export function SystemHealthPage() {
       </Card>
 
       {/* ------------- FLEET STAT TILES ------------- */}
-      <section
-        className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"
+      <StatGrid
         data-testid="system-health-fleet-tiles"
       >
         <StatCard
@@ -363,7 +363,7 @@ export function SystemHealthPage() {
           tone={(data.summary.crashlooping ?? 0) > 0 ? "critical" : "neutral"}
           hint=">3 restarts/hour"
         />
-      </section>
+      </StatGrid>
 
       {/* ------------- DETAIL TABS (progressive disclosure) ------------- */}
       <Tabs value={tab} onValueChange={setTab} items={tabs} />
@@ -489,7 +489,7 @@ function HeartbeatDetails({ hb }: { hb: SystemHealthHeartbeat }) {
   const activeTargets = compactCountMap(hb.metadata.active_jobs_by_target_type);
   const targetCapacity = compactCountMap(hb.metadata.target_capacity);
   return (
-    <div className="max-w-[280px] truncate text-[11px] text-muted-foreground">
+    <div className="text-[11px] text-muted-foreground">
       <span className="font-mono text-foreground">{hb.metadata.active_jobs ?? 0}/{hb.metadata.max_concurrent ?? "?"}</span>
       <span> busy</span>
       <span> · idle </span>

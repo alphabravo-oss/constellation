@@ -2,6 +2,7 @@ package compliance
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -116,7 +117,7 @@ WHERE $2::uuid IS NULL OR EXISTS (SELECT 1 FROM clusters WHERE id = $2 AND org_i
 RETURNING id`,
 		subj.OrgID, clusterArg, body.Framework, body.ControlID, body.Reason, subj.UserID, expiresAt.UTC(),
 	).Scan(&id); err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})
 			return
 		}

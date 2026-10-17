@@ -4,11 +4,11 @@
 // and emits ElevationDecision when the policy is "stable enough" to elevate to the next
 // mode. Stability rules (defaults; per-workload overrides via WorkloadConfig):
 //
-//   Discover → Monitor:  observed ≥ 7 days, no new (peer, port, proto) tuple in last 24h,
-//                        observed flow count ≥ MinObservedFlows.
-//   Monitor  → Protect:  observed ≥ 7 days in Monitor, zero out-of-policy alerts in last
-//                        24h, customer has explicitly clicked "approve elevation" or
-//                        AutoElevate is true on the workload's config.
+//	Discover → Monitor:  observed ≥ 7 days, no new (peer, port, proto) tuple in last 24h,
+//	                     observed flow count ≥ MinObservedFlows.
+//	Monitor  → Protect:  observed ≥ 7 days in Monitor, zero out-of-policy alerts in last
+//	                     24h, customer has explicitly clicked "approve elevation" or
+//	                     AutoElevate is true on the workload's config.
 //
 // Why mirror NeuVector exactly: customers migrating from NeuVector get a familiar lifecycle;
 // runbooks transfer verbatim; the spec calls for this (Runtime Enforcement Modes section).
@@ -35,10 +35,10 @@ var AllModes = []Mode{ModeDiscover, ModeMonitor, ModeProtect}
 
 // WorkloadState captures the per-workload state the elevation engine needs.
 type WorkloadState struct {
-	Workload   string    // "namespace/name"
-	Namespace  string
-	Mode       Mode
-	ModeSince  time.Time
+	Workload  string // "namespace/name"
+	Namespace string
+	Mode      Mode
+	ModeSince time.Time
 
 	// AutoElevate: when true, the elevation manager automatically transitions
 	// Discover→Monitor→Protect as criteria are met. When false, the manager emits

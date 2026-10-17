@@ -41,7 +41,7 @@ SELECT $1, $2, 'default/client', 'default/service-' || seq, 'tcp', 'https', 443,
 	subject := authctx.Subject{OrgID: orgID, UserID: uuid.New()}
 	request := func(path string, serve func(http.ResponseWriter, *http.Request)) map[string]json.RawMessage {
 		t.Helper()
-		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
 		req = req.WithContext(authctx.WithSubject(req.Context(), subject))
 		response := httptest.NewRecorder()
 		serve(response, req)

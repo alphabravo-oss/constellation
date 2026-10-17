@@ -10,11 +10,12 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/pkg/audit"
-	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 )
 
 func TestNetworkRulesPortableExportImportAuthoredOverrides(t *testing.T) {
@@ -59,7 +60,7 @@ VALUES ($1, $2, 'prod/api', 'prod/db', 'tcp/5432', ARRAY['postgres','postgres'],
 	router.Get("/clusters/{id}/network-rules:export", h.ExportNetworkRules)
 	router.Post("/clusters/{id}/network-rules:import", h.ImportNetworkRules)
 
-	req := httptest.NewRequest(http.MethodGet, "/clusters/"+sourceClusterID.String()+"/network-rules:export", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/clusters/"+sourceClusterID.String()+"/network-rules:export", nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -71,7 +72,7 @@ VALUES ($1, $2, 'prod/api', 'prod/db', 'tcp/5432', ARRAY['postgres','postgres'],
 		t.Fatalf("exported bundle missing rule: %s", exported)
 	}
 
-	req = httptest.NewRequest(http.MethodPost, "/clusters/"+targetClusterID.String()+"/network-rules:import", strings.NewReader(exported))
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/clusters/"+targetClusterID.String()+"/network-rules:import", strings.NewReader(exported))
 	req.Header.Set("Content-Type", "application/x-yaml")
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rec = httptest.NewRecorder()
@@ -136,7 +137,7 @@ func TestNetworkRulesPortableImportBoundaryAndPerRuleErrors(t *testing.T) {
 	router.Post("/clusters/{id}/network-rules:import", NewNetwork(d).WithAudit(audit.New(pool)).ImportNetworkRules)
 	importRules := func(contentType, body string) *httptest.ResponseRecorder {
 		t.Helper()
-		req := httptest.NewRequest(http.MethodPost, "/clusters/"+clusterID.String()+"/network-rules:import", strings.NewReader(body))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/clusters/"+clusterID.String()+"/network-rules:import", strings.NewReader(body))
 		if contentType != "" {
 			req.Header.Set("Content-Type", contentType)
 		}
@@ -180,7 +181,7 @@ func TestNetworkRulesPortableImportBoundaryAndPerRuleErrors(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO clusters (id, org_id, name) VALUES ($1,$2,$3)`, foreignClusterID, foreignOrgID, "foreign-network-rules-"+foreignClusterID.String()); err != nil {
 		t.Fatal(err)
 	}
-	foreignRequest := httptest.NewRequest(http.MethodPost, "/clusters/"+foreignClusterID.String()+"/network-rules:import", strings.NewReader(validBundle))
+	foreignRequest := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/clusters/"+foreignClusterID.String()+"/network-rules:import", strings.NewReader(validBundle))
 	foreignRequest.Header.Set("Content-Type", "application/x-yaml")
 	foreignRequest = foreignRequest.WithContext(authctx.WithSubject(foreignRequest.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	foreignResponse := httptest.NewRecorder()
@@ -194,7 +195,7 @@ func TestNetworkRulesPortableImportBoundaryAndPerRuleErrors(t *testing.T) {
 	}
 	noAuditRouter := chi.NewRouter()
 	noAuditRouter.Post("/clusters/{id}/network-rules:import", NewNetwork(d).ImportNetworkRules)
-	noAuditRequest := httptest.NewRequest(http.MethodPost, "/clusters/"+clusterID.String()+"/network-rules:import", strings.NewReader(validBundle))
+	noAuditRequest := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/clusters/"+clusterID.String()+"/network-rules:import", strings.NewReader(validBundle))
 	noAuditRequest.Header.Set("Content-Type", "application/x-yaml")
 	noAuditRequest = noAuditRequest.WithContext(authctx.WithSubject(noAuditRequest.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	noAuditResponse := httptest.NewRecorder()
@@ -254,7 +255,7 @@ func portableImportFixture(t *testing.T) (*db.DB, func(string) *httptest.Respons
 	router := chi.NewRouter()
 	router.Post("/clusters/{id}/network-rules:import", NewNetwork(database).WithAudit(audit.New(database.Pool())).ImportNetworkRules)
 	request := func(bundle string) *httptest.ResponseRecorder {
-		httpRequest := httptest.NewRequest(http.MethodPost, "/clusters/"+clusterID.String()+"/network-rules:import", strings.NewReader(bundle))
+		httpRequest := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/clusters/"+clusterID.String()+"/network-rules:import", strings.NewReader(bundle))
 		httpRequest.Header.Set("Content-Type", "application/x-yaml")
 		httpRequest = httpRequest.WithContext(authctx.WithSubject(httpRequest.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 		response := httptest.NewRecorder()

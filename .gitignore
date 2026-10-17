@@ -34,3 +34,7 @@ tools/constellation-test-suite/.pytest_cache/
 /constellation-discoverer
 /constellation-api
 /constellation-runtime-agent
+
+# Admission test credentials are streamed to Kubernetes, never retained as evidence.
+/deploy/e2e/threat-scenarios/04-admission-tls/captures/secret.yaml
+/deploy/e2e/threat-scenarios/04-admission-tls/captures/tls/*.key

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -528,16 +529,17 @@ func upsertServerlessPermissionFinding(
 	}})
 
 	var existing uuid.UUID
+	var existingFirstSeen time.Time
 	err := tx.QueryRow(ctx, `
-SELECT id
+SELECT id,first_seen_at
   FROM findings
  WHERE org_id = $1
    AND kind = 'cloud-config'
    AND scan_target_id = $2
    AND detail_json->>'stable_key' = $3
- ORDER BY last_seen_at DESC
- LIMIT 1`, orgID, target.ID, stableKey).Scan(&existing)
-	if err != nil && err != pgx.ErrNoRows {
+ ORDER BY last_seen_at DESC,id ASC,first_seen_at ASC
+ LIMIT 1`, orgID, target.ID, stableKey).Scan(&existing, &existingFirstSeen)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
 	if err == nil {
@@ -559,10 +561,10 @@ UPDATE findings
        source_type = NULLIF($15, ''),
        last_seen_at = NOW(),
        lifecycle = CASE WHEN lifecycle = 'resolved' THEN 'open' ELSE lifecycle END
- WHERE id = $1 AND org_id = $16`,
+ WHERE id = $1 AND org_id = $16 AND first_seen_at=$17`,
 			existing, assetID, target.ClusterID, finding.ID, title, description, severity,
 			handler.SeverityToScore(severity, 0, false), string(enginesJSON), string(detailJSON),
-			target.ID, target.Type, target.Ref, target.ClusterID, target.SourceType, orgID)
+			target.ID, target.Type, target.Ref, target.ClusterID, target.SourceType, orgID, existingFirstSeen)
 		return err
 	}
 	_, err = tx.Exec(ctx, `

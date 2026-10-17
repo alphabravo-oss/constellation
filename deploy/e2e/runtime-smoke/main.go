@@ -28,10 +28,10 @@ import (
 
 func main() {
 	var (
-		duration  = flag.Duration("duration", 10*time.Second, "smoke window")
-		minExec   = flag.Int("min-exec", 10, "minimum /bin/true exec events to require")
-		minTCP    = flag.Int("min-tcp", 1, "minimum tcp_connect events to require")
-		showFile  = flag.Bool("show-file", false, "log first file_open events")
+		duration = flag.Duration("duration", 10*time.Second, "smoke window")
+		minExec  = flag.Int("min-exec", 10, "minimum /bin/true exec events to require")
+		minTCP   = flag.Int("min-tcp", 1, "minimum tcp_connect events to require")
+		showFile = flag.Bool("show-file", false, "log first file_open events")
 	)
 	flag.Parse()
 
@@ -141,11 +141,11 @@ func main() {
 	fmt.Printf("dropped (chan full) : %d\n", dropped)
 
 	failed := false
-	if int(etrue) < *minExec {
+	if *minExec > 0 && etrue < uint64(*minExec) {
 		fmt.Fprintf(os.Stderr, "FAIL: /bin/true exec events %d < required %d\n", etrue, *minExec)
 		failed = true
 	}
-	if int(nc) < *minTCP {
+	if *minTCP > 0 && nc < uint64(*minTCP) {
 		fmt.Fprintf(os.Stderr, "FAIL: tcp_connect events %d < required %d\n", nc, *minTCP)
 		failed = true
 	}

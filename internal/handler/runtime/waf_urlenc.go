@@ -20,6 +20,7 @@ import "strings"
 //   - `\s`            -> (?:\s|%09|%0[AaCcDd]|%20|\+)
 //   - escaped `\. \/ \\ \|` and the literal set (' " < > : ; / ` = & , space)
 //     -> (?:orig|%HH)
+//
 // Character classes are augmented (not skipped) with the encodings of their
 // encodable members so e.g. `[\s>]` also matches `%3E`. Group openers ((?:, (?i),
 // (?i:, (?<name>, lookaround) and quantifier braces are copied verbatim so their
@@ -34,8 +35,8 @@ func urlEncodeTolerant(pcre string) string {
 	n := len(s)
 	for i := 0; i < n; {
 		c := s[i]
-		switch {
-		case c == '\\':
+		switch c {
+		case '\\':
 			if i+1 >= n {
 				b.WriteByte(c)
 				i++
@@ -59,15 +60,15 @@ func urlEncodeTolerant(pcre string) string {
 				b.WriteByte(s[i+1])
 			}
 			i += 2
-		case c == '[':
+		case '[':
 			j := classEnd(s, i)
 			b.WriteString(augmentClass(s[i:j]))
 			i = j
-		case c == '(':
+		case '(':
 			j := groupOpenerEnd(s, i)
 			b.WriteString(s[i:j])
 			i = j
-		case c == '{':
+		case '{':
 			j := i + 1
 			for j < n && s[j] != '}' {
 				j++

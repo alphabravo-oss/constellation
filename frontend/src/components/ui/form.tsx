@@ -1,4 +1,4 @@
-import { type ReactNode, type ComponentProps } from "react";
+import { useId, type ReactNode, type ComponentProps } from "react";
 import { cn } from "@/lib/cn";
 
 /**
@@ -88,11 +88,13 @@ export function Switch({
   description?: ReactNode;
   className?: string;
 }) {
+  const labelId = useId();
   const toggle = (
     <button
       type="button"
       role="switch"
       aria-checked={checked}
+      aria-labelledby={label ? labelId : undefined}
       disabled={disabled}
       onClick={() => onCheckedChange(!checked)}
       className={cn(
@@ -113,7 +115,7 @@ export function Switch({
   return (
     <div className="flex items-center justify-between gap-4">
       <div className="min-w-0">
-        {label && <div className="text-sm font-medium text-foreground">{label}</div>}
+        {label && <div id={labelId} className="text-sm font-medium text-foreground">{label}</div>}
         {description && <div className="text-xs leading-relaxed text-muted-foreground">{description}</div>}
       </div>
       {toggle}

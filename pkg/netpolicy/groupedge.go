@@ -16,13 +16,14 @@
 package netpolicy
 
 import (
+	"slices"
 	"sort"
 	"strings"
 )
 
 // PortSpec is one L4 opening on an edge. Port 0 means "any port" for that proto.
 type PortSpec struct {
-	Protocol string `json:"protocol"` // TCP | UDP | SCTP | ICMP
+	Protocol string `json:"protocol"` // TCP | UDP | ICMP | ICMPV6
 	Port     int    `json:"port"`
 }
 
@@ -53,14 +54,16 @@ func (e *GroupEdge) Validate() error {
 	default:
 		return errBadEdge("invalid mode " + e.Mode)
 	}
+	// Value copies can share the caller's port slice; normalization must stay local.
+	e.Ports = slices.Clone(e.Ports)
 	for i := range e.Ports {
 		p := &e.Ports[i]
 		p.Protocol = strings.ToUpper(strings.TrimSpace(p.Protocol))
 		if p.Protocol == "" {
 			p.Protocol = "TCP"
 		}
-		if p.Port < 0 || p.Port > 65535 {
-			return errBadEdge("port out of range")
+		if _, _, err := nativeFlowPortAndProtocol(p.Port, p.Protocol); err != nil {
+			return err
 		}
 	}
 	return nil

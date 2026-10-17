@@ -406,7 +406,7 @@ func publicTarget(ctx context.Context, raw, scheme, defaultPort string) (*url.UR
 	if port == "" {
 		port = defaultPort
 	}
-	if _, err := net.LookupPort("tcp", port); err != nil {
+	if _, err := net.DefaultResolver.LookupPort(ctx, "tcp", port); err != nil {
 		return nil, "", err
 	}
 	ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", target.Hostname())

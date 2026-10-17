@@ -26,20 +26,20 @@ import (
 
 // Envelope is the v1 snapshot shape.
 type Envelope struct {
-	Kind        string                  `json:"kind"`
-	CapturedAt  time.Time               `json:"captured_at"`
-	Trigger     string                  `json:"trigger"`
-	Pod         json.RawMessage         `json:"pod,omitempty"`
-	Events      []Event                 `json:"events,omitempty"`
-	Logs        map[string][]string     `json:"logs,omitempty"` // container → lines
-	Flows       []Flow                  `json:"flows,omitempty"`
-	Annotations map[string]string       `json:"annotations,omitempty"`
+	Kind        string              `json:"kind"`
+	CapturedAt  time.Time           `json:"captured_at"`
+	Trigger     string              `json:"trigger"`
+	Pod         json.RawMessage     `json:"pod,omitempty"`
+	Events      []Event             `json:"events,omitempty"`
+	Logs        map[string][]string `json:"logs,omitempty"` // container → lines
+	Flows       []Flow              `json:"flows,omitempty"`
+	Annotations map[string]string   `json:"annotations,omitempty"`
 }
 
 // Event is a K8s Event projection.
 type Event struct {
 	Time    time.Time `json:"time"`
-	Type    string    `json:"type"`    // Normal | Warning
+	Type    string    `json:"type"` // Normal | Warning
 	Reason  string    `json:"reason"`
 	Message string    `json:"message"`
 	Source  string    `json:"source"`

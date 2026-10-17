@@ -46,6 +46,11 @@ type Image struct {
 // Config describes the credentials a connector needs. Connectors only read the fields
 // relevant to them; unused fields are ignored.
 type Config struct {
+	// CredentialCacheScope is set only by trusted owner code after resolving an
+	// owned registry. It must not come from registry payloads or credential maps.
+	// Missing scope disables the shared credential cache, without disabling auth.
+	CredentialCacheScope string `json:"-"`
+
 	Username string
 	Password string
 	Token    string

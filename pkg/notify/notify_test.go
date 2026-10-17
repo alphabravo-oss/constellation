@@ -63,7 +63,12 @@ func TestPagerDuty_SendsTriggerEvent(t *testing.T) {
 		"routing_key":  "key123",
 		"event_action": "trigger",
 	})
-	resp, err := http.Post(srv.URL, "application/json", strings.NewReader(string(body)))
+	httpRequest, err := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL, strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpRequest.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(httpRequest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +174,7 @@ func TestSyslog_SDEscaping(t *testing.T) {
 }
 
 func TestSyslog_SendOverUDP(t *testing.T) {
-	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	pc, err := (&net.ListenConfig{}).ListenPacket(t.Context(), "udp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -280,7 +285,7 @@ func TestSyslog_SendToMTLSCollector(t *testing.T) {
 				defer conn.Close()
 				_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
 				tlsConn := conn.(*tls.Conn)
-				if handshakeErr := tlsConn.Handshake(); handshakeErr != nil {
+				if handshakeErr := tlsConn.HandshakeContext(t.Context()); handshakeErr != nil {
 					results <- collectorResult{err: handshakeErr}
 					return
 				}
@@ -488,7 +493,7 @@ func TestSyslog_LevelAndCategoryFilter(t *testing.T) {
 }
 
 func TestSyslog_FilterSkipsSendWhenEmpty(t *testing.T) {
-	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	pc, err := (&net.ListenConfig{}).ListenPacket(t.Context(), "udp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}

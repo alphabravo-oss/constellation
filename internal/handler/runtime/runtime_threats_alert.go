@@ -234,7 +234,7 @@ func (h *RuntimeThreats) fanOutOneThreat(ctx context.Context, orgID uuid.UUID, p
 	row := p.row
 	sev := threatSeverityLabel(row.Severity)
 	name := handler.NeuVectorThreatName(row.ThreatID)
-	category := threatCategory(int32(row.ThreatID))
+	category := threatCategory(int64(row.ThreatID))
 	action := "runtime.alert.dpi"
 
 	// E1 declarative response rules first, so a suppress_log action can gate
@@ -323,7 +323,7 @@ func (h *RuntimeThreats) fanOutOneThreat(ctx context.Context, orgID uuid.UUID, p
 
 func responseEventForThreat(p *pendingThreatAlert, sev, name, action string) response.Event {
 	eventType := response.EventThreat
-	switch threatCategory(int32(p.row.ThreatID)) {
+	switch threatCategory(int64(p.row.ThreatID)) {
 	case "dlp":
 		eventType = response.EventDLP
 	case "waf":

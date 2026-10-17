@@ -1,5 +1,5 @@
 import { act, type ReactNode } from "react";
-import { MemoryRouter } from "react-router-dom";
+import { TestRouter } from "@/test/router";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -19,8 +19,8 @@ afterEach(() => {
 });
 
 describe("NeuVectorCompatibilityChips", () => {
-  it("renders NeuVector mapping labels and linked actions", () => {
-    render(
+  it("renders NeuVector mapping labels and linked actions", async () => {
+    await render(
       <NeuVectorCompatibilityChips
         items={[
           { label: "NV DLP Sensors -> DLP Rules" },
@@ -36,7 +36,7 @@ describe("NeuVectorCompatibilityChips", () => {
   });
 });
 
-function render(ui: ReactNode) {
+async function render(ui: ReactNode) {
   if (root) {
     act(() => root?.unmount());
   }
@@ -44,7 +44,7 @@ function render(ui: ReactNode) {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
-  act(() => {
-    root?.render(<MemoryRouter>{ui}</MemoryRouter>);
+  await act(async () => {
+    root?.render(<TestRouter>{ui}</TestRouter>);
   });
 }

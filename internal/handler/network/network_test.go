@@ -7,8 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 )
 
 func TestNetwork_MapAggregatesFlows(t *testing.T) {
@@ -81,7 +82,7 @@ VALUES ($1, $2, 'default/api', 'data/postgres', '10.99.0.8', '10.99.1.15', 41002
 		t.Fatalf("rollup fold: %v", err)
 	}
 
-	r := httptest.NewRequest("GET", "/api/v1/network/map?hours=1&cluster_id="+clusterID.String(), nil)
+	r := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/network/map?hours=1&cluster_id="+clusterID.String(), nil)
 	r = r.WithContext(authctx.WithSubject(r.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	NewNetwork(d).Map(w, r)
@@ -161,7 +162,7 @@ VALUES ($1, $2, 'default/api', 'data/postgres', '10.99.0.8', '10.99.1.15', 41002
 		t.Fatalf("missing recent flow metadata: %+v", got.RecentFlows[0])
 	}
 
-	groupReq := httptest.NewRequest("GET", "/api/v1/network/map?hours=1&cluster_id="+clusterID.String()+"&group=payments-tier", nil)
+	groupReq := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/network/map?hours=1&cluster_id="+clusterID.String()+"&group=payments-tier", nil)
 	groupReq = groupReq.WithContext(authctx.WithSubject(groupReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	groupRec := httptest.NewRecorder()
 	NewNetwork(d).Map(groupRec, groupReq)

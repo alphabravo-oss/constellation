@@ -8,7 +8,7 @@
 // We intentionally avoid creating yet-another React context — useCluster() already
 // derives everything from the URL + TanStack cache, which means deeplinks Just Work.
 import { Suspense } from "react";
-import { Navigate, Outlet } from "react-router-dom";
+import { Navigate, Outlet } from "@tanstack/react-router";
 
 import { useCluster } from "@/hooks/useCluster";
 

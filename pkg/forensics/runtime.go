@@ -10,13 +10,13 @@ import (
 // It rides inside the existing Envelope.Annotations as JSON so older readers can
 // still parse the snapshot.
 type RuntimeArtifacts struct {
-	ManifestSHA256 string            `json:"manifest_sha256"`
-	TarballPath    string            `json:"tarball_path,omitempty"`
-	TarballBytes   int64             `json:"tarball_bytes,omitempty"`
-	Components     []string          `json:"components,omitempty"` // pcap, proc, logs, netpolicy
-	Trigger        RuntimeTrigger    `json:"trigger,omitempty"`
-	Target         RuntimeTarget     `json:"target,omitempty"`
-	CapturedAt     time.Time         `json:"captured_at,omitempty"`
+	ManifestSHA256 string         `json:"manifest_sha256"`
+	TarballPath    string         `json:"tarball_path,omitempty"`
+	TarballBytes   int64          `json:"tarball_bytes,omitempty"`
+	Components     []string       `json:"components,omitempty"` // pcap, proc, logs, netpolicy
+	Trigger        RuntimeTrigger `json:"trigger,omitempty"`
+	Target         RuntimeTarget  `json:"target,omitempty"`
+	CapturedAt     time.Time      `json:"captured_at,omitempty"`
 }
 
 // RuntimeTrigger mirrors quarantine.Trigger (kept here so pkg/forensics has no

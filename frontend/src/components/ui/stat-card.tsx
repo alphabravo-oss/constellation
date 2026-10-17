@@ -1,8 +1,12 @@
-import { type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { type HTMLAttributes, type ReactNode } from "react";
 import { ArrowUpRight } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Sparkline } from "./sparkline";
+
+/** Lay out metrics using the content width, including beside an expanded sidebar. */
+export function StatGrid({ className, ...props }: HTMLAttributes<HTMLElement>) {
+  return <section className={cn("app-stat-grid", className)} {...props} />;
+}
 
 /**
  * StatCard / MetricTile — dashboard-grade KPI card.
@@ -13,6 +17,7 @@ import { Sparkline } from "./sparkline";
 export function StatCard({
   label,
   value,
+  valueKind = "number",
   delta,
   trend,
   href,
@@ -23,6 +28,8 @@ export function StatCard({
 }: {
   label: string;
   value: ReactNode;
+  /** Text metadata uses the shared compact value typography. */
+  valueKind?: "number" | "text";
   delta?: { value: string; positive?: boolean };
   trend?: number[];
   href?: string;
@@ -42,7 +49,7 @@ export function StatCard({
   const inner = (
     <div
       className={cn(
-        "group relative rounded-md border border-border bg-card px-4 py-3 transition-all duration-100",
+        "app-stat-card group relative min-w-0 rounded-md border border-border bg-card px-4 py-3 transition-all duration-100",
         "hover:border-[color-mix(in_oklab,var(--color-primary)_30%,var(--color-border))]",
         href && "cursor-pointer",
         className,
@@ -51,13 +58,14 @@ export function StatCard({
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+          <div className="flex items-center gap-1.5 [overflow-wrap:anywhere] text-[10px] uppercase tracking-wider text-muted-foreground">
             {icon}
             {label}
           </div>
-          <div className="mt-1 flex items-baseline gap-2">
+          <div className="mt-1 flex flex-wrap items-baseline gap-2">
             <span
-              className="text-display text-3xl font-semibold tabular-nums"
+              className="app-stat-value [overflow-wrap:anywhere] min-w-0 text-display font-semibold tabular-nums"
+              data-kind={valueKind}
               style={{ color: tone === "neutral" ? "var(--color-foreground)" : toneColor }}
             >
               {value}
@@ -85,6 +93,6 @@ export function StatCard({
     </div>
   );
 
-  if (href) return <Link to={href} className="block">{inner}</Link>;
+  if (href) return <a href={href} className="block">{inner}</a>;
   return inner;
 }

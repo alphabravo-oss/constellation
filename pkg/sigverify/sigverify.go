@@ -70,6 +70,8 @@ type AttestationResult struct {
 type Verifier struct {
 	CosignBinary string // default: "cosign" from PATH
 	Timeout      time.Duration
+	// Env is the subprocess environment. Nil inherits the current process.
+	Env []string
 }
 
 // New returns a Verifier with defaults.
@@ -113,9 +115,7 @@ func (v *Verifier) verifyRoot(ctx context.Context, imageRef string, root RootOfT
 
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, v.CosignBinary, args...)
-	if len(env) > 0 {
-		cmd.Env = append(os.Environ(), env...)
-	}
+	cmd.Env = v.commandEnv(env...)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -173,6 +173,7 @@ func (v *Verifier) VerifyAttestation(ctx context.Context, subjectRef string, pol
 
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, v.CosignBinary, args...)
+	cmd.Env = v.commandEnv()
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -525,4 +526,14 @@ func stringInList(value string, allowed []string) bool {
 		}
 	}
 	return false
+}
+
+// commandEnv copies the base environment so concurrent verification never mutates
+// another job's environment. exec.Cmd uses the last occurrence of duplicate keys.
+func (v *Verifier) commandEnv(overrides ...string) []string {
+	base := v.Env
+	if base == nil {
+		base = os.Environ()
+	}
+	return append(append([]string{}, base...), overrides...)
 }

@@ -76,9 +76,7 @@ func (a *Auth) WithProviderSet(ps *auth.ProviderSet) *Auth {
 // static env-wired one.
 func (a *Auth) providerOIDC() *auth.OIDCClient {
 	if a.providers != nil {
-		if p := a.providers.OIDC(); p != nil {
-			return p
-		}
+		return a.providers.OIDC()
 	}
 	return a.oidc
 }
@@ -86,9 +84,7 @@ func (a *Auth) providerOIDC() *auth.OIDCClient {
 // providerSAML returns the live SAML provider (set snapshot, else static).
 func (a *Auth) providerSAML() *auth.SAMLProvider {
 	if a.providers != nil {
-		if p := a.providers.SAML(); p != nil {
-			return p
-		}
+		return a.providers.SAML()
 	}
 	return a.saml
 }
@@ -96,11 +92,19 @@ func (a *Auth) providerSAML() *auth.SAMLProvider {
 // providerLDAP returns the live LDAP provider (set snapshot, else static).
 func (a *Auth) providerLDAP() *auth.LDAPProvider {
 	if a.providers != nil {
-		if p := a.providers.LDAP(); p != nil {
-			return p
-		}
+		return a.providers.LDAP()
 	}
 	return a.ldap
+}
+
+// Providers exposes only available browser SSO methods, never provider configuration.
+// Resolve the same live providers used by the login endpoints, including disabled states.
+func (a *Auth) Providers(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]bool{
+		"oidc": a.providerOIDC() != nil,
+		"saml": a.providerSAML() != nil,
+	})
 }
 
 // providerSAMLParse returns the SAML ACS identity resolver to use for this request. A test-set
@@ -513,7 +517,7 @@ func (a *Auth) issueSession(ctx context.Context, userID, orgID uuid.UUID, email 
 		return "", time.Time{}, errors.New("session changed during login")
 	}
 	if _, err := tx.Exec(ctx,
-		`INSERT INTO user_sessions (session_id, user_id, created_at, last_seen_at) VALUES ($1, $2, clock_timestamp(), clock_timestamp())`, sessionID, userID); err != nil {
+		`INSERT INTO user_sessions (session_id, user_id, created_at, last_seen_at, expires_at) VALUES ($1, $2, clock_timestamp(), clock_timestamp(), $3)`, sessionID, userID, expiresAt); err != nil {
 		return "", time.Time{}, err
 	}
 	if _, err := tx.Exec(ctx, `
@@ -721,7 +725,9 @@ func (a *Auth) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		// RSP-AUDIT-05: a failed OIDC code exchange / id_token validation is a failed login
 		// attempt on the OIDC path — audit it (identity unknown pre-validation, so no username).
 		a.auditLoginFailure(r.Context(), r, nil, nil, "", "oidc_exchange_failed")
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
+		// Provider/JWKS/parser errors can contain upstream bytes or URLs. The
+		// browser receives a stable category; no identity is issued on failure.
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "oidc authentication failed"})
 		return
 	}
 	// Route OIDC through the shared linked-session tail (like SAML/LDAP) so its id_token groups are
@@ -772,6 +778,7 @@ func (a *Auth) SAMLLogin(w http.ResponseWriter, r *http.Request) {
 	if browser {
 		setSAMLBrowserCookie(w, relayState)
 	}
+	// #nosec G710 -- Destination comes from configured IdP metadata; StartLogin query-escapes caller RelayState.
 	http.Redirect(w, r, redirectURL, http.StatusFound)
 }
 

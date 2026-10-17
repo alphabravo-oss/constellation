@@ -215,9 +215,11 @@ func VerifyChain(ctx context.Context, pool *pgxpool.Pool) (*ChainBreak, error) {
 	// for every row that carries a non-NULL actor IP. host() returns just the
 	// address portion ("::1", "10.0.0.1") — matching what Logger stored at
 	// write time via net.IP.String().
+	// Nullable metadata uses the same empty-string canonical representation as
+	// Event. This affects decoding only; stored rows and the hash format remain unchanged.
 	rows, err := pool.Query(ctx, `
-SELECT id, org_id, actor_id, host(actor_ip), action, target_kind, target_id,
-       before, after, prev_hash, chain_hash, request_id, at
+SELECT id, org_id, actor_id, host(actor_ip), action, COALESCE(target_kind,''), COALESCE(target_id,''),
+       before, after, prev_hash, chain_hash, COALESCE(request_id,''), at
   FROM audit_events ORDER BY id ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("audit: query chain: %w", err)

@@ -81,7 +81,7 @@ func TestSigstoreRoots_CRUDOrgScoping(t *testing.T) {
 
 func createSigstoreRoot(t *testing.T, h *SigstoreRoots, userID, orgID uuid.UUID, body string) string {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/sigstore-roots", bytes.NewReader([]byte(body)))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/sigstore-roots", bytes.NewReader([]byte(body)))
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	rec := httptest.NewRecorder()
 	h.Create(rec, req)
@@ -95,7 +95,7 @@ func createSigstoreRoot(t *testing.T, h *SigstoreRoots, userID, orgID uuid.UUID,
 
 func listSigstoreRoots(t *testing.T, h *SigstoreRoots, userID, orgID uuid.UUID) []map[string]any {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/sigstore-roots", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/sigstore-roots", nil)
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	rec := httptest.NewRecorder()
 	h.List(rec, req)
@@ -111,7 +111,7 @@ func listSigstoreRoots(t *testing.T, h *SigstoreRoots, userID, orgID uuid.UUID) 
 
 func deleteSigstoreRoot(t *testing.T, h *SigstoreRoots, userID, orgID uuid.UUID, id string) int {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/sigstore-roots/"+id, nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/api/v1/sigstore-roots/"+id, nil)
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", id)

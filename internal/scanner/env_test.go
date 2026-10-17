@@ -8,7 +8,7 @@ import (
 func TestRegistryEnvInheritsProcessEnvironmentAndAppendsCredentials(t *testing.T) {
 	t.Setenv("CONSTELLATION_SCANNER_ENV_SENTINEL", "present")
 
-	env := registryEnv(ScanOptions{
+	env := RegistryEnvironment(ScanOptions{
 		Username:          "alice",
 		Password:          "secret",
 		RegistryAuthority: "ghcr.io",
@@ -40,7 +40,7 @@ func TestRegistryEnvInheritsProcessEnvironmentAndAppendsCredentials(t *testing.T
 }
 
 func TestRegistryEnvOmitsCredentialVarsWithoutCredentials(t *testing.T) {
-	env := registryEnv(ScanOptions{})
+	env := RegistryEnvironment(ScanOptions{})
 	for _, key := range []string{"TRIVY_USERNAME", "GRYPE_REGISTRY_AUTH_USERNAME", "SYFT_REGISTRY_AUTH_USERNAME", "DOCKER_CONFIG"} {
 		if got := envValue(env, key); got != "" {
 			t.Fatalf("%s should be unset without credentials, got %q", key, got)
@@ -50,7 +50,7 @@ func TestRegistryEnvOmitsCredentialVarsWithoutCredentials(t *testing.T) {
 
 func TestRegistryEnvWithoutIsolatedConfigPreservesLegacyEnvironment(t *testing.T) {
 	t.Setenv("TRIVY_USERNAME", "ambient-user")
-	if got := envValue(registryEnv(ScanOptions{}), "TRIVY_USERNAME"); got != "ambient-user" {
+	if got := envValue(RegistryEnvironment(ScanOptions{}), "TRIVY_USERNAME"); got != "ambient-user" {
 		t.Fatalf("legacy ambient credentials changed: %q", got)
 	}
 }
@@ -74,7 +74,7 @@ func TestRegistryEnvIsolatedConfigExcludesAmbientRegistryCredentials(t *testing.
 		{name: "private", options: ScanOptions{DockerConfigDir: "/tmp/private", Username: "alice", Password: "private-secret", RegistryAuthority: "ghcr.io"}, wantUser: "alice"},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			env := registryEnv(testCase.options)
+			env := RegistryEnvironment(testCase.options)
 			if got := envValue(env, "DOCKER_CONFIG"); got != testCase.options.DockerConfigDir {
 				t.Fatalf("DOCKER_CONFIG=%q", got)
 			}

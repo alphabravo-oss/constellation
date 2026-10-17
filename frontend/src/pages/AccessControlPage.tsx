@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { ArrowRight, KeyRound, Pencil, Plus, ShieldCheck, Trash2, UserRoundCog, UsersRound, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
@@ -15,16 +15,18 @@ import {
 } from "@/api/client";
 import { PageHeader, PageContainer } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
 import { Collapse } from "@/components/ui/collapse";
 import { Button } from "@/components/ui/button";
+import { ErrorState } from "@/components/ui/states";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
 
 const userColumns: Column<AccessControlUser>[] = [
   {
     id: "user",
-    header: "User",
+    header: "User", exportValue: (u) => `${u.name} <${u.email}>`, kind: "name", wrap: true,
     cell: (u) => (
       <div>
         <div className="font-medium">{u.name}</div>
@@ -32,20 +34,20 @@ const userColumns: Column<AccessControlUser>[] = [
       </div>
     ),
   },
-  { id: "auth", header: "Auth", cell: (u) => <>{u.auth_provider_id} · {u.mfa_enabled ? "MFA" : "no MFA"}</>, className: "text-xs" },
+  { id: "auth", header: "Auth", exportValue: (u) => `${u.auth_provider_id}; mfa=${u.mfa_enabled}`, kind: "text", wrap: true, size: 176, minSize: 144, maxSize: 208, cell: (u) => <>{u.auth_provider_id} · {u.mfa_enabled ? "MFA" : "no MFA"}</>, className: "text-xs" },
   {
     id: "roles",
-    header: "Roles",
+    header: "Roles", exportValue: (u) => u.roles.join("; "), kind: "text", wrap: true, size: 224, minSize: 160, maxSize: 320,
     cell: (u) => <div className="flex flex-wrap gap-1">{u.roles.map((role) => <Badge key={role}>{role}</Badge>)}</div>,
   },
-  { id: "status", header: "Status", cell: (u) => <div className="flex flex-wrap gap-1"><Status value={u.status} />{u.locked && <Status value="locked" />}{u.password_reset_required && <Status value="reset required" />}</div> },
-  { id: "last_seen", header: "Last Seen", cell: (u) => formatDate(u.last_login_at), className: "text-xs text-muted-foreground" },
+  { id: "status", header: "Status", exportValue: (u) => [u.status, u.locked ? "locked" : "", u.password_reset_required ? "reset required" : ""].filter(Boolean).join("; "), kind: "status", size: 176, minSize: 144, maxSize: 224, wrap: true, cell: (u) => <div className="flex flex-wrap gap-1"><Status value={u.status} />{u.locked && <Status value="locked" />}{u.password_reset_required && <Status value="reset required" />}</div> },
+  { id: "last_seen", header: "Last Seen", exportValue: (u) => u.last_login_at ?? "", kind: "date", size: 224, minSize: 208, maxSize: 240, cell: (u) => formatDate(u.last_login_at), className: "text-xs text-muted-foreground" },
 ];
 
 const roleColumns: Column<AccessControlRole>[] = [
   {
     id: "role",
-    header: "Role",
+    header: "Role", exportValue: (r) => r.name, kind: "name", wrap: true,
     cell: (r) => (
       <div>
         <div className="font-medium">{r.name}</div>
@@ -53,10 +55,10 @@ const roleColumns: Column<AccessControlRole>[] = [
       </div>
     ),
   },
-  { id: "type", header: "Type", cell: (r) => <Badge>{r.type}</Badge> },
+  { id: "type", header: "Type", exportValue: (r) => r.type, kind: "badge", cell: (r) => <Badge>{r.type}</Badge> },
   {
     id: "permissions",
-    header: "Permissions",
+    header: "Permissions", exportValue: (r) => r.permissions.join("; "), kind: "text", wrap: true, size: 320, minSize: 240, maxSize: 480, grow: true,
     cell: (r) => (
       <div className="flex flex-wrap gap-1">
         {r.permissions.length === 0 ? (
@@ -70,16 +72,16 @@ const roleColumns: Column<AccessControlRole>[] = [
 ];
 
 const permissionColumns: Column<AccessControlPermissionMatrixRow>[] = [
-  { id: "domain", header: "Domain", cell: (row) => row.domain, className: "text-xs font-medium" },
-  { id: "permissions", header: "Permissions", cell: (row) => row.permissions.join(", "), className: "font-mono text-xs" },
-  { id: "roles", header: "Roles", cell: (row) => row.roles.join(", "), className: "text-xs" },
-  { id: "notes", header: "Notes", cell: (row) => row.notes, className: "text-xs text-muted-foreground" },
+  { id: "domain", header: "Domain", exportValue: (r) => r.domain, kind: "name", wrap: true, cell: (row) => row.domain, className: "text-xs font-medium" },
+  { id: "permissions", header: "Permissions", exportValue: (r) => r.permissions.join("; "), kind: "text", wrap: true, size: 320, minSize: 240, maxSize: 480, grow: true, cell: (row) => row.permissions.join(", "), className: "font-mono text-xs" },
+  { id: "roles", header: "Roles", exportValue: (r) => r.roles.join("; "), kind: "text", wrap: true, size: 224, minSize: 160, maxSize: 320, cell: (row) => row.roles.join(", "), className: "text-xs" },
+  { id: "notes", header: "Notes", exportValue: (r) => r.notes, kind: "text", wrap: true, size: 240, minSize: 160, maxSize: 360, cell: (row) => row.notes, className: "text-xs text-muted-foreground" },
 ];
 
 const tokenColumns: Column<AccessControlAPIToken>[] = [
   {
     id: "token",
-    header: "Token",
+    header: "Token", exportValue: (t) => `${t.name}; scopes=${t.scopes.join("|")}`, kind: "name", wrap: true,
     cell: (token) => (
       <div>
         <div className="font-medium">{token.name}</div>
@@ -87,8 +89,8 @@ const tokenColumns: Column<AccessControlAPIToken>[] = [
       </div>
     ),
   },
-  { id: "status", header: "Status", cell: (token) => <Status value={token.status} /> },
-  { id: "expires", header: "Expires", cell: (token) => formatDate(token.expires_at), className: "text-xs text-muted-foreground" },
+  { id: "status", header: "Status", exportValue: (u) => u.status, kind: "status", size: 176, minSize: 144, maxSize: 224, wrap: true, cell: (token) => <Status value={token.status} /> },
+  { id: "expires", header: "Expires", exportValue: (t) => t.expires_at ?? "", kind: "date", size: 224, minSize: 208, maxSize: 240, cell: (token) => formatDate(token.expires_at), className: "text-xs text-muted-foreground" },
 ];
 
 export function AccessControlPage() {
@@ -99,7 +101,7 @@ export function AccessControlPage() {
   const [tab, setTab] = useTabParam("tab", "users");
 
   const authServersQuery = useQuery({ queryKey: ["auth-servers"], queryFn: () => authServersApi.list() });
-  const authProviders = authServersQuery.data ?? [];
+  const authProviders = authServersQuery.isSuccess ? authServersQuery.data : [];
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["access-control"] });
   const invalidateAuth = () => qc.invalidateQueries({ queryKey: ["auth-servers"] });
@@ -127,9 +129,9 @@ export function AccessControlPage() {
     ...userColumns,
     {
       id: "recovery",
-      header: "Recovery",
+      header: "Recovery", exportable: false, kind: "actions", size: 224, minSize: 208, maxSize: 240,
       cell: (user) => user.local_password ? (
-        <div className="flex gap-2">
+        <div className="flex justify-end gap-2">
           <Button variant="ghost" size="sm" disabled={!user.locked || unlockUser.isPending || forceResetUser.isPending} onClick={() => {
             if (window.confirm(`Unlock ${user.email}? This clears the login lockout.`)) unlockUser.mutate(user.id);
           }}>Unlock</Button>
@@ -142,6 +144,7 @@ export function AccessControlPage() {
   ];
 
   if (q.isPending) return <p className="text-sm text-muted-foreground">Loading access control...</p>;
+  if (q.isError || !q.data) return <PageContainer><PageHeader title="Access Control" description="Users, roles and scoped access for your organization." /><VerdictBanner status="degraded" title="Access inventory unavailable" /><ErrorState error={q.error} action={<Button onClick={() => void q.refetch()}>Retry</Button>} /></PageContainer>;
   const data = q.data;
 
   const tabs = [
@@ -154,7 +157,7 @@ export function AccessControlPage() {
           <div className="flex justify-end">
             <button
               type="button"
-              onClick={() => navigate("/settings/access/users/new")}
+              onClick={() => navigate({ href: "/settings/access/users/new" })}
               className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
             >
               <UserPlus className="h-3.5 w-3.5" /> New user
@@ -162,7 +165,7 @@ export function AccessControlPage() {
           </div>
           <Card padded={false}>
             <div className="overflow-x-auto" data-testid="access-users">
-              <DataTable rows={data?.users ?? []} columns={localUserColumns} rowKey={(u) => u.id} />
+              <DataTable preferencesKey="access-users" exportFileName="access-users" rows={data?.users ?? []} columns={localUserColumns} rowKey={(u) => u.id} />
             </div>
           </Card>
         </div>
@@ -178,7 +181,7 @@ export function AccessControlPage() {
             title="Scoped bindings"
             description="Grants of a role to a subject, optionally narrowed to specific clusters or namespaces. This is where you assign access."
             action={
-              <Button variant="primary" size="sm" onClick={() => navigate("/settings/access/bindings/new")}>
+              <Button variant="primary" size="sm" onClick={() => navigate({ href: "/settings/access/bindings/new" })}>
                 <Plus className="h-3.5 w-3.5" /> Add binding
               </Button>
             }
@@ -216,18 +219,18 @@ export function AccessControlPage() {
             description="The named permission sets you can bind. Built-in roles are fixed; custom roles are defined by your org."
             padded={false}
             action={
-              <Button variant="primary" size="sm" onClick={() => navigate("/settings/access/roles/new")}>
+              <Button variant="primary" size="sm" onClick={() => navigate({ href: "/settings/access/roles/new" })}>
                 <Plus className="h-3.5 w-3.5" /> New role
               </Button>
             }
           >
             <div className="overflow-x-auto" data-testid="access-roles">
-              <DataTable rows={roles} columns={roleColumns} rowKey={(r) => r.name} />
+              <DataTable preferencesKey="access-roles" exportFileName="access-roles" rows={roles} columns={roleColumns} rowKey={(r) => r.name} />
             </div>
             <div className="border-t border-border px-5 py-3">
               <Collapse label="Permission matrix — by domain">
                 <div className="overflow-x-auto" data-testid="permission-matrix">
-                  <DataTable rows={data?.permission_matrix ?? []} columns={permissionColumns} rowKey={(row) => row.domain} />
+                  <DataTable preferencesKey="access-permissions" exportFileName="access-permissions" rows={data?.permission_matrix ?? []} columns={permissionColumns} rowKey={(row) => row.domain} />
                 </div>
               </Collapse>
             </div>
@@ -238,20 +241,21 @@ export function AccessControlPage() {
     {
       value: "sso",
       label: "SSO / Auth",
-      count: authProviders.length,
+      count: authServersQuery.isSuccess ? authProviders.length : undefined,
       content: (
         <Card
           title="Authentication providers"
           description="Identity providers (LDAP, SAML, OIDC) that federate sign-in for your organization."
           action={
-            <Button variant="primary" size="sm" onClick={() => navigate("/settings/access/sso/new")}>
+            <Button variant="primary" size="sm" onClick={() => navigate({ href: "/settings/access/sso/new" })}>
               <Plus className="h-3.5 w-3.5" /> Add provider
             </Button>
           }
         >
           <div className="space-y-2" data-testid="auth-providers">
             {authServersQuery.isPending && <p className="text-xs text-muted-foreground">Loading providers…</p>}
-            {!authServersQuery.isPending && authProviders.length === 0 && (
+            {authServersQuery.isError && <ErrorState title="Authentication providers unavailable" error={authServersQuery.error} action={<Button onClick={() => void authServersQuery.refetch()}>Retry</Button>} />}
+            {authServersQuery.isSuccess && authProviders.length === 0 && (
               <p className="text-xs text-muted-foreground">No authentication providers yet. Add one to federate sign-in.</p>
             )}
             {authProviders.map((provider) => {
@@ -274,7 +278,7 @@ export function AccessControlPage() {
                       variant="ghost"
                       size="icon"
                       aria-label="Edit provider"
-                      onClick={() => navigate(`/settings/access/sso/${provider.id}`)}
+                      onClick={() => navigate({ href: `/settings/access/sso/${provider.id}` })}
                       className="text-muted-foreground hover:text-foreground"
                     >
                       <Pencil className="h-3.5 w-3.5" />
@@ -306,7 +310,7 @@ export function AccessControlPage() {
           title="Service accounts"
           description="Non-human identities for automation, each with a scoped set of permissions."
           action={
-            <Button variant="primary" size="sm" onClick={() => navigate("/settings/access/service-accounts/new")}>
+            <Button variant="primary" size="sm" onClick={() => navigate({ href: "/settings/access/service-accounts/new" })}>
               <Plus className="h-3.5 w-3.5" /> New service account
             </Button>
           }
@@ -330,7 +334,7 @@ export function AccessControlPage() {
             ))}
             <div className="border-t border-border pt-3" data-testid="service-tokens">
               <div className="mb-2 text-xs font-medium text-muted-foreground">API tokens</div>
-              <DataTable rows={data?.api_tokens ?? []} columns={tokenColumns} rowKey={(token) => token.id} />
+              <DataTable preferencesKey="access-tokens" exportFileName="access-tokens" rows={data?.api_tokens ?? []} columns={tokenColumns} rowKey={(token) => token.id} />
             </div>
           </div>
         </Card>
@@ -366,12 +370,13 @@ export function AccessControlPage() {
         description="Who can do what in your organization — users, roles, scoped bindings, SSO, and service accounts."
       />
 
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <VerdictBanner status="info" title={`${data.summary.users_total} users and ${data.summary.role_bindings_total} scoped bindings reported`} detail="Review roles and bindings to understand organization access." actions={<Button variant="outline" disabled={q.isFetching} onClick={() => void q.refetch()}>Refresh</Button>} />
+      <StatGrid>
         <StatCard label="Users" value={data?.summary.users_total ?? 0} icon={<UsersRound className="h-3.5 w-3.5" />} />
         <StatCard label="Roles" value={data?.summary.roles_total ?? 0} icon={<ShieldCheck className="h-3.5 w-3.5" />} />
         <StatCard label="Bindings" value={data?.summary.role_bindings_total ?? 0} icon={<UserRoundCog className="h-3.5 w-3.5" />} />
         <StatCard label="API tokens" value={data?.summary.api_tokens_total ?? 0} icon={<KeyRound className="h-3.5 w-3.5" />} href="/settings/api-tokens" />
-      </section>
+      </StatGrid>
 
       <Tabs value={tab} onValueChange={setTab} items={tabs} />
     </PageContainer>

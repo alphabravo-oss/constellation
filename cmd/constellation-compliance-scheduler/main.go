@@ -11,9 +11,10 @@
 //     status=running and update next_run_at = cron.Next(now), so a parallel
 //     scheduler can't double-fire (the row update is the lock).
 //  3. Render the compliance report for the target (org + cluster + framework)
-//     using pkg/report, signing the rendered bytes with cosign 2.x.
+//     using pkg/report, signing the rendered bytes with cosign 2.x when configured.
+//     Configured signing errors fail the run before any delivery.
 //  4. Push the artifact + signature to every delivery target. Failures are
-//     logged but do not fail the run — the artifact is still on disk.
+//     recorded as run failures; the rendered artifact remains available on disk.
 //  5. UPDATE compliance_runs SET status='succeeded'|'failed', artifact_uri,
 //     artifact_signature, completed_at, summary.
 //
@@ -38,7 +39,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
+	"encoding/csv"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -67,6 +68,7 @@ import (
 	evidence "github.com/alphabravocompany/constellation/internal/complianceevidence"
 	compliancehandler "github.com/alphabravocompany/constellation/internal/handler/compliance"
 	"github.com/alphabravocompany/constellation/internal/obslog"
+	"github.com/alphabravocompany/constellation/internal/securefiles"
 	"github.com/alphabravocompany/constellation/pkg/compliance"
 	"github.com/alphabravocompany/constellation/pkg/report"
 	"github.com/alphabravocompany/constellation/pkg/version"
@@ -85,8 +87,14 @@ func main() {
 		fmt.Fprintln(os.Stderr, "DATABASE_URL required")
 		os.Exit(2)
 	}
-	if err := os.MkdirAll(*outDir, 0o755); err != nil {
+	artifactRoot, err := securefiles.OpenPrivateDir(*outDir)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "mkdir %s: %v\n", *outDir, err)
+		os.Exit(1)
+	}
+
+	if err := artifactRoot.Close(); err != nil {
+		fmt.Fprintln(os.Stderr, "close artifact directory:", err)
 		os.Exit(1)
 	}
 
@@ -245,89 +253,128 @@ RETURNING id`, s.OrgID, s.ClusterID, s.ID, s.Framework).Scan(&runID); err != nil
 		return fmt.Errorf("insert run row: %w", err)
 	}
 
-	finalize := func(status, artifactURI, sig string, size int64, summary map[string]int, runErr error) {
+	var artifactFormat, artifactMediaType, artifactFilename string
+	finalize := func(status, artifactURI, sig string, size int64, summary map[string]int, runErr error) error {
 		errMsg := ""
 		if runErr != nil {
 			errMsg = runErr.Error()
 		}
 		summaryRaw, _ := json.Marshal(summary)
-		_, _ = d.pool.Exec(ctx, `
+		_, persistErr := d.pool.Exec(ctx, `
 UPDATE compliance_runs
    SET completed_at = NOW(), status = $1, summary = $2::jsonb,
        artifact_uri = NULLIF($3,''), artifact_signature = NULLIF($4,''),
-       artifact_size_bytes = $5, error_message = NULLIF($6,'')
- WHERE id = $7`, status, summaryRaw, artifactURI, sig, size, errMsg, runID)
+       artifact_size_bytes = $5, error_message = NULLIF($6,''),
+ artifact_format=NULLIF($8,''),artifact_media_type=NULLIF($9,''),artifact_filename=NULLIF($10,'')
+ WHERE id = $7`, status, summaryRaw, artifactURI, sig, size, errMsg, runID, artifactFormat, artifactMediaType, artifactFilename)
+		if persistErr != nil {
+			return fmt.Errorf("persist artifact result: %w", persistErr)
+		}
 		// Mirror onto the schedule's last_* columns.
-		_, _ = d.pool.Exec(ctx, `
+		_, persistErr = d.pool.Exec(ctx, `
 UPDATE compliance_schedules
    SET last_run_at = NOW(), last_status = $1, last_artifact_uri = NULLIF($2,''),
        last_error = NULLIF($3,''), updated_at = NOW()
  WHERE id = $4`, status, artifactURI, errMsg, s.ID)
+		if persistErr != nil {
+			return fmt.Errorf("persist schedule result: %w", persistErr)
+		}
 		d.logger.Info("run finished", "schedule", s.Name, "status", status, "artifact", artifactURI, "signature_bytes", len(sig))
+		return nil
 	}
 
 	checks, summary, err := d.loadChecks(ctx, s)
 	if err != nil {
-		finalize("failed", "", "", 0, summary, err)
-		return err
+		return errors.Join(err, finalize("failed", "", "", 0, summary, err))
 	}
 
-	orgName, clusterName := d.resolveNames(ctx, s.OrgID, s.ClusterID)
-	frameworkName := s.Framework
-	for _, fw := range compliance.AllFrameworks() {
-		if fw.ID == s.Framework {
-			frameworkName = fw.Name
-			break
-		}
+	orgName, clusterName, err := d.resolveNames(ctx, s.OrgID, s.ClusterID)
+	if err != nil {
+		_ = finalize("failed", "", "", 0, summary, err)
+		return err
 	}
 
 	artifact, ext, err := renderArtifact(s.ReportFormat, report.ComplianceData{
 		OrgName:       orgName,
 		GeneratedAt:   time.Now().UTC(),
 		Framework:     s.Framework,
-		FrameworkName: fmt.Sprintf("%s (cluster: %s)", frameworkName, clusterName),
+		FrameworkName: fmt.Sprintf("%s (cluster: %s)", complianceFrameworkName(s.Framework), clusterName),
 		Summary: report.FrameworkSummary{
-			Total: summary["total"], Pass: summary["pass"], Fail: summary["fail"], Manual: summary["manual"],
+			Total: summary["total"], Pass: summary["pass"], Fail: summary["fail"], Manual: summary["manual"], Exempted: summary["exempted"], NotApplicable: summary["not_applicable"],
 		},
-		Checks: checks,
+		Checks:      checks,
+		SourceLabel: "Current retained multi-source evidence; effective exemptions; graded rate excludes manual/exempted/not-applicable", SourceTotal: summary["total"], SourceReturned: len(checks), SourceTruncated: summary["truncated"] == 1,
 	})
 	if err != nil {
-		finalize("failed", "", "", 0, summary, err)
-		return err
+		return errors.Join(err, finalize("failed", "", "", 0, summary, err))
 	}
 
 	stamp := time.Now().UTC().Format("20060102T150405Z")
-	filename := fmt.Sprintf("%s-%s-%s.%s", safeName(s.Name), s.Framework, stamp, ext)
+	filename := fmt.Sprintf("%s-%s-%s-%s.%s", safeName(s.Name), safeName(s.Framework), stamp, runID, ext)
 	localPath := filepath.Join(d.outDir, filename)
-	if err := os.WriteFile(localPath, artifact, 0o644); err != nil {
-		finalize("failed", "", "", 0, summary, err)
-		return err
+	artifactRoot, err := securefiles.OpenPrivateDir(d.outDir)
+	if err != nil {
+		return errors.Join(err, finalize("failed", "", "", 0, summary, err))
 	}
+	defer func() { _ = artifactRoot.Close() }()
+	if err := securefiles.WriteFile(artifactRoot, filename, artifact, 0o600); err != nil {
+		return errors.Join(err, finalize("failed", "", "", 0, summary, err))
+	}
+	artifactFormat, artifactMediaType, artifactFilename = ext, report.ArtifactMediaType(ext), filename
 	size := int64(len(artifact))
 
-	// Sign the artifact bytes (best-effort).
-	sig := ""
-	if d.signer != nil {
-		raw, err := d.signer.Sign(ctx, localPath)
-		if err != nil {
-			d.logger.Warn("cosign sign", "err", err.Error())
-		} else {
-			sig = raw
-			// Persist the signature next to the artifact so cosign verify-blob works.
-			_ = os.WriteFile(localPath+".sig", []byte(sig), 0o644)
-		}
-	} else {
-		// Fallback: sha256 the artifact so the UI can show *something* in
-		// X-Constellation-Cosign-Signature when cosign isn't installed.
-		h := sha256.Sum256(artifact)
-		sig = "sha256:" + hex.EncodeToString(h[:])
+	sig, err := d.signArtifact(ctx, artifactRoot, filename, localPath, artifact)
+	if err != nil {
+		return errors.Join(err, finalize("failed", "file://"+localPath, "", size, summary, err))
 	}
 
-	// Deliver to each target. Email/webhook/file/S3. Errors don't fail the run.
+	primaryURI, deliveryErr := d.deliverAll(ctx, s, localPath, artifact, sig, ext)
+	if deliveryErr != nil {
+		return errors.Join(deliveryErr, finalize("failed", primaryURI, sig, size, summary, deliveryErr))
+	}
+	return finalize("succeeded", primaryURI, sig, size, summary, nil)
+}
+
+func complianceFrameworkName(id string) string {
+	for _, framework := range compliance.AllFrameworks() {
+		if framework.ID == id {
+			return framework.Name
+		}
+	}
+	return id
+}
+
+// signArtifact requires a configured signer to produce and persist a signature
+// before delivery. With no signer, the established explicit checksum fallback applies.
+func (d *daemon) signArtifact(ctx context.Context, root *os.Root, filename, localPath string, artifact []byte) (string, error) {
+	if d.signer == nil {
+		h := sha256.Sum256(artifact)
+		return "sha256:" + hex.EncodeToString(h[:]), nil
+	}
+	sig, err := d.signer.Sign(ctx, localPath)
+	if err != nil {
+		d.logger.Warn("cosign sign", "err", err.Error())
+		return "", fmt.Errorf("sign compliance artifact: %w", err)
+	}
+	if strings.TrimSpace(sig) == "" {
+		return "", errors.New("sign compliance artifact: empty signature")
+	}
+	if err := securefiles.WriteFile(root, filename+".sig", []byte(sig), 0o600); err != nil {
+		return "", err
+	}
+	return sig, nil
+}
+
+// deliverAll attempts every configured destination and retains the local artifact
+// even when one or more deliveries fail. A rendered report is not delivery proof.
+func (d *daemon) deliverAll(ctx context.Context, s dueSchedule, localPath string, artifact []byte, sig, ext string) (string, error) {
+	filename := filepath.Base(localPath)
 	primaryURI := "file://" + localPath
+	var deliveryErrors []error
 	for _, t := range s.Delivery {
 		if err := d.deliver(ctx, t, s, localPath, artifact, sig, ext); err != nil {
 			d.logger.Warn("delivery failed", "kind", t.Kind, "err", err.Error())
+			deliveryErrors = append(deliveryErrors, fmt.Errorf("%s delivery: %w", t.Kind, err))
 			continue
 		}
 		// Prefer the externally-addressable URI when available.
@@ -341,8 +388,7 @@ UPDATE compliance_schedules
 		}
 	}
 
-	finalize("succeeded", primaryURI, sig, size, summary, nil)
-	return nil
+	return primaryURI, errors.Join(deliveryErrors...)
 }
 
 // loadChecks pulls the first-class compliance evidence rows for the
@@ -355,7 +401,7 @@ func (d *daemon) loadChecks(ctx context.Context, s dueSchedule) ([]report.Compli
 		OrgID:     s.OrgID,
 		ClusterID: s.ClusterID,
 		Framework: s.Framework,
-		Limit:     5000,
+		Limit:     evidence.ExportLimit,
 	})
 	if err != nil {
 		return nil, summary, fmt.Errorf("load evidence checks: %w", err)
@@ -373,27 +419,27 @@ func (d *daemon) loadChecks(ctx context.Context, s dueSchedule) ([]report.Compli
 			Severity:  item.Severity,
 			Evidence:  item.ReportEvidence(),
 		})
-		summary["total"]++
-		switch strings.ToLower(status) {
-		case "pass", "exempted":
-			summary["pass"]++
-		case "fail":
-			summary["fail"]++
-		case "manual":
-			summary["manual"]++
-		}
+	}
+	summary["total"], summary["pass"], summary["fail"], summary["manual"] = result.Summary.Total, result.Summary.Pass, result.Summary.Fail, result.Summary.Manual
+	summary["exempted"], summary["not_applicable"], summary["returned"] = result.Summary.Exempted, result.Summary.NotApplicable, len(out)
+	if result.HasMore {
+		summary["truncated"] = 1
 	}
 	return out, summary, nil
 }
 
-func (d *daemon) resolveNames(ctx context.Context, orgID uuid.UUID, clusterID *uuid.UUID) (string, string) {
-	orgName := "unknown-org"
-	_ = d.pool.QueryRow(ctx, `SELECT name FROM orgs WHERE id=$1`, orgID).Scan(&orgName)
-	clusterName := "all-clusters"
-	if clusterID != nil {
-		_ = d.pool.QueryRow(ctx, `SELECT name FROM clusters WHERE id=$1`, *clusterID).Scan(&clusterName)
+func (d *daemon) resolveNames(ctx context.Context, orgID uuid.UUID, clusterID *uuid.UUID) (string, string, error) {
+	var orgName string
+	if err := d.pool.QueryRow(ctx, `SELECT COALESCE(NULLIF(display_name,''),name) FROM orgs WHERE id=$1`, orgID).Scan(&orgName); err != nil {
+		return "", "", fmt.Errorf("resolve report organization: %w", err)
 	}
-	return orgName, clusterName
+	clusterName := "all owned clusters"
+	if clusterID != nil {
+		if err := d.pool.QueryRow(ctx, `SELECT name FROM clusters WHERE id=$1 AND org_id=$2`, *clusterID, orgID).Scan(&clusterName); err != nil {
+			return "", "", fmt.Errorf("resolve report cluster: %w", err)
+		}
+	}
+	return orgName, clusterName, nil
 }
 
 // renderArtifact picks the right pkg/report path for the configured format. For
@@ -422,13 +468,23 @@ func renderArtifact(format string, data report.ComplianceData) ([]byte, string, 
 		raw, err := json.MarshalIndent(map[string]any{
 			"org": data.OrgName, "framework": data.Framework, "summary": data.Summary,
 			"checks": data.Checks, "generated_at": data.GeneratedAt,
+			"source": map[string]any{"label": data.SourceLabel, "total": data.SourceTotal, "returned": data.SourceReturned, "truncated": data.SourceTruncated},
 		}, "", "  ")
 		return raw, "json", err
 	case "csv":
 		var buf bytes.Buffer
-		buf.WriteString("control_id,title,status,severity,evidence\n")
+		writer := csv.NewWriter(&buf)
+		if err := writer.Write([]string{"control_id", "title", "status", "severity", "evidence"}); err != nil {
+			return nil, "", err
+		}
 		for _, c := range data.Checks {
-			buf.WriteString(fmt.Sprintf("%q,%q,%q,%q,%q\n", c.ControlID, c.Title, c.Status, c.Severity, c.Evidence))
+			if err := writer.Write([]string{c.ControlID, c.Title, c.Status, c.Severity, c.Evidence}); err != nil {
+				return nil, "", err
+			}
+		}
+		writer.Flush()
+		if err := writer.Error(); err != nil {
+			return nil, "", err
 		}
 		return buf.Bytes(), "csv", nil
 	case "sarif":
@@ -479,22 +535,7 @@ func sarifLevel(severity string) string {
 func (d *daemon) deliver(ctx context.Context, t compliancehandler.DeliveryTarget, s dueSchedule, localPath string, body []byte, sig, ext string) error {
 	switch t.Kind {
 	case "file":
-		if t.Target == "" {
-			return errors.New("file delivery: target required")
-		}
-		dir := strings.TrimPrefix(t.Target, "file://")
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return err
-		}
-		dest := filepath.Join(dir, filepath.Base(localPath))
-		if err := os.WriteFile(dest, body, 0o644); err != nil {
-			return err
-		}
-		if sig != "" {
-			_ = os.WriteFile(dest+".sig", []byte(sig), 0o644)
-		}
-		d.logger.Info("delivered: file", "path", dest)
-		return nil
+		return d.deliverFile(t.Target, localPath, body, sig)
 	case "email":
 		return d.deliverEmail(t, s, body, sig, filepath.Base(localPath))
 	case "s3":
@@ -506,11 +547,54 @@ func (d *daemon) deliver(ctx context.Context, t compliancehandler.DeliveryTarget
 	}
 }
 
+func (d *daemon) deliverFile(target, localPath string, body []byte, sig string) error {
+	if target == "" {
+		return errors.New("file delivery: target required")
+	}
+	dir := strings.TrimPrefix(target, "file://")
+	trusted, err := filepath.Abs(d.outDir)
+	if err != nil {
+		return err
+	}
+	destination, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	relative, err := filepath.Rel(trusted, destination)
+	if err != nil || !filepath.IsLocal(relative) {
+		return errors.New("file delivery target must be within REPORT_OUT_DIR")
+	}
+	parent, err := securefiles.OpenPrivateDir(d.outDir)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = parent.Close() }()
+	root, err := securefiles.OpenPrivateSubdir(parent, relative)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	name := filepath.Base(localPath)
+	if err = securefiles.WriteFile(root, name, body, 0o600); err != nil {
+		return err
+	}
+	if sig != "" {
+		if err = securefiles.WriteFile(root, name+".sig", []byte(sig), 0o600); err != nil {
+			return err
+		}
+	}
+	dest := filepath.Join(dir, name)
+	d.logger.Info("delivered: file", "path", dest)
+	return nil
+}
+
 func (d *daemon) deliverEmail(t compliancehandler.DeliveryTarget, s dueSchedule, body []byte, sig, filename string) error {
-	host := os.Getenv("SMTP_HOST")
+	if strings.TrimSpace(t.Target) == "" {
+		return errors.New("email delivery: target email required")
+	}
+	host := strings.TrimSpace(os.Getenv("SMTP_HOST"))
 	if host == "" {
-		d.logger.Warn("email delivery skipped: SMTP_HOST not set")
-		return nil
+		return errors.New("email delivery: SMTP_HOST is required")
 	}
 	user := os.Getenv("SMTP_USER")
 	pass := os.Getenv("SMTP_PASS")
@@ -518,27 +602,10 @@ func (d *daemon) deliverEmail(t compliancehandler.DeliveryTarget, s dueSchedule,
 	if from == "" {
 		from = user
 	}
-	if t.Target == "" {
-		return errors.New("email delivery: target email required")
+	message, err := makeReportEmail(from, t.Target, s.Name, s.Framework, sig, filename, body)
+	if err != nil {
+		return err
 	}
-	// RFC 822 message with a base64-encoded attachment + cosign signature header.
-	boundary := "constellation-boundary-" + uuid.NewString()
-	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "From: %s\r\n", from)
-	fmt.Fprintf(&buf, "To: %s\r\n", t.Target)
-	fmt.Fprintf(&buf, "Subject: Compliance report — %s (%s)\r\n", s.Name, s.Framework)
-	fmt.Fprintf(&buf, "X-Constellation-Cosign-Signature: %s\r\n", sig)
-	fmt.Fprintf(&buf, "MIME-Version: 1.0\r\n")
-	fmt.Fprintf(&buf, "Content-Type: multipart/mixed; boundary=%q\r\n\r\n", boundary)
-	fmt.Fprintf(&buf, "--%s\r\n", boundary)
-	fmt.Fprintf(&buf, "Content-Type: text/plain; charset=utf-8\r\n\r\n")
-	fmt.Fprintf(&buf, "Attached: %s\nFramework: %s\nGenerated by Constellation.\n\r\n", filename, s.Framework)
-	fmt.Fprintf(&buf, "--%s\r\n", boundary)
-	fmt.Fprintf(&buf, "Content-Type: application/octet-stream; name=%q\r\n", filename)
-	fmt.Fprintf(&buf, "Content-Transfer-Encoding: base64\r\n")
-	fmt.Fprintf(&buf, "Content-Disposition: attachment; filename=%q\r\n\r\n", filename)
-	buf.WriteString(base64.StdEncoding.EncodeToString(body))
-	fmt.Fprintf(&buf, "\r\n--%s--\r\n", boundary)
 
 	addr := host
 	if !strings.Contains(addr, ":") {
@@ -548,7 +615,7 @@ func (d *daemon) deliverEmail(t compliancehandler.DeliveryTarget, s dueSchedule,
 	if user == "" {
 		auth = nil
 	}
-	if err := smtp.SendMail(addr, auth, from, []string{t.Target}, buf.Bytes()); err != nil {
+	if err := smtp.SendMail(addr, auth, message.from, []string{message.to}, message.body); err != nil {
 		return fmt.Errorf("smtp: %w", err)
 	}
 	d.logger.Info("delivered: email", "to", t.Target)
@@ -615,7 +682,7 @@ func (d *daemon) deliverWebhook(ctx context.Context, t compliancehandler.Deliver
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		return fmt.Errorf("webhook %s: %d %s", url, resp.StatusCode, strings.TrimSpace(string(body)))
@@ -649,22 +716,76 @@ func ensureCosignKey(outDir string, logger *slog.Logger) (*cosignSigner, error) 
 	}
 	// Generate an ephemeral key if absent.
 	keyDir := filepath.Join(outDir, ".cosign")
-	if err := os.MkdirAll(keyDir, 0o700); err != nil {
+	keyRoot, err := securefiles.OpenPrivateDir(keyDir)
+	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = keyRoot.Close() }()
 	keyPath := filepath.Join(keyDir, "cosign.key")
 	pubPath := filepath.Join(keyDir, "cosign.pub")
-	if _, err := os.Stat(keyPath); err == nil {
+	existing, err := hardenGeneratedKey(keyRoot)
+	if err != nil {
+		return nil, err
+	}
+	if existing {
 		return &cosignSigner{bin: bin, keyPath: keyPath, password: pw}, nil
 	}
-	cmd := exec.Command(bin, "generate-key-pair", "--output-key-prefix", filepath.Join(keyDir, "cosign"))
-	cmd.Env = append(os.Environ(), "COSIGN_PASSWORD="+pw)
-	out, err := cmd.CombinedOutput()
+	// cosign chooses its output permissions. Generate in an isolated private
+	// staging directory, then atomically publish the key pair with explicit
+	// private/public permissions, never through pre-existing output symlinks.
+	staging, err := os.MkdirTemp("", "compliance-cosign-*")
 	if err != nil {
-		return nil, fmt.Errorf("cosign generate-key-pair: %w (%s)", err, strings.TrimSpace(string(out)))
+		return nil, err
+	}
+	defer func() { _ = os.RemoveAll(staging) }()
+	cmd := exec.Command(bin, "generate-key-pair", "--output-key-prefix", filepath.Join(staging, "cosign"))
+	cmd.Env = append(os.Environ(), "COSIGN_PASSWORD="+pw)
+	if _, err := cmd.CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("cosign generate-key-pair: %w", err)
+	}
+	generated, err := os.OpenRoot(staging)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = generated.Close() }()
+	privateKey, err := generated.ReadFile("cosign.key")
+	if err != nil {
+		return nil, err
+	}
+	publicKey, err := generated.ReadFile("cosign.pub")
+	if err != nil {
+		return nil, err
+	}
+	if len(privateKey) == 0 || len(publicKey) == 0 {
+		return nil, errors.New("cosign generated an empty key pair")
+	}
+	if err = securefiles.WriteFile(keyRoot, "cosign.pub", publicKey, 0o644); err != nil {
+		return nil, err
+	}
+	if err = securefiles.WriteFile(keyRoot, "cosign.key", privateKey, 0o600); err != nil {
+		return nil, err
 	}
 	logger.Info("generated cosign key", "key", keyPath, "pub", pubPath)
 	return &cosignSigner{bin: bin, keyPath: keyPath, password: pw}, nil
+}
+
+func hardenGeneratedKey(root *os.Root) (bool, error) {
+	info, err := root.Lstat("cosign.key")
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !info.Mode().IsRegular() {
+		return false, errors.New("generated signing key must be a regular file")
+	}
+	file, err := root.Open("cosign.key")
+	if err != nil {
+		return false, err
+	}
+	chmodErr := file.Chmod(0o600)
+	return true, errors.Join(chmodErr, file.Close())
 }
 
 // Sign produces a base64 cosign signature over the artifact at path. Returns the

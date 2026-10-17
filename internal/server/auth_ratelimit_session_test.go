@@ -21,7 +21,12 @@ const maxConcurrentSessions = 5
 func postLogin(t *testing.T, baseURL, email, password string) (int, string) {
 	t.Helper()
 	body, _ := json.Marshal(map[string]string{"email": email, "password": password})
-	resp, err := http.Post(baseURL+"/api/v1/auth/login", "application/json", bytes.NewReader(body))
+	httpRequest, err := http.NewRequestWithContext(t.Context(), http.MethodPost, baseURL+"/api/v1/auth/login", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpRequest.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(httpRequest)
 	if err != nil {
 		t.Fatalf("login post: %v", err)
 	}
@@ -140,7 +145,7 @@ func TestForcedPasswordReset_BlocksOtherRequests(t *testing.T) {
 
 	// The change-password endpoint is reachable; a valid change clears the flag.
 	body, _ := json.Marshal(map[string]string{"current_password": pw, "new_password": "AfterReset-Pass2!"})
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/auth/change-password", bytes.NewReader(body))
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, ts.URL+"/api/v1/auth/change-password", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+tok)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)

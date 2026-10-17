@@ -57,12 +57,16 @@ func TestPlatformRoleInventoryAPIs(t *testing.T) {
 		($4, $2, $3, 'payments', 'api', 'Deployment', '{}'::jsonb)`, coreID, orgID, clusterID, uuid.New()); err != nil {
 		t.Fatal(err)
 	}
+	// Core container attribution requires exact pod ownership, not a name prefix.
+	if _, err := pool.Exec(ctx, `INSERT INTO pod_workload_links(org_id,cluster_id,namespace,pod_name,pod_uid,pod_workload_id,owner_kind,owner_name,owner_workload_id,deployment_id) VALUES($1,$2,'security','agent-abc','platform-role-positive-pod','security/pod/agent-abc','Deployment','agent','security/agent',$3)`, orgID, clusterID, coreID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := pool.Exec(ctx, `INSERT INTO host_containers (org_id, cluster_id, node, container_count, payload, observed_at) VALUES
 		($1, $2, 'node-1', 2, '{"items":[{"id":"core","name":"agent","pod_namespace":"security","pod_name":"agent-abc","state":"running"},{"id":"user","name":"api","pod_namespace":"payments","pod_name":"api-abc","state":"running"}]}'::jsonb, $3)`, orgID, clusterID, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	subject := Subject{OrgID: orgID, UserID: userID}
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/deployments", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/deployments", nil)
 	request = request.WithContext(WithSubject(request.Context(), subject))
 	response := httptest.NewRecorder()
 	NewDeployments(database, nil).List(response, request)
@@ -76,7 +80,7 @@ func TestPlatformRoleInventoryAPIs(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertPlatformRoles(t, listed.Deployments)
-	request = httptest.NewRequest(http.MethodGet, "/api/v1/deployments/"+coreID.String(), nil)
+	request = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/deployments/"+coreID.String(), nil)
 	route := chi.NewRouteContext()
 	route.URLParams.Add("id", coreID.String())
 	request = request.WithContext(WithSubject(context.WithValue(request.Context(), chi.RouteCtxKey, route), subject))
@@ -93,7 +97,7 @@ func TestPlatformRoleInventoryAPIs(t *testing.T) {
 		t.Fatalf("deployment detail role: %#v", detail["platform_role"])
 	}
 
-	request = httptest.NewRequest(http.MethodGet, "/api/v1/clusters/"+clusterID.String()+"/containers", nil)
+	request = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/clusters/"+clusterID.String()+"/containers", nil)
 	route = chi.NewRouteContext()
 	route.URLParams.Add("id", clusterID.String())
 	request = request.WithContext(WithSubject(context.WithValue(request.Context(), chi.RouteCtxKey, route), subject))

@@ -357,81 +357,8 @@ func (h *ScanJobs) loadScanTarget(ctx context.Context, tx pgx.Tx, id uuid.UUID) 
 	return handler.LoadScanTarget(ctx, h.db.Pool(), tx, id)
 }
 
-// List returns recent scan jobs for the calling org.
-func (h *ScanJobs) List(w http.ResponseWriter, r *http.Request) {
-	subj, _ := authctx.SubjectFrom(r.Context())
-	targetType := strings.TrimSpace(r.URL.Query().Get("target_type"))
-	status := strings.TrimSpace(r.URL.Query().Get("status"))
-	var clusterID *uuid.UUID
-	if raw := strings.TrimSpace(r.URL.Query().Get("cluster_id")); raw != "" {
-		parsed, err := uuid.Parse(raw)
-		if err != nil {
-			jsonError(w, http.StatusBadRequest, "invalid cluster_id")
-			return
-		}
-		clusterID = &parsed
-	}
-	if targetType != "" && !validScanTargetType(targetType) {
-		jsonError(w, http.StatusBadRequest, "unsupported target_type")
-		return
-	}
-	rows, err := h.db.Pool().Query(r.Context(), `
-SELECT sj.id, sj.org_id, st.id, st.type, st.ref, st.cluster_id,
-       st.source_type, COALESCE(st.source_ref, ''),
-       COALESCE(st.image_ref, ''),
-       COALESCE(st.platform, ''),
-       COALESCE(st.inventory_hash, ''),
-       st.registry_id, COALESCE(st.image_digest, ''), st.metadata,
-       COALESCE(sj.enqueue_reason,''), COALESCE(sj.registry_policy_hash,''), COALESCE(sj.vulndb_bundle_version,''),
-       sj.status, COALESCE(sj.worker_id,''), COALESCE(sj.error,''),
-       COALESCE(sj.attempt_count,0), COALESCE(sj.max_attempts,3),
-       COALESCE(sj.package_count,0), COALESCE(sj.finding_count,0),
-       sj.bundle_metadata, sj.requested_at, sj.claimed_at, sj.lease_expires_at,
-       sj.next_attempt_at, sj.last_attempt_at, sj.last_error_at, sj.finished_at
-  FROM scan_jobs sj
-  JOIN scan_targets st ON st.id = sj.target_id AND st.org_id = sj.org_id
- WHERE sj.org_id = $1
-   AND ($2 = '' OR st.type = $2)
-   AND ($3 = '' OR sj.status = $3)
-   AND ($4::uuid IS NULL OR st.cluster_id = $4)
- ORDER BY sj.requested_at DESC
- LIMIT 200`, subj.OrgID, targetType, status, clusterID)
-	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	defer rows.Close()
-	out := []JobView{}
-	for rows.Next() {
-		var j JobView
-		var bundleRaw, metadataRaw []byte
-		if err := rows.Scan(&j.ID, &j.OrgID, &j.TargetID, &j.TargetType, &j.TargetRef, &j.TargetClusterID,
-			&j.SourceType, &j.SourceRef, &j.ImageRef, &j.Platform, &j.InventoryHash,
-			&j.RegistryID, &j.ImageDigest, &metadataRaw, &j.EnqueueReason, &j.RegistryPolicyHash, &j.VulnDBBundleVersion,
-			&j.Status, &j.WorkerID, &j.Error, &j.AttemptCount, &j.MaxAttempts, &j.PackageCount, &j.FindingCount,
-			&bundleRaw,
-			&j.RequestedAt, &j.ClaimedAt, &j.LeaseExpiresAt, &j.NextAttemptAt, &j.LastAttemptAt, &j.LastErrorAt, &j.FinishedAt); err != nil {
-			jsonError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		if len(bundleRaw) > 0 {
-			var metadata scanner.BundleMetadata
-			if err := json.Unmarshal(bundleRaw, &metadata); err != nil {
-				jsonError(w, http.StatusInternalServerError, "invalid scan job bundle metadata")
-				return
-			}
-			j.BundleMetadata = &metadata
-		}
-		j.Metadata = handler.NormalizedJSONRaw(metadataRaw)
-		out = append(out, j)
-	}
-	metrics, err := handler.ScanQueueMetrics(r.Context(), h.db.Pool(), subj.OrgID)
-	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	httpx.WriteJSON(w, 200, map[string]any{"jobs": out, "queue_metrics": metrics})
-}
+// List returns the matching scan-job inventory for the calling organization.
+func (h *ScanJobs) List(w http.ResponseWriter, r *http.Request) { h.listInventory(w, r, false) }
 
 // Attempts returns the persisted per-attempt ledger for one scan job.
 func (h *ScanJobs) Attempts(w http.ResponseWriter, r *http.Request) {
@@ -557,6 +484,7 @@ func (h *ScanJobs) Claim(w http.ResponseWriter, r *http.Request) {
 		targetType      string
 		targetRef       string
 		targetClusterID *uuid.UUID
+		registryID      *uuid.UUID
 		sourceType      string
 		sourceRef       string
 		imageDigest     string
@@ -619,7 +547,7 @@ attempt AS (
 SELECT c.id, c.org_id, st.id, c.lease_expires_at,
        COALESCE(c.attempt_count, 0), COALESCE(c.max_attempts, 3),
        COALESCE(st.platform, ''),
-       st.type, st.ref, st.cluster_id,
+       st.type, st.ref, st.cluster_id, st.registry_id,
        st.source_type, COALESCE(st.source_ref, ''), COALESCE(st.image_digest, ''), COALESCE(st.inventory_hash, ''),
        ev.id
   FROM claimed c
@@ -651,7 +579,7 @@ SELECT c.id, c.org_id, st.id, c.lease_expires_at,
   ) ev ON st.type IN ('host', 'workload', 'platform', 'serverless', 'repository')
       OR st.type = 'image'`,
 		workerID, token.OrgID, handler.ScannerJobLeaseInterval, targetTypes)
-	if err := row.Scan(&id, &orgID, &targetID, &leaseExpiresAt, &attemptCount, &maxAttempts, &platform, &targetType, &targetRef, &targetClusterID, &sourceType, &sourceRef, &imageDigest, &inventoryHash, &evidenceID); err != nil {
+	if err := row.Scan(&id, &orgID, &targetID, &leaseExpiresAt, &attemptCount, &maxAttempts, &platform, &targetType, &targetRef, &targetClusterID, &registryID, &sourceType, &sourceRef, &imageDigest, &inventoryHash, &evidenceID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -665,6 +593,7 @@ SELECT c.id, c.org_id, st.id, c.lease_expires_at,
 		"source_type": sourceType, "source_ref": sourceRef, "image_digest": imageDigest, "inventory_hash": inventoryHash,
 		"evidence_id": evidenceID, "lease_expires_at": leaseExpiresAt,
 		"attempt_count": attemptCount, "max_attempts": maxAttempts,
+		"registry_id": registryID,
 	}
 	// SIG-ROOTS-38: ride this org's DB-managed sigstore roots-of-trust on the job envelope so the
 	// scanner (which has no DB pool) can union them onto its static --signature-roots for THIS job
@@ -879,7 +808,7 @@ UPDATE scan_targets
 
 	var imageScanResultID uuid.UUID
 	if target.Type == "image" {
-		imageScanResultID, err = upsertImageScanResult(r.Context(), tx, orgID, id, target, identity, assetID, body.PackageCount, len(body.Findings))
+		imageScanResultID, err = upsertImageScanResult(r.Context(), tx, orgID, id, target, identity, assetID, body.PackageCount, len(body.Findings), scanEngineStatus(body.Engines))
 		if err != nil {
 			jsonError(w, http.StatusInternalServerError, "image scan result: "+err.Error())
 			return
@@ -1316,19 +1245,19 @@ SELECT COALESCE(
 	identity.NormalizedRef = parsed.Repository + "@" + identity.Digest
 }
 
-func upsertImageScanResult(ctx context.Context, tx pgx.Tx, orgID, jobID uuid.UUID, target handler.ScanTarget, identity scanImageIdentity, assetID uuid.UUID, packageCount, findingCount int) (uuid.UUID, error) {
+func upsertImageScanResult(ctx context.Context, tx pgx.Tx, orgID, jobID uuid.UUID, target handler.ScanTarget, identity scanImageIdentity, assetID uuid.UUID, packageCount, findingCount int, engineStatus string) (uuid.UUID, error) {
 	resultID := uuid.New()
 	err := tx.QueryRow(ctx, `
 INSERT INTO image_scan_results (
     id, org_id, scan_target_id, last_scan_job_id, asset_id,
     image_ref, image_ref_normalized, image_repository, image_tag, image_digest,
     platform, scanner_profile, vulndb_bundle_version, vulndb_bundle_hash,
-    source_type, source_ref, package_count, finding_count, bundle_metadata, last_scanned_at, updated_at
+    source_type, source_ref, package_count, finding_count, bundle_metadata, engine_status, last_scanned_at, updated_at
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, NULLIF($9, ''), $10,
     $11, $12, $13, $14,
-    NULLIF($15, ''), NULLIF($16, ''), $17, $18, $19::jsonb, NOW(), NOW()
+    NULLIF($15, ''), NULLIF($16, ''), $17, $18, $19::jsonb, $20::jsonb, NOW(), NOW()
 )
 ON CONFLICT (
     org_id, image_digest, platform, scanner_profile, vulndb_bundle_version, vulndb_bundle_hash
@@ -1345,14 +1274,34 @@ ON CONFLICT (
     package_count = EXCLUDED.package_count,
     finding_count = EXCLUDED.finding_count,
     bundle_metadata = EXCLUDED.bundle_metadata,
+    engine_status = EXCLUDED.engine_status,
     last_scanned_at = NOW(),
     updated_at = NOW()
 RETURNING id`,
 		resultID, orgID, target.ID, jobID, assetID,
 		identity.Ref, identity.NormalizedRef, identity.Repository, identity.Tag, identity.Digest,
 		identity.Platform, identity.ScannerProfile, identity.BundleVersion, identity.BundleHash,
-		target.SourceType, target.SourceRef, packageCount, findingCount, identity.BundleMetadata).Scan(&resultID)
+		target.SourceType, target.SourceRef, packageCount, findingCount, identity.BundleMetadata, engineStatus).Scan(&resultID)
 	return resultID, err
+}
+
+// Store only engine outcomes, never raw engine errors that could contain secrets.
+// Conflicting duplicates fail closed; legacy uploads have no proof of success.
+func scanEngineStatus(engines []completeScanEngine) string {
+	status := make(map[string]string)
+	for _, engine := range engines {
+		name := strings.ToLower(strings.TrimSpace(engine.Engine))
+		if name == "" {
+			continue
+		}
+		if strings.TrimSpace(engine.Error) != "" || status[name] == "failed" {
+			status[name] = "failed"
+		} else {
+			status[name] = "succeeded"
+		}
+	}
+	raw, _ := json.Marshal(status)
+	return string(raw)
 }
 
 func completeScanEnginesToResults(engines []completeScanEngine) []scanner.EngineResult {
@@ -1586,16 +1535,17 @@ func upsertTargetFinding(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, cluste
 		clusterArg = *clusterID
 	}
 	var existing uuid.UUID
+	var existingFirstSeen time.Time
 	err := tx.QueryRow(ctx, `
-SELECT id
+SELECT id,first_seen_at
   FROM findings
  WHERE org_id = $1
    AND kind = 'vulnerability'
    AND COALESCE(cluster_id, '00000000-0000-0000-0000-000000000000'::uuid) = COALESCE($2::uuid, '00000000-0000-0000-0000-000000000000'::uuid)
    AND scan_target_id = $3
    AND detail_json->>'scan_finding_key' = $4
- ORDER BY last_seen_at DESC
- LIMIT 1`, orgID, clusterArg, target.ID, findingKey).Scan(&existing)
+ ORDER BY last_seen_at DESC,id ASC,first_seen_at ASC
+ LIMIT 1`, orgID, clusterArg, target.ID, findingKey).Scan(&existing, &existingFirstSeen)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
@@ -1629,10 +1579,10 @@ UPDATE findings
                        WHEN accepted_until IS NOT NULL THEN lifecycle
                        WHEN NULLIF($19, '') IS NOT NULL THEN $19
                        ELSE 'open' END
- WHERE id = $1 AND org_id = $17`,
+ WHERE id = $1 AND org_id = $17 AND first_seen_at=$20`,
 			existing, assetID, clusterArg, f.VulnerabilityID, title, f.Description,
 			severity, risk, canonicalEngine, string(engines), string(detail),
-			target.ID, target.Type, target.Ref, target.ClusterID, target.SourceType, orgID, f.Reachable, lifecycleOverride)
+			target.ID, target.Type, target.Ref, target.ClusterID, target.SourceType, orgID, f.Reachable, lifecycleOverride, existingFirstSeen)
 		return err
 	}
 	_, err = tx.Exec(ctx, `

@@ -2,6 +2,7 @@ package network
 
 import (
 	"encoding/json"
+	"errors"
 	"hash/fnv"
 	"net/http"
 	"sort"
@@ -262,7 +263,7 @@ func (h *Network) UpsertNetworkRule(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster id"})
 		return
 	}
-	var body ruleMutation
+	body := ruleMutation{Priority: 1000}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
 		return
@@ -281,9 +282,6 @@ func (h *Network) UpsertNetworkRule(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Applications == nil {
 		body.Applications = []string{}
-	}
-	if body.Priority <= 0 {
-		body.Priority = 1000
 	}
 	// Whether this pair exists in the learned set determines cfg_type.
 	var learned bool
@@ -353,7 +351,7 @@ func (h *Network) MoveNetworkRuleToTop(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 	var lockedCluster uuid.UUID
 	if err := tx.QueryRow(r.Context(), `SELECT id FROM clusters WHERE id=$1 AND org_id=$2 FOR UPDATE`, clusterID, subj.OrgID).Scan(&lockedCluster); err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})
 		} else {
 			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify cluster"})

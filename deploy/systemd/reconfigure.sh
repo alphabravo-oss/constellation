@@ -7,12 +7,10 @@
 
 set -euo pipefail
 
-USER_MODE=0
 SYSTEMCTL="systemctl"
 ETC_DIR="/etc/constellation"
 
 if [[ "${1:-}" == "--user" ]]; then
-  USER_MODE=1
   SYSTEMCTL="systemctl --user"
   ETC_DIR="$HOME/.config/constellation"
   shift

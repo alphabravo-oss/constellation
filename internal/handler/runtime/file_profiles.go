@@ -28,6 +28,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler"
@@ -580,7 +581,7 @@ func fedFileProfileBundleRow(wl observedWorkload, rule fileProfileRule) fileProf
 		Behavior:     rule.Behavior,
 		Applications: nonNilStrings(rule.Applications),
 		Description:  rule.Description,
-		UpdatedAt:    rfc3339Or(rule.UpdatedAt),
+		UpdatedAt:    rule.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
 }
 
@@ -927,6 +928,10 @@ func (h *FileProfiles) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	wl, ok, err := h.findWorkload(r.Context(), subj.OrgID, clusterArg, workloadID)
 	if err != nil {
+		if errors.Is(err, errFileProfileAmbiguous) {
+			jsonError(w, 409, err.Error())
+			return
+		}
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -967,6 +972,10 @@ func (h *FileProfiles) Export(w http.ResponseWriter, r *http.Request) {
 	}
 	wl, found, err := h.findWorkload(r.Context(), subj.OrgID, clusterArg, workloadID)
 	if err != nil {
+		if errors.Is(err, errFileProfileAmbiguous) {
+			jsonError(w, 409, err.Error())
+			return
+		}
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -1025,6 +1034,10 @@ func (h *FileProfiles) Import(w http.ResponseWriter, r *http.Request) {
 	}
 	wl, found, err := h.findWorkload(r.Context(), subj.OrgID, clusterArg, workloadID)
 	if err != nil {
+		if errors.Is(err, errFileProfileAmbiguous) {
+			jsonError(w, 409, err.Error())
+			return
+		}
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -1279,6 +1292,10 @@ func (h *FileProfiles) SetMode(w http.ResponseWriter, r *http.Request) {
 	}
 	wl, ok, err := h.findWorkload(r.Context(), subj.OrgID, clusterArg, workloadID)
 	if err != nil {
+		if errors.Is(err, errFileProfileAmbiguous) {
+			jsonError(w, 409, err.Error())
+			return
+		}
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -1307,13 +1324,14 @@ func (h *FileProfiles) SetMode(w http.ResponseWriter, r *http.Request) {
 }
 
 type fileProfileRuleBody struct {
-	Filter       string   `json:"filter"`
-	Recursive    *bool    `json:"recursive"`
-	Behavior     string   `json:"behavior"`
-	Applications []string `json:"applications"`
-	Enabled      *bool    `json:"enabled"`
-	Description  string   `json:"description"`
-	Reason       string   `json:"reason"`
+	ExpectedUpdatedAt string   `json:"expected_updated_at"`
+	Filter            string   `json:"filter"`
+	Recursive         *bool    `json:"recursive"`
+	Behavior          string   `json:"behavior"`
+	Applications      []string `json:"applications"`
+	Enabled           *bool    `json:"enabled"`
+	Description       string   `json:"description"`
+	Reason            string   `json:"reason"`
 }
 
 type fileProfileExceptionBody struct {
@@ -1383,6 +1401,15 @@ func (h *FileProfiles) UpdateRule(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "invalid rule_id")
 		return
 	}
+	var expected *time.Time
+	if body.ExpectedUpdatedAt != "" {
+		value, e := time.Parse(time.RFC3339Nano, body.ExpectedUpdatedAt)
+		if e != nil {
+			jsonError(w, 400, "invalid expected_updated_at")
+			return
+		}
+		expected = &value
+	}
 	clusterID, _ := uuid.Parse(wl.ClusterID)
 	before, ok, err := h.findRule(r.Context(), subj.OrgID, clusterID, wl.WorkloadID, ruleID)
 	if err != nil {
@@ -1415,15 +1442,19 @@ UPDATE file_profile_rules
  WHERE org_id = $11
    AND cluster_id = $12
    AND workload_id = $13
-   AND id = $14
+   AND id = $14 AND ($15::timestamptz IS NULL OR updated_at=$15)
 RETURNING id, filter, path, regex, recursive, behavior, applications, enabled,
           description, COALESCE(created_by::text, ''), COALESCE(updated_by::text, ''),
           created_at, updated_at`,
 		next.Filter, next.Path, next.Regex, next.Recursive, next.Behavior, next.Applications,
-		next.Enabled, next.Description, subj.UserID, now, subj.OrgID, clusterID, wl.WorkloadID, ruleID).
+		next.Enabled, next.Description, subj.UserID, now, subj.OrgID, clusterID, wl.WorkloadID, ruleID, expected).
 		Scan(&updated.ID, &updated.Filter, &updated.Path, &updated.Regex, &updated.Recursive, &updated.Behavior,
 			&updated.Applications, &updated.Enabled, &updated.Description, &updated.CreatedBy,
 			&updated.UpdatedBy, &updated.CreatedAt, &updated.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) && expected != nil {
+		jsonError(w, 409, "rule changed; refresh and review before saving")
+		return
+	}
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -1444,6 +1475,15 @@ func (h *FileProfiles) DeleteRule(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "invalid rule_id")
 		return
 	}
+	var expected *time.Time
+	if body.ExpectedUpdatedAt != "" {
+		value, e := time.Parse(time.RFC3339Nano, body.ExpectedUpdatedAt)
+		if e != nil {
+			jsonError(w, 400, "invalid expected_updated_at")
+			return
+		}
+		expected = &value
+	}
 	clusterID, _ := uuid.Parse(wl.ClusterID)
 	before, ok, err := h.findRule(r.Context(), subj.OrgID, clusterID, wl.WorkloadID, ruleID)
 	if err != nil {
@@ -1459,12 +1499,16 @@ DELETE FROM file_profile_rules
  WHERE org_id = $1
    AND cluster_id = $2
    AND workload_id = $3
-   AND id = $4`, subj.OrgID, clusterID, wl.WorkloadID, ruleID)
+   AND id = $4 AND ($5::timestamptz IS NULL OR updated_at=$5)`, subj.OrgID, clusterID, wl.WorkloadID, ruleID, expected)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if tag.RowsAffected() == 0 {
+		if expected != nil {
+			jsonError(w, 409, "rule changed; refresh and review before deleting")
+			return
+		}
 		jsonError(w, http.StatusNotFound, "rule not found")
 		return
 	}
@@ -1624,13 +1668,10 @@ DELETE FROM file_profile_exceptions
 
 func (h *FileProfiles) observedWorkloads(ctx context.Context, orgID uuid.UUID, clusterArg any, namespace string) ([]observedWorkload, error) {
 	rows, err := h.db.Pool().Query(ctx, `
-SELECT COALESCE(cluster_id::text, ''), namespace, name, COALESCE(labels,'{}'::jsonb)
-  FROM deployments
- WHERE org_id = $1
-   AND cluster_id IS NOT NULL
-   AND ($2::uuid IS NULL OR cluster_id = $2)
-   AND ($3::text = '' OR namespace = $3)
- ORDER BY namespace, name`, orgID, clusterArg, namespace)
+SELECT d.cluster_id::text,d.namespace,d.name,COALESCE(d.labels,'{}'::jsonb)
+ FROM deployments d JOIN clusters c ON c.id=d.cluster_id AND c.org_id=d.org_id
+ WHERE d.org_id=$1 AND ($2::uuid IS NULL OR d.cluster_id=$2) AND ($3::text='' OR d.namespace=$3)
+ ORDER BY d.namespace,d.name`, orgID, clusterArg, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -1657,17 +1698,25 @@ SELECT COALESCE(cluster_id::text, ''), namespace, name, COALESCE(labels,'{}'::js
 	return out, rows.Err()
 }
 
+var errFileProfileAmbiguous = errors.New("workload has ambiguous owners; choose an unambiguous shared profile")
+
 func (h *FileProfiles) findWorkload(ctx context.Context, orgID uuid.UUID, clusterArg any, workloadID string) (observedWorkload, bool, error) {
 	all, err := h.observedWorkloads(ctx, orgID, clusterArg, "")
 	if err != nil {
 		return observedWorkload{}, false, err
 	}
+	var matched observedWorkload
+	found := false
 	for _, wl := range all {
 		if wl.WorkloadID == workloadID {
-			return wl, true, nil
+			if found {
+				return observedWorkload{}, false, errFileProfileAmbiguous
+			}
+			matched = wl
+			found = true
 		}
 	}
-	return observedWorkload{}, false, nil
+	return matched, found, nil
 }
 
 func (h *FileProfiles) ensureState(ctx context.Context, orgID uuid.UUID, wl observedWorkload, now time.Time) (*fileProfileState, error) {
@@ -2229,7 +2278,7 @@ func fileProfileRuleToDTO(rule fileProfileRule) fileProfileRuleDTO {
 		CreatedBy:    rule.CreatedBy,
 		UpdatedBy:    rule.UpdatedBy,
 		CreatedAt:    rfc3339Or(rule.CreatedAt),
-		UpdatedAt:    rfc3339Or(rule.UpdatedAt),
+		UpdatedAt:    rule.UpdatedAt.UTC().Format(time.RFC3339Nano),
 	}
 }
 
@@ -2794,6 +2843,10 @@ func (h *FileProfiles) ruleRequest(w http.ResponseWriter, r *http.Request) (auth
 	}
 	wl, found, err := h.findWorkload(r.Context(), subj.OrgID, clusterArg, workloadID)
 	if err != nil {
+		if errors.Is(err, errFileProfileAmbiguous) {
+			jsonError(w, 409, err.Error())
+			return authctx.Subject{}, observedWorkload{}, fileProfileRuleBody{}, false
+		}
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return authctx.Subject{}, observedWorkload{}, fileProfileRuleBody{}, false
 	}
@@ -2837,6 +2890,10 @@ func (h *FileProfiles) exceptionRequest(w http.ResponseWriter, r *http.Request) 
 	}
 	wl, found, err := h.findWorkload(r.Context(), subj.OrgID, clusterArg, workloadID)
 	if err != nil {
+		if errors.Is(err, errFileProfileAmbiguous) {
+			jsonError(w, 409, err.Error())
+			return authctx.Subject{}, observedWorkload{}, fileProfileExceptionBody{}, false
+		}
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return authctx.Subject{}, observedWorkload{}, fileProfileExceptionBody{}, false
 	}

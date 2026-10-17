@@ -29,7 +29,11 @@ func TestRecovererConvertsPanicTo500(t *testing.T) {
 	defer ts.Close()
 
 	// Panicking route: recovered -> 500, server still serving.
-	resp, err := http.Get(ts.URL + "/boom")
+	httpRequest, err := http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+"/boom", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(httpRequest)
 	if err != nil {
 		t.Fatalf("GET /boom: %v", err)
 	}
@@ -39,7 +43,11 @@ func TestRecovererConvertsPanicTo500(t *testing.T) {
 	_ = resp.Body.Close()
 
 	// Process survived the panic: a subsequent request still succeeds.
-	resp, err = http.Get(ts.URL + "/ok")
+	httpRequest, err = http.NewRequestWithContext(t.Context(), http.MethodGet, ts.URL+"/ok", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err = http.DefaultClient.Do(httpRequest)
 	if err != nil {
 		t.Fatalf("GET /ok after panic: %v", err)
 	}

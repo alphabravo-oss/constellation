@@ -71,14 +71,14 @@ type IPFqdnStorageMsg struct {
 // Length is the total datagram size (header included), big-endian, matching
 // decodeHdr's expectation.
 func (m IPFqdnStorageMsg) Encode() []byte {
-	bodyLen := 16
+	var wireLen uint16 = dpMsgHdrSize + 16
 	if m.Kind == KindIPFqdnStorageUpdate {
-		bodyLen += fqdnNameMaxLen
+		wireLen += fqdnNameMaxLen
 	}
-	buf := make([]byte, dpMsgHdrSize+bodyLen)
+	buf := make([]byte, wireLen)
 	buf[0] = m.Kind
 	buf[1] = 0 // More
-	binary.BigEndian.PutUint16(buf[2:4], uint16(len(buf)))
+	binary.BigEndian.PutUint16(buf[2:4], wireLen)
 	copy(buf[dpMsgHdrSize:dpMsgHdrSize+16], to16(m.IP))
 	if m.Kind == KindIPFqdnStorageUpdate {
 		name := m.Fqdn

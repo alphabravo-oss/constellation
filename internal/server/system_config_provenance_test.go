@@ -60,7 +60,11 @@ func TestSystemConfig_ProvenanceAppliedReloadAndAudit(t *testing.T) {
 	}
 	for _, provider := range []*syscfg.Provider{srv.syscfg, remote} {
 		client := provider.HTTPClient(ctx, orgID, time.Second)
-		response, err := client.Get("http://reload-config.invalid/test")
+		httpRequest, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://reload-config.invalid/test", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response, err := client.Do(httpRequest)
 		client.CloseIdleConnections()
 		if err != nil {
 			t.Fatal(err)
@@ -109,7 +113,7 @@ func TestSystemConfig_RedactedFieldErrorsDoNotMutateAndRBAC(t *testing.T) {
 	}
 	for _, testcase := range cases {
 		t.Run(testcase.name, func(t *testing.T) {
-			request, err := http.NewRequest(http.MethodPatch, server.URL+"/api/v1/system/config", strings.NewReader(testcase.patch))
+			request, err := http.NewRequestWithContext(t.Context(), http.MethodPatch, server.URL+"/api/v1/system/config", strings.NewReader(testcase.patch))
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -50,7 +50,7 @@ VALUES ($1,$2,'vulnerability',$3,$4,'high',$5,$6)`,
 		}
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/vex/openvex/"+assetID.String(), nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/vex/openvex/"+assetID.String(), nil)
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID, Email: "vex@example.com"}))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("asset_id", assetID.String())

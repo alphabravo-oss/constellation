@@ -76,10 +76,10 @@ func TestCycloneDXVEX_ShapeAndAnalysisState(t *testing.T) {
 
 func TestVulnURI_RoutesByIDPrefix(t *testing.T) {
 	for in, want := range map[string]string{
-		"CVE-2024-1":      "https://nvd.nist.gov/vuln/detail/CVE-2024-1",
-		"GHSA-aaaa-bbbb":  "https://github.com/advisories/GHSA-aaaa-bbbb",
-		"GO-2024-1":       "https://pkg.go.dev/vuln/GO-2024-1",
-		"unknown-format":  "unknown-format",
+		"CVE-2024-1":     "https://nvd.nist.gov/vuln/detail/CVE-2024-1",
+		"GHSA-aaaa-bbbb": "https://github.com/advisories/GHSA-aaaa-bbbb",
+		"GO-2024-1":      "https://pkg.go.dev/vuln/GO-2024-1",
+		"unknown-format": "unknown-format",
 	} {
 		if got := vulnURI(in); got != want {
 			t.Fatalf("%s → %s (want %s)", in, got, want)

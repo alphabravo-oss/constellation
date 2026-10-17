@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -88,20 +89,24 @@ type complianceScheduleRow struct {
 }
 
 type complianceRunRow struct {
-	ID                uuid.UUID      `json:"id"`
-	OrgID             uuid.UUID      `json:"org_id"`
-	ClusterID         *uuid.UUID     `json:"cluster_id,omitempty"`
-	ScheduleID        *uuid.UUID     `json:"schedule_id,omitempty"`
-	Framework         string         `json:"framework"`
-	StartedAt         time.Time      `json:"started_at"`
-	CompletedAt       *time.Time     `json:"completed_at,omitempty"`
-	Status            string         `json:"status"`
-	Summary           map[string]any `json:"summary"`
-	ArtifactURI       string         `json:"artifact_uri,omitempty"`
-	ArtifactSignature string         `json:"artifact_signature,omitempty"`
-	ArtifactSizeBytes int64          `json:"artifact_size_bytes,omitempty"`
-	TriggeredBy       string         `json:"triggered_by"`
-	ErrorMessage      string         `json:"error_message,omitempty"`
+	ID                    uuid.UUID      `json:"id"`
+	OrgID                 uuid.UUID      `json:"org_id"`
+	ClusterID             *uuid.UUID     `json:"cluster_id,omitempty"`
+	ScheduleID            *uuid.UUID     `json:"schedule_id,omitempty"`
+	Framework             string         `json:"framework"`
+	StartedAt             time.Time      `json:"started_at"`
+	CompletedAt           *time.Time     `json:"completed_at,omitempty"`
+	Status                string         `json:"status"`
+	Summary               map[string]any `json:"summary"`
+	ArtifactURI           string         `json:"artifact_uri,omitempty"`
+	ArtifactFormat        string         `json:"artifact_format,omitempty"`
+	ArtifactMediaType     string         `json:"artifact_media_type,omitempty"`
+	ArtifactFilename      string         `json:"artifact_filename,omitempty"`
+	ArtifactMetadataKnown bool           `json:"artifact_metadata_known"`
+	ArtifactSignature     string         `json:"artifact_signature,omitempty"`
+	ArtifactSizeBytes     int64          `json:"artifact_size_bytes,omitempty"`
+	TriggeredBy           string         `json:"triggered_by"`
+	ErrorMessage          string         `json:"error_message,omitempty"`
 }
 
 // NextRunFromCron computes the next fire time from a cron expression in the given timezone.
@@ -174,7 +179,7 @@ SELECT id, org_id, cluster_id, name, description, framework, cron_expression, ti
 			"disabled": len(out) - countEnabled(out),
 		},
 		"frameworks":     defaultFrameworkIDs(),
-		"report_formats": []string{"pdf", "json", "sarif", "csv"},
+		"report_formats": []string{"html", "json", "csv", "sarif", "pdf"},
 	})
 }
 
@@ -454,7 +459,7 @@ func (h *ComplianceSchedulesDB) Runs(w http.ResponseWriter, r *http.Request) {
 SELECT id, org_id, cluster_id, schedule_id, framework, started_at, completed_at,
        status, COALESCE(summary,'{}'::jsonb), COALESCE(artifact_uri,''),
        COALESCE(artifact_signature,''), COALESCE(artifact_size_bytes,0),
-       triggered_by, COALESCE(error_message,'')
+       triggered_by, COALESCE(error_message,''),COALESCE(artifact_format,''),COALESCE(artifact_media_type,''),COALESCE(artifact_filename,'')
   FROM compliance_runs
  WHERE org_id=$1 AND schedule_id=$2
  ORDER BY started_at DESC
@@ -473,6 +478,10 @@ SELECT id, org_id, cluster_id, schedule_id, framework, started_at, completed_at,
 		}
 		out = append(out, row)
 	}
+	if err := rows.Err(); err != nil {
+		httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"runs": out})
 }
 
@@ -486,13 +495,17 @@ func (h *ComplianceSchedulesDB) Artifact(w http.ResponseWriter, r *http.Request)
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
 		return
 	}
-	var uri, sig, format string
+	var uri, sig, format, mediaType, filename string
 	err = h.db.Pool().QueryRow(r.Context(), `
 SELECT COALESCE(artifact_uri,''), COALESCE(artifact_signature,''),
-       (SELECT report_format FROM compliance_schedules s WHERE s.id = r.schedule_id)
+       COALESCE(artifact_format,''),COALESCE(artifact_media_type,''),COALESCE(artifact_filename,'')
   FROM compliance_runs r
- WHERE r.id=$1 AND r.org_id=$2`, id, subj.OrgID).Scan(&uri, &sig, &format)
+ WHERE r.id=$1 AND r.org_id=$2`, id, subj.OrgID).Scan(&uri, &sig, &format, &mediaType, &filename)
 	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			httpx.WriteJSON(w, 500, map[string]string{"error": "artifact metadata unavailable"})
+			return
+		}
 		httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "run not found"})
 		return
 	}
@@ -511,19 +524,26 @@ SELECT COALESCE(artifact_uri,''), COALESCE(artifact_signature,''),
 			return
 		}
 		defer f.Close()
-		w.Header().Set("Content-Type", contentTypeFor(format))
-		w.Header().Set("Content-Disposition", `inline; filename="compliance-`+id.String()+`.`+strings.ToLower(format)+`"`)
+		if format == "" || mediaType == "" || filename == "" {
+			mediaType = "application/octet-stream"
+			filename = filepath.Base(path)
+			w.Header().Set("X-Constellation-Artifact-Metadata", "legacy_unknown")
+		} else {
+			w.Header().Set("X-Constellation-Artifact-Metadata", "recorded")
+		}
+		w.Header().Set("Content-Type", mediaType)
+		w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
 		_, _ = io.Copy(w, f)
 		return
 	}
 	if strings.HasPrefix(uri, "s3://") {
 		// Best-effort: return the URI so the UI can deep-link via the operator's
 		// S3 console. Pre-signing requires bucket-scoped creds we don't hold here.
-		httpx.WriteJSON(w, http.StatusOK, map[string]string{"artifact_uri": uri, "signature": sig})
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"artifact_uri": uri, "signature": sig, "artifact_format": format, "artifact_media_type": mediaType, "artifact_filename": filename, "artifact_metadata_known": format != "" && mediaType != "" && filename != "", "download_kind": "metadata"})
 		return
 	}
 	// Unknown scheme — return metadata.
-	httpx.WriteJSON(w, http.StatusOK, map[string]string{"artifact_uri": uri, "signature": sig})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"artifact_uri": uri, "signature": sig, "artifact_format": format, "artifact_media_type": mediaType, "artifact_filename": filename, "artifact_metadata_known": format != "" && mediaType != "" && filename != "", "download_kind": "metadata"})
 }
 
 // loadSchedule fetches a single schedule scoped to org.
@@ -568,9 +588,10 @@ func scanRunRow(s rowScanner) (complianceRunRow, error) {
 	var summaryRaw []byte
 	if err := s.Scan(&row.ID, &row.OrgID, &clusterID, &scheduleID, &row.Framework,
 		&row.StartedAt, &row.CompletedAt, &row.Status, &summaryRaw, &row.ArtifactURI,
-		&row.ArtifactSignature, &row.ArtifactSizeBytes, &row.TriggeredBy, &row.ErrorMessage); err != nil {
+		&row.ArtifactSignature, &row.ArtifactSizeBytes, &row.TriggeredBy, &row.ErrorMessage, &row.ArtifactFormat, &row.ArtifactMediaType, &row.ArtifactFilename); err != nil {
 		return row, err
 	}
+	row.ArtifactMetadataKnown = row.ArtifactFormat != "" && row.ArtifactMediaType != "" && row.ArtifactFilename != ""
 	row.ClusterID = clusterID
 	row.ScheduleID = scheduleID
 	if len(summaryRaw) > 0 {
@@ -594,21 +615,6 @@ func defaultFrameworkIDs() []string {
 		"cis-k8s-1.9", "cis-docker-1.6", "nsa-cisa-k8s", "nist-800-53-rev5",
 		"nist-800-190", "pci-dss-4.0", "hipaa", "soc-2", "stig", "fedramp-moderate",
 		"nis2-eu", "dora-eu", "iso-27001", "iso-27017", "iso-27018", "csa-ccm",
-	}
-}
-
-func contentTypeFor(format string) string {
-	switch strings.ToLower(format) {
-	case "pdf":
-		return "application/pdf"
-	case "json":
-		return "application/json"
-	case "sarif":
-		return "application/sarif+json"
-	case "csv":
-		return "text/csv"
-	default:
-		return "application/octet-stream"
 	}
 }
 

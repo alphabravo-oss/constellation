@@ -1,92 +1,130 @@
+import { ResourceSavedViewsControl } from "@/components/ResourceSavedViewsControl";
 // Risk-prioritized deployment dashboard — StackRox parity.
 //
 // The center of the platform's operational workflow: show the riskiest
 // deployments first and expose the factors behind the score. The discoverer
 // rolls image/workload findings and runtime exposure into deployments.risk_score.
-import { useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, Flame, Layers, ShieldAlert } from "lucide-react";
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
+import { useExportGuard, exportQueryReady } from "@/hooks/useExportGuard";
+import { clusterCacheReady } from "@/lib/cluster-evidence";
+import { useState } from "react";
+import { useRouteSearchParams } from "@/lib/route-search";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle, Flame, Layers, RefreshCw, ShieldAlert } from "lucide-react";
 import { deployments, type Deployment } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { PlatformVisibilityToggle } from "@/components/ui/platform-visibility-toggle";
-import { downloadCsv } from "@/lib/csv";
-import { isPlatformResource } from "@/lib/platform-components";
-import { StatCard } from "@/components/ui/stat-card";
+import { Pager } from "@/components/ui/pager";
+import { Button } from "@/components/ui/button";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { ErrorState, LoadingState } from "@/components/ui/states";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { usePlatformComponentVisibility } from "@/hooks/usePlatformComponentVisibility";
 
+const PAGE_SIZE = 100;
+
 export function DeploymentsPage() {
-  const { clusterId } = useCluster();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const search = searchParams.get("q") ?? "";
-  const [namespace, setNamespace] = useState("");
-  const [hidePlatformComponents, setHidePlatformComponents] = usePlatformComponentVisibility();
+  const { clusterId, cluster, isLoading: clusterLoading, error: clusterError } = useCluster();
+  const identity = useTablePreferencesIdentity();
+  const owner = identity?.org_id && identity.user_id ? `${identity.org_id}:${identity.user_id}` : "";
+  const client = useQueryClient();
+  const scopeReady = !!owner && !!clusterId && cluster?.id === clusterId && !clusterLoading && !clusterError;
+  const [searchParams, setSearchParams] = useRouteSearchParams();
+  const search = searchParams.get("q") ?? searchParams.get("name") ?? "";
+  const namespace = searchParams.get("namespace") ?? "";
+  const groupMode = searchParams.get("group_mode") ?? "";
+  const riskFact = searchParams.get("risk_fact") ?? "";
+  const platformRole = searchParams.get("platform_role") ?? "all";
+  const requestedPage = Number(searchParams.get("page") ?? "1");
+  const page = Number.isSafeInteger(requestedPage) && requestedPage > 0 && requestedPage <= Math.floor(Number.MAX_SAFE_INTEGER / PAGE_SIZE) ? requestedPage - 1 : 0;
+  const [preferredHidden, setPreferredHidden] = usePlatformComponentVisibility();
+  const visibility = searchParams.get("hide_platform");
+  const normalizedVisibility = visibility?.toLowerCase();
+  const validVisibility = visibility === null || ["true", "false", "1", "0", "t", "f"].includes(normalizedVisibility!);
+  const hidePlatformComponents = visibility === null ? preferredHidden : ["true", "1", "t"].includes(normalizedVisibility!);
+  const [pendingExport, setPendingExport] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<{context:string;error:unknown} | null>(null);
+  const filters = { q: search.trim() || undefined, namespace: namespace || undefined, cluster_id: clusterId, hide_platform: hidePlatformComponents, platform_role: platformRole === "all" ? undefined : platformRole, ...(groupMode ? { group_mode: groupMode } : {}), ...(riskFact ? { risk_fact: riskFact } : {}) };
+  const inventoryKey = ["deployments", owner, clusterId, search.trim(), namespace, platformRole, groupMode, riskFact, hidePlatformComponents, visibility, page];
   const q = useQuery({
-    queryKey: ["deployments", namespace, clusterId],
-    queryFn: () => deployments.list({ namespace: namespace || undefined, cluster_id: clusterId, limit: 500 }),
+    queryKey: inventoryKey,
+    queryFn: async () => {
+      if (!validVisibility) throw new Error("Invalid platform visibility filter");
+      return deployments.list({ ...filters, limit: PAGE_SIZE, offset: page * PAGE_SIZE });
+    },
+    enabled: scopeReady,
   });
+  const rows = scopeReady && !q.isError ? q.data?.deployments ?? [] : [];
+  const summary = scopeReady && !q.isError ? q.data?.summary : undefined;
+  const total = scopeReady && !q.isError ? q.data?.total : undefined;
+  const platformCount = scopeReady && !q.isError ? q.data?.platform_count : undefined;
+  const updateFilter = (key: string, value: string) => setSearchParams((current) => {
+    if (key === "q") current.delete("name");
+    if (value) current.set(key, value); else current.delete(key);
+    current.delete("page");
+    return current;
+  }, { replace: key === "q" || key === "namespace" });
+  const setPage = (nextPage: number) => setSearchParams((current) => {
+    if (nextPage === 0) current.delete("page"); else current.set("page", String(nextPage + 1));
+    return current;
+  });
+  const exportContext = JSON.stringify([owner, filters, page]);
+  const exporting = pendingExport === exportContext;
+  const captureExport = useExportGuard(exportContext, !scopeReady || !q.isSuccess || q.isFetching, () => !!clusterId && clusterCacheReady(client, clusterId) && exportQueryReady(client, inventoryKey, q.data));
+  const exportMatching = async () => {
+    const current = captureExport();
+    if (!current() || exporting) return;
+    const context = exportContext;
+    setExportError(null); setPendingExport(context);
+    try {
+      const blob = await deployments.exportCsv(filters);
+      if (!current()) return;
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url; anchor.download = "constellation-workloads.csv";
+      anchor.click(); URL.revokeObjectURL(url);
+    } catch (error) { if (current()) setExportError({context,error}); }
+    finally { setPendingExport(previous => previous === context ? null : previous); }
+  };
 
-  const allRows = useMemo(() => q.data?.deployments ?? [], [q.data?.deployments]);
-  const matchingRows = useMemo(() => {
-    const name = search.trim().toLowerCase();
-    return name ? allRows.filter((row) => row.name.toLowerCase().includes(name)) : allRows;
-  }, [allRows, search]);
-  const platformCount = useMemo(() => matchingRows.filter((row) => isPlatformResource(row.platform_role, row.namespace)).length, [matchingRows]);
-  const rows = useMemo(
-    () => hidePlatformComponents ? matchingRows.filter((row) => !isPlatformResource(row.platform_role, row.namespace)) : matchingRows,
-    [matchingRows, hidePlatformComponents],
-  );
-  const summary = useMemo(
-    () =>
-      rows.reduce(
-        (acc, d) => {
-          acc.total += 1;
-          acc.critical += d.critical_count;
-          acc.high += d.high_count;
-          if (d.risk_score >= 60) acc.atRisk += 1;
-          return acc;
-        },
-        { total: 0, critical: 0, high: 0, atRisk: 0 },
-      ),
-    [rows],
-  );
-
+  // The server fixes order by risk, last seen, then ID. No client comparators
+  // are supplied, so a sortable header cannot reorder only the current page.
   const columns: Column<Deployment>[] = [
     {
-      id: "risk",
+      id: "risk", kind: "count", size: 88, numeric: true,
       header: "Risk",
       className: "font-mono",
       cell: (d) => <span className={`rounded-md px-2 py-0.5 ${riskClass(d.risk_score)}`}>{d.risk_score}</span>,
     },
     {
-      id: "deployment",
+      id: "deployment", kind: "name", grow: true, minSize: 280, wrap: true,
       header: "Deployment",
       cell: (d) => (
         <>
-          <Link to={`/clusters/${clusterId}/deployments/${d.id}`} className="hover:underline">
+          <a href={`/clusters/${clusterId}/deployments/${d.id}`} className="hover:underline">
             <span className="text-foreground font-medium">
               {d.namespace}/{d.name}
             </span>
-          </Link>
+          </a>
           <span className="ml-1 text-xs text-muted-foreground">· {d.kind}</span>
           {/* Security-context posture chips (NeuVector surfaces privileged/root as columns). */}
           {Number(d.risk_factors?.privileged) > 0 && <span className="ml-1.5 rounded px-1 py-px text-[9px] font-semibold uppercase" style={{ background: "color-mix(in oklab, var(--color-severity-critical) 16%, transparent)", color: "var(--color-severity-critical)" }} title="privileged container">priv</span>}
           {Number(d.risk_factors?.run_as_root) > 0 && <span className="ml-1 rounded px-1 py-px text-[9px] font-semibold uppercase" style={{ background: "color-mix(in oklab, var(--color-severity-high) 16%, transparent)", color: "var(--color-severity-high)" }} title="runs as root">root</span>}
           {Number(d.risk_factors?.host_network) > 0 && <span className="ml-1 rounded px-1 py-px text-[9px] font-semibold uppercase" style={{ background: "color-mix(in oklab, var(--color-severity-high) 16%, transparent)", color: "var(--color-severity-high)" }} title="host network">hostnet</span>}
-          <Link
-            to={`/clusters/${clusterId}/risk/deployment/${encodeURIComponent(d.id)}`}
+          <a
+            href={`/clusters/${clusterId}/risk/deployment/${encodeURIComponent(d.id)}`}
             className="ml-2 text-[10px] text-muted-foreground hover:text-foreground hover:underline"
             data-testid="deployment-risk-workspace-link"
           >
             risk workspace
-          </Link>
+          </a>
         </>
       ),
     },
     {
-      id: "findings",
+      id: "findings", kind: "count", size: 200, minSize: 176, maxSize: 232, wrap: true,
       header: "Findings",
       className: "text-xs",
       cell: (d) => (
@@ -106,13 +144,13 @@ export function DeploymentsPage() {
       ),
     },
     {
-      id: "factors",
+      id: "factors", kind: "percent", size: 144, minSize: 128, maxSize: 160,
       header: "Risk factors",
       className: "text-xs",
       cell: (d) => <FactorBar factors={d.risk_factors} />,
     },
     {
-      id: "lastSeen",
+      id: "lastSeen", kind: "date", size: 176, minSize: 160,
       header: "Last seen",
       className: "text-xs text-muted-foreground",
       cell: (d) => <>{new Date(d.last_seen_at).toLocaleString()}</>,
@@ -124,81 +162,60 @@ export function DeploymentsPage() {
       <PageHeader
         title="Deployments at risk"
         description="Your riskiest deployments first. The score blends open vulnerabilities, exploit signals (CVSS, KEV), runtime exposure, and workload posture."
-        actions={
-          <div className="flex items-center gap-2">
-            <label className="flex items-center gap-2 text-xs">
-              <span className="text-muted-foreground">Search</span>
-              <input
-                type="search"
-                value={search}
-                onChange={(event) => {
-                  const next = new URLSearchParams(searchParams);
-                  if (event.target.value) next.set("q", event.target.value);
-                  else next.delete("q");
-                  setSearchParams(next);
-                }}
-                placeholder="Deployment name"
-                className="rounded-md border border-border bg-card px-2 py-1 text-sm"
-                data-testid="deployment-search"
-              />
-            </label>
-            <PlatformVisibilityToggle
-              hidden={hidePlatformComponents}
-              onHiddenChange={setHidePlatformComponents}
-              hiddenCount={platformCount}
-            />
-            <label className="flex items-center gap-2 text-xs">
-              <span className="text-muted-foreground">Namespace</span>
-              <input
-                type="text"
-                value={namespace}
-                onChange={(e) => setNamespace(e.target.value)}
-                placeholder="(all)"
-                className="rounded-md border border-border bg-card px-2 py-1 text-sm"
-                data-testid="namespace-filter"
-              />
-            </label>
-            <button
-              type="button"
-              onClick={() => downloadCsv("constellation-workloads", ["Namespace", "Platform Role", "Name", "Kind", "Risk", "Findings", "Critical", "High", "Privileged", "RunAsRoot", "HostNetwork", "LastSeen"],
-                rows.map((d) => [d.namespace, d.platform_role ?? "", d.name, d.kind, d.risk_score, d.finding_count, d.critical_count, d.high_count, Number(d.risk_factors?.privileged) > 0 ? "yes" : "", Number(d.risk_factors?.run_as_root) > 0 ? "yes" : "", Number(d.risk_factors?.host_network) > 0 ? "yes" : "", d.last_seen_at]))}
-              className="rounded-md border border-border bg-card px-3 py-1.5 text-sm hover:bg-accent"
-            >Export CSV</button>
-          </div>
-        }
+      />
+      <VerdictBanner
+        status={clusterError ? "degraded" : !scopeReady || q.isPending ? "info" : q.isError ? "degraded" : !total ? "info" : (summary?.at_risk ?? 0) > 0 ? "degraded" : "ok"}
+        title={clusterError ? "Cluster inventory is unavailable" : !scopeReady ? clusterLoading ? "Resolving cluster" : "Select a resolved cluster" : q.isPending ? "Loading deployment inventory" : q.isError ? "Deployment inventory is unavailable" : !total ? "No matching deployments" : (summary?.at_risk ?? 0) > 0 ? "Deployments need risk review" : "No high-risk deployments match these filters"}
+        detail="Search, visibility, counts, paging and CSV use the same source filters. Platform visibility does not change collection or protection."
       />
 
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="deployments-summary">
-        <StatCard label="Deployments" value={summary.total.toLocaleString()} icon={<Layers className="h-3.5 w-3.5" />} />
-        <StatCard label="At risk" value={summary.atRisk.toLocaleString()} icon={<AlertTriangle className="h-3.5 w-3.5" />} tone={summary.atRisk > 0 ? "high" : "neutral"} hint="risk score ≥ 60" />
-        <StatCard label="Critical findings" value={summary.critical.toLocaleString()} icon={<Flame className="h-3.5 w-3.5" />} tone={summary.critical > 0 ? "critical" : "neutral"} />
-        <StatCard label="High findings" value={summary.high.toLocaleString()} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={summary.high > 0 ? "high" : "neutral"} />
-      </section>
+      <ResourceSavedViewsControl inventory="deployments" clusterId={clusterId} ready={scopeReady && q.isSuccess && !q.isFetching} overrides={{hide_platform:String(hidePlatformComponents)}}/>
+      <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card p-3">
+        <label className="min-w-48 flex-1 space-y-1 text-xs"><span className="text-muted-foreground">Search</span><input type="search" value={search} onChange={(event) => updateFilter("q", event.target.value)} placeholder="Deployment name or namespace/name" className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm" data-testid="deployment-search" /></label>
+        <label className="space-y-1 text-xs"><span className="text-muted-foreground">Namespace</span><input value={namespace} onChange={(event) => updateFilter("namespace", event.target.value)} placeholder="All namespaces" className="block rounded-md border border-border bg-background px-3 py-2 text-sm" data-testid="namespace-filter" /></label>
+        <label className="space-y-1 text-xs"><span className="text-muted-foreground">Deployment type</span><select value={platformRole} onChange={(event) => {
+          const value = event.target.value;
+          if (value === "core") setPreferredHidden(false);
+          setSearchParams((current) => {
+            if (value === "all") current.delete("platform_role"); else current.set("platform_role", value);
+            if (value === "core") current.set("hide_platform", "false");
+            current.delete("page"); return current;
+          });
+        }} className="block rounded-md border border-border bg-background px-3 py-2 text-sm" data-testid="deployment-role-filter"><option value="all">All types</option><option value="none">Customer deployments</option><option value="core">Platform deployments</option></select></label>
+        <label className="space-y-1 text-xs"><span className="text-muted-foreground">Strongest group mode</span><select aria-label="Strongest group mode" value={groupMode} onChange={(event) => updateFilter("group_mode", event.target.value)} className="block rounded-md border border-border bg-background px-3 py-2 text-sm"><option value="">Any group mode</option><option value="discover">Discover</option><option value="monitor">Monitor</option><option value="protect">Protect</option>{groupMode && !["discover", "monitor", "protect"].includes(groupMode) && <option value={groupMode}>Invalid mode: {groupMode}</option>}</select></label>
+        <label className="space-y-1 text-xs"><span className="text-muted-foreground">Recorded risk fact</span><select aria-label="Recorded risk fact" value={riskFact} onChange={(event) => updateFilter("risk_fact", event.target.value)} className="block rounded-md border border-border bg-background px-3 py-2 text-sm"><option value="">Any fact</option><option value="privileged">Privileged</option><option value="run_as_root">Runs as root</option><option value="net_exposure">Network exposure</option><option value="host_network">Host network</option>{riskFact && !["privileged", "run_as_root", "net_exposure", "host_network"].includes(riskFact) && <option value={riskFact}>Invalid fact: {riskFact}</option>}</select></label>
+        <PlatformVisibilityToggle hidden={hidePlatformComponents} onHiddenChange={(hidden) => { setPreferredHidden(hidden); updateFilter("hide_platform", String(hidden)); }} hiddenCount={platformCount} />
+        <Button variant="outline" disabled={!scopeReady || q.isFetching} onClick={() => void q.refetch()}><RefreshCw className="h-4 w-4" />Refresh</Button>
+        <Button variant="outline" disabled={!scopeReady || q.isPending || q.isFetching || q.isError || !total || exporting} onClick={() => void exportMatching()}>{exporting ? "Exporting…" : "Export CSV"}</Button>
+      </div>
+      {groupMode && <p className="text-xs text-muted-foreground" data-testid="deployment-group-mode-scope">Workloads whose strongest configured group mode is {groupMode}. Unmatched workloads are excluded. This describes cached group membership, not applied protection.</p>}
+      {riskFact && <p className="text-xs text-muted-foreground" data-testid="deployment-risk-fact-scope">Recorded risk fact: {riskFact}. Matches deployments reporting this key, including zero or null values; this does not assert that the condition is active.</p>}
+      {exportError?.context === exportContext ? <ErrorState title="Deployment export failed" error={exportError.error} /> : null}
 
-      <DataTable
-        rows={rows}
-        sourceLimit={500}
-        sourceCount={allRows.length}
-        columns={columns}
-        rowKey={(d) => d.id}
-        testId="deployments-table"
-        rowTestId={() => "deployment-row"}
-        showDensityToggle={false}
-        className="rounded-lg"
-        emptyState={
-          q.isPending ? (
-            <div className="px-3 py-6" />
-          ) : (
-            <div className="px-3 py-6 text-center text-xs text-muted-foreground">
-              {hidePlatformComponents && platformCount > 0 && matchingRows.length === platformCount
-                ? `${platformCount} platform ${platformCount === 1 ? "deployment is" : "deployments are"} hidden. Use Platform hidden to show them.`
-                : search.trim()
-                  ? "No deployments match this search."
-                : "No deployments yet. The operator's reconciler discovers deployments per ConstellationCluster and persists risk into the deployments table."}
-            </div>
-          )
-        }
-      />
+      <StatGrid data-testid="deployments-summary">
+        <StatCard label="Deployments" value={summary?.total.toLocaleString() ?? "—"} icon={<Layers className="h-3.5 w-3.5" />} />
+        <StatCard label="At risk" value={summary?.at_risk.toLocaleString() ?? "—"} icon={<AlertTriangle className="h-3.5 w-3.5" />} tone={(summary?.at_risk ?? 0) > 0 ? "high" : "neutral"} hint="risk score ≥ 60" />
+        <StatCard label="Critical findings" value={summary?.critical_count.toLocaleString() ?? "—"} icon={<Flame className="h-3.5 w-3.5" />} tone={(summary?.critical_count ?? 0) > 0 ? "critical" : "neutral"} />
+        <StatCard label="High findings" value={summary?.high_count.toLocaleString() ?? "—"} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={(summary?.high_count ?? 0) > 0 ? "high" : "neutral"} />
+      </StatGrid>
+
+      {!scopeReady ? clusterError ? <ErrorState title="Cluster inventory is unavailable" error={clusterError} /> : clusterLoading ? <LoadingState label="Resolving cluster…" /> : <p className="text-sm text-muted-foreground">Select a resolved cluster to view deployments.</p> : q.isPending ? <LoadingState label="Loading deployments…" /> : q.isError ? <ErrorState title="Could not load deployments" error={q.error} action={<Button variant="outline" onClick={() => void q.refetch()}>Retry</Button>} /> : <>
+        <DataTable
+          rows={rows}
+          columns={columns}
+          rowKey={(d) => d.id}
+          preferencesKey="deployments"
+          testId="deployments-table"
+          rowTestId={() => "deployment-row"}
+          pagination={false}
+          className="rounded-lg"
+          emptyState={<div className="px-3 py-6 text-center text-xs text-muted-foreground">{hidePlatformComponents && platformCount ? `${platformCount} matching platform deployments are hidden. Use Platform hidden to show them.` : page > 0 ? "No deployments on this page. Return to the first page or change the filters." : search.trim() || namespace || groupMode || riskFact || platformRole !== "all" ? "No deployments match this search." : "No deployments yet. The operator discovers workloads and persists their risk."}</div>}
+        />
+        <p className="text-xs text-muted-foreground" data-testid="deployment-page-scope">Showing {rows.length ? page * PAGE_SIZE + 1 : 0}–{page * PAGE_SIZE + rows.length} of {total ?? "unknown"} matching deployments, ranked by risk then last seen. CSV exports all matching deployments.</p>
+        <Pager page={page} pageSize={PAGE_SIZE} total={total} hasMore={q.data?.has_more} rowsOnPage={rows.length} onPage={setPage} />
+        {page > 0 && rows.length === 0 ? <Button variant="outline" onClick={() => setPage(0)}>First page</Button> : null}
+      </>}
+
     </div>
   );
 }

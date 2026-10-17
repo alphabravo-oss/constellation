@@ -240,7 +240,7 @@ func TestScopedRegistryTransportDropsCredentialsOnPlaintextSameHost(t *testing.T
 		writer.WriteHeader(http.StatusUnauthorized)
 	}))
 	defer server.Close()
-	request, err := http.NewRequest(http.MethodGet, server.URL+"/v2/", nil)
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+"/v2/", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

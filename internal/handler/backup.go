@@ -21,10 +21,9 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -43,25 +42,18 @@ import (
 
 // Backups is the HTTP handler.
 type Backups struct {
-	db    *db.DB
-	audit *audit.Logger
-	dir   string
+	db     *db.DB
+	audit  *audit.Logger
+	dir    string
+	dirErr error
 }
 
 // NewBackups returns a fresh handler. The artifact directory is resolved from
 // CONSTELLATION_BACKUP_DIR or defaults to /var/lib/constellation/backups (created on
-// first use; falls back to /tmp/constellation-backups when the canonical dir is unwritable).
+// first use; only an implicit default may fall back to a private temp directory).
 func NewBackups(d *db.DB, a *audit.Logger) *Backups {
-	dir := os.Getenv("CONSTELLATION_BACKUP_DIR")
-	if dir == "" {
-		dir = "/var/lib/constellation/backups"
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		// Fallback under /tmp so dev / unprivileged installs still work.
-		dir = filepath.Join(os.TempDir(), "constellation-backups")
-		_ = os.MkdirAll(dir, 0o700)
-	}
-	return &Backups{db: d, audit: a, dir: dir}
+	dir, err := backup.ManagedArtifactDir(os.Getenv("CONSTELLATION_BACKUP_DIR"))
+	return &Backups{db: d, audit: a, dir: dir, dirErr: err}
 }
 
 // ---- DTOs ----
@@ -95,7 +87,7 @@ type scheduleDTO struct {
 }
 
 type createBackupRequest struct {
-	// SignMode overrides the org's schedule.sign_mode for this one-off backup.
+	// SignMode selects this one-off backup independently of the saved schedule.
 	// Default "none" (the dev posture; production callers should pass static-key).
 	SignMode string `json:"sign_mode,omitempty"`
 }
@@ -110,13 +102,25 @@ func (h *Backups) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req createBackupRequest
-	_ = json.NewDecoder(r.Body).Decode(&req) // body optional
+	if !decodeBackupRequest(w, r, &req, true, "sign_mode") {
+		return
+	}
+	mode, err := backup.ResolveSignMode(req.SignMode, backup.SignModeNone)
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	req.SignMode = string(mode)
+	if h.dirErr != nil {
+		jsonError(w, http.StatusInternalServerError, "backup artifact directory unavailable")
+		return
+	}
 	id := uuid.New()
 	// Insert in-flight row up-front so polling sees status=running immediately.
-	_, err := h.db.Pool().Exec(r.Context(), `
+	_, err = h.db.Pool().Exec(r.Context(), `
 INSERT INTO backups (id, org_id, mode, status, started_at, signed, format_version)
 VALUES ($1, $2, 'org-backup', 'running', NOW(), $3, $4)`,
-		id, subj.OrgID, req.SignMode != "" && req.SignMode != "none", backup.FormatVersion)
+		id, subj.OrgID, mode != backup.SignModeNone, backup.FormatVersion)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -140,14 +144,18 @@ func (h *Backups) runBackupJob(id uuid.UUID, orgID, userID, signMode string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
+	mode, err := backup.ResolveSignMode(signMode, backup.SignModeNone)
+	if err != nil {
+		h.markFailed(ctx, id, err.Error())
+		return
+	}
 	var orgName string
 	if err := h.db.Pool().QueryRow(ctx, `SELECT name FROM orgs WHERE id=$1`, orgID).Scan(&orgName); err != nil {
 		h.markFailed(ctx, id, "org lookup: "+err.Error())
 		return
 	}
 
-	stamp := time.Now().UTC().Format("20060102T150405Z")
-	fname := fmt.Sprintf("constellation-backup-%s-%s.tar.gz", orgName, stamp)
+	fname := backup.ArtifactName(orgName, id, time.Now())
 	path := filepath.Join(h.dir, fname)
 
 	opts := backup.ExportOptions{
@@ -156,17 +164,12 @@ func (h *Backups) runBackupJob(id uuid.UUID, orgID, userID, signMode string) {
 		GeneratedBy:    userID,
 		SourceInstance: "constellation-api",
 	}
-	switch signMode {
-	case "static-key":
-		opts.Sign.Mode = backup.SignModeStaticKey
+	opts.Sign.Mode = mode
+	if mode == backup.SignModeStaticKey {
 		opts.Sign.KeyPath = os.Getenv("CONSTELLATION_BACKUP_SIGN_KEY")
-	case "keyless":
-		opts.Sign.Mode = backup.SignModeKeyless
-	default:
-		// none — pass through
 	}
 
-	res, err := backup.ExportToFile(ctx, h.db.Pool(), path, opts)
+	res, err := backup.ExportManaged(ctx, h.db.Pool(), h.dir, fname, opts)
 	if err != nil {
 		h.markFailed(ctx, id, "export: "+err.Error())
 		return
@@ -217,7 +220,7 @@ SELECT id, COALESCE(mode,'org-backup'), status,
        COALESCE(s3_uri,''), COALESCE(tables_included,'{}'::text[]),
        COALESCE(error,'')
   FROM backups
- WHERE org_id=$1 OR org_id IS NULL
+ WHERE org_id=$1
  ORDER BY started_at DESC LIMIT 50`, subj.OrgID)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
@@ -262,7 +265,7 @@ SELECT id, COALESCE(mode,'org-backup'), status,
        COALESCE(s3_uri,''), COALESCE(tables_included,'{}'::text[]),
        COALESCE(error,'')
   FROM backups
- WHERE id=$1 AND (org_id=$2 OR org_id IS NULL)`, id, subj.OrgID).Scan(
+ WHERE id=$1 AND org_id=$2`, id, subj.OrgID).Scan(
 		&s.ID, &s.Mode, &s.Status, &s.StartedAt, &finished,
 		&s.SizeBytes, &s.SHA256, &s.Signed, &s.SignerIdentity, &s.FormatVersion,
 		&s.S3URI, &s.TablesIncluded, &s.ErrorMessage,
@@ -294,7 +297,7 @@ func (h *Backups) Download(w http.ResponseWriter, r *http.Request) {
 	var path, status string
 	err = h.db.Pool().QueryRow(r.Context(), `
 SELECT COALESCE(local_path,''), status FROM backups
- WHERE id=$1 AND (org_id=$2 OR org_id IS NULL)`, id, subj.OrgID).Scan(&path, &status)
+ WHERE id=$1 AND org_id=$2`, id, subj.OrgID).Scan(&path, &status)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			jsonError(w, http.StatusNotFound, "not found")
@@ -311,15 +314,20 @@ SELECT COALESCE(local_path,''), status FROM backups
 		jsonError(w, http.StatusGone, "backup artifact has been pruned or uploaded to S3 only")
 		return
 	}
-	f, err := os.Open(path)
+	f, err := backup.OpenArtifact(path)
 	if err != nil {
-		jsonError(w, http.StatusGone, "artifact unavailable: "+err.Error())
+		jsonError(w, http.StatusGone, "artifact unavailable")
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	w.Header().Set("Content-Type", "application/gzip")
-	w.Header().Set("Content-Disposition", `attachment; filename="`+filepath.Base(path)+`"`)
-	_, _ = io.Copy(w, f)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filepath.Base(path)}))
+	if _, err := io.Copy(w, f); err != nil {
+		return
+	}
+	if err := f.Close(); err != nil {
+		return
+	}
 	_, _, _ = h.audit.Log(r.Context(), audit.Event{
 		OrgID:      &subj.OrgID,
 		ActorID:    &subj.UserID,
@@ -473,16 +481,18 @@ func (h *Backups) PutSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var s scheduleDTO
-	if err := json.NewDecoder(r.Body).Decode(&s); err != nil {
-		jsonError(w, http.StatusBadRequest, "decode: "+err.Error())
+	if !decodeBackupRequest(w, r, &s, false, "cron_expr", "enabled", "s3_bucket", "s3_prefix", "s3_endpoint", "sign_mode", "last_run_at", "last_status", "next_run_at") {
 		return
 	}
+	mode, err := backup.ResolveSignMode(s.SignMode, backup.SignModeStaticKey)
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.SignMode = string(mode)
 	s.CronExpr = strings.TrimSpace(s.CronExpr)
 	if s.CronExpr == "" {
 		s.CronExpr = "0 3 * * *"
-	}
-	if s.SignMode == "" {
-		s.SignMode = "static-key"
 	}
 	if _, err := h.db.Pool().Exec(r.Context(), `
 INSERT INTO backup_schedules(org_id, cron_expr, enabled, s3_bucket, s3_prefix, s3_endpoint, sign_mode)
@@ -504,11 +514,4 @@ ON CONFLICT (org_id) DO UPDATE
 		After:      map[string]any{"cron": s.CronExpr, "enabled": s.Enabled, "s3_bucket": s.S3Bucket, "sign_mode": s.SignMode},
 	})
 	writeJSON(w, 200, s)
-}
-
-// extractFromArchive walks a tar.gz reader and returns manifest.json + .sig + .cert
-// bytes. Used by Verify above; mirrors the helper inside cmd/constellation-backup so the
-// API doesn't have to reach into a private package symbol.
-func extractFromArchive(r io.Reader) (manifest, sig, cert []byte, err error) {
-	return extractTarTriplet(r, "manifest.json", "manifest.json.sig", "manifest.json.cert")
 }

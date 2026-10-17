@@ -21,9 +21,9 @@
 package hostscan
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -235,57 +235,30 @@ func readSysctl(hostRoot, path string) (string, error) {
 	return strings.TrimSpace(string(b)), nil
 }
 
-// checkModuleDisabled returns pass if modprobe.d says "install <mod>
-// /bin/true" or the module isn't on disk. fail if the .ko file is on
-// disk and there's no modprobe block.
+// checkModuleDisabled reports bounded observed module state. Configuration text
+// alone cannot prove that a module is disabled or cannot be explicitly loaded.
 func checkModuleDisabled(hostRoot, name string) (string, string) {
-	// Look under /lib/modules/$release/ for the module file.
-	rel, err := os.ReadFile("/proc/sys/kernel/osrelease")
+	proc, err := os.OpenRoot("/proc")
 	if err != nil {
-		return "skip", "no /proc/sys/kernel/osrelease"
+		return "skip", "kernel module evidence unavailable"
 	}
-	release := strings.TrimSpace(string(rel))
-	modDir := filepath.Join(hostRoot, "/lib/modules", release)
-	found := false
-	_ = filepath.Walk(modDir, func(p string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		base := info.Name()
-		if strings.HasPrefix(base, name+".") &&
-			(strings.Contains(base, ".ko")) {
-			found = true
-			return errors.New("stop")
-		}
-		return nil
-	})
-	if !found {
-		return "pass", "module " + name + " not present on disk"
+	if hostRoot == "" {
+		hostRoot = "/"
 	}
-	// Module present — check modprobe.d for a disable directive.
-	for _, dir := range []string{
-		filepath.Join(hostRoot, "/etc/modprobe.d"),
-		filepath.Join(hostRoot, "/lib/modprobe.d"),
-		filepath.Join(hostRoot, "/usr/lib/modprobe.d"),
-	} {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			continue
-		}
-		for _, e := range entries {
-			b, err := os.ReadFile(filepath.Join(dir, e.Name()))
-			if err != nil {
-				continue
-			}
-			content := string(b)
-			needle1 := "install " + name + " /bin/true"
-			needle2 := "blacklist " + name
-			if strings.Contains(content, needle1) || strings.Contains(content, needle2) {
-				return "pass", "disabled via " + dir + "/" + e.Name()
-			}
-		}
+	host, hostErr := os.OpenRoot(hostRoot)
+	var hostFS fs.FS
+	if hostErr == nil {
+		hostFS = host.FS()
 	}
-	return "warn", "module " + name + " on disk and not blacklisted"
+	result, detail := checkModuleEvidence(proc.FS(), hostFS, name)
+	closeErr := proc.Close()
+	if host != nil {
+		closeErr = errors.Join(closeErr, host.Close())
+	}
+	if closeErr != nil && result != "fail" {
+		return "skip", "kernel module evidence could not be completed"
+	}
+	return result, detail
 }
 
 // checkFileModeMax returns pass if the file's permission bits are a
@@ -311,37 +284,26 @@ func checkFileModeMax(hostRoot, path string, maxMode os.FileMode) (string, strin
 	return "fail", fmt.Sprintf("mode=%#o (want subset of %#o)", mode, maxMode)
 }
 
-// checkSSHDOption parses /etc/ssh/sshd_config and matches the named
-// option's value against any of the acceptable values. If the option
-// is absent, returns warn (defaults vary). If the file is missing,
-// returns skip.
+// checkSSHDOption supports plain configuration only. Conditional/include syntax
+// requires review, and incomplete reads never establish a passing result.
 func checkSSHDOption(hostRoot, option string, acceptable ...string) (string, string) {
-	p := filepath.Join(hostRoot, "/etc/ssh/sshd_config")
-	f, err := os.Open(p)
+	if hostRoot == "" {
+		hostRoot = "/"
+	}
+	root, err := os.OpenRoot(hostRoot)
 	if err != nil {
-		return "skip", err.Error()
+		return "skip", "SSH configuration unavailable"
 	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
+	input, openErr := root.Open("etc/ssh/sshd_config")
+	if openErr != nil {
+		if err := root.Close(); err != nil {
+			return "skip", "SSH configuration could not be completed"
 		}
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		if !strings.EqualFold(fields[0], option) {
-			continue
-		}
-		value := fields[1]
-		for _, a := range acceptable {
-			if strings.EqualFold(value, a) {
-				return "pass", option + "=" + value
-			}
-		}
-		return "fail", fmt.Sprintf("%s=%s (want one of %v)", option, value, acceptable)
+		return "skip", "SSH configuration unavailable"
 	}
-	return "warn", option + " not set in sshd_config (default applies)"
+	result, detail := checkSSHDReader(input, option, acceptable...)
+	if err := root.Close(); err != nil {
+		return "skip", "SSH configuration could not be completed"
+	}
+	return result, detail
 }

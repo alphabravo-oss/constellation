@@ -83,9 +83,9 @@ func TestDecodeSessions_WithHeader(t *testing.T) {
 	binary.BigEndian.PutUint16(payload[0:2], n) // Sessions
 	for i := 0; i < n; i++ {
 		off := dpMsgSessionHdrSize + i*dpMsgSessionSize
-		binary.BigEndian.PutUint32(payload[off+0:off+4], uint32(1000+i))    // ID
-		binary.BigEndian.PutUint16(payload[off+10:off+12], ethTypeIPv4)     // EtherType
-		binary.BigEndian.PutUint16(payload[off+58:off+60], uint16(80+i*20)) // ServerPort
+		binary.BigEndian.PutUint32(payload[off+0:off+4], uint32(1000+i))      // ID
+		binary.BigEndian.PutUint16(payload[off+10:off+12], ethTypeIPv4)       // EtherType
+		binary.BigEndian.PutUint16(payload[off+58:off+60], uint16(80+i*20))   // ServerPort
 		binary.BigEndian.PutUint32(payload[off+72:off+76], uint32(100*(i+1))) // ClientBytes
 		binary.BigEndian.PutUint32(payload[off+76:off+80], uint32(500*(i+1))) // ServerBytes
 	}
@@ -215,8 +215,8 @@ func TestSessionCache_ReplaceEvictsAbsent(t *testing.T) {
 // the same address arriving as a 16-byte IPv4-mapped IPv6 must produce the
 // same cache key, and a lookup built from either form must find the other.
 func TestSessionKey_IPCanonicalization(t *testing.T) {
-	v4 := net.IP{1, 2, 3, 4}                                                       // 4-byte IPv4
-	mapped := net.IP{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 1, 2, 3, 4}         // ::ffff:1.2.3.4
+	v4 := net.IP{1, 2, 3, 4}                                               // 4-byte IPv4
+	mapped := net.IP{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 1, 2, 3, 4} // ::ffff:1.2.3.4
 	srvV4 := net.IP{5, 6, 7, 8}
 	srvMapped := net.IP{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 5, 6, 7, 8}
 

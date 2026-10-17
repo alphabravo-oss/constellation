@@ -566,15 +566,17 @@ func TestOpenAPIEventsExportContract(t *testing.T) {
 	}
 	assertOpenAPIFields(t, openAPISchemaAt(t, "components", "schemas", "EventsExportRecord"),
 		[]string{"event", "data"}, []string{"event", "data"})
-	if _, ok := openAPISchemaAt(t, "paths", path, "get", "responses", "500", "content")["text/plain"]; !ok {
-		t.Error("initial export failure should document text/plain 500")
+	for _, media := range []string{"application/json", "application/x-ndjson"} {
+		if _, ok := openAPISchemaAt(t, "paths", path, "get", "responses", "500", "content")[media]; !ok {
+			t.Errorf("initial export failure should document %s 500", media)
+		}
 	}
 }
 
 func TestOpenAPIPcapContracts(t *testing.T) {
 	capture := openAPISchemaAt(t, "components", "schemas", "PcapCapture")
 	assertOpenAPIFields(t, capture,
-		[]string{"id", "org_id", "cluster_id", "workload", "namespace", "requested_by", "requested_at", "duration_s", "src_ip", "dst_ip", "dst_port", "protocol", "bpf_filter", "interface", "file_count", "file_size_mb", "status", "claimed_by_node", "claimed_at", "completed_at", "error_message", "file_size_bytes", "sha256", "packet_count", "expires_at"},
+		[]string{"id", "org_id", "cluster_id", "workload", "namespace", "platform_role", "requested_by", "requested_at", "duration_s", "src_ip", "dst_ip", "dst_port", "protocol", "bpf_filter", "interface", "file_count", "file_size_mb", "status", "claimed_by_node", "claimed_at", "completed_at", "error_message", "file_size_bytes", "sha256", "packet_count", "expires_at"},
 		[]string{"id", "org_id", "cluster_id", "workload", "namespace", "requested_by", "requested_at", "duration_s", "status", "expires_at"})
 	assertOpenAPIFields(t, openAPISchemaAt(t, "components", "schemas", "PcapStartRequest"),
 		[]string{"cluster_id", "workload", "namespace", "duration_s", "src_ip", "dst_ip", "dst_port", "protocol", "bpf_filter", "interface", "file_count", "file_size_mb"},
@@ -796,6 +798,197 @@ func TestOpenAPIMigrationContracts(t *testing.T) {
 		for _, status := range []string{"400", "403", "404", "409"} {
 			if _, ok := operation["responses"].(map[string]any)[status]; !ok {
 				t.Errorf("%s omits %s response", path, status)
+			}
+		}
+	}
+}
+
+func TestOpenAPIFindingsQueryContracts(t *testing.T) {
+	parametersAt := func(path string) map[string]map[string]any {
+		operation := openAPISchemaAt(t, "paths", path, "get")
+		parameters := map[string]map[string]any{}
+		for _, raw := range operation["parameters"].([]any) {
+			parameter := raw.(map[string]any)
+			if parameter["in"] != "query" || parameter["required"] != false {
+				t.Errorf("%s has invalid optional query parameter: %v", path, parameter)
+			}
+			parameters[parameter["name"].(string)] = parameter
+		}
+		return parameters
+	}
+	list := parametersAt("/api/v1/findings")
+	csv := parametersAt("/api/v1/findings.csv")
+	rollup := parametersAt("/api/v1/findings/by-cve")
+	for _, name := range []string{"q", "kind", "lifecycle", "cluster_id", "fixable", "sort", "order", "offset"} {
+		if list[name] == nil || !reflect.DeepEqual(list[name], csv[name]) {
+			t.Errorf("instance list/CSV must share the %s query contract", name)
+		}
+	}
+	for _, name := range []string{"q", "lifecycle", "cluster_id", "offset"} {
+		if list[name] == nil || !reflect.DeepEqual(list[name], rollup[name]) {
+			t.Errorf("CVE rollup must share the %s query contract", name)
+		}
+	}
+	for _, name := range []string{"kind", "sort", "order"} {
+		if rollup[name] != nil {
+			t.Errorf("CVE rollup must not advertise unsupported %s", name)
+		}
+	}
+	wantSort := []any{"risk", "severity", "cve", "title", "package", "fixed", "asset", "lifecycle", "kind", "last_seen", "age", "cvss_vector", "cvss"}
+	if !reflect.DeepEqual(list["sort"]["schema"].(map[string]any)["enum"], wantSort) {
+		t.Error("finding sort keys must match the handler allowlist")
+	}
+	for _, tc := range []struct {
+		parameters map[string]map[string]any
+		defaultMax float64
+		maximum    float64
+	}{{list, 100, 1000}, {rollup, 200, 2000}, {csv, 10000, 100000}} {
+		limit := tc.parameters["limit"]["schema"].(map[string]any)
+		if limit["minimum"] != float64(1) || limit["default"] != tc.defaultMax || limit["maximum"] != tc.maximum {
+			t.Errorf("finding pagination limit = %v", limit)
+		}
+	}
+	listSchema := openAPISchemaAt(t, "paths", "/api/v1/findings", "get", "responses", "200", "content", "application/json", "schema")
+	assertOpenAPIFields(t, listSchema,
+		[]string{"findings", "limit", "offset", "total", "has_more", "lifecycle_counts"},
+		[]string{"findings", "limit", "offset", "total", "has_more", "lifecycle_counts"})
+	counts := listSchema["properties"].(map[string]any)["lifecycle_counts"].(map[string]any)
+	if !strings.Contains(counts["description"].(string), "without the dedicated lifecycle query parameter") {
+		t.Error("lifecycle totals must describe which filter is omitted")
+	}
+	rollupSchema := openAPISchemaAt(t, "paths", "/api/v1/findings/by-cve", "get", "responses", "200", "content", "application/json", "schema")
+	assertOpenAPIFields(t, rollupSchema,
+		[]string{"cves", "limit", "offset", "total"}, []string{"cves", "limit", "offset", "total"})
+	if !strings.Contains(rollup["fixable"]["description"].(string), "HAVING") ||
+		!strings.Contains(rollup["fixable"]["description"].(string), "unfixed instances") {
+		t.Error("fixable CVE documentation must preserve unfixed matching instances")
+	}
+	csvResponse := openAPISchemaAt(t, "paths", "/api/v1/findings.csv", "get", "responses", "200")
+	capHeader := csvResponse["headers"].(map[string]any)["X-Export-Limit"].(map[string]any)["schema"].(map[string]any)
+	if capHeader["maximum"] != float64(100000) || csvResponse["content"].(map[string]any)["text/csv"] == nil {
+		t.Error("CSV export must document the effective cap header and CSV content")
+	}
+}
+
+func TestOpenAPINodeAndContainerInventoryContracts(t *testing.T) {
+	for _, family := range []string{"nodes", "containers"} {
+		path := "/api/v1/clusters/{id}/" + family
+		list := openAPISchemaAt(t, "paths", path, "get")
+		export := openAPISchemaAt(t, "paths", path+".csv", "get")
+		parameters := func(op map[string]any) map[string]any {
+			out := map[string]any{}
+			for _, raw := range op["parameters"].([]any) {
+				p := raw.(map[string]any)
+				out[p["name"].(string)] = p
+			}
+			return out
+		}
+		lp, ep := parameters(list), parameters(export)
+		filters := []string{"id", "q", "sort", "order"}
+		if family == "nodes" {
+			filters = append(filters, "agent", "risk", "host_cves")
+		} else {
+			filters = append(filters, "namespace", "node", "hide_platform", "platform_role")
+		}
+		for _, name := range filters {
+			if lp[name] == nil || !reflect.DeepEqual(lp[name], ep[name]) {
+				t.Errorf("%s list/export mismatch for %s", family, name)
+			}
+		}
+		if ep["limit"] != nil || ep["offset"] != nil {
+			t.Errorf("%s export must not advertise page clipping", family)
+		}
+		schema := openAPISchemaAt(t, "paths", path, "get", "responses", "200", "content", "application/json", "schema")
+		fields := []string{"cluster_id", "items", "summary", "total", "has_more", "limit", "offset", "sort", "order"}
+		if family == "nodes" {
+			fields = append(fields, "q", "agent", "risk", "host_cves")
+		}
+		assertOpenAPIFields(t, schema, fields, fields)
+		headers := openAPISchemaAt(t, "paths", path+".csv", "get", "responses", "200", "headers")
+		for _, name := range []string{"X-Export-Limit", "X-Export-Total", "X-Export-Truncated"} {
+			if headers[name] == nil {
+				t.Errorf("%s missing %s", family, name)
+			}
+		}
+	}
+}
+
+func TestOpenAPIRegistryAndJobInventoryContracts(t *testing.T) {
+	for _, path := range []string{"/api/v1/registries/{id}/images", "/api/v1/scan-jobs"} {
+		list := openAPISchemaAt(t, "paths", path, "get")
+		export := openAPISchemaAt(t, "paths", path+".csv", "get")
+		parameters := func(op map[string]any) map[string]any {
+			out := map[string]any{}
+			for _, raw := range op["parameters"].([]any) {
+				p := raw.(map[string]any)
+				out[p["name"].(string)] = p
+			}
+			return out
+		}
+		lp, ep := parameters(list), parameters(export)
+		for name, p := range lp {
+			if name == "limit" || name == "offset" {
+				continue
+			}
+			if !reflect.DeepEqual(p, ep[name]) {
+				t.Errorf("%s inconsistent export filter%s", path, name)
+			}
+		}
+		if ep["limit"] != nil || ep["offset"] != nil {
+			t.Errorf("%s CSV advertises clipping", path)
+		}
+		schema := openAPISchemaAt(t, "paths", path, "get", "responses", "200", "content", "application/json", "schema")
+		properties := schema["properties"].(map[string]any)
+		for _, key := range []string{"total", "summary", "has_more", "limit", "offset", "sort", "order"} {
+			if properties[key] == nil {
+				t.Errorf("%s missing%s", path, key)
+			}
+		}
+		headers := openAPISchemaAt(t, "paths", path+".csv", "get", "responses", "200", "headers")
+		for _, key := range []string{"X-Export-Limit", "X-Export-Total", "X-Export-Truncated"} {
+			if headers[key] == nil {
+				t.Errorf("%s missing%s", path, key)
+			}
+		}
+	}
+}
+
+func TestOpenAPIDetailEvidenceInventories(t *testing.T) {
+	for _, path := range []string{"/api/v1/assets/{id}/findings", "/api/v1/clusters/{id}/nodes/{node}/vulnerabilities", "/api/v1/cve/{id}/affected/{view}", "/api/v1/compliance/evidence"} {
+		list := openAPISchemaAt(t, "paths", path, "get")
+		export := openAPISchemaAt(t, "paths", path+".csv", "get")
+		parameters := func(op map[string]any) map[string]any {
+			out := map[string]any{}
+			for _, raw := range op["parameters"].([]any) {
+				p := raw.(map[string]any)
+				out[p["name"].(string)] = p
+			}
+			return out
+		}
+		lp, ep := parameters(list), parameters(export)
+		for name, p := range lp {
+			if name == "limit" || name == "offset" {
+				continue
+			}
+			if !reflect.DeepEqual(p, ep[name]) {
+				t.Errorf("%s CSV must retain %s filter", path, name)
+			}
+		}
+		if ep["limit"] != nil || ep["offset"] != nil {
+			t.Errorf("%s export must not advertise page clipping", path)
+		}
+		response := openAPISchemaAt(t, "paths", path, "get", "responses", "200", "content", "application/json", "schema")
+		name := strings.TrimPrefix(response["$ref"].(string), "#/components/schemas/")
+		schema := openAPISchemaAt(t, "components", "schemas", name, "properties")
+		for _, key := range []string{"total", "items", "summary", "has_more", "limit", "offset", "sort", "order"} {
+			if schema[key] == nil {
+				t.Errorf("%s missing %s", path, key)
+			}
+		}
+		headers := openAPISchemaAt(t, "paths", path+".csv", "get", "responses", "200", "headers")
+		for _, key := range []string{"X-Export-Total", "X-Export-Limit", "X-Export-Truncated"} {
+			if headers[key] == nil {
+				t.Errorf("%s export missing %s", path, key)
 			}
 		}
 	}

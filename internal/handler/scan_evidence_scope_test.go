@@ -86,7 +86,7 @@ func TestScanEvidenceTargetOrgScope(t *testing.T) {
 		{"foreign target link", mismatchedEvidenceID, http.StatusNotFound},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			request := httptest.NewRequest(http.MethodGet, "/api/v1/scan-evidence/"+testCase.id.String(), nil)
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scan-evidence/"+testCase.id.String(), nil)
 			request.Header.Set("Authorization", "Bearer "+rawToken)
 			route := chi.NewRouteContext()
 			route.URLParams.Add("id", testCase.id.String())

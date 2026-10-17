@@ -1,13 +1,18 @@
-// CVEPage — browse the live cve_records table (332k+ rows). Shows aggregate
-// stat tiles, filter chip bar, and a default list of recent CVEs that the user
-// can search/filter without typing a query first.
-import { useMemo, useState, useEffect, useDeferredValue } from "react";
-import { useQuery, keepPreviousData } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
+// Global CVE intelligence catalog: server-filtered lookahead pages and matching CSV.
+import { useMemo, useState, useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { Search, Database, Crown, Activity, AlertTriangle } from "lucide-react";
 
-import { cve, type CVEResult, type Severity } from "@/api/client";
-import { StatCard } from "@/components/ui/stat-card";
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
+import { useExportGuard, exportQueryReady } from "@/hooks/useExportGuard";
+import { LookaheadExport } from "@/components/LookaheadExport";
+import { useRouteSearchParams } from "@/lib/route-search";
+import { Pager } from "@/components/ui/pager";
+import { Button } from "@/components/ui/button";
+import { ErrorState, LoadingState } from "@/components/ui/states";
+import { cve, type CVEResult, type CVESearchParams, type Severity } from "@/api/client";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { FilterChip } from "@/components/ui/filter-chip";
 import { SeverityBadge } from "@/components/ui/severity-badge";
 import { KevBadge } from "@/components/ui/kev-badge";
@@ -39,65 +44,72 @@ function useDebounced<T>(value: T, ms = 200): T {
 
 export function CVEPage() {
   const navigate = useNavigate();
+  const client = useQueryClient();
+  const identity = useTablePreferencesIdentity();
+  const owner = `${identity?.org_id ?? ""}:${identity?.user_id ?? ""}`;
+  const scopeReady = !!identity?.org_id && !!identity?.user_id;
 
-  const [q, setQ] = useState("");
+  const [params, setParams] = useRouteSearchParams();
+  const q = params.get("q") ?? "";
   const debouncedQ = useDebounced(q, 200);
-  const deferredQ = useDeferredValue(debouncedQ);
+  const kevOnly = params.get("kev") === "true";
+  const epssHigh = params.get("epss_gt") === "0.5";
+  const cvssHigh = params.get("cvss_gt") === "7";
+  const severity = SEVERITIES.includes(params.get("severity") as Severity) ? params.get("severity") as Severity : "";
+  const source = SOURCES.includes(params.get("source") as typeof SOURCES[number]) ? params.get("source")! : "";
+  const sortID = params.get("sort") ?? "cvss";
+  const sort = { id: ["cve_id", "cvss", "severity", "epss", "kev", "published"].includes(sortID) ? sortID : "cvss", dir: params.get("dir") === "asc" ? "asc" as const : "desc" as const };
+  const requestedPage = Number(params.get("page") ?? "1");
+  const page = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage - 1 : 0;
+  const pageSize = 50;
+  const changeFilters = (values: Record<string, string>, replace = false) => setParams((current) => {
+    current.delete("page");
+    for (const [key, value] of Object.entries(values)) { if (value) current.set(key, value); else current.delete(key); }
+    return current;
+  }, { replace });
+  const setQ = (value: string) => changeFilters({ q: value }, true);
+  const setSeverity = (value: string) => changeFilters({ severity: value });
+  const setSource = (value: string) => changeFilters({ source: value });
+  const setSort = (value: typeof sort) => changeFilters({ sort: value.id, dir: value.dir });
+  const clearFilters = () => changeFilters({ q: "", kev: "", epss_gt: "", cvss_gt: "", severity: "", source: "" });
 
-  const [kevOnly, setKevOnly] = useState(false);
-  const [epssHigh, setEpssHigh] = useState(false);
-  const [cvssHigh, setCvssHigh] = useState(false);
-  const [severity, setSeverity] = useState<Severity | "">("");
-  const [source, setSource] = useState<string>("");
-  // Sort is applied SERVER-SIDE — the catalog is far larger than one page, so a
-  // client-side sort would only reorder the visible 50 rows. Header clicks update this
-  // and refetch in the new global order. Default matches the DataTable's defaultSort.
-  const [sort, setSort] = useState<{ id: string; dir: "asc" | "desc" }>({ id: "cvss", dir: "desc" });
-
-  const stats = useQuery({ queryKey: ["cve", "stats"], queryFn: () => cve.stats(), staleTime: 60_000 });
-  const bundle = useQuery({ queryKey: ["cve", "bundle"], queryFn: () => cve.bundle(), staleTime: 60_000 });
-
-  const search = useQuery({
-    queryKey: ["cve", "search", deferredQ, kevOnly, epssHigh, cvssHigh, severity, source, sort.id, sort.dir],
-    queryFn: () =>
-      cve.search({
-        q: deferredQ,
-        kev: kevOnly || undefined,
-        epss_gt: epssHigh ? 0.5 : undefined,
-        cvss_gt: cvssHigh ? 7.0 : undefined,
-        severity: severity || undefined,
-        source: source || undefined,
-        sort: sort.id,
-        dir: sort.dir,
-        limit: 50,
-      }),
-    placeholderData: keepPreviousData,
-  });
-
-  const rows = search.data?.results ?? [];
+  const stats = useQuery({ queryKey: ["cve", "stats", owner], queryFn: () => cve.stats(), staleTime: 60_000, enabled: scopeReady });
+  const bundle = useQuery({ queryKey: ["cve", "bundle", owner], queryFn: () => cve.bundle(), staleTime: 60_000, enabled: scopeReady });
+  const filters: CVESearchParams = { q: debouncedQ, kev: kevOnly || undefined, epss_gt: epssHigh ? 0.5 : undefined, cvss_gt: cvssHigh ? 7 : undefined, severity: severity || undefined, source: source || undefined, sort: sort.id, dir: sort.dir };
+  const searchKey = ["cve", "search", owner, debouncedQ, kevOnly, epssHigh, cvssHigh, severity, source, sort.id, sort.dir, page];
+  const search = useQuery({ queryKey: searchKey, queryFn: () => cve.search({ ...filters, limit: pageSize + 1, offset: page * pageSize }), enabled: scopeReady && q === debouncedQ });
+  const responseValid = !!search.data && catalogResponseMatches(search.data, pageSize + 1, page * pageSize);
+  const ready = scopeReady && search.isSuccess && !search.isError && q === debouncedQ && responseValid;
+  const rows = ready ? search.data!.results.slice(0, pageSize) : [];
+  const hasMore = ready && search.data!.results.length > pageSize;
+  const context = JSON.stringify(searchKey);
+  const isCurrent = () => scopeReady && ready && exportQueryReady(client, searchKey, search.data);
+  const captureExport = useExportGuard(context, !ready || search.isFetching, isCurrent);
+  const statsValid = !!stats.data && ["total", "kev_listed", "epss_gt_50", "cvss_gt_70"].every(key => Number.isSafeInteger(stats.data[key as keyof typeof stats.data]) && Number(stats.data[key as keyof typeof stats.data]) >= 0);
+  const bundleValid = !!bundle.data && typeof bundle.data.available === "boolean" && (!bundle.data.imported_at || Number.isFinite(Date.parse(bundle.data.imported_at)));
+  const statsData = scopeReady && stats.isSuccess && !stats.isError && statsValid ? stats.data : undefined;
+  const bundleData = scopeReady && bundle.isSuccess && !bundle.isError && bundleValid ? bundle.data : undefined;
 
   const columns = useMemo<Column<CVEResult>[]>(
     () => [
       {
-        id: "cve_id",
+        id: "cve_id", exportValue: r => r.cve_id, kind: "id", size: 176, minSize: 160,
         header: "CVE-ID",
         cell: (r) => (
-          <Link to={`/cve/${r.cve_id}`} className="text-mono text-[12px] text-[color:var(--color-primary)] hover:underline">
+          <Link to="/cve/$id" params={{ id: r.cve_id }} className="text-mono text-[12px] text-[color:var(--color-primary)] hover:underline">
             {r.cve_id}
           </Link>
         ),
         sort: (a, b) => a.cve_id.localeCompare(b.cve_id),
-        width: "160px",
       },
       {
-        id: "severity",
+        id: "severity", exportValue: r => severityOf(r.cvss_base), kind: "badge", size: 120, minSize: 112,
         header: "Severity",
         cell: (r) => <SeverityBadge severity={severityOf(r.cvss_base)} kev={r.kev_listed} />,
         sort: (a, b) => (a.cvss_base ?? -1) - (b.cvss_base ?? -1),
-        width: "110px",
       },
       {
-        id: "cvss",
+        id: "cvss", exportValue: r => r.cvss_base ?? "", kind: "count", size: 88, minSize: 80,
         header: "CVSS",
         numeric: true,
         cell: (r) => (
@@ -106,24 +118,21 @@ export function CVEPage() {
           </span>
         ),
         sort: (a, b) => (a.cvss_base ?? -1) - (b.cvss_base ?? -1),
-        width: "80px",
       },
       {
-        id: "kev",
+        id: "kev", exportValue: r => r.kev_listed, kind: "badge", size: 88, minSize: 80,
         header: "KEV",
         cell: (r) => (r.kev_listed ? <KevBadge /> : <span className="text-muted-foreground text-[10px]">—</span>),
         sort: (a, b) => Number(a.kev_listed) - Number(b.kev_listed),
-        width: "70px",
       },
       {
-        id: "epss",
+        id: "epss", exportValue: r => r.epss_probability ?? "", kind: "percent", size: 144, minSize: 136, maxSize: 160,
         header: "EPSS",
         cell: (r) => <EpssBar value={r.epss_probability} />,
         sort: (a, b) => (a.epss_probability ?? -1) - (b.epss_probability ?? -1),
-        width: "120px",
       },
       {
-        id: "title",
+        id: "title", exportValue: r => r.title ?? "", kind: "text", grow: true, minSize: 240,
         header: "Title",
         cell: (r) => (
           <span className="line-clamp-1 text-[12px] text-foreground/90" title={r.title ?? r.description}>
@@ -132,7 +141,7 @@ export function CVEPage() {
         ),
       },
       {
-        id: "sources",
+        id: "sources", exportValue: r => JSON.stringify(r.sources), kind: "badge", size: 144, minSize: 128, wrap: true,
         header: "Sources",
         cell: (r) => (
           <div className="flex flex-wrap gap-1">
@@ -143,10 +152,9 @@ export function CVEPage() {
             ))}
           </div>
         ),
-        width: "180px",
       },
       {
-        id: "published",
+        id: "published", exportValue: r => r.published_at ?? "", kind: "date", size: 136, minSize: 128,
         header: "Published",
         cell: (r) =>
           r.published_at ? (
@@ -157,23 +165,23 @@ export function CVEPage() {
             <span className="text-muted-foreground text-[10px]">—</span>
           ),
         sort: (a, b) => (a.published_at ?? "").localeCompare(b.published_at ?? ""),
-        width: "110px",
       },
     ],
     [],
   );
 
-  const totalLabel = stats.data ? stats.data.total.toLocaleString() : "—";
-  const bundleVersion = bundle.data?.available ? bundle.data.version : "—";
-  const importedAt = bundle.data?.available && bundle.data.imported_at ? new Date(bundle.data.imported_at).toLocaleString() : null;
+  const totalLabel = statsData ? statsData.total.toLocaleString() : "—";
+  const bundleVersion = bundleData?.available ? bundleData.version : "—";
+  const importedAt = bundleData?.available && bundleData.imported_at ? new Date(bundleData.imported_at).toLocaleString() : null;
 
   return (
     <PageContainer>
       <PageHeader
         title="CVE Database"
+        actions={<Button disabled={!scopeReady || search.isFetching || q !== debouncedQ} onClick={() => { void search.refetch(); void stats.refetch(); void bundle.refetch(); }}>Refresh</Button>}
         description={
           <>
-            {stats.data ? (
+            {statsData ? (
               <>
                 {totalLabel} vulnerabilities aggregated from NVD, KEV, EPSS, OSV, and GHSA.
               </>
@@ -191,8 +199,8 @@ export function CVEPage() {
       />
 
       {/* Verdict — honest state of the catalog (populated vs not yet synced). */}
-      {stats.data && (
-        stats.data.total > 0 ? (
+      {stats.isError || stats.isSuccess && !statsValid ? <VerdictBanner status="degraded" title="CVE catalog summary unavailable" detail="Retry before relying on the catalog totals." /> : stats.isPending ? <VerdictBanner status="info" title="Loading CVE catalog" detail="Fetching current catalog totals." /> : statsData && (
+        statsData.total > 0 ? (
           <VerdictBanner
             status="ok"
             title={`${totalLabel} CVEs in the catalog`}
@@ -208,44 +216,45 @@ export function CVEPage() {
       )}
 
       {/* Stat tiles */}
-      <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <StatGrid>
         <StatCard
           label="Total CVEs"
-          value={stats.data ? stats.data.total.toLocaleString() : "—"}
+          value={statsData ? statsData.total.toLocaleString() : "—"}
           tone="accent"
           icon={<Database className="h-3 w-3" />}
           hint="Live row count"
         />
         <StatCard
           label="KEV-listed"
-          value={stats.data ? stats.data.kev_listed.toLocaleString() : "—"}
+          value={statsData ? statsData.kev_listed.toLocaleString() : "—"}
           tone="critical"
           icon={<Crown className="h-3 w-3" />}
           hint="CISA Known-Exploited"
         />
         <StatCard
           label="EPSS > 0.5"
-          value={stats.data ? stats.data.epss_gt_50.toLocaleString() : "—"}
+          value={statsData ? statsData.epss_gt_50.toLocaleString() : "—"}
           tone="high"
           icon={<Activity className="h-3 w-3" />}
           hint="High exploit probability"
         />
         <StatCard
           label="CVSS ≥ 7.0"
-          value={stats.data ? stats.data.cvss_gt_70.toLocaleString() : "—"}
+          value={statsData ? statsData.cvss_gt_70.toLocaleString() : "—"}
           tone="high"
           icon={<AlertTriangle className="h-3 w-3" />}
           hint="High / critical severity"
         />
-      </section>
+      </StatGrid>
 
-      {bundle.data?.available && (
+      {(bundle.isError || bundle.isSuccess && !bundleValid) && <ErrorState title="CVE bundle metadata unavailable." />}
+      {bundleData?.available && (
         <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs">
           <span className="text-muted-foreground">Bundle</span>
           <span className="font-mono" data-testid="bundle-version">{bundleVersion}</span>
           <span className="text-muted-foreground">·</span>
           <span data-testid="bundle-signed">
-            {bundle.data.signed ? `signed${bundle.data.signer_identity ? ` by ${bundle.data.signer_identity}` : ""}` : "unsigned"}
+            {bundleData.signed ? `signed${bundleData.signer_identity ? ` by ${bundleData.signer_identity}` : ""}` : "unsigned"}
           </span>
         </div>
       )}
@@ -280,9 +289,9 @@ export function CVEPage() {
       {/* Filter chip bar */}
       <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-3 py-2">
         <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Filters</span>
-        <FilterChip label="KEV-only" active={kevOnly} onClick={() => setKevOnly((v) => !v)} />
-        <FilterChip label="EPSS > 0.5" active={epssHigh} onClick={() => setEpssHigh((v) => !v)} />
-        <FilterChip label="CVSS ≥ 7" active={cvssHigh} onClick={() => setCvssHigh((v) => !v)} />
+        <FilterChip label="KEV-only" active={kevOnly} onClick={() => changeFilters({ kev: kevOnly ? "" : "true" })} />
+        <FilterChip label="EPSS > 0.5" active={epssHigh} onClick={() => changeFilters({ epss_gt: epssHigh ? "" : "0.5" })} />
+        <FilterChip label="CVSS > 7" active={cvssHigh} onClick={() => changeFilters({ cvss_gt: cvssHigh ? "" : "7" })} />
         <div className="ml-1 flex items-center gap-1">
           <label className="text-[10px] uppercase tracking-wider text-muted-foreground">Severity</label>
           <select
@@ -316,14 +325,7 @@ export function CVEPage() {
         {(kevOnly || epssHigh || cvssHigh || severity || source || q) && (
           <button
             type="button"
-            onClick={() => {
-              setKevOnly(false);
-              setEpssHigh(false);
-              setCvssHigh(false);
-              setSeverity("");
-              setSource("");
-              setQ("");
-            }}
+            onClick={clearFilters}
             className="ml-auto text-[11px] text-muted-foreground hover:text-foreground"
           >
             Clear all
@@ -333,14 +335,18 @@ export function CVEPage() {
 
       {/* Results */}
       <div data-testid="cve-results-table">
-        <DataTable<CVEResult>
+        {!scopeReady ? <LoadingState label="Resolving operator scope…" /> : search.isError || search.isSuccess && !responseValid ? <ErrorState title="Could not load CVE results." action={<Button onClick={() => void search.refetch()}>Retry</Button>} /> : search.isPending || q !== debouncedQ ? <LoadingState label="Loading CVE results…" /> : <DataTable<CVEResult>
           rows={rows}
-          sourceLimit={50}
-          sourceCount={rows.length}
+          canExport={() => captureExport()()}
+          pagination={false}
+          preferencesKey="cve-catalog"
+          exportFileName="constellation-cve-page.csv"
+          exportLabel="Export this page"
           columns={columns}
           rowKey={(r) => r.cve_id}
-          onRowClick={(r) => navigate(`/cve/${r.cve_id}`)}
-          defaultSort={{ id: "cvss", dir: "desc" }}
+          onRowClick={(r) => navigate({ href: `/cve/${encodeURIComponent(r.cve_id)}` })}
+          sort={sort}
+          manualSorting
           onSortChange={(s) => setSort(s ?? { id: "cvss", dir: "desc" })}
           rowTestId={(r) => `cve-row-${r.cve_id}`}
           emptyState={
@@ -354,14 +360,24 @@ export function CVEPage() {
               />
             )
           }
-        />
+        />}
+        {ready && search.isFetching && <p role="status" className="text-xs text-muted-foreground">Refreshing catalog results…</p>}
+        {ready && rows.length > 0 && <fieldset disabled={search.isFetching || q !== debouncedQ}><Pager page={page} pageSize={pageSize} hasMore={!search.isError && hasMore} rowsOnPage={rows.length} onPage={(next) => setParams((current) => { if (next) current.set("page", String(next + 1)); else current.delete("page"); return current; })} /></fieldset>}
+        {ready && !rows.length && page > 0 && <Button onClick={() => setParams(current => { current.delete("page"); return current; })}>First page</Button>}
+        <LookaheadExport context={context} disabled={!ready || search.isFetching} isCurrent={isCurrent} path={cve.catalogCSVPath} params={cve.catalogCSVParams(filters)} filename="constellation-cve-catalog.csv" />
       </div>
-
-      <div className="text-[10px] text-muted-foreground">
-        Showing up to {rows.length} fetched CVEs from {stats.data ? stats.data.total.toLocaleString() : "—"} catalog records; filter and sort run on the server. This view is capped at 50 results.
-      </div>
+      <p className="text-xs text-muted-foreground">Global intelligence catalog. Page CSV contains visible columns on this page; matching CSV preserves filters and sorting across pages. Summary metrics cover the entire catalog.</p>
     </PageContainer>
   );
+}
+
+function catalogResponseMatches(data: { results: CVEResult[]; limit: number; offset: number }, limit: number, offset: number) {
+  if (!Array.isArray(data.results) || data.limit !== limit || data.offset !== offset || data.results.length > limit) return false;
+  const ids = new Set<string>();
+  return data.results.every(row => {
+    if (!row || typeof row.cve_id !== "string" || !row.cve_id.trim() || ids.has(row.cve_id) || typeof row.kev_listed !== "boolean" || !Array.isArray(row.aliases) || !row.aliases.every(value => typeof value === "string") || !Array.isArray(row.sources) || !row.sources.every(value => typeof value === "string") || [row.title, row.description, row.cvss_vector].some(value => value !== undefined && typeof value !== "string") || [row.published_at, row.modified_at].some(value => value !== undefined && (typeof value !== "string" || !Number.isFinite(Date.parse(value)))) || [row.cvss_base, row.epss_probability].some(value => value !== undefined && (typeof value !== "number" || !Number.isFinite(value)))) return false;
+    ids.add(row.cve_id); return true;
+  });
 }
 
 function EpssBar({ value }: { value?: number }) {
@@ -369,7 +385,7 @@ function EpssBar({ value }: { value?: number }) {
   const pct = Math.min(100, Math.max(0, value * 100));
   const hot = pct >= 50;
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex items-center justify-end gap-1.5">
       <div className="h-1.5 w-14 overflow-hidden rounded-sm bg-muted">
         <div
           className="h-full rounded-sm"

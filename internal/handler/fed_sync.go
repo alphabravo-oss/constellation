@@ -143,20 +143,6 @@ func policyIsFed(ctx context.Context, pool *pgxpool.Pool, id, orgID uuid.UUID) (
 	return cfg == "fed", nil
 }
 
-// groupIsFed reports whether the group with the given id/org is a fed row.
-func groupIsFed(ctx context.Context, pool *pgxpool.Pool, id, orgID uuid.UUID) (bool, error) {
-	var cfg string
-	err := pool.QueryRow(ctx,
-		`SELECT cfg_type FROM groups WHERE id=$1 AND org_id=$2`, id, orgID).Scan(&cfg)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return false, nil
-		}
-		return false, err
-	}
-	return cfg == "fed", nil
-}
-
 // responseRuleOverrideIsFed reports whether the v1 response-rule override for the
 // given catalog ruleID/org is a fed (master-authored, read-only) row. Missing rows
 // report false so the caller's own create/update path stays in charge.
@@ -326,7 +312,7 @@ SELECT secret, cluster_id, client_cert_pem, client_key_enc, master_ca_pem
 		return nil
 	}
 
-	var maxRev int64 = since
+	maxRev := since
 	for _, rev := range sr.Revisions {
 		if err := applyFedRevision(ctx, pool, orgID, rev); err != nil {
 			return err
@@ -457,7 +443,7 @@ INSERT INTO fed_runtime_profiles (org_id, rule_kind, rule_key, payload, cfg_type
 VALUES ($1,$2,$3,$4,'fed')
 ON CONFLICT (org_id, rule_kind, rule_key) DO UPDATE SET
     payload=EXCLUDED.payload, cfg_type='fed', updated_at=NOW()`,
-			orgID, rev.Kind, rev.RuleID, []byte(payload))
+			orgID, rev.Kind, rev.RuleID, payload)
 		return err
 	case fedKindFileProfile + "_delete", fedKindHostProcessProfile + "_delete", fedKindRuntimeDLP + "_delete":
 		// Tombstone: the master removed this runtime profile. Drop the joint's fed

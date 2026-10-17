@@ -73,7 +73,7 @@ func TestNeuVectorCutoverFixtureManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	previewRequest := httptest.NewRequest(http.MethodPost, "/api/v1/migration/preview", strings.NewReader(string(body)))
+	previewRequest := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/migration/preview", strings.NewReader(string(body)))
 	previewRequest = previewRequest.WithContext(WithSubject(previewRequest.Context(), Subject{OrgID: fixture.org, UserID: fixture.user}))
 	previewResponse := httptest.NewRecorder()
 	fixture.h.MigrationPreview(previewResponse, previewRequest)
@@ -116,7 +116,7 @@ func TestNeuVectorCutoverFixtureManifest(t *testing.T) {
 			t.Fatalf("missing converted %s rule or binding: rules=%+v bindings=%+v", expected.category, preview.DPIRules, preview.DPIBindings)
 		}
 	}
-	applyRequest := migrationActionRequest(http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":apply", preview.ImportID, fixture.org, fixture.user)
+	applyRequest := migrationActionRequest(t.Context(), http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":apply", preview.ImportID, fixture.org, fixture.user)
 	applyResponse := httptest.NewRecorder()
 	fixture.h.MigrationApply(applyResponse, applyRequest)
 	if applyResponse.Code != http.StatusOK {
@@ -183,7 +183,7 @@ func TestNeuVectorCutoverFixtureManifest(t *testing.T) {
 			t.Fatalf("%s rule lost migration semantics: mode=%s source=%s apply_dir=%d severity=%d patterns=%s", expected.category, mode, source, applyDir, severity, patterns)
 		}
 	}
-	rollbackRequest := migrationActionRequest(http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":rollback", preview.ImportID, fixture.org, fixture.user)
+	rollbackRequest := migrationActionRequest(t.Context(), http.MethodPost, "/api/v1/migration/imports/"+preview.ImportID+":rollback", preview.ImportID, fixture.org, fixture.user)
 	rollbackResponse := httptest.NewRecorder()
 	fixture.h.MigrationRollback(rollbackResponse, rollbackRequest)
 	if rollbackResponse.Code != http.StatusOK {

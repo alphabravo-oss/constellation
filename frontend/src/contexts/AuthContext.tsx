@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { TablePreferencesProvider } from "./TablePreferencesContext";
 import { auth } from "@/api/client";
 
 interface Me {
@@ -66,7 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     notifyIdentityChange();
   }
 
-  return <AuthCtx.Provider value={{ me, loading, login, logout }}>{children}</AuthCtx.Provider>;
+  return <AuthCtx.Provider value={{ me, loading, login, logout }}><TablePreferencesProvider identity={me}>{children}</TablePreferencesProvider></AuthCtx.Provider>;
 }
 
 // eslint-disable-next-line react-refresh/only-export-components

@@ -27,17 +27,16 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler"
-	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
-	"github.com/alphabravocompany/constellation/internal/handler/sqlx"
+	"github.com/alphabravocompany/constellation/internal/telemetryingest"
 	"github.com/alphabravocompany/constellation/pkg/attack"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/notify"
@@ -145,12 +144,15 @@ type IngestEvent struct {
 	ContainerID string    `json:"container_id,omitempty"`
 
 	// Process fields (kind=process_exec).
-	PID      uint32   `json:"pid,omitempty"`
-	PPID     uint32   `json:"ppid,omitempty"`
-	UID      uint32   `json:"uid,omitempty"`
-	Comm     string   `json:"comm,omitempty"`
-	Filename string   `json:"filename,omitempty"`
-	Args     []string `json:"args,omitempty"`
+	ProcessStartTicks  string   `json:"process_start_ticks,omitempty"`
+	ProcessStartBootNS string   `json:"start_boot_ns,omitempty"`
+	BootID             string   `json:"boot_id,omitempty"`
+	PID                uint32   `json:"pid,omitempty"`
+	PPID               uint32   `json:"ppid,omitempty"`
+	UID                uint32   `json:"uid,omitempty"`
+	Comm               string   `json:"comm,omitempty"`
+	Filename           string   `json:"filename,omitempty"`
+	Args               []string `json:"args,omitempty"`
 
 	// RT-4 /proc enrichment from the agent (optional; absent => current behavior).
 	// UID above is the EFFECTIVE uid; Ruid is the REAL uid read from /proc/<pid>/status.
@@ -320,6 +322,16 @@ func (h *EventsIngest) Bulk(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, status, err.Error())
 		return
 	}
+	// Older agents discard 429 responses. Apply the new concurrency budget
+	// only to receipt-aware producers until the fleet has upgraded.
+	if r.Header.Get(telemetryingest.ProducerHeader) != "" || r.Header.Get(telemetryingest.SequenceHeader) != "" {
+		release, admitted := telemetryingest.Admit(w, tok.OrgID, clusterID)
+		if !admitted {
+			return
+		}
+		defer release()
+	}
+
 	fileRules, err := h.loadFileProfileRuleSet(r.Context(), tok.OrgID, clusterID, events)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, "file profile rules: "+err.Error())
@@ -332,6 +344,17 @@ func (h *EventsIngest) Bulk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
+	receipt, replay, err := telemetryingest.Begin(r.Context(), tx, r, tok.OrgID, clusterID, "events", events)
+	if err != nil {
+		telemetryingest.WriteError(w, err)
+		return
+	}
+	if replay != nil {
+		receipt.Acknowledge(w)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(replay)
+		return
+	}
 
 	const insertSQL = `
 INSERT INTO events (org_id, cluster_id, node_id, workload_id, namespace, container_id,
@@ -349,6 +372,7 @@ VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),'ebpf',$7,$8,$9,$10,$11,$12)`
 		}
 	}
 
+	var writes pgx.Batch
 	var alerts, inserted int
 	classifications := make([]eventClassification, len(events))
 	// ruleActions holds the ordered E1 response-rule actions matched for each event (only the
@@ -410,22 +434,28 @@ VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),'ebpf',$7,$8,$9,$10,$11,$12)`
 			storedKind = "file_modified"
 		}
 
-		if _, err := tx.Exec(r.Context(), insertSQL,
+		writes.Queue(insertSQL,
 			tok.OrgID, clusterID, ev.Node, ev.WorkloadID, ev.Namespace, ev.ContainerID,
 			storedKind, cls.Severity, cls.Verdict, techniques, payload, ev.At,
-		); err != nil {
-			jsonError(w, http.StatusInternalServerError, "insert: "+err.Error())
-			return
-		}
+		)
 		inserted++
 		if cls.Severity == "high" || cls.Severity == "critical" {
 			alerts++
 		}
 	}
+	if err := tx.SendBatch(r.Context(), &writes).Close(); err != nil {
+		jsonError(w, http.StatusInternalServerError, "event batch insert failed")
+		return
+	}
+	if err := receipt.Complete(r.Context(), tx, IngestResponse{Accepted: inserted, Alerts: alerts}); err != nil {
+		telemetryingest.WriteError(w, err)
+		return
+	}
 	if err := tx.Commit(r.Context()); err != nil {
 		jsonError(w, http.StatusInternalServerError, "commit: "+err.Error())
 		return
 	}
+	receipt.Acknowledge(w)
 
 	// Audit-log the high-severity events outside the events txn so an audit-chain
 	// failure doesn't roll back the ingest.
@@ -540,13 +570,15 @@ func (h *EventsIngest) dispatchResponse(ctx context.Context, orgID, clusterID uu
 
 func responseEventForIngest(clusterID uuid.UUID, ev *IngestEvent, cls eventClassification) response.Event {
 	revt := response.Event{
-		ID:        uuid.NewString(),
-		Name:      ev.Kind,
-		Type:      response.EventRuntime,
-		Severity:  cls.Severity,
-		Cluster:   clusterID.String(),
-		Namespace: ev.Namespace,
-		Workload:  ev.WorkloadID,
+		ObservedAt:    ev.At,
+		ProcessTarget: &response.ProcessTarget{Node: ev.Node, PID: ev.PID, Comm: ev.Comm, ContainerID: ev.ContainerID, BootID: ev.BootID, StartTicks: ev.ProcessStartTicks, StartBootNS: ev.ProcessStartBootNS},
+		ID:            uuid.NewString(),
+		Name:          ev.Kind,
+		Type:          response.EventRuntime,
+		Severity:      cls.Severity,
+		Cluster:       clusterID.String(),
+		Namespace:     ev.Namespace,
+		Workload:      ev.WorkloadID,
 		Labels: map[string]string{
 			"event_kind":  ev.Kind,
 			"node":        ev.Node,
@@ -1552,98 +1584,6 @@ func isSensitivePath(p string) bool {
 		}
 	}
 	return false
-}
-
-// EventDTO is the read-side shape returned by GET /api/v1/events.
-type EventDTO struct {
-	ID               uuid.UUID       `json:"id"`
-	At               time.Time       `json:"at"`
-	Kind             string          `json:"kind"`
-	Source           string          `json:"source"`
-	Severity         string          `json:"severity"`
-	Verdict          string          `json:"verdict"`
-	NodeID           string          `json:"node_id"`
-	WorkloadID       string          `json:"workload_id"`
-	Namespace        string          `json:"namespace,omitempty"`
-	ContainerID      string          `json:"container_id,omitempty"`
-	AttackTechniques []string        `json:"attack_techniques"`
-	Payload          json.RawMessage `json:"payload"`
-}
-
-// List handles GET /api/v1/events. Returns the most recent N events for the calling user's
-// org, ordered newest-first. Query params:
-//
-//	limit       1..1000   default 100
-//	kind        comma-separated list of kinds to filter
-//	severity    "info" | "low" | "medium" | "high" | "critical" — minimum
-//	workload    workload_id substring filter
-func (h *EventsIngest) List(w http.ResponseWriter, r *http.Request) {
-	subj, ok := authctx.SubjectFrom(r.Context())
-	if !ok {
-		jsonError(w, http.StatusUnauthorized, "no subject")
-		return
-	}
-	q := r.URL.Query()
-	limit, _ := strconv.Atoi(q.Get("limit"))
-	if limit <= 0 || limit > 1000 {
-		limit = 100
-	}
-	clusterArg, err := sqlx.ParseClusterIDParam(r)
-	if err != nil {
-		jsonError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	args := []any{subj.OrgID}
-	where := []string{"org_id = $1"}
-	if clusterArg != nil {
-		args = append(args, clusterArg)
-		where = append(where, "cluster_id = $"+strconv.Itoa(len(args)))
-	}
-	if kindList := q.Get("kind"); kindList != "" {
-		args = append(args, splitCSV(kindList))
-		where = append(where, "kind = ANY($"+strconv.Itoa(len(args))+")")
-	}
-	if wl := q.Get("workload"); wl != "" {
-		args = append(args, "%"+wl+"%")
-		where = append(where, "workload_id ILIKE $"+strconv.Itoa(len(args)))
-	}
-	if sev := q.Get("severity"); sev != "" {
-		// Treat severity as a tier filter rather than equality so the UI can ask
-		// for "show me high+".
-		tier := severityTier(sev)
-		args = append(args, tier)
-		where = append(where, "(CASE severity WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END) >= $"+strconv.Itoa(len(args)))
-	}
-	args = append(args, limit)
-	sql := `
-SELECT id, at, kind, source, severity, verdict, node_id, workload_id,
-       COALESCE(namespace,''), COALESCE(container_id,''), attack_techniques, payload
-  FROM events
- WHERE ` + strings.Join(where, " AND ") + `
- ORDER BY at DESC
- LIMIT $` + strconv.Itoa(len(args))
-	rows, err := h.db.Pool().Query(r.Context(), sql, args...)
-	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	defer rows.Close()
-	out := make([]EventDTO, 0, limit)
-	for rows.Next() {
-		var d EventDTO
-		var payload []byte
-		if err := rows.Scan(&d.ID, &d.At, &d.Kind, &d.Source, &d.Severity, &d.Verdict,
-			&d.NodeID, &d.WorkloadID, &d.Namespace, &d.ContainerID, &d.AttackTechniques, &payload); err != nil {
-			jsonError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		d.Payload = payload
-		if d.AttackTechniques == nil {
-			d.AttackTechniques = []string{}
-		}
-		out = append(out, d)
-	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"events": out, "limit": limit})
 }
 
 func splitCSV(s string) []string {

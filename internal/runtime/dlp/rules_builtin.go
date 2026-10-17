@@ -2,6 +2,7 @@ package dlp
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -22,7 +23,7 @@ func BuiltinSensor() Sensor {
 			{
 				ID: 1001, Msg: "Credit card number (Luhn-valid)",
 				Severity: SevCritical, Action: "block",
-				Regex:    `\b(?:\d[ -]*?){13,19}\b`,
+				Regex: `\b(?:\d[ -]*?){13,19}\b`,
 				Validator: func(s string) bool {
 					return luhnValid(stripNonDigits(s))
 				},
@@ -32,9 +33,9 @@ func BuiltinSensor() Sensor {
 				ID: 1002, Msg: "US Social Security Number",
 				Severity: SevCritical, Action: "block",
 				// RE2 has no negative lookaheads; we validate exclusions in code.
-				Regex:   `\b\d{3}-\d{2}-\d{4}\b`,
+				Regex:     `\b\d{3}-\d{2}-\d{4}\b`,
 				Validator: validSSN,
-				Targets: defaultTargets,
+				Targets:   defaultTargets,
 			},
 			{
 				ID: 1003, Msg: "AWS Access Key ID",
@@ -82,7 +83,7 @@ func BuiltinSensor() Sensor {
 			{
 				ID: 1010, Msg: "EU IBAN",
 				Severity: SevWarning, Action: "alert",
-				Regex:   `\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b`,
+				Regex: `\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b`,
 				Validator: func(s string) bool {
 					s = strings.ToUpper(stripNonAlnum(s))
 					return looksLikeIBAN(s)
@@ -173,7 +174,7 @@ func looksLikeIBAN(s string) bool {
 		case r >= '0' && r <= '9':
 			digits.WriteRune(r)
 		case r >= 'A' && r <= 'Z':
-			digits.WriteString(itoa(int(r - 'A' + 10)))
+			digits.WriteString(strconv.Itoa(int(r - 'A' + 10)))
 		default:
 			return false
 		}
@@ -184,13 +185,6 @@ func looksLikeIBAN(s string) bool {
 		mod = (mod*10 + int(r-'0')) % 97
 	}
 	return mod == 1
-}
-
-func itoa(n int) string {
-	if n < 10 {
-		return string('0' + rune(n))
-	}
-	return string('0'+rune(n/10)) + string('0'+rune(n%10))
 }
 
 // rxStripBlanks deletes whitespace + dashes (used by Luhn pre-check).

@@ -308,11 +308,11 @@ func writeRpmSQLite(t *testing.T, path string, blobs ...[]byte) {
 			t.Fatal(err)
 		}
 	}()
-	if _, err := db.Exec(`CREATE TABLE Packages (hnum INTEGER PRIMARY KEY AUTOINCREMENT, blob BLOB NOT NULL)`); err != nil {
+	if _, err := db.ExecContext(t.Context(), `CREATE TABLE Packages (hnum INTEGER PRIMARY KEY AUTOINCREMENT, blob BLOB NOT NULL)`); err != nil {
 		t.Fatal(err)
 	}
 	for _, blob := range blobs {
-		if _, err := db.Exec(`INSERT INTO Packages(blob) VALUES (?)`, blob); err != nil {
+		if _, err := db.ExecContext(t.Context(), `INSERT INTO Packages(blob) VALUES (?)`, blob); err != nil {
 			t.Fatal(err)
 		}
 	}

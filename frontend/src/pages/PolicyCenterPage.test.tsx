@@ -1,6 +1,6 @@
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+import { TestRouter } from "@/test/router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -54,7 +54,7 @@ describe("PolicyCenterPage", () => {
     vi.mocked(runtimeSignatures.list).mockResolvedValue([{ updated_at: "2026-09-23T12:00:00Z" } as DLPRule]);
     vi.mocked(groupsApi.list).mockResolvedValue({ groups: [{ updated_at: "2026-09-22T13:00:00Z" } as Group] });
     vi.mocked(vulnProfiles.list).mockResolvedValue({ profiles: [{ updated_at: "2026-09-21T14:00:00Z" } as VulnProfile] });
-    render(<PolicyCenterPage />);
+    await render(<PolicyCenterPage />);
     await settle();
 
     expect(changeTime("dlp")).toBe("2026-09-25T11:00:00.000Z");
@@ -79,7 +79,7 @@ describe("PolicyCenterPage", () => {
   it("does not invent change times for empty, invalid, or failed lists", async () => {
     vi.mocked(runtimeSignatures.list).mockResolvedValue([{ updated_at: "not-a-date" } as DLPRule]);
     vi.mocked(groupsApi.list).mockRejectedValue(new Error("unavailable"));
-    render(<PolicyCenterPage />);
+    await render(<PolicyCenterPage />);
     await settle();
 
     expect(changeText("dlp")).toContain("No listed items");
@@ -95,7 +95,7 @@ describe("PolicyCenterPage", () => {
       { match_counter: 7, last_match_timestamp: 1700000000 } as NetworkRule,
       { match_counter: 3, last_match_timestamp: 1700000100 } as NetworkRule,
     ], summary: { total: 2, allow: 2, deny: 0, learned: 2, disabled: 0 } });
-    render(<PolicyCenterPage />);
+    await render(<PolicyCenterPage />);
     await settle();
 
     const stats = familyElement("network-rules").querySelector('[data-testid="policy-family-network-rules-match-stats"]');
@@ -108,7 +108,7 @@ describe("PolicyCenterPage", () => {
     vi.mocked(networkRules.list).mockResolvedValue({ cluster_id: "cluster-1", rules: [
       { match_counter: -1, last_match_timestamp: -1 } as NetworkRule,
     ], summary: { total: 1, allow: 1, deny: 0, learned: 1, disabled: 0 } });
-    render(<PolicyCenterPage />);
+    await render(<PolicyCenterPage />);
     await settle();
 
     const stats = familyElement("network-rules").querySelector('[data-testid="policy-family-network-rules-match-stats"]');
@@ -116,15 +116,17 @@ describe("PolicyCenterPage", () => {
     expect(stats?.textContent).toContain("Last listed match: Unavailable");
   });
 
-  it("renders mode vocabulary and portable policy family controls", () => {
-    render(<PolicyCenterPage />);
+  it("renders mode vocabulary and portable policy family controls", async () => {
+    await render(<PolicyCenterPage />);
 
+    await selectTab("Mode guide");
     expect(text()).toContain("Discover");
     expect(text()).toContain("Learn");
     expect(text()).toContain("Monitor");
     expect(text()).toContain("Protect");
     expect(text()).toContain("Enforce");
 
+    await selectTab("Policy families");
     for (const slug of ["network-rules", "runtime-dlp", "runtime-signatures", "vuln-profiles", "groups"]) {
       const family = familyElement(slug);
       expect(family.textContent).toContain("yaml");
@@ -134,8 +136,8 @@ describe("PolicyCenterPage", () => {
     }
   });
 
-  it("shows migration only as migration and omits unsupported family imports", () => {
-    render(<PolicyCenterPage />);
+  it("shows migration only as migration and omits unsupported family imports", async () => {
+    await render(<PolicyCenterPage />);
 
     const migrationLinks = host?.querySelectorAll<HTMLAnchorElement>('a[href="/settings/migration"]');
     expect(migrationLinks).toHaveLength(1);
@@ -149,8 +151,8 @@ describe("PolicyCenterPage", () => {
     }
   });
 
-  it("links only supported precedence controls with their actual scope", () => {
-    render(<PolicyCenterPage />);
+  it("links only supported precedence controls with their actual scope", async () => {
+    await render(<PolicyCenterPage />);
 
     const network = familyElement("network-rules").querySelector('[data-testid="policy-family-network-rules-reorder"]');
     const response = familyElement("response-rules").querySelector('[data-testid="policy-family-response-rules-reorder"]');
@@ -178,7 +180,7 @@ describe("PolicyCenterPage", () => {
       ]),
       savedImport([diagnostic("network_rule", "other-source")], "stackrox"),
     ], has_more: false });
-    render(<PolicyCenterPage />);
+    await render(<PolicyCenterPage />);
     await settle();
 
     expect(familyElement("network-rules").textContent).toContain("blocked-flow");
@@ -206,14 +208,16 @@ describe("PolicyCenterPage", () => {
         diagnostic("registry", "registry-record"),
       ]),
     ], has_more: false });
-    render(<PolicyCenterPage />);
+    await render(<PolicyCenterPage />);
     await settle();
 
+    await selectTab("Migration diagnostics");
     const general = host?.querySelector('[data-testid="migration-general-diagnostics"]');
     expect(general?.textContent).toContain("unknown_future_kind · future");
     expect(general?.textContent).toContain("dpi_pattern · ambiguous");
     expect(general?.textContent).toContain("registry · registry-record");
     expect(general?.textContent).toContain("Review manually");
+    await selectTab("Policy families");
     expect(familyElement("runtime-dlp").textContent).not.toContain("ambiguous");
     expect(familyElement("runtime-signatures").textContent).not.toContain("ambiguous");
   });
@@ -221,7 +225,7 @@ describe("PolicyCenterPage", () => {
   it("shows loading, empty, and error states for saved diagnostics", async () => {
     let resolveImports!: (page: MigrationImportPage) => void;
     vi.mocked(enterprise.migrationImportsPage).mockImplementation(() => new Promise((resolve) => { resolveImports = resolve; }));
-    render(<PolicyCenterPage />);
+    await render(<PolicyCenterPage />, "migration");
     expect(text()).toContain("Loading migration diagnostics");
 
     await act(async () => resolveImports({ imports: [], has_more: false }));
@@ -237,7 +241,7 @@ describe("PolicyCenterPage", () => {
 
   it("reports an initial history failure without claiming an empty history", async () => {
     vi.mocked(enterprise.migrationImportsPage).mockRejectedValue(new Error("unavailable"));
-    render(<PolicyCenterPage />);
+    await render(<PolicyCenterPage />, "migration");
     await settle();
 
     expect(host?.querySelector('[role="alert"]')?.textContent).toContain("Migration diagnostics are unavailable");
@@ -254,7 +258,7 @@ describe("PolicyCenterPage", () => {
       .mockResolvedValueOnce({ imports: [
         { ...savedImport([diagnostic("group", "next-page")], "neuvector", "cluster-1"), id: "next-import" },
       ], has_more: false });
-    render(<PolicyCenterPage />);
+    await render(<PolicyCenterPage />);
     await settle();
 
     expect(familyElement("network-rules").textContent).toContain("selected");
@@ -262,6 +266,7 @@ describe("PolicyCenterPage", () => {
     expect(familyElement("network-rules").textContent).toContain("legacy");
     expect(familyElement("network-rules").textContent).toContain("Target: unknown or unspecified");
     expect(familyElement("network-rules").textContent).not.toContain("sibling");
+    await selectTab("Migration diagnostics");
     expect(host?.querySelector('[data-testid="migration-other-cluster-diagnostics"]')?.textContent).toContain("Target: other cluster (cluster-2)");
     expect(host?.querySelector('[data-testid="migration-other-cluster-diagnostics"]')?.textContent).toContain("sibling");
     expect(enterprise.migrationImportsPage).toHaveBeenCalledWith({ limit: 25 });
@@ -272,24 +277,26 @@ describe("PolicyCenterPage", () => {
     await settle();
 
     expect(enterprise.migrationImportsPage).toHaveBeenCalledWith({ limit: 25, cursor: "cursor-25" });
-    expect(familyElement("groups").textContent).toContain("next-page");
     expect(text()).not.toContain("Load more imports");
+    await selectTab("Policy families");
+    expect(familyElement("groups").textContent).toContain("next-page");
   });
 
   it("keeps loaded diagnostics visible when another page fails", async () => {
     vi.mocked(enterprise.migrationImportsPage)
       .mockResolvedValueOnce({ imports: [savedImport([diagnostic("network_rule", "saved")], "neuvector", "cluster-1")], has_more: true, next_cursor: "cursor-25" })
       .mockRejectedValueOnce(new Error("next page unavailable"));
-    render(<PolicyCenterPage />);
+    await render(<PolicyCenterPage />, "migration");
     await settle();
 
     const button = Array.from(host?.querySelectorAll("button") ?? []).find((candidate) => candidate.textContent === "Load more imports");
     await act(async () => { button?.click(); });
     await settle();
 
-    expect(familyElement("network-rules").textContent).toContain("saved");
     expect(host?.querySelector('[role="alert"]')?.textContent).toContain("Could not load more migration history");
     expect(text()).toContain("Load more imports");
+    await selectTab("Policy families");
+    expect(familyElement("network-rules").textContent).toContain("saved");
   });
 });
 
@@ -315,15 +322,15 @@ async function settle() {
   throw new Error("Policy Center queries did not settle");
 }
 
-function render(ui: ReactNode) {
+async function render(ui: ReactNode, tab = "families") {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  act(() => {
+  await act(async () => {
     root?.render(
       <QueryClientProvider client={queryClient!}>
-        <MemoryRouter>{ui}</MemoryRouter>
+        <TestRouter initialEntries={[`/?tab=${tab}`]}>{ui}</TestRouter>
       </QueryClientProvider>,
     );
   });
@@ -349,4 +356,11 @@ function familyElement(slug: string) {
   const family = host?.querySelector<HTMLElement>(`[data-testid="policy-family-${slug}"]`);
   if (!family) throw new Error(`Missing policy family ${slug}`);
   return family;
+}
+
+async function selectTab(label: string) {
+  const tab = Array.from(host?.querySelectorAll('[role="tab"]') ?? []).find((element) => element.textContent === label)!;
+  await act(async () => { tab.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })); });
+  await vi.waitFor(async () => { await act(async () => {}); expect(tab.getAttribute("aria-selected")).toBe("true"); });
+  await settle();
 }

@@ -49,7 +49,7 @@ func federationJoinCmd(serverFlag *string) *cobra.Command {
 		Example: `  constellationctl --server https://joint.example.com federation join \
     --master-url https://master.example.com --token <join-token>`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cli, err := resolveClient(*serverFlag, email)
+			cli, err := resolveClient(cmd.Context(), *serverFlag, email)
 			if err != nil {
 				return err
 			}
@@ -72,17 +72,18 @@ func federationJoinCmd(serverFlag *string) *cobra.Command {
 				MasterURL string `json:"master_url"`
 				MTLS      bool   `json:"mtls"`
 			}
-			if err := cli.postJSON("/api/v1/federation/join-remote", body, &resp); err != nil {
+			if err := cli.postJSON(cmd.Context(), "/api/v1/federation/join-remote", body, &resp); err != nil {
 				return err
 			}
 			mode := "bearer-only"
 			if resp.MTLS {
 				mode = "mTLS (per-joint client cert issued)"
 			}
-			fmt.Fprintf(cmd.OutOrStdout(),
+			output := &commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
+			output.printf(
 				"Joined federation master %s as cluster_id=%s (state=%s, auth=%s)\n",
 				resp.MasterURL, resp.ClusterID, resp.State, mode)
-			return nil
+			return output.result()
 		},
 	}
 	cmd.Flags().StringVar(&masterURL, "master-url", "", "Federation master base URL (e.g. https://master.example.com)")

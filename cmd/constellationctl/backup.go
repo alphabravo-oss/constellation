@@ -18,10 +18,10 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/spf13/cobra"
 
@@ -34,144 +34,184 @@ func backupCmd() *cobra.Command {
 	return c
 }
 
+type cliBackupCreateOptions struct {
+	dbURL, out, s3URI, orgName, orgID, signKey, verifyKey string
+	signKeyless                                           bool
+}
+
 func backupCreateCmd() *cobra.Command {
-	var (
-		dbURL       string
-		out         string
-		s3URI       string
-		orgName     string
-		orgID       string
-		signKey     string
-		signKeyless bool
-		verifyKey   string
-	)
-	c := &cobra.Command{
-		Use:   "create",
-		Short: "Create a signed full-org backup",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			if dbURL == "" {
-				dbURL = os.Getenv("DATABASE_URL")
-			}
-			if dbURL == "" {
-				return fmt.Errorf("--database-url or DATABASE_URL required")
-			}
-			if out == "" && s3URI == "" {
-				return fmt.Errorf("--out or --s3 required")
-			}
-			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Minute)
-			defer cancel()
-
-			pool, err := pgxpool.New(ctx, dbURL)
-			if err != nil {
-				return err
-			}
-			defer pool.Close()
-
-			// Resolve org.
-			id, name, err := resolveOrgCLI(ctx, pool, orgID, orgName)
-			if err != nil {
-				return err
-			}
-
-			signOpts := backup.SignerOptions{Mode: backup.SignModeNone}
-			if signKeyless {
-				signOpts.Mode = backup.SignModeKeyless
-			} else if signKey != "" {
-				signOpts.Mode = backup.SignModeStaticKey
-				signOpts.KeyPath = signKey
-			}
-
-			outPath := out
-			if outPath == "" {
-				f, err := os.CreateTemp("", "constellation-backup-*.tar.gz")
-				if err != nil {
-					return err
-				}
-				_ = f.Close()
-				outPath = f.Name()
-			}
-			usingTemp := out == ""
-			hostname, _ := os.Hostname()
-			res, err := backup.ExportToFile(ctx, pool, outPath, backup.ExportOptions{
-				OrgID: id, OrgName: name,
-				GeneratedBy: "constellationctl", SourceInstance: hostname,
-				Sign: signOpts,
-			})
-			if err != nil {
-				return err
-			}
-			if verifyKey != "" && (signOpts.Mode == backup.SignModeNone || signOpts.Mode == "") {
-				return fmt.Errorf("--verify-key requires --sign-key or --sign-keyless")
-			}
-			if signOpts.Mode == backup.SignModeKeyless || (signOpts.Mode == backup.SignModeStaticKey && verifyKey != "") {
-				if err := verifyCLIBackupAfterWrite(outPath, signOpts.Mode, verifyKey); err != nil {
-					return fmt.Errorf("verify after write: %w", err)
-				}
-			}
-			var objectURI string
-			if s3URI != "" {
-				objectURI, err = uploadCLIBackupToS3(ctx, s3URI, outPath, name)
-				if err != nil {
-					return fmt.Errorf("s3 upload: %w", err)
-				}
-			}
-			// Record the backup row in the catalog so `backup list` and the UI see it.
-			tables := make([]string, 0, len(res.Manifest.Tables))
-			for _, t := range res.Manifest.Tables {
-				tables = append(tables, t.Name)
-			}
-			localPath := any(outPath)
-			if usingTemp && objectURI != "" {
-				localPath = nil
-			}
-			_, _ = pool.Exec(ctx, `
-INSERT INTO backups (id, org_id, mode, status, started_at, finished_at,
-                     size_bytes, signed, signer_identity, format_version,
-                     tables_included, local_path, s3_uri, object_uri)
-VALUES (gen_random_uuid(), $1::uuid, 'org-backup', 'succeeded', NOW(), NOW(),
-        $2, $3, $4, $5, $6, $7, $8, $9)`,
-				id, res.Bytes, signOpts.Mode != backup.SignModeNone && signOpts.Mode != "",
-				res.SignerIdentity, backup.FormatVersion, tables, localPath, nullableString(objectURI), nullableString(objectURI))
-			if objectURI != "" {
-				fmt.Fprintf(cmd.OutOrStdout(), "uploaded %s (%d bytes)\n", objectURI, res.Bytes)
-			} else {
-				fmt.Fprintf(cmd.OutOrStdout(), "wrote %s (%d bytes)\n", outPath, res.Bytes)
-			}
-			fmt.Fprintf(cmd.OutOrStdout(), "org=%s tables=%d root_hash=%s\n", name, len(res.Manifest.Tables), res.Manifest.RootHash)
-			if res.SignerIdentity != "" {
-				fmt.Fprintf(cmd.OutOrStdout(), "signed by %s\n", res.SignerIdentity)
-			}
-			if signOpts.Mode == backup.SignModeKeyless || (signOpts.Mode == backup.SignModeStaticKey && verifyKey != "") {
-				fmt.Fprintln(cmd.OutOrStdout(), "signature verified")
-			}
-			if usingTemp && objectURI != "" {
-				_ = os.Remove(outPath)
-			}
-			return nil
-		},
-	}
-	c.Flags().StringVar(&dbURL, "database-url", "", "Postgres URL (or DATABASE_URL)")
-	c.Flags().StringVar(&out, "out", "", "Local file path for the tarball")
-	c.Flags().StringVar(&s3URI, "s3", "", "s3://bucket/prefix destination uploaded with the AWS CLI")
-	c.Flags().StringVar(&orgName, "org", "", "Org name to back up (default: only org)")
-	c.Flags().StringVar(&orgID, "org-id", "", "Org UUID to back up")
-	c.Flags().StringVar(&signKey, "sign-key", "", "PEM ed25519 private key for cosign-style signing")
-	c.Flags().BoolVar(&signKeyless, "sign-keyless", false, "Use cosign keyless signing (Fulcio)")
-	c.Flags().StringVar(&verifyKey, "verify-key", "", "Public key for verify-after-write")
+	var args cliBackupCreateOptions
+	c := &cobra.Command{Use: "create", Short: "Create a signed full-org backup", RunE: func(cmd *cobra.Command, _ []string) error { return args.run(cmd) }}
+	c.Flags().StringVar(&args.dbURL, "database-url", "", "Postgres URL (or DATABASE_URL)")
+	c.Flags().StringVar(&args.out, "out", "", "Local file path for the tarball")
+	c.Flags().StringVar(&args.s3URI, "s3", "", "s3://bucket/prefix destination uploaded with the AWS CLI")
+	c.Flags().StringVar(&args.orgName, "org", "", "Org name to back up (default: only org)")
+	c.Flags().StringVar(&args.orgID, "org-id", "", "Org UUID to back up")
+	c.Flags().StringVar(&args.signKey, "sign-key", "", "PEM ed25519 private key for cosign-style signing")
+	c.Flags().BoolVar(&args.signKeyless, "sign-keyless", false, "Use cosign keyless signing (Fulcio)")
+	c.Flags().StringVar(&args.verifyKey, "verify-key", "", "Public key for verify-after-write")
 	return c
 }
 
-func verifyCLIBackupAfterWrite(path string, mode backup.SignMode, verifyKey string) error {
-	f, err := os.Open(path)
+func (a *cliBackupCreateOptions) preflight(cmd *cobra.Command) (backup.SignMode, error) {
+	if cmd.Flags().Changed("sign-key") && a.signKey == "" {
+		return "", errors.New("--sign-key must not be empty")
+	}
+	if cmd.Flags().Changed("verify-key") && a.verifyKey == "" {
+		return "", errors.New("--verify-key must not be empty")
+	}
+	mode, err := backup.ValidateCLIBackupSigning(a.signKey, a.signKeyless, a.verifyKey)
+	if err != nil {
+		return "", err
+	}
+	if a.s3URI != "" {
+		if _, err = backup.S3ArtifactURI(a.s3URI, "validation"); err != nil {
+			return "", err
+		}
+	}
+	if a.dbURL == "" {
+		a.dbURL = os.Getenv("DATABASE_URL")
+	}
+	if a.dbURL == "" {
+		return "", errors.New("--database-url or DATABASE_URL required")
+	}
+	if a.out == "" && a.s3URI == "" {
+		return "", errors.New("--out or --s3 required")
+	}
+	return mode, nil
+}
+
+func (a cliBackupCreateOptions) run(cmd *cobra.Command) (resultErr error) {
+	mode, err := a.preflight(cmd)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	manifestBytes, sig, cert, err := extractCLIManifestAndSig(f)
+	ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Minute)
+	defer cancel()
+	pool, err := pgxpool.New(ctx, a.dbURL)
+	if err != nil {
+		return backup.CLIFailure("database configuration", err)
+	}
+	defer pool.Close()
+	orgID, name, err := resolveOrgCLI(ctx, pool, a.orgID, a.orgName)
+	if err != nil {
+		return backup.CLIFailure("organization lookup", err)
+	}
+	rowID := uuid.New()
+	at := time.Now().UTC()
+	out := a.out
+	var workspace *backup.CLIWorkspace
+	if out == "" {
+		workspace, err = backup.NewCLIWorkspace(name, rowID, at)
+		if err != nil {
+			return err
+		}
+		out = workspace.Path
+		defer func() { resultErr = errors.Join(resultErr, workspace.Close()) }()
+	}
+	hostname, _ := os.Hostname()
+	res, err := backup.ExportToFile(ctx, pool, out, backup.ExportOptions{OrgID: orgID, OrgName: name, GeneratedBy: "constellationctl", SourceInstance: hostname, Sign: backup.SignerOptions{Mode: mode, KeyPath: a.signKey}})
+	if err != nil {
+		return backup.CLIFailure("backup export", err)
+	}
+	artifact, err := backup.OpenArtifact(out)
+	if err != nil {
+		return backup.CLIFailure("backup artifact open", err)
+	}
+	defer func() {
+		resultErr = errors.Join(resultErr, backup.CLIFailure("backup artifact close", artifact.Close()))
+	}()
+	if err = a.verify(artifact, mode); err != nil {
+		return err
+	}
+	if workspace != nil {
+		workspace.Preserve()
+	}
+	uri, err := a.upload(ctx, name, rowID, at, artifact, res.Bytes)
+	if err != nil {
+		return errors.Join(err, fmt.Errorf("completed backup retained at %s", out))
+	}
+	receipt := cliBackupReceipt{ID: rowID, OrgID: orgID, Out: out, URI: uri, Temporary: workspace != nil, Mode: mode, Result: res}
+	if err = receipt.record(ctx, pool); err != nil {
+		return err
+	}
+	if workspace != nil && uri != "" {
+		workspace.Discard()
+	}
+	return receipt.print(cmd, name, a.verifyKey != "")
+}
+
+func (a cliBackupCreateOptions) verify(file *os.File, mode backup.SignMode) error {
+	if mode != backup.SignModeKeyless && a.verifyKey == "" {
+		return nil
+	}
+	return backup.CLIFailure("backup verification", verifyOpenedCLIBackup(file, mode, a.verifyKey))
+}
+func (a cliBackupCreateOptions) upload(ctx context.Context, name string, id uuid.UUID, at time.Time, file *os.File, size int64) (string, error) {
+	if a.s3URI == "" {
+		return "", nil
+	}
+	uri, err := buildBackupS3URI(a.s3URI, name, at, id)
+	if err != nil {
+		return "", err
+	}
+	return uri, backup.UploadS3Artifact(ctx, uri, "", file, size)
+}
+
+type cliBackupReceipt struct {
+	ID              uuid.UUID
+	OrgID, Out, URI string
+	Temporary       bool
+	Mode            backup.SignMode
+	Result          *backup.ExportResult
+}
+
+func (r cliBackupReceipt) record(ctx context.Context, pool *pgxpool.Pool) error {
+	tables := make([]string, 0, len(r.Result.Manifest.Tables))
+	for _, table := range r.Result.Manifest.Tables {
+		tables = append(tables, table.Name)
+	}
+	local := any(r.Out)
+	if r.Temporary && r.URI != "" {
+		local = nil
+	}
+	_, err := pool.Exec(ctx, `
+INSERT INTO backups (id, org_id, mode, status, started_at, finished_at,
+                     size_bytes, signed, signer_identity, format_version,
+                     tables_included, local_path, s3_uri, object_uri)
+VALUES ($10, $1::uuid, 'org-backup', 'succeeded', NOW(), NOW(),
+        $2, $3, $4, $5, $6, $7, $8, $9)`, r.OrgID, r.Result.Bytes, r.Mode != backup.SignModeNone, r.Result.SignerIdentity, backup.FormatVersion, tables, local, nullableString(r.URI), nullableString(r.URI), r.ID)
+	if err != nil {
+		return errors.Join(backup.CLIFailure("backup artifact created but catalog acknowledgment", err), fmt.Errorf("backup catalog success unconfirmed; backup_id=%s; retained_path=%s; object_uri=%s", r.ID, r.Out, r.URI))
+	}
+	return nil
+}
+func (r cliBackupReceipt) print(cmd *cobra.Command, name string, explicitVerify bool) error {
+	output := &commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
+	if r.URI != "" {
+		output.printf("uploaded %s (%d bytes)\n", r.URI, r.Result.Bytes)
+	} else {
+		output.printf("wrote %s (%d bytes)\n", r.Out, r.Result.Bytes)
+	}
+	output.printf("org=%s tables=%d root_hash=%s\n", name, len(r.Result.Manifest.Tables), r.Result.Manifest.RootHash)
+	if r.Result.SignerIdentity != "" {
+		output.printf("signed by %s\n", r.Result.SignerIdentity)
+	}
+	if r.Mode == backup.SignModeKeyless || explicitVerify {
+		output.println("signature verified")
+	}
+	return output.result()
+}
+
+func verifyOpenedCLIBackup(file *os.File, mode backup.SignMode, key string) error {
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	manifest, sig, cert, err := extractCLIManifestAndSig(file)
 	if err != nil {
 		return err
 	}
-	_, err = backup.Verify(manifestBytes, sig, cert, backup.VerifierOptions{Mode: mode, KeyPath: verifyKey})
+	_, err = backup.Verify(manifest, sig, cert, backup.VerifierOptions{Mode: mode, KeyPath: key})
 	return err
 }
 
@@ -180,25 +220,42 @@ func extractCLIManifestAndSig(r io.Reader) (manifest, sig, cert []byte, err erro
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	defer gz.Close()
-	tr := tar.NewReader(gz)
+	defer func() { err = errors.Join(err, gz.Close()) }()
+	limited := &io.LimitedReader{R: gz, N: (512 << 20) + 1}
+	tr := tar.NewReader(limited)
 	for {
 		hdr, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		buf, _ := io.ReadAll(tr)
-		switch hdr.Name {
-		case "manifest.json":
-			manifest = buf
-		case "manifest.json.sig":
-			sig = buf
-		case "manifest.json.cert":
-			cert = buf
+		if hdr.Size > 512<<20 {
+			return nil, nil, nil, errors.New("backup signature inspection exceeds 512 MiB decompressed limit")
 		}
+		switch hdr.Name {
+		case "manifest.json", "manifest.json.sig", "manifest.json.cert":
+			buf, readErr := io.ReadAll(tr)
+			if readErr != nil {
+				return nil, nil, nil, readErr
+			}
+			switch hdr.Name {
+			case "manifest.json":
+				manifest = buf
+			case "manifest.json.sig":
+				sig = buf
+			case "manifest.json.cert":
+				cert = buf
+			}
+		}
+
+	}
+	if _, readErr := io.Copy(io.Discard, io.LimitReader(limited, (512<<20)+1)); readErr != nil {
+		return nil, nil, nil, readErr
+	}
+	if limited.N == 0 {
+		return nil, nil, nil, errors.New("backup signature inspection exceeds 512 MiB decompressed limit")
 	}
 	if manifest == nil {
 		return nil, nil, nil, errors.New("manifest.json not found in tarball")
@@ -206,36 +263,8 @@ func extractCLIManifestAndSig(r io.Reader) (manifest, sig, cert []byte, err erro
 	return manifest, sig, cert, nil
 }
 
-func uploadCLIBackupToS3(ctx context.Context, dest, path, orgName string) (string, error) {
-	uri, err := buildBackupS3URI(dest, orgName, time.Now().UTC())
-	if err != nil {
-		return "", err
-	}
-	if _, err := exec.LookPath("aws"); err != nil {
-		return "", fmt.Errorf("aws CLI not in PATH")
-	}
-	cmd := exec.CommandContext(ctx, "aws", "s3", "cp", path, uri)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return "", err
-	}
-	return uri, nil
-}
-
-func buildBackupS3URI(dest, orgName string, at time.Time) (string, error) {
-	rest := strings.TrimPrefix(dest, "s3://")
-	parts := strings.SplitN(rest, "/", 2)
-	if rest == dest || parts[0] == "" {
-		return "", fmt.Errorf("destination must be s3://bucket[/prefix]")
-	}
-	keyPrefix := ""
-	if len(parts) == 2 {
-		keyPrefix = strings.TrimSuffix(parts[1], "/") + "/"
-	}
-	stamp := at.UTC().Format(time.RFC3339)
-	key := fmt.Sprintf("%sconstellation-backup-%s-%s.tar.gz", keyPrefix, orgName, stamp)
-	return fmt.Sprintf("s3://%s/%s", parts[0], key), nil
+func buildBackupS3URI(dest, orgName string, at time.Time, id uuid.UUID) (string, error) {
+	return backup.S3BackupURI(dest, orgName, id, at)
 }
 
 func nullableString(s string) any {
@@ -252,7 +281,7 @@ func backupListCmd() *cobra.Command {
 		Short: "List recorded backups",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if server != "" {
-				return listViaServer(cmd, server)
+				return listViaServer(cmd.Context(), server, cmd.OutOrStdout())
 			}
 			if dbURL == "" {
 				dbURL = os.Getenv("DATABASE_URL")
@@ -264,7 +293,7 @@ func backupListCmd() *cobra.Command {
 			defer cancel()
 			pool, err := pgxpool.New(ctx, dbURL)
 			if err != nil {
-				return err
+				return backup.CLIFailure("database configuration", err)
 			}
 			defer pool.Close()
 			rows, err := pool.Query(ctx, `
@@ -278,7 +307,11 @@ SELECT id, COALESCE(mode,'org-backup'), status, COALESCE(format_version,''),
 				return err
 			}
 			defer rows.Close()
-			fmt.Fprintf(cmd.OutOrStdout(), "%-36s %-12s %-10s %-10s %-12s %s\n", "ID", "MODE", "STATUS", "SIZE", "SIGNED", "WHEN")
+			output := &commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
+			output.printf("%-36s %-12s %-10s %-10s %-12s %s\n", "ID", "MODE", "STATUS", "SIZE", "SIGNED", "WHEN")
+			if err := output.result(); err != nil {
+				return err
+			}
 			for rows.Next() {
 				var id, mode, status, fmtVer, signer, s3uri, lp string
 				var signed bool
@@ -295,9 +328,12 @@ SELECT id, COALESCE(mode,'org-backup'), status, COALESCE(format_version,''),
 				if signed {
 					sgn = "yes"
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "%-36s %-12s %-10s %-10d %-12s %s\n", id, mode, status, size, sgn, ts)
+				output.printf("%-36s %-12s %-10s %-10d %-12s %s\n", id, mode, status, size, sgn, ts)
+				if err := output.result(); err != nil {
+					return err
+				}
 			}
-			return nil
+			return rows.Err()
 		},
 	}
 	c.Flags().StringVar(&dbURL, "database-url", "", "Postgres URL (or DATABASE_URL)")
@@ -305,22 +341,29 @@ SELECT id, COALESCE(mode,'org-backup'), status, COALESCE(format_version,''),
 	return c
 }
 
-func listViaServer(cmd *cobra.Command, server string) error {
-	cfg, _ := loadConfig()
-	req, err := http.NewRequest(http.MethodGet, strings.TrimRight(server, "/")+"/api/v1/backups", nil)
+func listViaServer(ctx context.Context, server string, out io.Writer) error {
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(server, "/")+"/api/v1/backups", nil)
 	if err != nil {
 		return err
 	}
 	if cfg != nil && cfg.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+cfg.Token)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := newAPIClient().Do(req)
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
-	io.Copy(cmd.OutOrStdout(), resp.Body)
-	return nil
+	if resp.StatusCode != http.StatusOK {
+		return errors.Join(fmt.Errorf("list backups: server returned %d", resp.StatusCode), resp.Body.Close())
+	}
+	// Preserve the configured Write contract rather than an embedded ReaderFrom
+	// implementation that can bypass an output wrapper's failure handling.
+	_, err = io.Copy(struct{ io.Writer }{out}, resp.Body)
+	return errors.Join(err, resp.Body.Close(), ctx.Err())
 }
 
 func backupRestoreCmd() *cobra.Command {
@@ -334,7 +377,7 @@ func backupRestoreCmd() *cobra.Command {
 		Use:   "restore <path>",
 		Short: "Restore a backup tarball into the destination database",
 		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) (resultErr error) {
 			path := args[0]
 			if dbURL == "" {
 				dbURL = os.Getenv("DATABASE_URL")
@@ -353,10 +396,10 @@ func backupRestoreCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			defer f.Close()
+			defer func() { resultErr = errors.Join(resultErr, f.Close()) }()
 			pool, err := pgxpool.New(ctx, dbURL)
 			if err != nil {
-				return err
+				return backup.CLIFailure("database configuration", err)
 			}
 			defer pool.Close()
 
@@ -373,12 +416,13 @@ func backupRestoreCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Restored org=%s verified=%t signer=%s\n",
+			output := &commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
+			output.printf("Restored org=%s verified=%t signer=%s\n",
 				res.Manifest.OrgName, res.Verified, res.SignerIdentity)
 			for _, t := range res.Tables {
-				fmt.Fprintf(cmd.OutOrStdout(), "  %s: %d new / %d updated / %d skipped\n", t.Name, t.New, t.Updated, t.Skipped)
+				output.printf("  %s: %d new / %d updated / %d skipped\n", t.Name, t.New, t.Updated, t.Skipped)
 			}
-			return nil
+			return output.result()
 		},
 	}
 	c.Flags().StringVar(&dbURL, "database-url", "", "Postgres URL (or DATABASE_URL)")
@@ -394,11 +438,15 @@ func backupGenKeyCmd() *cobra.Command {
 		Short: "Generate a cosign-compatible ed25519 keypair for signing backups",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := cmd.Context().Err(); err != nil {
+				return err
+			}
 			if err := backup.GenerateEd25519Keypair(args[0], args[1]); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "wrote %s (private, 0600) and %s (public, 0644)\n", args[0], args[1])
-			return nil
+			output := &commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
+			output.printf("wrote %s (private, 0600) and %s (public, 0644)\n", args[0], args[1])
+			return output.result()
 		},
 	}
 }

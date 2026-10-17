@@ -7,7 +7,9 @@ metadata only; the SPA removes the obsolete localStorage token on startup.
 Deploy the UI and API behind the same HTTPS origin. Plain HTTP remote-host
 deployments cannot use these Secure cookies; do not disable Secure as a workaround.
 
-Apply Goose migration 163 before rolling out the API and matching frontend.
+Apply migrations through **171** before rolling out the current API and matching
+frontend. The API checks its required schema before initializing services; Helm
+uses the same API image with `--check-schema` as its init-container gate.
 Clients holding old localStorage credentials must sign in again. Explicit bearer
 clients continue using `POST /api/v1/auth/login` without browser headers and
 receive a JSON token; personal access tokens remain the preferred automation
@@ -34,6 +36,38 @@ including when the header is invalid.
   coordinate tabs. Strict replay detection still applies to duplicate refresh
   requests; browsers without Web Locks can require reauthentication after a
   cross-tab race.
+
+## Operational cleanup
+
+Migration 171 records the absolute expiry of newly issued tracked sessions.
+Browser login atomically extends that row to cover its refresh family's absolute
+deadline. Rotation does not extend that deadline. Legacy session rows with no
+recorded expiry remain untouched; guessing from last activity could revoke a
+still-valid credential.
+
+The API leader reaps once at startup and every minute, with at most 1,000 rows
+per family per pass and a five-second deadline per statement. Locked rows are
+skipped. Refresh rows expire one minute after their absolute deadline, including
+consumed digests; consumed but unexpired digests remain for reuse detection.
+A session is eligible only after its recorded deadline plus one minute **and**
+after all its refresh rows have gone, preventing an unbounded foreign-key cascade.
+Other replicas can take over with the leader lease; deployments without leader
+election can run concurrent, bounded passes safely.
+
+The same worker removes network snapshots and undelivered network-session kill
+requests older than five minutes. Delivery independently rejects expired commands.
+The API and console expose the delivery deadline; a queued request is not proof
+of agent execution. Audit receipts are preserved. Durable delivery/acknowledgement
+and the other operational-history families remain separate parity work.
+
+Metrics use four fixed family labels, with no session, user, cluster or token
+identifiers: `constellation_session_cleanup_deleted_total{family}`,
+`constellation_session_cleanup_failures_total`,
+`constellation_session_cleanup_last_success_timestamp_seconds`, and
+`constellation_session_cleanup_duration_seconds`. The last-success gauge is zero
+until a pass completes. Aggregate across API replicas when evaluating worker
+freshness because follower gauges remain zero. These measurements do not yet
+provide a backlog alarm or prove the 1,000-row/minute budget handles a given load.
 
 ## CSRF contract
 
@@ -69,5 +103,7 @@ and network afterward. Install Playwright Chromium first with
 Additional Playwright spec paths can be passed to the script. Logs/image IDs are
 stored under `artifacts/browser`; Playwright retains failure traces and screenshots.
 This gate does not claim live external-IdP, multi-replica, CNI or production rollout
-coverage. Consumed refresh-row retention/cleanup operational limits and broader
-TSG security requirements remain tracked in `NEUVECTOR-PARITY-PLAN.md`.
+coverage. Real PostgreSQL tests cover expiry, batch/cascade bounds, locked rows,
+legacy sessions, cluster/node key collisions, browser refresh and reuse revocation.
+Live cleanup/backlog alerting, measured capacity and broader TSG security
+requirements remain tracked in `NEUVECTOR-PARITY-PLAN.md`.

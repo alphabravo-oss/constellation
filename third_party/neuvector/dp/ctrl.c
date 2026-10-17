@@ -1,5 +1,6 @@
 #include <stddef.h>
 #include <stdint.h>
+#include <time.h>
 #include <stdio.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -2645,13 +2646,26 @@ int dp_ctrl_traffic_log(DPMsgSession *log)
 }
 
 #define TUNNEL_THRESHOLD 800
+// Idle remains a coarse session-clock duration, so nonzero-idle timestamps
+// approximate last activity. Fresh zero-idle reports must use wall time rather
+// than the startup-relative timer, whose tick can trail a wall-second boundary.
+static bool dp_ctrl_connect_timestamp(uint16_t idle, uint32_t *timestamp)
+{
+    time_t now = time(NULL);
+    if (now < 0 || (uintmax_t)now > UINT32_MAX || (uintmax_t)now < idle) {
+        return false;
+    }
+    *timestamp = (uint32_t)now - idle;
+    return true;
+}
+
 int dp_ctrl_connect_report(DPMsgSession *log, DPMonitorMetric *metric, int count_session, int count_violate)
 {
     dp_thread_data_t *th_data = &g_dp_thread_data[THREAD_ID];
 
     // TODO: Only care IPv4 sessions
     if (likely(log->EtherType == ETH_P_IP)) {
-        conn4_key_t key;
+        conn4_key_t key = {0};
 
         DEBUG_LOGGER(DBG_MAC_FORMAT" "DBG_IPV4_FORMAT":%u => "DBG_IPV4_FORMAT":%u"
                      " app=%u policy=%u action=%d sess=%d violate=%d threat=%u severity=%d\n",
@@ -2659,6 +2673,13 @@ int dp_ctrl_connect_report(DPMsgSession *log, DPMonitorMetric *metric, int count
                      DBG_IPV4_TUPLE(log->ServerIP),log->ServerPort,
                      log->Application, log->PolicyId, log->PolicyAction,
                      count_session, count_violate, log->ThreatID, log->Severity);
+
+        uint32_t last_seen;
+        // Reject an unusable wall clock before mutating any aggregate or rate
+        // counter. The start-log caller already retries a rejected report.
+        if (!dp_ctrl_connect_timestamp(log->Idle, &last_seen)) {
+            return -1;
+        }
 
         // host: IP is on host subnet
         // unkpeer: IP is not on host or container subnets
@@ -2692,6 +2713,7 @@ int dp_ctrl_connect_report(DPMsgSession *log, DPMonitorMetric *metric, int count
             key.ingress = false;
         }
         key.port = log->ServerPort;
+        key.application = log->Application;
         key.ipproto = log->IPProto;
         key.pol_id = log->PolicyId;
 
@@ -2704,7 +2726,6 @@ int dp_ctrl_connect_report(DPMsgSession *log, DPMonitorMetric *metric, int count
         conn_node_t *n = rcu_map_lookup(conn4_map, &key);
         if (n != NULL) {
             DPMsgConnect *conn = &n->conn;
-            uint32_t last_seen = get_current_time() - log->Idle;
             conn->Bytes += log->ClientBytes + log->ServerBytes;
             conn->Sessions += count_session;
             conn->Violates += count_violate;
@@ -2775,7 +2796,7 @@ int dp_ctrl_connect_report(DPMsgSession *log, DPMonitorMetric *metric, int count
                 FLAGS_SET(conn->Flags, DPCONN_FLAG_NBE_SNS);
             }
 
-            conn->FirstSeenAt = conn->LastSeenAt = get_current_time() - log->Idle;
+            conn->FirstSeenAt = conn->LastSeenAt = last_seen;
             conn->Bytes = log->ClientBytes + log->ServerBytes;
             conn->Sessions = count_session;
             conn->Violates = count_violate;

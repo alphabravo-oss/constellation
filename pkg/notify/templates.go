@@ -26,8 +26,8 @@ type templateBundle struct {
 }
 
 var (
-	tmplMu      sync.RWMutex
-	tmplCache   = map[string]*templateBundle{}
+	tmplMu    sync.RWMutex
+	tmplCache = map[string]*templateBundle{}
 )
 
 func renderBody(rec receiverRow, ev Event) ([]byte, string, error) {

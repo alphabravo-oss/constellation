@@ -4,6 +4,8 @@ import (
 	"encoding/binary"
 	"net"
 	"testing"
+
+	"github.com/alphabravocompany/constellation/internal/testutil/socketfixture"
 )
 
 func TestIPCDispatchEmitsTypedEvents(t *testing.T) {
@@ -85,7 +87,7 @@ func TestIPCDispatchEmitsTypedEvents(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			out := make(chan Event, 4)
-			server := newIPCServer(t.TempDir()+"/listen.sock", newSilentLogger(), out)
+			server := newIPCServer(socketfixture.Dir(t)+"/listen.sock", newSilentLogger(), out)
 			server.dispatch(tt.msg)
 			if got := server.snapshot().RxTotal; got != 0 {
 				t.Fatalf("dispatch should not mutate read-loop rx total directly, got %d", got)
@@ -105,7 +107,7 @@ func TestIPCDispatchEmitsTypedEvents(t *testing.T) {
 
 func TestIPCDispatchCountsMalformedMessages(t *testing.T) {
 	out := make(chan Event, 1)
-	server := newIPCServer(t.TempDir()+"/listen.sock", newSilentLogger(), out)
+	server := newIPCServer(socketfixture.Dir(t)+"/listen.sock", newSilentLogger(), out)
 
 	server.dispatch([]byte{KindKeepAlive, 0, 0, 99})
 	if got := server.snapshot().RxBadHdr; got != 1 {
@@ -123,7 +125,7 @@ func TestIPCDispatchCountsMalformedMessages(t *testing.T) {
 
 func TestIPCDispatchCountsBackPressureDrops(t *testing.T) {
 	out := make(chan Event)
-	server := newIPCServer(t.TempDir()+"/listen.sock", newSilentLogger(), out)
+	server := newIPCServer(socketfixture.Dir(t)+"/listen.sock", newSilentLogger(), out)
 
 	server.dispatch(dpDatagram(KindKeepAlive, nil))
 	if got := server.snapshot().RxDrop; got != 1 {

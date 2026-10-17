@@ -115,7 +115,9 @@ SELECT org_id, cluster_id::text, workload_id, COALESCE(namespace,''), COALESCE(n
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	// Resolve observations after the cursor is drained (each does its own query).
+	// Hydration obtains the full retained allowed identities once per cluster.
+	allowed := map[string]map[string][]processObservation{}
+
 	for _, hr := range pending {
 		clusterID, perr := uuid.Parse(hr.clusterID)
 		if perr != nil {
@@ -136,12 +138,17 @@ SELECT org_id, cluster_id::text, workload_id, COALESCE(namespace,''), COALESCE(n
 		if hr.enforceAt != nil {
 			st.EnforceStartedAt = *hr.enforceAt
 		}
-		if procs, alerts, blocks, lastNew, oerr := h.processObservations(ctx, hr.orgID, clusterID, hr.workloadID); oerr == nil {
-			st.Processes = procs
-			st.Alerts24h = alerts
-			st.Blocks24h = blocks
-			st.LastNewProcessAt = lastNew
+		key := hr.orgID.String() + ":" + clusterID.String()
+		byWorkload, ok := allowed[key]
+		if !ok {
+			var err error
+			byWorkload, err = h.fullProcessObservations(ctx, hr.orgID, clusterID, "")
+			if err != nil {
+				return err
+			}
+			allowed[key] = byWorkload
 		}
+		st.Processes = byWorkload[hr.workloadID]
 		h.cacheState(st)
 	}
 	return nil
@@ -318,7 +325,11 @@ func (h *Baselines) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	wl, ok, err := h.findWorkload(r.Context(), subj.OrgID, clusterArg, workloadID)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		status := http.StatusInternalServerError
+		if errors.Is(err, errBaselineAmbiguous) {
+			status = http.StatusConflict
+		}
+		httpx.WriteJSON(w, status, map[string]string{"error": err.Error()})
 		return
 	}
 	if !ok {
@@ -331,19 +342,25 @@ func (h *Baselines) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	rules, err := h.loadProcessRules(r.Context(), subj.OrgID, wl.ClusterID, wl.WorkloadID)
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not load process rules"})
+		return
+	}
 	detail := baselineDetailDTO{
 		baselineSummaryDTO: h.summary(state),
 		Processes:          processesDTO(state.Processes),
 		Transitions:        transitionsDTO(state.Transitions),
-		Rules:              h.loadProcessRules(r.Context(), subj.OrgID, wl.ClusterID, wl.WorkloadID),
+		Rules:              rules,
 	}
 	httpx.WriteJSON(w, http.StatusOK, detail)
 }
 
 // ModeBody is the POST payload for /runtime/baselines/{workload_id}/mode.
 type baselineModeBody struct {
-	Mode   string `json:"mode"`
-	Reason string `json:"reason"`
+	Mode         string `json:"mode"`
+	Reason       string `json:"reason"`
+	ExpectedMode string `json:"expected_mode"`
 }
 
 // SetMode transitions a workload's baseline mode. Audit-logged.
@@ -382,7 +399,11 @@ func (h *Baselines) SetMode(w http.ResponseWriter, r *http.Request) {
 	}
 	wl, ok, err := h.findWorkload(r.Context(), subj.OrgID, clusterArg, workloadID)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		status := http.StatusInternalServerError
+		if errors.Is(err, errBaselineAmbiguous) {
+			status = http.StatusConflict
+		}
+		httpx.WriteJSON(w, status, map[string]string{"error": err.Error()})
 		return
 	}
 	if !ok {
@@ -396,6 +417,10 @@ func (h *Baselines) SetMode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	from := state.Mode
+	if body.ExpectedMode != "" && body.ExpectedMode != string(from) {
+		httpx.WriteJSON(w, http.StatusConflict, map[string]string{"error": "baseline mode changed; refresh and review before saving"})
+		return
+	}
 	if !validTransition(from, target) {
 		httpx.WriteJSON(w, http.StatusConflict, map[string]string{"error": fmt.Sprintf("transition %s → %s not allowed", from, target)})
 		return
@@ -405,7 +430,11 @@ func (h *Baselines) SetMode(w http.ResponseWriter, r *http.Request) {
 		reason = fmt.Sprintf("manual transition from %s to %s", from, target)
 	}
 	if err := h.persistModeTransition(r.Context(), subj, wl, from, target, reason, now); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		status := http.StatusInternalServerError
+		if errors.Is(err, errBaselineChanged) {
+			status = http.StatusConflict
+		}
+		httpx.WriteJSON(w, status, map[string]string{"error": err.Error()})
 		return
 	}
 	// A memory-backed state (empty ClusterID) is the SAME pointer stored in h.state that
@@ -414,6 +443,12 @@ func (h *Baselines) SetMode(w http.ResponseWriter, r *http.Request) {
 	// and behavior is unchanged.
 	h.mu.Lock()
 	applyBaselineTransition(state, subj.UserID.String(), from, target, reason, now)
+	key := state.ClusterID + "::" + state.WorkloadID
+	if cached := h.state[key]; sameBaselineScope(cached, subj.OrgID, state.ClusterID, state.WorkloadID) {
+		copy := *state
+		copy.Processes = cached.Processes
+		h.state[key] = &copy
+	}
 	h.mu.Unlock()
 
 	// Mirror into the engine so the actual lifecycle math reflects the new mode.
@@ -421,12 +456,13 @@ func (h *Baselines) SetMode(w http.ResponseWriter, r *http.Request) {
 	// of truth for the UI and the engine is best-effort.
 	h.driveEngineToMode(workloadID, target)
 
-	h.audit(r, subj, target, from, workloadID, reason)
+	h.audit(r, subj, target, from, workloadID, reason, wl.ClusterID)
 	// P2-3: federate the new baseline mode + allowed-process set (master only;
 	// LogFedRevision no-ops otherwise). Memory-backed states have no cluster, so
 	// there is no DB-derived allowed set to ship — skip them.
 	if clusterID, perr := uuid.Parse(wl.ClusterID); perr == nil {
-		if obs, _, _, _, oerr := h.processObservations(r.Context(), subj.OrgID, clusterID, wl.WorkloadID); oerr == nil {
+		if observations, oerr := h.fullProcessObservations(r.Context(), subj.OrgID, clusterID, wl.WorkloadID); oerr == nil {
+			obs := observations[wl.WorkloadID]
 			recordFedBaseline(r.Context(), h.db.Pool(), subj.OrgID, processBaselineBundleRow{
 				WorkloadID: wl.WorkloadID,
 				Namespace:  wl.Namespace,
@@ -456,9 +492,8 @@ func (h *Baselines) BaselineMode(orgID uuid.UUID, workloadID string) (baseline.M
 func (h *Baselines) BaselineModeForCluster(orgID, clusterID uuid.UUID, workloadID string) (baseline.Mode, map[string]struct{}, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	clusterKey := ""
 	if clusterID != uuid.Nil {
-		clusterKey = clusterID.String()
+		clusterKey := clusterID.String()
 		if st, ok := h.state[clusterKey+"::"+workloadID]; ok && sameBaselineScope(st, orgID, clusterKey, workloadID) {
 			return baselineModeSet(st)
 		}
@@ -514,6 +549,7 @@ func pathBasename(path string) string {
 // ----- helpers --------------------------------------------------------------
 
 type observedWorkload struct {
+	OwnerCount int
 	OrgID      uuid.UUID
 	WorkloadID string
 	ClusterID  string
@@ -530,12 +566,13 @@ func (h *Baselines) observedWorkloads(ctx context.Context, orgID uuid.UUID, clus
 		return nil, nil
 	}
 	rows, err := h.db.Pool().Query(ctx, `
-SELECT COALESCE(cluster_id::text, ''), namespace, name, COALESCE(labels,'{}'::jsonb)
+SELECT COALESCE(cluster_id::text, ''), namespace, name, CASE WHEN count(*)=1 THEN (jsonb_agg(COALESCE(labels,'{}'::jsonb) ORDER BY id)->0) ELSE '{}'::jsonb END,count(*)::int
   FROM deployments
  WHERE org_id = $1
    AND ($2::uuid IS NULL OR cluster_id = $2)
    AND ($3::text = '' OR namespace = $3)
- ORDER BY namespace, name`, orgID, clusterArg, namespace)
+ GROUP BY cluster_id,namespace,name
+ ORDER BY namespace, name,cluster_id`, orgID, clusterArg, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -544,7 +581,8 @@ SELECT COALESCE(cluster_id::text, ''), namespace, name, COALESCE(labels,'{}'::js
 	for rows.Next() {
 		var clusterID, ns, name string
 		var labelsRaw []byte
-		if err := rows.Scan(&clusterID, &ns, &name, &labelsRaw); err != nil {
+		var ownerCount int
+		if err := rows.Scan(&clusterID, &ns, &name, &labelsRaw, &ownerCount); err != nil {
 			return nil, err
 		}
 		var labels map[string]string
@@ -552,6 +590,7 @@ SELECT COALESCE(cluster_id::text, ''), namespace, name, COALESCE(labels,'{}'::js
 			_ = json.Unmarshal(labelsRaw, &labels)
 		}
 		out = append(out, observedWorkload{
+			OwnerCount: ownerCount,
 			OrgID:      orgID,
 			WorkloadID: ns + "/" + name,
 			ClusterID:  clusterID,
@@ -568,12 +607,20 @@ func (h *Baselines) findWorkload(ctx context.Context, orgID uuid.UUID, clusterAr
 	if err != nil {
 		return observedWorkload{}, false, err
 	}
+	var matched observedWorkload
+	found := false
 	for _, wl := range all {
 		if wl.WorkloadID == workloadID {
-			return wl, true, nil
+			if wl.OwnerCount > 1 {
+				return observedWorkload{}, false, errBaselineAmbiguous
+			}
+			if found {
+				return observedWorkload{}, false, errBaselineAmbiguous
+			}
+			matched, found = wl, true
 		}
 	}
-	return observedWorkload{}, false, nil
+	return matched, found, nil
 }
 
 // ensureState gets or initializes per-workload baseline state.
@@ -632,7 +679,13 @@ RETURNING workload_id, cluster_id::text, namespace, name, mode,
 	// RT-DRIFT-50: keep the hot-path BaselineMode map current on every List/Get/SetMode
 	// (in addition to the startup Hydrate), so a DB-backed workload's mode + learned set
 	// are served to the drift classifier without waiting for the next full hydrate.
-	h.cacheState(&state)
+	allowed, err := h.fullProcessObservations(ctx, orgID, clusterID, wl.WorkloadID)
+	if err != nil {
+		return nil, err
+	}
+	cached := state
+	cached.Processes = allowed[wl.WorkloadID]
+	h.cacheState(&cached)
 	return &state, nil
 }
 
@@ -654,12 +707,11 @@ func (h *Baselines) processObservations(ctx context.Context, orgID, clusterID uu
 	workloadRefs := []string{workloadID}
 	seenWorkloadRefs := map[string]struct{}{workloadID: {}}
 	linkRows, err := h.db.Pool().Query(ctx, `
-SELECT pod_workload_id
-  FROM pod_workload_links
- WHERE org_id = $1
-   AND cluster_id = $2
-   AND owner_workload_id = $3
-   AND pod_workload_id <> ''`, orgID, clusterID, workloadID)
+SELECT l.pod_workload_id FROM pod_workload_links l
+ JOIN deployments d ON d.id=l.deployment_id AND d.org_id=$1 AND d.cluster_id=$2 AND d.namespace=l.namespace
+ WHERE l.org_id=$1 AND l.cluster_id=$2 AND l.owner_workload_id=$3
+ AND d.namespace||'/'||d.name=$3 AND l.pod_workload_id<>''
+ AND (SELECT count(*) FROM deployments owner WHERE owner.org_id=$1 AND owner.cluster_id=$2 AND owner.namespace=d.namespace AND owner.name=d.name)=1`, orgID, clusterID, workloadID)
 	if err != nil {
 		return nil, 0, 0, time.Time{}, err
 	}
@@ -695,7 +747,7 @@ SELECT severity,
    AND cluster_id = $2
    AND kind = 'process_exec'
    AND workload_id = ANY($3::text[])
- ORDER BY at DESC
+ ORDER BY at DESC,id ASC
  LIMIT 1000`, orgID, clusterID, workloadRefs)
 	if err != nil {
 		return nil, 0, 0, time.Time{}, err
@@ -828,7 +880,7 @@ func (h *Baselines) persistModeTransition(ctx context.Context, subj authctx.Subj
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := tx.Exec(ctx, `
+	tag, err := tx.Exec(ctx, `
 UPDATE process_baseline_states
    SET mode = $1,
        learn_started_at = CASE WHEN $1 = 'learn' THEN $2 ELSE learn_started_at END,
@@ -838,9 +890,13 @@ UPDATE process_baseline_states
        updated_at = $2
  WHERE org_id = $4
    AND cluster_id = $5
-   AND workload_id = $6`,
-		string(to), now, subj.UserID, subj.OrgID, clusterID, wl.WorkloadID); err != nil {
+   AND workload_id = $6 AND mode = $7`,
+		string(to), now, subj.UserID, subj.OrgID, clusterID, wl.WorkloadID, string(from))
+	if err != nil {
 		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return errBaselineChanged
 	}
 	if _, err := tx.Exec(ctx, `
 INSERT INTO process_baseline_transitions (
@@ -1014,7 +1070,7 @@ func rfc3339Or(t time.Time) string {
 	return t.UTC().Format(time.RFC3339)
 }
 
-func (h *Baselines) audit(r *http.Request, subj authctx.Subject, to, from baseline.Mode, workloadID, reason string) {
+func (h *Baselines) audit(r *http.Request, subj authctx.Subject, to, from baseline.Mode, workloadID, reason, clusterID string) {
 	if h.auditLog == nil {
 		return
 	}
@@ -1032,7 +1088,10 @@ func (h *Baselines) audit(r *http.Request, subj authctx.Subject, to, from baseli
 		TargetKind: "process-baseline",
 		TargetID:   workloadID,
 		Before:     map[string]any{"mode": string(from)},
-		After:      map[string]any{"mode": string(to), "reason": reason},
+		After:      map[string]any{"mode": string(to), "reason": reason, "cluster_id": clusterID},
 		RequestID:  chimw.GetReqID(r.Context()),
 	})
 }
+
+var errBaselineAmbiguous = errors.New("workload exists in multiple clusters; specify cluster_id")
+var errBaselineChanged = errors.New("baseline mode changed; refresh and review before saving")

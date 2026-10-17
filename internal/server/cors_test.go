@@ -54,7 +54,7 @@ func TestCORSAllowedOrigins_NeverWildcardsWithCredentials(t *testing.T) {
 // bearing); the second proves our deny-all func suppresses any cross-origin reflection.
 func TestCORSEmptyAllowListDeniesCrossOrigin(t *testing.T) {
 	preflight := func(h http.Handler) string {
-		req := httptest.NewRequest(http.MethodOptions, "/api/v1/findings", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodOptions, "/api/v1/findings", nil)
 		req.Header.Set("Origin", "https://evil.example.com")
 		req.Header.Set("Access-Control-Request-Method", "GET")
 		rec := httptest.NewRecorder()

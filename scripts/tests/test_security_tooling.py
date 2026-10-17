@@ -1,4 +1,6 @@
+import copy
 import json
+import importlib.util
 import os
 from pathlib import Path
 import subprocess
@@ -23,8 +25,16 @@ class SecurityToolingTests(unittest.TestCase):
             CALLS=str(self.calls),
         )
 
+        self.environment.pop("GOTMPDIR", None)
+        self.environment["XDG_CACHE_HOME"] = str(self.directory / "cache")
+        self.executable("go", 'test "$*" = "list -f {{.Dir}} ./..."\nprintf "/module/cmd/api\\n/module/internal/app\\n"\n')
+
     def executable(self, name, body):
         executable = self.directory / name
+        if name == "gosec":
+            body = '''printf '{"runs":[{"results":[]}]}' > "$ARTIFACT_DIR/gosec.sarif"
+printf '{"Issues":[]}'
+''' + body
         executable.write_text("#!/bin/bash\nset -euo pipefail\n" + body)
         executable.chmod(0o755)
         return executable
@@ -47,7 +57,8 @@ class SecurityToolingTests(unittest.TestCase):
         )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Error 23", result.stderr)
-        self.assertIn("./...", self.calls.read_text())
+        self.assertEqual(self.calls.read_text().splitlines()[-2:], ["/module/cmd/api", "/module/internal/app"])
+        self.assertNotIn("./...", self.calls.read_text())
         self.assertNotIn("skipping", result.stdout + result.stderr)
 
     def test_make_lint_requires_tool(self):
@@ -58,12 +69,111 @@ class SecurityToolingTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("is required", result.stderr)
 
+    def test_lint_discovery_failure_or_empty_result_blocks(self):
+        executable = self.executable("golangci-lint", 'touch "$CALLS"\n')
+        self.environment["GOLANGCI_LINT"] = str(executable)
+        for body in ("exit 9\n", "exit 0\n"):
+            with self.subTest(body=body):
+                self.executable("go", body)
+                result = subprocess.run(["bash", "scripts/lint-go.sh"], cwd=ROOT,
+                                        env=self.environment, capture_output=True, text=True, check=False)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(self.calls.exists())
+
+    def test_format_uses_module_scope_and_blocks_differences_and_errors(self):
+        for body, expected in (("exit 0\n", 0), ('echo "format diff"\n', 1), ("exit 9\n", 9)):
+            with self.subTest(body=body):
+                executable = self.executable("golangci-lint", 'printf "%s\\n" "$@" > "$CALLS"\n' + body)
+                self.environment["GOLANGCI_LINT"] = str(executable)
+                result = subprocess.run(["bash", "scripts/check-go-format.sh"], cwd=ROOT,
+                                        env=self.environment, capture_output=True, text=True, check=False)
+                self.assertEqual(result.returncode, expected)
+                self.assertEqual(self.calls.read_text().splitlines(), ["fmt", "--diff", "/module/cmd/api", "/module/internal/app"])
+
+    def test_format_discovery_failure_or_empty_result_blocks(self):
+        executable = self.executable("golangci-lint", 'touch "$CALLS"\n')
+        self.environment["GOLANGCI_LINT"] = str(executable)
+        for body in ("exit 9\n", "exit 0\n"):
+            with self.subTest(body=body):
+                self.executable("go", body)
+                result = subprocess.run(["bash", "scripts/check-go-format.sh"], cwd=ROOT,
+                                        env=self.environment, capture_output=True, text=True, check=False)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(self.calls.exists())
+
     def test_gosec_propagates_findings(self):
         self.executable("gosec", 'printf "%s\\n" "$@" > "$CALLS"\nexit 7\n')
         result = self.run_scan("gosec")
         self.assertEqual(result.returncode, 7)
         self.assertIn("sarif", self.calls.read_text())
         self.assertNotIn("-no-fail", self.calls.read_text())
+
+    def test_gosec_defaults_to_bounded_resources(self):
+        for key in ("GOSEC_GOMEMLIMIT", "GOSEC_GOMAXPROCS", "GOSEC_CONCURRENCY"):
+            self.environment.pop(key, None)
+        self.executable("gosec", 'printf "%s\\n" "$GOMEMLIMIT" "$GOMAXPROCS" "$@" > "$CALLS"\n')
+        self.assertEqual(self.run_scan("gosec").returncode, 0)
+        self.assertEqual(self.calls.read_text().splitlines()[:4], ["2GiB", "2", "-concurrency", "2"])
+
+    def test_gosec_resource_overrides_preserve_findings_exit(self):
+        self.environment.update(GOSEC_GOMEMLIMIT="1GiB", GOSEC_GOMAXPROCS="1", GOSEC_CONCURRENCY="1")
+        self.executable("gosec", 'printf "%s\\n" "$GOMEMLIMIT" "$GOMAXPROCS" "$@" > "$CALLS"\nexit 7\n')
+        self.assertEqual(self.run_scan("gosec").returncode, 7)
+        self.assertEqual(self.calls.read_text().splitlines()[:4], ["1GiB", "1", "-concurrency", "1"])
+
+    def test_gosec_scans_module_packages_and_cleans_owned_scratch(self):
+        self.executable("gosec", 'test -d "$GOTMPDIR"\nprintf "%s\\n" "$GOTMPDIR" "$@" > "$CALLS"\nexit 7\n')
+        self.assertEqual(self.run_scan("gosec").returncode, 7)
+        arguments = self.calls.read_text().splitlines()
+        self.assertEqual(arguments[-2:], ["/module/cmd/api", "/module/internal/app"])
+        self.assertNotIn("./...", arguments)
+        self.assertFalse(Path(arguments[0]).exists())
+        self.assertTrue(Path(arguments[0]).is_relative_to(self.directory / "cache"))
+
+    def test_gosec_preserves_caller_owned_scratch(self):
+        scratch = self.directory / "caller-scratch"
+        scratch.mkdir()
+        self.environment["GOTMPDIR"] = str(scratch)
+        self.executable("gosec", 'test -d "$GOTMPDIR"\n')
+        self.assertEqual(self.run_scan("gosec").returncode, 0)
+        self.assertTrue(scratch.exists())
+
+    def test_gosec_discovery_failure_or_empty_result_blocks(self):
+        self.executable("gosec", 'touch "$CALLS"\n')
+        for body in ("exit 9\n", "exit 0\n"):
+            with self.subTest(body=body):
+                self.executable("go", body)
+                self.assertNotEqual(self.run_scan("gosec").returncode, 0)
+                self.assertFalse(self.calls.exists())
+
+    def test_gosec_missing_or_invalid_reports_block(self):
+        for body in ('rm "$ARTIFACT_DIR/gosec.sarif"\n', 'echo invalid > "$ARTIFACT_DIR/gosec.sarif"\n'):
+            with self.subTest(body=body):
+                self.executable("gosec", body)
+                self.assertNotEqual(self.run_scan("gosec").returncode, 0)
+
+    def test_gosec_sarif_rebases_distinct_files_and_preserves_findings(self):
+        spec = importlib.util.spec_from_file_location("rebase_gosec", ROOT / "scripts/rebase-gosec-sarif.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        result = {"ruleId": "G101", "message": {"text": "review this"}, "level": "error", "locations": [{
+            "physicalLocation": {"artifactLocation": {"uri": "main.go"}, "region": {"startLine": 12}},
+        }]}
+        report = {"runs": [{"results": [copy.deepcopy(result), copy.deepcopy(result)]}]}
+        issues = [{"rule_id": "G101", "details": "review this", "line": "12-14", "file": str(ROOT / name)}
+                  for name in ("cmd/api/main.go", "cmd/worker/main.go")]
+        rebased = module.rebase(copy.deepcopy(report), {"Issues": issues}, ROOT)
+        for entry, name in zip(rebased["runs"][0]["results"], ("cmd/api/main.go", "cmd/worker/main.go"), strict=True):
+            self.assertEqual(entry["locations"][0]["physicalLocation"]["artifactLocation"]["uri"], name)
+            entry["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] = "main.go"
+        self.assertEqual(rebased, report)
+        invalid_sources = [issues[:1], [dict(issues[0], rule_id="G999"), issues[1]],
+                           [dict(issues[0], file=str(ROOT.parent / "outside.go")), issues[1]],
+                           [dict(issues[0], line="13"), issues[1]]]
+        for invalid in invalid_sources:
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(ValueError):
+                    module.rebase(copy.deepcopy(report), {"Issues": invalid}, ROOT)
 
     def test_scan_ignores_parent_workspace(self):
         self.environment["GOWORK"] = "/outside/go.work"
@@ -92,6 +202,19 @@ fi
         self.assertEqual(json.loads((self.artifacts / "govulncheck.sarif").read_text())["version"], "2.1.0")
         self.assertIn("reachable vulnerability", (self.artifacts / "govulncheck.txt").read_text())
         self.assertEqual(len(self.calls.read_text().splitlines()), 3)
+
+    def test_sarif_normalization_preserves_findings_and_distinct_stacks(self):
+        report = {"runs": [{"results": [
+            {"ruleId": "test", "stacks": [{"frames": [1]}, {"frames": [1]}, {"frames": [2]}]},
+            {"ruleId": "other", "message": {"text": "still blocks"}},
+        ]}]}
+        path = self.directory / "report.sarif"
+        path.write_text(json.dumps(report))
+        subprocess.run(["python3", "scripts/normalize-sarif.py", str(path)], cwd=ROOT, check=True)
+        result = json.loads(path.read_text())["runs"][0]["results"]
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result[0]["stacks"], [{"frames": [1]}, {"frames": [2]}])
+        self.assertEqual(result[1], report["runs"][0]["results"][1])
 
     def test_govulncheck_analysis_errors_do_not_convert_partial_report(self):
         self.executable("govulncheck", 'printf "%s\\n" "$*" >> "$CALLS"\nexit 9\n')

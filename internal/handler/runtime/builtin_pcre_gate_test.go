@@ -117,14 +117,14 @@ func splitPCREValue(v string) (inner, flags string, ok bool) {
 		}
 	}
 	var delim byte
-	switch {
-	case v[0] == 'm': // m<delim>...<delim><flags>
+	switch v[0] {
+	case 'm': // m<delim>...<delim><flags>
 		if len(v) < 2 {
 			return "", "", false
 		}
 		delim = v[1]
 		v = v[2:]
-	case v[0] == '/': // /...<flags>, delimiter is '/'
+	case '/': // /...<flags>, delimiter is '/'
 		delim = '/'
 		v = v[1:]
 	default:

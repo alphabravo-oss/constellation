@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/db"
+	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 )
 
 // Nodes aggregates NeuVector-style host posture around a Kubernetes node:
@@ -70,66 +70,19 @@ type NodeSummary struct {
 }
 
 type NodeDetail struct {
-	Node            NodeSummary     `json:"node"`
-	Facts           json.RawMessage `json:"facts,omitempty"`
-	Packages        json.RawMessage `json:"packages,omitempty"`
-	Containers      json.RawMessage `json:"containers,omitempty"`
-	Processes       json.RawMessage `json:"processes,omitempty"`
-	CIS             json.RawMessage `json:"cis,omitempty"`
-	Vulnerabilities []HostVulnRow   `json:"vulnerabilities"`
+	Node                   NodeSummary            `json:"node"`
+	Facts                  json.RawMessage        `json:"facts,omitempty"`
+	Packages               json.RawMessage        `json:"packages,omitempty"`
+	Containers             json.RawMessage        `json:"containers,omitempty"`
+	Processes              json.RawMessage        `json:"processes,omitempty"`
+	CIS                    json.RawMessage        `json:"cis,omitempty"`
+	Vulnerabilities        []NodeVulnerabilityRow `json:"vulnerabilities"`
+	VulnerabilitiesTotal   int64                  `json:"vulnerabilities_total"`
+	VulnerabilitiesLimit   int                    `json:"vulnerabilities_limit"`
+	VulnerabilitiesHasMore bool                   `json:"vulnerabilities_has_more"`
 }
 
-func (h *Nodes) List(w http.ResponseWriter, r *http.Request) {
-	subj, ok := SubjectFrom(r.Context())
-	if !ok {
-		jsonError(w, http.StatusUnauthorized, "subject required")
-		return
-	}
-	clusterID, ok := h.clusterIDFromRoute(w, r, subj.OrgID)
-	if !ok {
-		return
-	}
-	limit, offset := 500, 0
-	if raw := r.URL.Query().Get("limit"); raw != "" {
-		parsed, err := strconv.Atoi(raw)
-		if err != nil || parsed < 1 || parsed > 500 {
-			jsonError(w, http.StatusBadRequest, "limit must be between 1 and 500")
-			return
-		}
-		limit = parsed
-	}
-	if raw := r.URL.Query().Get("offset"); raw != "" {
-		parsed, err := strconv.Atoi(raw)
-		if err != nil || parsed < 0 {
-			jsonError(w, http.StatusBadRequest, "offset must be nonnegative")
-			return
-		}
-		offset = parsed
-	}
-	hostCVEs := r.URL.Query().Get("host_cves") == "open"
-	if raw := r.URL.Query().Get("host_cves"); raw != "" && raw != "open" {
-		jsonError(w, http.StatusBadRequest, "host_cves must be open")
-		return
-	}
-	total, err := h.countNodes(r, subj.OrgID, clusterID, hostCVEs)
-	if err != nil {
-		jsonError(w, http.StatusInternalServerError, "count nodes: "+err.Error())
-		return
-	}
-	nodes, err := h.nodeSummaries(r, subj.OrgID, clusterID, "", hostCVEs, limit, offset)
-	if err != nil {
-		jsonError(w, http.StatusInternalServerError, "query nodes: "+err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"cluster_id": clusterID,
-		"items":      nodes,
-		"summary":    summarizeNodes(nodes),
-		"total":      total,
-		"limit":      limit,
-		"offset":     offset,
-	})
-}
+func (h *Nodes) List(w http.ResponseWriter, r *http.Request) { h.writeNodeInventory(w, r, false) }
 
 func (h *Nodes) Get(w http.ResponseWriter, r *http.Request) {
 	subj, ok := SubjectFrom(r.Context())
@@ -177,7 +130,11 @@ func (h *Nodes) Get(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, "host cis: "+err.Error())
 		return
 	}
-	detail.Vulnerabilities, err = h.nodeVulnerabilities(r, subj.OrgID, clusterID, node)
+	var vulnerabilityMeta inventorylist.Metadata
+	detail.Vulnerabilities, vulnerabilityMeta, err = h.nodeVulnerabilities(r, subj.OrgID, clusterID, node)
+	detail.VulnerabilitiesTotal = vulnerabilityMeta.Total
+	detail.VulnerabilitiesLimit = 2000
+	detail.VulnerabilitiesHasMore = vulnerabilityMeta.HasMore
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, "host vulnerabilities: "+err.Error())
 		return
@@ -206,30 +163,7 @@ func (h *Nodes) clusterIDFromRoute(w http.ResponseWriter, r *http.Request, orgID
 	return clusterID, true
 }
 
-func (h *Nodes) countNodes(r *http.Request, orgID, clusterID uuid.UUID, hostCVEs bool) (int, error) {
-	var total int
-	err := h.db.Pool().QueryRow(r.Context(), `
-WITH node_names AS (
-    SELECT node FROM host_facts WHERE org_id = $1 AND cluster_id = $2
-    UNION SELECT node FROM host_packages WHERE org_id = $1 AND cluster_id = $2
-    UNION SELECT node FROM host_cis WHERE org_id = $1 AND cluster_id = $2
-    UNION SELECT node FROM host_containers WHERE org_id = $1 AND cluster_id = $2
-    UNION SELECT node FROM host_processes WHERE org_id = $1 AND cluster_id = $2
-    UNION SELECT ref AS node FROM scan_targets WHERE org_id = $1 AND cluster_id = $2 AND type = 'host'
-    UNION SELECT target_ref AS node FROM findings WHERE org_id = $1 AND cluster_id = $2 AND target_type = 'host'
-    UNION SELECT target_ref AS node FROM findings WHERE org_id = $1 AND COALESCE(target_cluster_id, cluster_id) = $2 AND target_type = 'host'
-)
-SELECT COUNT(*)::int FROM node_names n
- WHERE NOT $3 OR (NULLIF(BTRIM(n.node), '') IS NOT NULL AND EXISTS (
-    SELECT 1 FROM findings f
-     WHERE f.org_id = $1 AND f.cluster_id = $2 AND f.target_type = 'host'
-       AND f.target_ref = n.node AND f.kind = 'vulnerability' AND f.lifecycle = 'open'
-))`, orgID, clusterID, hostCVEs).Scan(&total)
-	return total, err
-}
-
-func (h *Nodes) nodeSummaries(r *http.Request, orgID, clusterID uuid.UUID, nodeFilter string, hostCVEs bool, limit, offset int) ([]NodeSummary, error) {
-	rows, err := h.db.Pool().Query(r.Context(), `
+const nodeSummarySQL = `
 WITH node_names AS (
     SELECT node FROM host_facts WHERE org_id = $1 AND cluster_id = $2
     UNION SELECT node FROM host_packages WHERE org_id = $1 AND cluster_id = $2
@@ -331,14 +265,15 @@ SELECT n.node,
        WHERE org_id = $1 AND target_id = st.id
        ORDER BY requested_at DESC LIMIT 1
   ) sj ON true
- WHERE ($3 = '' OR n.node = $3)
+ WHERE NULLIF(BTRIM(n.node),'') IS NOT NULL AND ($3 = '' OR n.node = $3)
    AND (NOT $4 OR (NULLIF(BTRIM(n.node), '') IS NOT NULL AND EXISTS (
        SELECT 1 FROM findings f
         WHERE f.org_id = $1 AND f.cluster_id = $2 AND f.target_type = 'host'
           AND f.target_ref = n.node AND f.kind = 'vulnerability' AND f.lifecycle = 'open'
-   )))
- ORDER BY node_last_seen_at DESC, n.node
- LIMIT $5 OFFSET $6`, orgID, clusterID, nodeFilter, hostCVEs, limit, offset)
+   )))`
+
+func (h *Nodes) nodeSummaries(r *http.Request, orgID, clusterID uuid.UUID, nodeFilter string, hostCVEs bool, limit, offset int) ([]NodeSummary, error) {
+	rows, err := h.db.Pool().Query(r.Context(), nodeSummarySQL+` ORDER BY node_last_seen_at DESC, n.node LIMIT $5 OFFSET $6`, orgID, clusterID, nodeFilter, hostCVEs, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -408,39 +343,6 @@ func normalizeNodeSummary(item *NodeSummary) {
 	}
 }
 
-func summarizeNodes(nodes []NodeSummary) map[string]any {
-	summary := map[string]any{
-		"nodes":                 len(nodes),
-		"runtime_agent_healthy": 0,
-		"runtime_agent_stale":   0,
-		"runtime_agent_missing": 0,
-		"scan_completed":        0,
-		"scan_gaps":             0,
-		"critical_vulns":        0,
-		"high_vulns":            0,
-		"cis_failed":            0,
-	}
-	for _, node := range nodes {
-		switch node.RuntimeAgentStatus {
-		case "healthy":
-			summary["runtime_agent_healthy"] = summary["runtime_agent_healthy"].(int) + 1
-		case "stale":
-			summary["runtime_agent_stale"] = summary["runtime_agent_stale"].(int) + 1
-		default:
-			summary["runtime_agent_missing"] = summary["runtime_agent_missing"].(int) + 1
-		}
-		if node.ScanStatus == "completed" {
-			summary["scan_completed"] = summary["scan_completed"].(int) + 1
-		} else {
-			summary["scan_gaps"] = summary["scan_gaps"].(int) + 1
-		}
-		summary["critical_vulns"] = summary["critical_vulns"].(int) + node.CriticalVulns
-		summary["high_vulns"] = summary["high_vulns"].(int) + node.HighVulns
-		summary["cis_failed"] = summary["cis_failed"].(int) + node.CISFailed
-	}
-	return summary
-}
-
 func (h *Nodes) nodePayload(r *http.Request, orgID, clusterID uuid.UUID, node, table, column string) (json.RawMessage, error) {
 	switch table {
 	case "host_facts", "host_packages", "host_containers", "host_processes", "host_cis":
@@ -464,48 +366,6 @@ func (h *Nodes) nodePayload(r *http.Request, orgID, clusterID uuid.UUID, node, t
 	return json.RawMessage(raw), nil
 }
 
-func (h *Nodes) nodeVulnerabilities(r *http.Request, orgID, clusterID uuid.UUID, node string) ([]HostVulnRow, error) {
-	rows, err := h.db.Pool().Query(r.Context(), `
-SELECT COALESCE(NULLIF(f.target_ref, ''), a.name, ''),
-       COALESCE(f.target_cluster_id, f.cluster_id),
-       COALESCE(f.detail_json->'package'->>'name', ''),
-       COALESCE(f.detail_json->'package'->>'version', ''),
-       COALESCE(f.external_id, ''),
-       COALESCE(f.detail_json->'aliases', '[]'::jsonb),
-       COALESCE(f.severity, ''),
-       COALESCE(NULLIF(f.description, ''), f.title, ''),
-       COALESCE(f.detail_json->'references', '[]'::jsonb),
-       COALESCE(f.detail_json->>'fixed', ''),
-       COALESCE(NULLIF(f.source_type, ''), NULLIF(f.canonical_engine, ''), 'scanner'),
-       f.last_seen_at
-  FROM findings f
-  LEFT JOIN assets a ON a.id = f.asset_id
- WHERE f.org_id = $1
-   AND f.kind = 'vulnerability'
-   AND f.lifecycle = 'open'
-   AND f.target_type = 'host'
-   AND f.target_ref = $2
-   AND (f.cluster_id = $3 OR COALESCE(f.target_cluster_id, f.cluster_id) = $3)
- ORDER BY f.risk_score DESC NULLS LAST, f.last_seen_at DESC
- LIMIT 2000`, orgID, node, clusterID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []HostVulnRow{}
-	for rows.Next() {
-		var item HostVulnRow
-		var aliasesRaw, refsRaw []byte
-		if err := rows.Scan(
-			&item.Node, &item.ClusterID, &item.PackageName, &item.PackageVersion,
-			&item.VulnID, &aliasesRaw, &item.Severity, &item.Summary, &refsRaw,
-			&item.FixedVersion, &item.Source, &item.ObservedAt,
-		); err != nil {
-			return nil, err
-		}
-		item.Aliases = decodeStringList(aliasesRaw)
-		item.References = strings.Join(decodeStringList(refsRaw), ",")
-		out = append(out, item)
-	}
-	return out, rows.Err()
+func (h *Nodes) nodeVulnerabilities(r *http.Request, orgID, clusterID uuid.UUID, node string) ([]NodeVulnerabilityRow, inventorylist.Metadata, error) {
+	return inventorylist.Read(r.Context(), h.db.Pool(), nodeVulnerabilityDefinition(orgID, clusterID, node), inventorylist.Options{Limit: 2000, OrderSQL: "risk_score DESC NULLS LAST, observed_at DESC, id ASC"}, scanNodeVulnerability)
 }

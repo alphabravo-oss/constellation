@@ -7,9 +7,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 )
 
 func TestScannerCacheStatAndDataFromHeartbeatMetadata(t *testing.T) {
@@ -82,7 +83,7 @@ INSERT INTO component_heartbeats (
 	router.Get("/api/v1/scanner-cache/{scanner_id}/stat", cache.Stat)
 	router.Get("/api/v1/scanner-cache/{scanner_id}/data", cache.Data)
 
-	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/scan/scanner", nil)
+	listReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scan/scanner", nil)
 	listReq = listReq.WithContext(authctx.WithSubject(listReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	listResp := httptest.NewRecorder()
 	router.ServeHTTP(listResp, listReq)
@@ -97,7 +98,7 @@ INSERT INTO component_heartbeats (
 		t.Fatalf("scanner list = %+v", list)
 	}
 
-	statReq := httptest.NewRequest(http.MethodGet, "/api/v1/scanner-cache/scanner-instance-1/stat", nil)
+	statReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scanner-cache/scanner-instance-1/stat", nil)
 	statReq = statReq.WithContext(authctx.WithSubject(statReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	statResp := httptest.NewRecorder()
 	router.ServeHTTP(statResp, statReq)
@@ -118,7 +119,7 @@ INSERT INTO component_heartbeats (
 		t.Fatalf("caches should be sorted by name: %+v", stat.Caches)
 	}
 
-	dataReq := httptest.NewRequest(http.MethodGet, "/api/v1/scanner-cache/scanner-instance-1/data", nil)
+	dataReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scanner-cache/scanner-instance-1/data", nil)
 	dataReq = dataReq.WithContext(authctx.WithSubject(dataReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	dataResp := httptest.NewRecorder()
 	router.ServeHTTP(dataResp, dataReq)
@@ -136,7 +137,7 @@ INSERT INTO component_heartbeats (
 		t.Fatalf("cache records = %+v", data.CacheRecords)
 	}
 
-	compatStatReq := httptest.NewRequest(http.MethodGet, "/api/v1/scan/cache_stat/scanner-instance-1", nil)
+	compatStatReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scan/cache_stat/scanner-instance-1", nil)
 	compatStatReq = compatStatReq.WithContext(authctx.WithSubject(compatStatReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	compatStatResp := httptest.NewRecorder()
 	router.ServeHTTP(compatStatResp, compatStatReq)
@@ -151,7 +152,7 @@ INSERT INTO component_heartbeats (
 		t.Fatalf("compat stat = %+v", compatStat)
 	}
 
-	compatDataReq := httptest.NewRequest(http.MethodGet, "/api/v1/scan/cache_data/scanner-instance-1", nil)
+	compatDataReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scan/cache_data/scanner-instance-1", nil)
 	compatDataReq = compatDataReq.WithContext(authctx.WithSubject(compatDataReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	compatDataResp := httptest.NewRecorder()
 	router.ServeHTTP(compatDataResp, compatDataReq)

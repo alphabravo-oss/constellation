@@ -6,6 +6,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -114,7 +115,7 @@ func generateAndStoreSessionKey(ctx context.Context, store sessionKeyStore) ([]b
 	if err == nil {
 		return []byte(existing), tx.Commit(ctx)
 	}
-	if err != pgx.ErrNoRows {
+	if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("auth: recheck session key: %w", err)
 	}
 

@@ -7,7 +7,7 @@
 
 import { useMemo, useState } from "react";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { ArrowLeft, Check, ClipboardCopy, KeyRound, ShieldAlert } from "lucide-react";
 
@@ -237,7 +237,7 @@ export function ApiTokenCreatePage() {
             )}
 
             <div className="flex items-center justify-between pt-2">
-              <Button type="button" variant="ghost" size="lg" onClick={() => navigate("/settings/api-tokens")}>
+              <Button type="button" variant="ghost" size="lg" onClick={() => navigate({ href: "/settings/api-tokens" })}>
                 Cancel
               </Button>
               <div className="inline-flex gap-2">
@@ -281,7 +281,7 @@ export function ApiTokenCreatePage() {
       ) : (
         <RevealSection
           response={revealed}
-          onDone={() => navigate("/settings/api-tokens")}
+          onDone={() => navigate({ href: "/settings/api-tokens" })}
         />
       )}
     </div>

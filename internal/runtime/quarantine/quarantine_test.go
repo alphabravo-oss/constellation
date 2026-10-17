@@ -29,6 +29,11 @@ func TestExecuteSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := q.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	tgt := Target{
 		Namespace: "default", Pod: "web-1", WorkloadID: "default/Deployment/web",
 		PID: 1234, Veth: "veth1234",
@@ -78,6 +83,11 @@ func TestDryRunSkipsCordon(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := q.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	res, err := q.Execute(context.Background(), Target{Namespace: "ns", Pod: "p"}, Trigger{})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)

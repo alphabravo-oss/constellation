@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link } from "@tanstack/react-router";
 
 type NeuVectorCompatibilityChip = {
   label: string;
@@ -20,7 +20,7 @@ export function NeuVectorCompatibilityChips({
         const className = "rounded-md border border-primary/20 bg-primary/5 px-2.5 py-1 text-xs font-medium text-primary";
         if (item.to) {
           return (
-            <Link key={item.label} to={item.to} className={`${className} hover:border-primary/40 hover:bg-primary/10`}>
+            <Link key={item.label} to="." href={item.to} className={`${className} hover:border-primary/40 hover:bg-primary/10`}>
               {item.label}
             </Link>
           );

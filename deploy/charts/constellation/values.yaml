@@ -93,6 +93,8 @@ networkPolicies:
     namespace: cnpg-system
     podLabels:
       app.kubernetes.io/name: cloudnative-pg
+  # Allowed ingress/Gateway sources; also used for its direct /api route.
+  # Set api.env.CONSTELLATION_TRUSTED_PROXIES to the actual proxy peers.
   frontendIngressCIDRs: ["0.0.0.0/0"]
   admissionIngressCIDRs: ["0.0.0.0/0"]
   # Required when NetworkPolicy and the host-network runtime agent are both
@@ -167,12 +169,24 @@ migrate:
 # Control plane API
 # ---------------------------------------------------------------------------
 api:
+  # Bounded hourly ANALYZE of partitioned parents; disable when managed externally.
+  partitionStatisticsMaintenanceEnabled: true
   enabled: true
   replicas: 2
   image: {}
     # repository: ghcr.io/alphabravo-oss/constellation/api
     # tag: v0.2.0
   args: []
+  # Durable packet evidence is opt-in and always uses an operator-owned PVC.
+  # Single-replica RWO uses Recreate; multiple replicas require shared RWX.
+  # The claim must be Bound and writable by the configured API UID/fsGroup.
+  # No ephemeral fallback: disabled keeps the existing storage configuration.
+  pcapStorage:
+    enabled: false
+    existingClaim: ""
+    accessMode: ReadWriteOnce
+    # Expire DB-backed captures only after this same durable claim is verified.
+    retentionEnabled: false
   service:
     type: ClusterIP
     port: 8080
@@ -349,6 +363,35 @@ dockerBenchRunner:
   resources:
     limits:   { cpu: 200m, memory: 256Mi }
     requests: { cpu: 50m,  memory: 64Mi }
+
+# ---------------------------------------------------------------------------
+# Durable benchmark worker (opt-in)
+# ---------------------------------------------------------------------------
+# Durable on-demand execution is separate from scheduled benchmark CronJobs.
+# One worker inspects its assigned node; it does not establish fleet coverage.
+kubeBenchWorker:
+  enabled: false
+  image:
+    repository: ""
+    tag: ""
+  interval: "30s"
+  benchmark: ""
+  args: ""
+  clusterId: ""
+  state:
+    # Required: a durable PVC, exclusive to this worker (never emptyDir).
+    existingClaim: ""
+  nodeSelector: {}
+  tolerations: []
+  hostVolumes: []
+  hostVolumeMounts: []
+  resources:
+    limits: { cpu: 200m, memory: 256Mi }
+    requests: { cpu: 50m, memory: 64Mi }
+# No qualified image currently bundles docker-bench-security plus configuration.
+# Enabling this explicitly fails chart rendering instead of creating a fake job.
+dockerBenchWorker:
+  enabled: false
 
 # ---------------------------------------------------------------------------
 # Admission webhook
@@ -528,8 +571,17 @@ scanner:
 #     of inspected traffic in TAP mode; bump for higher-throughput nodes.
 runtimeAgent:
   enabled: true
+  # Persistent event/flow queues, each bounded independently. Survives pod
+  # replacement on the same node; node/disk loss requires external replication.
+  telemetrySpool:
+    hostPath: /var/lib/constellation/telemetry
+    bytesPerStream: 268435456
   image: {}
   args: []
+  # Optional execution-enforcer dry-run override. Omission keeps the agent's
+  # existing default; explicit true prevents executable enforcement effects.
+  # Explicit false is supported and does not arm the other enforcement gates.
+  # execDryRun: true
   resources:
     limits:   { cpu: "1",    memory: 1Gi }
     requests: { cpu: 200m,   memory: 256Mi }
@@ -701,6 +753,12 @@ postgres:
   dsn: ""
   existingSecret: ""        # if set, takes precedence over `dsn`
   existingSecretKey: url
+  # Upgrade-only cutover option: retain the legacy StatefulSet and Service, with
+  # zero replicas, while the app uses a separately validated target Secret.
+  # Requires mode=external and existingSecret. Preserve embeddedConfig values
+  # and the old credential Secret/PVC. Removing this flag removes the old workload;
+  # rollback after target writes requires reconciliation, not merely scaling it up.
+  retainStatefulSetForRollback: false
   embeddedConfig:
     image: pgvector/pgvector:pg16@sha256:00ba258a66dac104fd5171074a0084462a64a1369d8513f3d0a634e2f24d15bc
     storage: 20Gi
@@ -764,7 +822,7 @@ postgres:
     # NOTES.txt emits an install-time WARNING when mode=cnpg and this value does
     # not look pgvector-enabled (no "pgvector" in the ref) — a heuristic guard,
     # not a hard gate. See examples/values-cnpg.yaml for a worked profile.
-    imageName: ghcr.io/alphabravo-oss/constellation/postgres:16.10-v0.2.0
+    imageName: ghcr.io/alphabravo-oss/constellation/postgres:16.14-v0.2.0
     storage: 20Gi
     storageClass: ""        # empty = cluster default
     resources:
@@ -788,6 +846,19 @@ postgres:
     #       secretAccessKey: { name: cnpg-backup, key: SECRET_ACCESS_KEY }
     #   retentionPolicy: "30d"
     backup: {}
+    # CNPG-I Barman Cloud plugin and ObjectStore CRs are installed separately.
+    # Prefer this path for new deployments; backup above is legacy compatibility.
+    barmanCloud:
+      enabled: false
+      pluginName: barman-cloud.cloudnative-pg.io
+      objectStoreName: ""
+      recovery:
+        enabled: false
+        # Recovery initializes a NEW cluster; never enable on the live cluster.
+        sourceName: origin
+        objectStoreName: ""
+        serverName: ""
+        targetTime: "" # empty replays to the latest available WAL
     scheduledBackup:
       enabled: false
       # Six-field cron syntax used by CNPG (seconds first): daily at 02:00 UTC.

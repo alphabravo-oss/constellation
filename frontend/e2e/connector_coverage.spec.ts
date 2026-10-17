@@ -49,19 +49,20 @@ test("Connector actions are wired to dry-run checks and scan queue", async ({ pa
   await page.getByTestId("queue-scan-target-ref").fill(imageRef);
   await page.getByTestId("queue-scan").first().click();
   await expect(page).toHaveURL(/\/settings\/connectors\?tab=scan-jobs/);
-  const job = page.getByTestId("scan-job-card").filter({ hasText: imageRef }).first();
+  await page.getByRole("textbox", { name: "Search scan jobs" }).fill(imageRef);
+  const job = page.getByTestId("scan-jobs-table").getByRole("row").filter({ hasText: imageRef }).first();
   await expect(job).toContainText("pending");
 
-  await job.getByTestId("scan-job-pause").click();
+  await job.getByRole("button", { name: "Pause", exact: true }).click();
   await expect(job).toContainText("paused");
 
-  await job.getByTestId("scan-job-resume").click();
+  await job.getByRole("button", { name: "Resume", exact: true }).click();
   await expect(job).toContainText("pending");
 
-  await job.getByTestId("scan-job-cancel").click();
+  await job.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(job).toContainText("canceled");
 
-  await job.getByTestId("scan-job-retry").click();
+  await job.getByRole("button", { name: "Retry", exact: true }).click();
   await expect(job).toContainText("pending");
 });
 

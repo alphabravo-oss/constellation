@@ -31,9 +31,9 @@ type namespaceLabelResolver struct {
 // RBAC: the webhook ServiceAccount needs cluster-scoped list+watch on the core
 // "namespaces" resource for the informer to sync, e.g. a ClusterRole rule:
 //
-//	- apiGroups: [""]
-//	  resources: ["namespaces"]
-//	  verbs: ["list", "watch"]
+//   - apiGroups: [""]
+//     resources: ["namespaces"]
+//     verbs: ["list", "watch"]
 //
 // Without it WaitForCacheSync fails, this returns an error, and the caller falls
 // back to leaving the labeler unwired (namespaceSelector rules simply do not fire).

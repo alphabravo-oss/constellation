@@ -77,3 +77,17 @@ func NamespaceFilterFrom(ctx context.Context) (namespaces []string, ok bool) {
 	ns, _ := ctx.Value(nsFilterKey{}).([]string)
 	return ns, len(ns) > 0
 }
+
+// WithTrustedProxy records the direct peer's trust decision before RealIP can
+// replace RemoteAddr. Only server middleware should establish this property.
+func WithTrustedProxy(ctx context.Context, trusted bool) context.Context {
+	return context.WithValue(ctx, trustedProxyKey{}, trusted)
+}
+
+type trustedProxyKey struct{}
+
+// TrustedProxyFrom is false when middleware has not verified the direct peer.
+func TrustedProxyFrom(ctx context.Context) bool {
+	trusted, _ := ctx.Value(trustedProxyKey{}).(bool)
+	return trusted
+}

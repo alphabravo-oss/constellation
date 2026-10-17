@@ -63,7 +63,7 @@ func TestNetworkFlowsUseReportingTokenCluster(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			request := httptest.NewRequest(http.MethodPost, "/api/v1/network-flows:bulk", bytes.NewReader(body))
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/network-flows:bulk", bytes.NewReader(body))
 			request.Header.Set("Authorization", "Bearer "+testCase.token)
 			response := httptest.NewRecorder()
 			handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(NewNetworkFlowsIngest(database).Bulk)).ServeHTTP(response, request)

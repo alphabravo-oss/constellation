@@ -1,6 +1,9 @@
 package dpi
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+	"unicode/utf8"
+)
 
 // parseKafka decodes the Kafka request header: size(4) + apiKey(2) + apiVersion(2)
 // + correlationID(4) + clientID(short string). Body interpretation depends on apiKey
@@ -10,23 +13,33 @@ func parseKafka(flow Flow, dir Direction, payload []byte) *L7Event {
 	if len(payload) < 4+2+2+4+2 {
 		return nil
 	}
-	size := int(binary.BigEndian.Uint32(payload[0:4]))
-	if size <= 0 || size > 1<<24 || size+4 > len(payload) {
+	size := binary.BigEndian.Uint32(payload[0:4])
+	if size < 10 || size > 1<<24 || uint64(size)+4 > uint64(len(payload)) {
 		return nil
 	}
-	apiKey := int16(binary.BigEndian.Uint16(payload[4:6]))
-	apiVer := int16(binary.BigEndian.Uint16(payload[6:8]))
-	if apiKey < 0 || apiKey > 100 || apiVer < 0 || apiVer > 20 {
+	frame := payload[:int(size)+4]
+	var header struct {
+		APIKey      int16
+		APIVersion  int16
+		Correlation int32
+		ClientLen   int16
+	}
+	if _, err := binary.Decode(frame[4:14], binary.BigEndian, &header); err != nil {
 		return nil
 	}
-	corr := int32(binary.BigEndian.Uint32(payload[8:12]))
-	cidLen := int16(binary.BigEndian.Uint16(payload[12:14]))
+	if header.APIKey < 0 || header.APIKey > 100 || header.APIVersion < 0 || header.APIVersion > 20 || header.ClientLen < -1 {
+		return nil
+	}
 	cid := ""
-	if cidLen > 0 && 14+int(cidLen) <= len(payload) {
-		cid = string(payload[14 : 14+int(cidLen)])
+	if header.ClientLen > 0 {
+		end := 14 + int(header.ClientLen)
+		if end > len(frame) || !utf8.Valid(frame[14:end]) {
+			return nil
+		}
+		cid = string(frame[14:end])
 	}
 	return &L7Event{
 		Flow: flow, Protocol: "kafka", Dir: dir,
-		Kafka: &KafkaEvent{APIKey: apiKey, APIVersion: apiVer, Correlation: corr, ClientID: cid},
+		Kafka: &KafkaEvent{APIKey: header.APIKey, APIVersion: header.APIVersion, Correlation: header.Correlation, ClientID: cid},
 	}
 }

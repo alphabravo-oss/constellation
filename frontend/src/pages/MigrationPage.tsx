@@ -1,13 +1,16 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, CheckCircle2, Download, RotateCcw, ShieldCheck, Wand2 } from "lucide-react";
-import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
 import { clusters as clustersApi, enterprise, type MigrationImportListItem, type MigrationPreview, type MigrationUnsupported } from "@/api/client";
+import { Tabs, useTabParam } from "@/components/ui/tabs";
+import { ErrorState, LoadingState } from "@/components/ui/states";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { PageHeader } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
+import { Collapse } from "@/components/ui/collapse";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Field, Select, Textarea } from "@/components/ui/form";
@@ -41,7 +44,7 @@ const MAX_EXPORT_BYTES = 2 * 1024 * 1024;
 const vulnerabilityProfileColumns: Column<MigrationVulnerabilityProfile>[] = [
   {
     id: "profile",
-    header: "Vulnerability profile",
+    header: "Vulnerability profile", kind: "name", wrap: true,
     exportValue: (profile) => profile.name,
     cell: (profile) => (
       <div data-testid="migration-preview-vulnerability-profile">
@@ -50,16 +53,16 @@ const vulnerabilityProfileColumns: Column<MigrationVulnerabilityProfile>[] = [
       </div>
     ),
   },
-  { id: "action", header: "Action", cell: (profile) => profile.diff_action, exportValue: (profile) => profile.diff_action },
-  { id: "active", header: "State", cell: (profile) => profile.active ? "Active" : "Inactive", exportValue: (profile) => profile.active ? "Active" : "Inactive" },
-  { id: "scope", header: "Effective scope", cell: migrationVulnerabilityScopeLabel, exportValue: migrationVulnerabilityScopeLabel },
-  { id: "entries", header: "Entries", cell: (profile) => profile.entries.length, exportValue: (profile) => profile.entries.length },
+  { id: "action", header: "Action", kind: "status", cell: (profile) => profile.diff_action, exportValue: (profile) => profile.diff_action },
+  { id: "active", header: "State", kind: "status", cell: (profile) => profile.active ? "Active" : "Inactive", exportValue: (profile) => profile.active ? "Active" : "Inactive" },
+  { id: "scope", header: "Effective scope", kind: "text", wrap: true, size: 264, minSize: 192, maxSize: 400, code: true, cell: migrationVulnerabilityScopeLabel, exportValue: migrationVulnerabilityScopeLabel },
+  { id: "entries", header: "Entries", kind: "count", cell: (profile) => profile.entries.length, exportValue: (profile) => profile.entries.length },
 ];
 
 const registryColumns: Column<MigrationRegistry>[] = [
   {
     id: "registry",
-    header: "Registry",
+    header: "Registry", kind: "name", wrap: true,
     exportValue: (registry) => `${registry.name} (${registry.kind}) ${registry.endpoint}`,
     cell: (registry) => (
       <div data-testid="migration-preview-registry">
@@ -68,12 +71,12 @@ const registryColumns: Column<MigrationRegistry>[] = [
       </div>
     ),
   },
-  { id: "action", header: "Action", cell: (registry) => registry.diff_action, exportValue: (registry) => registry.diff_action },
-  { id: "scope", header: "Effective image scope", cell: (registry) => registry.image_globs.join(", ") || "All images", exportValue: (registry) => registry.image_globs.join(", ") || "All images" },
-  { id: "filters", header: "Image filters", cell: (registry) => registry.image_globs.length, exportValue: (registry) => registry.image_globs.length },
+  { id: "action", header: "Action", kind: "status", cell: (registry) => registry.diff_action, exportValue: (registry) => registry.diff_action },
+  { id: "scope", header: "Effective image scope", kind: "text", wrap: true, size: 264, minSize: 192, maxSize: 400, code: true, cell: (registry) => registry.image_globs.join(", ") || "All images", exportValue: (registry) => registry.image_globs.join(", ") || "All images" },
+  { id: "filters", header: "Image filters", kind: "count", cell: (registry) => registry.image_globs.length, exportValue: (registry) => registry.image_globs.length },
   {
     id: "scanning",
-    header: "Scanning and credentials",
+    header: "Scanning and credentials", kind: "text", wrap: true, size: 264, minSize: 208, maxSize: 360,
     exportValue: (registry) => `Manual scans; no credentials imported${registry.credentials_required ? "; reissue credentials before scanning" : ""}`,
     cell: (registry) => (
       <div className="text-xs">
@@ -100,7 +103,7 @@ const dpiRuleProvenance = (rule: MigrationDPIRule) => {
 const policyColumns: Column<MigrationPolicy>[] = [
   {
     id: "policy",
-    header: "Policy",
+    header: "Policy", kind: "name", wrap: true,
     exportHeader: "Policy",
     exportValue: (p) => p.name,
     cell: (p) => (
@@ -110,14 +113,14 @@ const policyColumns: Column<MigrationPolicy>[] = [
       </div>
     ),
   },
-  { id: "action", header: "Action", cell: (p) => p.diff_action, exportValue: (p) => p.diff_action },
-  { id: "mode", header: "Mode", cell: (p) => p.mode, exportValue: (p) => p.mode },
+  { id: "action", header: "Action", kind: "status", cell: (p) => p.diff_action, exportValue: (p) => p.diff_action },
+  { id: "mode", header: "Mode", kind: "status", cell: (p) => p.mode, exportValue: (p) => p.mode },
 ];
 
 const fileProfileColumns: Column<MigrationFileProfile>[] = [
   {
     id: "profile",
-    header: "File profile",
+    header: "File profile", kind: "name", wrap: true,
     exportHeader: "File profile",
     exportValue: (p) => p.group,
     cell: (p) => (
@@ -127,16 +130,16 @@ const fileProfileColumns: Column<MigrationFileProfile>[] = [
       </div>
     ),
   },
-  { id: "mode", header: "Mode", cell: (p) => p.mode, exportValue: (p) => p.mode },
-  { id: "rules", header: "Rules", cell: (p) => p.rules.length, exportValue: (p) => p.rules.length },
-  { id: "targets", header: "Targets", cell: (p) => p.target_workloads?.length ?? "-", exportValue: (p) => p.target_workloads?.length ?? "" },
-  { id: "action", header: "Action", cell: (p) => p.diff_action, exportValue: (p) => p.diff_action },
+  { id: "mode", header: "Mode", kind: "status", cell: (p) => p.mode, exportValue: (p) => p.mode },
+  { id: "rules", header: "Rules", kind: "count", cell: (p) => p.rules.length, exportValue: (p) => p.rules.length },
+  { id: "targets", header: "Targets", kind: "count", cell: (p) => p.target_workloads?.length ?? "-", exportValue: (p) => p.target_workloads?.length ?? "" },
+  { id: "action", header: "Action", kind: "status", cell: (p) => p.diff_action, exportValue: (p) => p.diff_action },
 ];
 
 const processProfileColumns: Column<MigrationProcessProfile>[] = [
   {
     id: "profile",
-    header: "Process profile",
+    header: "Process profile", kind: "name", wrap: true,
     exportHeader: "Process profile",
     exportValue: (p) => p.group,
     cell: (p) => (
@@ -146,16 +149,16 @@ const processProfileColumns: Column<MigrationProcessProfile>[] = [
       </div>
     ),
   },
-  { id: "mode", header: "Mode", cell: (p) => p.mode, exportValue: (p) => p.mode },
-  { id: "rules", header: "Rules", cell: (p) => p.rules.length, exportValue: (p) => p.rules.length },
-  { id: "targets", header: "Targets", cell: (p) => p.target_workloads?.length ?? "-", exportValue: (p) => p.target_workloads?.length ?? "" },
-  { id: "action", header: "Action", cell: (p) => p.diff_action, exportValue: (p) => p.diff_action },
+  { id: "mode", header: "Mode", kind: "status", cell: (p) => p.mode, exportValue: (p) => p.mode },
+  { id: "rules", header: "Rules", kind: "count", cell: (p) => p.rules.length, exportValue: (p) => p.rules.length },
+  { id: "targets", header: "Targets", kind: "count", cell: (p) => p.target_workloads?.length ?? "-", exportValue: (p) => p.target_workloads?.length ?? "" },
+  { id: "action", header: "Action", kind: "status", cell: (p) => p.diff_action, exportValue: (p) => p.diff_action },
 ];
 
 const groupColumns: Column<MigrationGroup>[] = [
   {
     id: "group",
-    header: "Group",
+    header: "Group", kind: "name", wrap: true,
     exportHeader: "Group",
     exportValue: (group) => group.name,
     cell: (group) => (
@@ -165,21 +168,21 @@ const groupColumns: Column<MigrationGroup>[] = [
       </div>
     ),
   },
-  { id: "kind", header: "Kind", cell: (group) => group.kind, exportValue: (group) => group.kind },
+  { id: "kind", header: "Kind", kind: "badge", cell: (group) => group.kind, exportValue: (group) => group.kind },
   {
     id: "modes",
-    header: "Modes",
+    header: "Modes", kind: "status", size: 176, minSize: 152, maxSize: 208,
     cell: (group) => `${group.policy_mode || "monitor"} / ${group.profile_mode || "monitor"}`,
     exportValue: (group) => `${group.policy_mode || "monitor"} / ${group.profile_mode || "monitor"}`,
   },
-  { id: "criteria", header: "Criteria", cell: (group) => group.criteria.length, exportValue: (group) => group.criteria.length },
-  { id: "action", header: "Action", cell: (group) => group.diff_action, exportValue: (group) => group.diff_action },
+  { id: "criteria", header: "Criteria", kind: "count", cell: (group) => group.criteria.length, exportValue: (group) => group.criteria.length },
+  { id: "action", header: "Action", kind: "status", cell: (group) => group.diff_action, exportValue: (group) => group.diff_action },
 ];
 
 const dpiRuleColumns: Column<MigrationDPIRule>[] = [
   {
     id: "rule",
-    header: "DLP / WAF rule",
+    header: "DLP / WAF rule", kind: "name", wrap: true,
     exportHeader: "DLP / WAF rule",
     exportValue: (r) => `${r.name} (${dpiRuleProvenance(r)})`,
     cell: (r) => (
@@ -189,16 +192,16 @@ const dpiRuleColumns: Column<MigrationDPIRule>[] = [
       </div>
     ),
   },
-  { id: "mode", header: "Mode", cell: (r) => r.mode, exportValue: (r) => r.mode },
-  { id: "direction", header: "Direction", cell: (r) => directionLabel(r.apply_dir), exportValue: (r) => directionLabel(r.apply_dir) },
-  { id: "patterns", header: "Patterns", cell: (r) => r.patterns.length, exportValue: (r) => r.patterns.length },
-  { id: "action", header: "Action", cell: (r) => r.diff_action, exportValue: (r) => r.diff_action },
+  { id: "mode", header: "Mode", kind: "status", cell: (r) => r.mode, exportValue: (r) => r.mode },
+  { id: "direction", header: "Direction", kind: "status", cell: (r) => directionLabel(r.apply_dir), exportValue: (r) => directionLabel(r.apply_dir) },
+  { id: "patterns", header: "Patterns", kind: "count", cell: (r) => r.patterns.length, exportValue: (r) => r.patterns.length },
+  { id: "action", header: "Action", kind: "status", cell: (r) => r.diff_action, exportValue: (r) => r.diff_action },
 ];
 
 const dpiBindingColumns: Column<MigrationDPIBinding>[] = [
   {
     id: "group",
-    header: "DLP / WAF group scope",
+    header: "DLP / WAF group scope", kind: "name", wrap: true,
     exportHeader: "DLP / WAF group scope",
     exportValue: (binding) => binding.target_group_name,
     cell: (binding) => (
@@ -210,46 +213,46 @@ const dpiBindingColumns: Column<MigrationDPIBinding>[] = [
   },
   {
     id: "kind",
-    header: "Detector",
+    header: "Detector", kind: "badge",
     cell: (binding) => <StatusPill label={binding.sensor_kind.toUpperCase()} tone={binding.sensor_kind === "waf" ? "accent" : "info"} />,
     exportValue: (binding) => binding.sensor_kind,
   },
   {
     id: "sensors",
-    header: "Source sensors",
+    header: "Source sensors", kind: "text", wrap: true, size: 224, minSize: 160, maxSize: 320,
     cell: (binding) => binding.source_sensors?.join(", ") || "-",
     exportValue: (binding) => binding.source_sensors?.join(", ") || "",
   },
-  { id: "action", header: "Action", cell: (binding) => binding.diff_action, exportValue: (binding) => binding.diff_action },
+  { id: "action", header: "Action", kind: "status", cell: (binding) => binding.diff_action, exportValue: (binding) => binding.diff_action },
 ];
 
 const networkRuleColumns: Column<MigrationNetworkRule>[] = [
   {
     id: "edge",
-    header: "Network edge",
+    header: "Network edge", kind: "name", wrap: true,
     exportHeader: "Network edge",
     exportValue: (rule) => `${rule.from_group} -> ${rule.to_group}`,
     cell: (rule) => (
       <div data-testid="migration-preview-network-rule">
-        <div className="flex min-w-0 items-center gap-2 font-medium">
-          <span className="truncate">{rule.from_group}</span>
+        <div className="flex min-w-0 flex-wrap items-center gap-2 font-medium">
+          <span className="">{rule.from_group}</span>
           <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-          <span className="truncate">{rule.to_group}</span>
+          <span className="">{rule.to_group}</span>
         </div>
         {rule.comment ? <div className="text-muted-foreground">{rule.comment}</div> : null}
       </div>
     ),
   },
-  { id: "mode", header: "Mode", cell: (rule) => rule.mode, exportValue: (rule) => rule.mode },
-  { id: "ports", header: "Ports", cell: (rule) => networkPortLabel(rule.ports), exportValue: (rule) => networkPortLabel(rule.ports) },
-  { id: "priority", header: "Priority", cell: (rule) => rule.priority || "-", exportValue: (rule) => rule.priority || "" },
-  { id: "action", header: "Action", cell: (rule) => rule.diff_action, exportValue: (rule) => rule.diff_action },
+  { id: "mode", header: "Mode", kind: "status", cell: (rule) => rule.mode, exportValue: (rule) => rule.mode },
+  { id: "ports", header: "Ports", kind: "text", code: true, wrap: true, size: 152, minSize: 112, maxSize: 208, cell: (rule) => networkPortLabel(rule.ports), exportValue: (rule) => networkPortLabel(rule.ports) },
+  { id: "priority", header: "Priority", kind: "count", cell: (rule) => rule.priority || "-", exportValue: (rule) => rule.priority || "" },
+  { id: "action", header: "Action", kind: "status", cell: (rule) => rule.diff_action, exportValue: (rule) => rule.diff_action },
 ];
 
 const unsupportedColumns: Column<MigrationUnsupported>[] = [
   {
     id: "item",
-    header: "Item",
+    header: "Item", kind: "name", wrap: true,
     exportHeader: "Item",
     exportValue: (item) => item.name,
     cell: (item) => (
@@ -261,10 +264,10 @@ const unsupportedColumns: Column<MigrationUnsupported>[] = [
   },
   {
     id: "reason",
-    header: "Reason",
+    header: "Reason", kind: "text", wrap: true, size: 320, minSize: 224, maxSize: 480, grow: true,
     exportValue: (item) => item.suggestion ? `${item.reason} Suggested fix: ${item.suggestion}` : item.reason,
     cell: (item) => (
-      <div className="max-w-xl text-xs leading-relaxed">
+      <div className="text-xs leading-relaxed">
         <div>{item.reason}</div>
         {item.suggestion ? <div className="mt-1 text-muted-foreground">{item.suggestion}</div> : null}
       </div>
@@ -272,10 +275,10 @@ const unsupportedColumns: Column<MigrationUnsupported>[] = [
   },
   {
     id: "source",
-    header: "Source",
+    header: "Source", kind: "text", code: true, wrap: true, size: 264, minSize: 192, maxSize: 400,
     exportValue: (item) => item.source ? JSON.stringify(item.source) : "",
     cell: (item) => (
-      <code className="block max-w-64 truncate rounded bg-muted px-1.5 py-1 text-[11px] text-muted-foreground">
+      <code className="block rounded bg-muted px-1.5 py-1 text-[11px] text-muted-foreground">
         {item.source ? JSON.stringify(item.source) : "-"}
       </code>
     ),
@@ -289,6 +292,12 @@ const unsupportedColumns: Column<MigrationUnsupported>[] = [
  */
 export function MigrationPage() {
   const qc = useQueryClient();
+  const [requestedTab, setTab] = useTabParam("tab", "import");
+  const tab = ["import", "readiness", "report", "history"].includes(requestedTab) ? requestedTab : "import";
+  const [family, setFamily] = useTabParam("family", "policies");
+  const uploadGeneration = useRef(0);
+  const active = useRef(true);
+  useEffect(() => { active.current = true; return () => { active.current = false; uploadGeneration.current += 1; }; }, []);
   const sourcesQ = useQuery({ queryKey: ["migration-sources"], queryFn: () => enterprise.migration() });
   const importsQ = useInfiniteQuery({
     queryKey: ["migration-imports-pages"],
@@ -297,36 +306,62 @@ export function MigrationPage() {
     getNextPageParam: (page) => page.has_more ? page.next_cursor : undefined,
   });
   const clustersQ = useQuery({ queryKey: ["clusters"], queryFn: () => clustersApi.list(), staleTime: 30_000 });
-  const sources = sourcesQ.data?.sources ?? [];
-  const clusterOptions = useMemo(() => clustersQ.data?.clusters ?? [], [clustersQ.data?.clusters]);
+  const sources = sourcesQ.isSuccess ? sourcesQ.data.sources : [];
+  const clusterOptions = useMemo(() => clustersQ.isSuccess ? clustersQ.data.clusters : [], [clustersQ.isSuccess, clustersQ.data?.clusters]);
 
   const [source, setSource] = useState("neuvector");
   const [exportText, setExportText] = useState("");
+  const [uploadError, setUploadError] = useState("");
   const [targetClusterID, setTargetClusterID] = useState("");
   const [selectedPolicy, setSelectedPolicy] = useState<string | null>(null);
 
+  const draftKey = JSON.stringify([source, exportText, targetClusterID]);
+  const currentDraftKey = useRef(draftKey);
+  currentDraftKey.current = draftKey;
+  const targetReady = !targetClusterID || clustersQ.isSuccess && !clustersQ.isFetching && clusterOptions.some(cluster => cluster.id === targetClusterID);
+  const sourceReady = sourcesQ.isSuccess && !sourcesQ.isFetching && (sources.some(item => item.id === source) || sources.length === 0 && source === "neuvector");
   const preview = useMutation({
-    mutationFn: () => {
-      if (new Blob([exportText]).size > MAX_EXPORT_BYTES) throw new Error("Export exceeds the 2 MiB limit.");
-      return enterprise.migrationPreview({ source, export: exportText, cluster_id: targetClusterID || undefined });
+    mutationFn: async (input: { source: string; export: string; cluster_id?: string; draftKey: string }) => {
+      const sourceState = qc.getQueryState<Awaited<ReturnType<typeof enterprise.migration>>>(["migration-sources"]);
+      const clusterState = qc.getQueryState<Awaited<ReturnType<typeof clustersApi.list>>>(["clusters"]);
+      if (!active.current || currentDraftKey.current !== input.draftKey || sourceState?.status !== "success" || sourceState.fetchStatus !== "idle" || sourceState.isInvalidated ||
+        !(sourceState.data?.sources.some(item => item.id === input.source) || sourceState.data?.sources.length === 0 && input.source === "neuvector") ||
+        input.cluster_id && (clusterState?.status !== "success" || clusterState.fetchStatus !== "idle" || clusterState.isInvalidated || !clusterState.data?.clusters.some(cluster => cluster.id === input.cluster_id))) {
+        throw new Error("Source or target changed. Wait for the current configuration and preview again.");
+      }
+      if (new Blob([input.export]).size > MAX_EXPORT_BYTES) throw new Error("Export exceeds the 2 MiB limit.");
+      const result = await enterprise.migrationPreview({ source: input.source, export: input.export, cluster_id: input.cluster_id });
+      if (result.summary.source !== input.source || (result.target_cluster_id || "") !== (input.cluster_id || "")) throw new Error("Preview response did not confirm the reviewed source and target. Preview again before applying.");
+      return result;
     },
-    onSuccess: (data) => {
-      setSelectedPolicy(data.policies[0]?.name ?? null);
+    onSuccess: (result, input) => {
+      if (active.current && currentDraftKey.current === input.draftKey) setSelectedPolicy(result.policies[0]?.name ?? null);
       void qc.invalidateQueries({ queryKey: ["migration-imports-pages"] });
-      toast.success(data.import_id ? "Migration preview saved" : "Migration preview generated");
+      if (active.current && currentDraftKey.current === input.draftKey) toast.success(result.import_id ? "Migration preview saved" : "Migration preview generated");
     },
     onError: (error) => toast.error(migrationErrorMessage(error, "Migration preview failed")),
   });
 
+  function requireCurrentImport(id: string, action: "apply" | "rollback" | "download") {
+    const state = qc.getQueryState<typeof importsQ.data>(["migration-imports-pages"]);
+    const item = state?.data?.pages.flatMap(page => page.imports).find(item => item.id === id);
+    if (!active.current || state?.status !== "success" || state.fetchStatus !== "idle" || state.isInvalidated || !item ||
+      (action === "apply" ? !canApplyImport(item) : action === "rollback" ? !canRollbackImport(item) : !canDownloadRollbackBundle(item))) {
+      throw new Error("Import history changed or is unavailable. Refresh it before continuing.");
+    }
+    return item;
+  }
+
   const applyImport = useMutation({
-    mutationFn: (id: string) => enterprise.migrationApply(id),
-    onSuccess: (res) => {
+    mutationFn: (id: string) => { requireCurrentImport(id, "apply"); return enterprise.migrationApply(id); },
+    onSuccess: (res, id) => {
+      const appliedTarget = qc.getQueryData<typeof importsQ.data>(["migration-imports-pages"])?.pages.flatMap(page => page.imports).find(item => item.id === id)?.target_cluster_id;
       void qc.invalidateQueries({ queryKey: ["migration-imports-pages"] });
-      if (targetClusterID) {
-        void qc.invalidateQueries({ queryKey: ["runtime-dlp-rules", targetClusterID] });
-        void qc.invalidateQueries({ queryKey: ["runtime-signatures", targetClusterID] });
-        void qc.invalidateQueries({ queryKey: ["network-rules", targetClusterID] });
-        void qc.invalidateQueries({ queryKey: ["baselines", targetClusterID] });
+      if (appliedTarget) {
+        void qc.invalidateQueries({ queryKey: ["runtime-dlp-rules", appliedTarget] });
+        void qc.invalidateQueries({ queryKey: ["runtime-signatures", appliedTarget] });
+        void qc.invalidateQueries({ queryKey: ["network-rules", appliedTarget] });
+        void qc.invalidateQueries({ queryKey: ["baselines", appliedTarget] });
       }
       void qc.invalidateQueries({ queryKey: ["dpi-group-bindings"] });
       void qc.invalidateQueries({ queryKey: ["groups"] });
@@ -345,14 +380,15 @@ export function MigrationPage() {
   });
 
   const rollbackImport = useMutation({
-    mutationFn: (id: string) => enterprise.migrationRollback(id),
-    onSuccess: (res) => {
+    mutationFn: (id: string) => { requireCurrentImport(id, "rollback"); return enterprise.migrationRollback(id); },
+    onSuccess: (res, id) => {
+      const appliedTarget = qc.getQueryData<typeof importsQ.data>(["migration-imports-pages"])?.pages.flatMap(page => page.imports).find(item => item.id === id)?.target_cluster_id;
       void qc.invalidateQueries({ queryKey: ["migration-imports-pages"] });
-      if (targetClusterID) {
-        void qc.invalidateQueries({ queryKey: ["runtime-dlp-rules", targetClusterID] });
-        void qc.invalidateQueries({ queryKey: ["runtime-signatures", targetClusterID] });
-        void qc.invalidateQueries({ queryKey: ["network-rules", targetClusterID] });
-        void qc.invalidateQueries({ queryKey: ["baselines", targetClusterID] });
+      if (appliedTarget) {
+        void qc.invalidateQueries({ queryKey: ["runtime-dlp-rules", appliedTarget] });
+        void qc.invalidateQueries({ queryKey: ["runtime-signatures", appliedTarget] });
+        void qc.invalidateQueries({ queryKey: ["network-rules", appliedTarget] });
+        void qc.invalidateQueries({ queryKey: ["baselines", appliedTarget] });
       }
       void qc.invalidateQueries({ queryKey: ["dpi-group-bindings"] });
       void qc.invalidateQueries({ queryKey: ["groups"] });
@@ -367,16 +403,18 @@ export function MigrationPage() {
   });
 
   const rollbackBundleDownload = useMutation({
-    mutationFn: (id: string) => enterprise.migrationRollbackBundle(id),
+    mutationFn: (id: string) => { requireCurrentImport(id, "download"); return enterprise.migrationRollbackBundle(id); },
     onSuccess: (bundle, id) => {
+      if (!active.current) return;
       downloadJson(`constellation-migration-rollback-${id}.json`, bundle);
       toast.success("Rollback bundle downloaded");
     },
     onError: (error) => toast.error(migrationErrorMessage(error, "Rollback bundle download failed")),
   });
 
-  const data = preview.data;
-  const selected = data?.policies.find((p) => p.name === selectedPolicy) ?? data?.policies[0];
+  const data = preview.variables?.draftKey === draftKey ? preview.data : undefined;
+  const historyReady = importsQ.isSuccess && !importsQ.isFetching;
+  const selected = data?.policies.find((p) => p.name === selectedPolicy);
   const processProfiles = data?.process_profiles ?? [];
   const groups = data?.groups ?? [];
   const dpiBindings = data?.dpi_bindings ?? [];
@@ -384,13 +422,14 @@ export function MigrationPage() {
   const vulnerabilityProfiles = data?.vulnerability_profiles ?? [];
   const registries = data?.registries ?? [];
   const unsupportedRows = useMemo(() => (data?.unsupported ?? []).map((item, diagnosticIndex) => ({ ...item, diagnosticIndex })), [data?.unsupported]);
-  const imports = importsQ.data?.pages.flatMap((page) => page.imports) ?? [];
-  const activeImport = data?.import_id ? imports.find((item) => item.id === data.import_id) : imports[0];
-  const activeStatus = activeImport?.status ?? (data?.import_id ? "previewed" : "preview");
-  const canApplyActive = Boolean(data?.import_id) && (activeStatus === "previewed" || activeStatus === "rolled_back");
+  const imports = importsQ.isSuccess || importsQ.isFetchNextPageError ? importsQ.data?.pages.flatMap((page) => page.imports) ?? [] : [];
+  const activeImport = data?.import_id ? imports.find((item) => item.id === data.import_id) : undefined;
+  const activeStatus = activeImport?.status ?? (data?.import_id ? "status unavailable" : "preview");
+  const canApplyActive = Boolean(activeImport) && historyReady && targetReady && sourceReady && (activeStatus === "previewed" || activeStatus === "rolled_back");
   const readiness = buildMigrationReadiness(data, activeImport, imports);
   const readinessCounts = countReadiness(readiness);
-  const reportText = buildMigrationReport({
+  const reportReady = historyReady && (!data?.import_id || !!activeImport);
+  const reportText = `Evidence scope: current draft preview and ${imports.length} loaded organization-wide import records. History is fetched in pages of 25${importsQ.hasNextPage ? "; older records remain unloaded" : ""}. This report is not a full inventory or cutover validation.\n\n` + buildMigrationReport({
     source,
     preview: data,
     activeImport,
@@ -402,7 +441,7 @@ export function MigrationPage() {
   const historyColumns: Column<MigrationImportListItem>[] = [
     {
       id: "import",
-      header: "Import",
+      header: "Import", kind: "name", wrap: true,
       exportHeader: "Import ID",
       exportValue: (item) => item.id,
       cell: (item) => (
@@ -415,16 +454,16 @@ export function MigrationPage() {
     },
     {
       id: "status",
-      header: "Status",
+      header: "Status", kind: "status", size: 152, minSize: 128, maxSize: 192,
       exportValue: (item) => item.status,
       cell: (item) => <StatusPill label={item.status.replace("_", " ")} tone={migrationStatusTone(item.status)} />,
     },
     {
       id: "summary",
-      header: "Summary",
+      header: "Summary", kind: "text", wrap: true, size: 320, minSize: 240, maxSize: 480, grow: true,
       exportValue: (item) => `${migrationSummaryLabel(item.summary)}; ${item.applied_summary ? migrationAppliedSummaryLabel(item.applied_summary) : "not applied"}${item.status === "rolled_back" ? "; subsequently rolled back" : ""}; ${(item.unsupported ?? []).map((diagnostic) => `${diagnostic.kind}: ${diagnostic.reason} ${diagnostic.suggestion ?? ""}`).join("; ")}`,
       cell: (item) => (
-        <div className="max-w-xl whitespace-normal text-xs text-muted-foreground">
+        <div className="whitespace-normal text-xs text-muted-foreground">
           <div>{migrationSummaryLabel(item.summary)}</div>
           <div>{item.applied_summary ? migrationAppliedSummaryLabel(item.applied_summary) : "Not applied"}{item.status === "rolled_back" ? " (subsequently rolled back)" : ""}</div>
           {item.error ? <div className="mt-1 text-destructive">{item.error}</div> : null}
@@ -446,14 +485,14 @@ export function MigrationPage() {
     },
     {
       id: "created",
-      header: "Created",
+      header: "Created", kind: "date", size: 224, minSize: 208, maxSize: 240,
       cell: (item) => formatDate(item.created_at),
       exportValue: (item) => item.created_at,
       className: "text-xs text-muted-foreground",
     },
     {
       id: "actions",
-      header: "Actions",
+      header: "Actions", kind: "actions", size: 320, minSize: 296, maxSize: 352, wrap: true,
       exportable: false,
       cell: (item) => (
         <div className="flex flex-wrap justify-end gap-2">
@@ -461,7 +500,7 @@ export function MigrationPage() {
             size="sm"
             variant="primary"
             onClick={() => applyImport.mutate(item.id)}
-            disabled={!canApplyImport(item) || applyImport.isPending}
+            disabled={!historyReady || !canApplyImport(item) || applyImport.isPending || rollbackImport.isPending}
             data-testid={`migration-import-apply-${item.id}`}
           >
             <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
@@ -471,7 +510,7 @@ export function MigrationPage() {
             size="sm"
             variant="outline"
             onClick={() => rollbackImport.mutate(item.id)}
-            disabled={!canRollbackImport(item) || rollbackImport.isPending}
+            disabled={!historyReady || !canRollbackImport(item) || rollbackImport.isPending || applyImport.isPending}
             data-testid={`migration-import-rollback-${item.id}`}
           >
             <RotateCcw className="h-3.5 w-3.5" aria-hidden />
@@ -481,7 +520,7 @@ export function MigrationPage() {
             size="sm"
             variant="outline"
             onClick={() => rollbackBundleDownload.mutate(item.id)}
-            disabled={!canDownloadRollbackBundle(item) || rollbackBundleDownload.isPending}
+            disabled={!historyReady || !canDownloadRollbackBundle(item) || rollbackBundleDownload.isPending}
             data-testid={`migration-import-rollback-bundle-${item.id}`}
           >
             <Download className="h-3.5 w-3.5" aria-hidden />
@@ -500,83 +539,19 @@ export function MigrationPage() {
         description="Preview policies, runtime profiles, groups, network rules, vulnerability profiles, and registry metadata from another security tool before applying."
       />
 
-      <section className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]" data-testid="migration-switch-readiness">
-        <Card
-          title="Switch Readiness"
-          description="Current import state, manual mapping work, and rollback evidence for a NeuVector cutover."
-        >
-          <div className="grid gap-3 sm:grid-cols-4">
-            <StatCard label="Blockers" value={readinessCounts.blocker} tone={readinessCounts.blocker > 0 ? "critical" : "neutral"} />
-            <StatCard label="Warnings" value={readinessCounts.warning} tone={readinessCounts.warning > 0 ? "medium" : "neutral"} />
-            <StatCard label="Ready" value={readinessCounts.ready} tone={readinessCounts.ready > 0 ? "accent" : "neutral"} />
-            <StatCard label="Imports" value={imports.length} />
-          </div>
-          <div className="mt-4 space-y-2" data-testid="migration-readiness-checklist">
-            {readiness.map((item) => (
-              <article key={item.id} className="rounded-md border border-border bg-background p-3">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-medium">{item.title}</div>
-                    <p className="mt-1 text-xs text-muted-foreground">{item.detail}</p>
-                  </div>
-                  <StatusPill label={item.category} tone={readinessTone(item.category)} />
-                </div>
-                {item.href ? (
-                  <Link to={item.href} className="mt-2 inline-flex items-center gap-1 text-xs text-[color:var(--color-primary)] hover:underline">
-                    Open <ArrowRight className="h-3 w-3" aria-hidden />
-                  </Link>
-                ) : null}
-              </article>
-            ))}
-          </div>
-        </Card>
-
-        <Card
-          title="Migration Report"
-          description="Export a cutover summary with imported counts, unsupported objects, rollback state, and recommended follow-up."
-        >
-          <div className="space-y-3" data-testid="migration-report-panel">
-            <div className="rounded-md bg-muted p-3 text-xs text-muted-foreground">
-                <div className="font-medium text-foreground">{migrationSourceLabel(data?.summary.source ?? activeImport?.source ?? source)} report</div>
-              <div className="mt-1">
-                {(data?.summary.total ?? activeImport?.summary.total ?? 0)} previewed items · {(data?.summary.unsupported ?? activeImport?.summary.unsupported ?? 0)} unsupported diagnostics · {imports.length} saved imports
-              </div>
-            </div>
-            <Button
-              variant="outline"
-              onClick={() => downloadMigrationReport(reportText, data?.summary.source ?? activeImport?.source ?? source)}
-              data-testid="migration-report-export"
-            >
-              <Download className="h-4 w-4" aria-hidden />
-              Export report
-            </Button>
-          </div>
-        </Card>
-      </section>
-
-      <Card
-        title="Post-Import Actions"
-        description="Controls that should be reviewed after policy migration so the cutover uses Constellation's stronger evidence and operations model."
-        padded={false}
-      >
-        <div className="grid gap-2 p-3 md:grid-cols-2 xl:grid-cols-4" data-testid="migration-recommended-actions">
-          {MIGRATION_RECOMMENDED_ACTIONS.map((action) => (
-            <Link
-              key={action.id}
-              to={action.href}
-              className="group rounded-md border border-border bg-background p-3 transition-colors hover:border-[color:var(--color-primary)]/60 hover:bg-accent"
-              data-testid={`migration-action-${action.id}`}
-            >
-              <div className="flex items-center gap-2 text-sm font-medium">
-                <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground group-hover:text-[color:var(--color-primary)]" aria-hidden />
-                {action.title}
-              </div>
-              <p className="mt-1 text-xs text-muted-foreground">{action.detail}</p>
-            </Link>
-          ))}
-        </div>
-      </Card>
-
+      <VerdictBanner status={sourcesQ.isError || importsQ.isError ? "degraded" : "info"}
+        title={sourcesQ.isError || importsQ.isError ? "Migration evidence is unavailable" : data ? "Review this preview before applying" : "Preview an export before changing live configuration"}
+        detail="Migration imports are organization-wide. Cluster-bound objects use the explicitly selected target; unsupported records and credentials are not imported." />
+          <StatGrid>
+            <StatCard label="Source Objects" value={data?.summary.source_total ?? data?.summary.total ?? "—"} />
+            <StatCard label="Create" value={data?.summary.create ?? "—"} tone="low" />
+            <StatCard label="Update" value={data?.summary.update ?? "—"} tone="medium" />
+            <StatCard label="Enforce" value={data?.summary.enforce ?? "—"} tone="high" />
+            <StatCard label="Unsupported Diagnostics" value={data?.summary.unsupported ?? "—"} tone={(data?.summary.unsupported ?? 0) > 0 ? "medium" : "neutral"} />
+          </StatGrid>
+      {(applyImport.isError || rollbackImport.isError || rollbackBundleDownload.isError) && <p role="alert" className="text-sm text-destructive">{migrationErrorMessage(applyImport.error ?? rollbackImport.error ?? rollbackBundleDownload.error, "Migration action failed")}</p>}
+      <Tabs value={tab} onValueChange={setTab} items={[
+        { value: "import", label: "Preview import", content: <div className="space-y-6">
       <div data-testid="migration-preview-wizard">
         <Card
           title="Paste or upload an export"
@@ -586,6 +561,7 @@ export function MigrationPage() {
             <div className="flex flex-wrap items-end gap-3">
               <Field label="Source" className="w-56">
                 <Select
+                  disabled={sourcesQ.isPending || sourcesQ.isError || preview.isPending}
                   value={source}
                   onChange={(e) => setSource(e.target.value)}
                   data-testid="migration-source-select"
@@ -600,10 +576,11 @@ export function MigrationPage() {
                 <Select
                   value={targetClusterID}
                   onChange={(e) => setTargetClusterID(e.target.value)}
-                  disabled={clustersQ.isLoading || clusterOptions.length === 0}
+                  disabled={preview.isPending || clustersQ.isFetching || clustersQ.isError}
                   data-testid="migration-target-cluster-select"
                 >
                   <option value="">{clustersQ.isLoading ? "Loading clusters..." : "No target cluster"}</option>
+                  {targetClusterID && !clusterOptions.some(cluster => cluster.id === targetClusterID) && <option value={targetClusterID}>Selected cluster unavailable ({targetClusterID})</option>}
                   {clusterOptions.map((cluster) => (
                     <option key={cluster.id} value={cluster.id}>{cluster.name || cluster.id}</option>
                   ))}
@@ -611,8 +588,8 @@ export function MigrationPage() {
               </Field>
               <Button
                 variant="primary"
-                onClick={() => preview.mutate()}
-                disabled={preview.isPending || exportText.trim().length === 0}
+                onClick={() => preview.mutate({ source, export: exportText, cluster_id: targetClusterID || undefined, draftKey })}
+                disabled={preview.isPending || !targetReady || !sourceReady || exportText.trim().length === 0}
                 data-testid="migration-preview-submit"
               >
                 <Wand2 className="h-4 w-4" aria-hidden />
@@ -620,6 +597,13 @@ export function MigrationPage() {
               </Button>
             </div>
 
+            {sourcesQ.isPending && <p role="status" className="text-sm text-muted-foreground">Loading migration sources…</p>}
+            {uploadError && <p role="alert" className="text-sm text-destructive">{uploadError} Your draft is preserved.</p>}
+            {sourcesQ.isError && <p role="alert" className="text-sm text-destructive">Migration sources are unavailable. Your draft is preserved. <Button onClick={() => void sourcesQ.refetch()}>Retry sources</Button></p>}
+            {clustersQ.isError && <p role="alert" className="text-sm text-destructive">Target clusters are unavailable. Your selected target is preserved. <Button onClick={() => void clustersQ.refetch()}>Retry clusters</Button></p>}
+            {!targetReady && !clustersQ.isFetching && <p role="alert" className="text-sm text-destructive">The selected cluster is unavailable. Choose a verified target before previewing or applying.</p>}
+            {preview.isError && preview.variables?.draftKey === draftKey && <p role="alert" className="text-sm text-destructive">{migrationErrorMessage(preview.error, "Migration preview failed. Your draft is preserved")}</p>}
+            {preview.data && preview.variables?.draftKey !== draftKey && <p role="status" className="text-sm text-muted-foreground">The draft changed. Preview again before applying.</p>}
             <p className="text-xs text-muted-foreground">Preview is read-only for live configuration: it saves an import preview but does not write live policies, profiles, or registries. Apply is a separate action.</p>
             <Field label="Upload export (maximum 2 MiB)">
               <input
@@ -631,13 +615,18 @@ export function MigrationPage() {
                   const file = event.target.files?.[0];
                   event.target.value = "";
                   if (!file) return;
+                  setUploadError("");
                   if (file.size > MAX_EXPORT_BYTES) {
+                    setUploadError("Export exceeds the 2 MiB limit.");
                     toast.error("Export exceeds the 2 MiB limit.");
                     return;
                   }
+                  const generation = ++uploadGeneration.current;
                   try {
-                    setExportText(await file.text());
+                    const text = await file.text();
+                    if (active.current && generation === uploadGeneration.current) setExportText(text);
                   } catch {
+                    if (active.current && generation === uploadGeneration.current) setUploadError("Could not read the export file.");
                     toast.error("Could not read the export file.");
                   }
                 }}
@@ -645,7 +634,7 @@ export function MigrationPage() {
             </Field>
             <Textarea
               value={exportText}
-              onChange={(e) => setExportText(e.target.value)}
+              onChange={(e) => { uploadGeneration.current += 1; setUploadError(""); setExportText(e.target.value); }}
               rows={8}
               spellCheck={false}
               placeholder="Paste the exported configuration from your source tool…"
@@ -680,24 +669,23 @@ export function MigrationPage() {
               </Button>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-[repeat(12,minmax(0,1fr))]">
-            <StatCard label="Source Objects" value={data.summary.source_total ?? data.summary.total} />
-            <StatCard label="Policies" value={data.policies.length} />
-            <StatCard label="Create" value={data.summary.create} tone="low" />
-            <StatCard label="Update" value={data.summary.update} tone="medium" />
-            <StatCard label="Unchanged" value={data.summary.unchanged ?? 0} />
-            <StatCard label="Enforce" value={data.summary.enforce} tone="high" />
-            <StatCard label="File Profiles" value={data.summary.file_profiles} />
-            <StatCard label="Process Profiles" value={data.summary.process_profiles ?? processProfiles.length} />
-            <StatCard label="Groups" value={data.summary.groups ?? groups.length} />
-            <StatCard label="Network Rules" value={data.summary.network_rules ?? networkRules.length} />
-            <StatCard label="DLP / WAF" value={data.summary.dpi_rules} />
-            <StatCard label="Group Scopes" value={data.summary.dpi_bindings ?? dpiBindings.length} />
-            <StatCard label="Vulnerability Profiles" value={data.summary.vulnerability_profiles ?? vulnerabilityProfiles.length} />
-            <StatCard label="Registries" value={data.summary.registries ?? registries.length} />
-            <StatCard label="Unsupported Diagnostics" value={data.summary.unsupported} tone={data.summary.unsupported > 0 ? "medium" : "neutral"} />
-          </div>
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+          <Collapse label="Additional import object counts">
+            <StatGrid>
+              <StatCard label="Policies" value={data.policies.length} />
+              <StatCard label="Unchanged" value={data.summary.unchanged ?? 0} />
+              <StatCard label="File Profiles" value={data.summary.file_profiles} />
+              <StatCard label="Process Profiles" value={data.summary.process_profiles ?? processProfiles.length} />
+              <StatCard label="Groups" value={data.summary.groups ?? groups.length} />
+              <StatCard label="Network Rules" value={data.summary.network_rules ?? networkRules.length} />
+              <StatCard label="DLP / WAF" value={data.summary.dpi_rules} />
+              <StatCard label="Group Scopes" value={data.summary.dpi_bindings ?? dpiBindings.length} />
+              <StatCard label="Vulnerability Profiles" value={data.summary.vulnerability_profiles ?? vulnerabilityProfiles.length} />
+              <StatCard label="Registries" value={data.summary.registries ?? registries.length} />
+            </StatGrid>
+          </Collapse>
+          <Tabs value={["policies", "files", "processes", "groups", "network", "dpi", "bindings", "vulnerabilities", "registries", "diagnostics", "rollback"].includes(family) ? family : "policies"} onValueChange={setFamily} items={[
+            { value: "policies", label: "Policies", content: <>
+          <div className="space-y-4">
             <DataTable
               rows={data.policies}
               columns={policyColumns}
@@ -705,14 +693,17 @@ export function MigrationPage() {
               onRowClick={(p) => setSelectedPolicy(p.name)}
               showDensityToggle={false}
               exportFileName={`constellation-${data.summary.source}-policies`}
+              preferencesKey="migration-preview-policies"
               testId="migration-preview-policies"
             />
-            <Card title="Generated policy YAML">
+            <Collapse label="Generated policy YAML"><Card title="Generated policy YAML">
               <pre className="max-h-64 overflow-auto rounded bg-muted p-2 text-xs" data-testid="migration-preview-yaml">
                 {selected?.spec_yaml ?? "No policy selected."}
               </pre>
-            </Card>
+            </Card></Collapse>
           </div>
+            </> },
+            { value: "files", label: "File profiles", content: <>
           {data.file_profiles.length > 0 ? (
             <div data-testid="migration-preview-file-profiles">
               <DataTable
@@ -721,10 +712,13 @@ export function MigrationPage() {
                 rowKey={(p) => p.group}
                 showDensityToggle={false}
                 exportFileName={`constellation-${data.summary.source}-file-profiles`}
-                testId="migration-preview-file-profile-table"
+                preferencesKey="migration-preview-file-profile-table"
+              testId="migration-preview-file-profile-table"
               />
             </div>
-          ) : null}
+          ) : <p className="py-6 text-sm text-muted-foreground">No file profiles in this preview.</p>}
+            </> },
+            { value: "processes", label: "Process profiles", content: <>
           {processProfiles.length > 0 ? (
             <div data-testid="migration-preview-process-profiles">
               <DataTable
@@ -733,10 +727,13 @@ export function MigrationPage() {
                 rowKey={(p) => `${p.cluster_id}:${p.group}`}
                 showDensityToggle={false}
                 exportFileName={`constellation-${data.summary.source}-process-profiles`}
-                testId="migration-preview-process-profile-table"
+                preferencesKey="migration-preview-process-profile-table"
+              testId="migration-preview-process-profile-table"
               />
             </div>
-          ) : null}
+          ) : <p className="py-6 text-sm text-muted-foreground">No process profiles in this preview.</p>}
+            </> },
+            { value: "groups", label: "Groups", content: <>
           {groups.length > 0 ? (
             <div data-testid="migration-preview-groups">
               <DataTable
@@ -745,10 +742,13 @@ export function MigrationPage() {
                 rowKey={(group) => `${group.cluster_id}:${group.name}`}
                 showDensityToggle={false}
                 exportFileName={`constellation-${data.summary.source}-groups`}
-                testId="migration-preview-group-table"
+                preferencesKey="migration-preview-group-table"
+              testId="migration-preview-group-table"
               />
             </div>
-          ) : null}
+          ) : <p className="py-6 text-sm text-muted-foreground">No groups in this preview.</p>}
+            </> },
+            { value: "network", label: "Network rules", content: <>
           {networkRules.length > 0 ? (
             <div data-testid="migration-preview-network-rules">
               <DataTable
@@ -757,10 +757,13 @@ export function MigrationPage() {
                 rowKey={(rule) => `${rule.cluster_id}:${rule.from_group}:${rule.to_group}`}
                 showDensityToggle={false}
                 exportFileName={`constellation-${data.summary.source}-network-rules`}
-                testId="migration-preview-network-rule-table"
+                preferencesKey="migration-preview-network-rule-table"
+              testId="migration-preview-network-rule-table"
               />
             </div>
-          ) : null}
+          ) : <p className="py-6 text-sm text-muted-foreground">No network rules in this preview.</p>}
+            </> },
+            { value: "dpi", label: "DLP / WAF", content: <>
           {data.dpi_rules.length > 0 ? (
             <div data-testid="migration-preview-dpi-rules">
               <DataTable
@@ -769,10 +772,13 @@ export function MigrationPage() {
                 rowKey={(r) => `${r.cluster_id}:${r.name}`}
                 showDensityToggle={false}
                 exportFileName={`constellation-${data.summary.source}-dlp-waf-rules`}
-                testId="migration-preview-dpi-rule-table"
+                preferencesKey="migration-preview-dpi-rule-table"
+              testId="migration-preview-dpi-rule-table"
               />
             </div>
-          ) : null}
+          ) : <p className="py-6 text-sm text-muted-foreground">No DLP / WAF rules in this preview.</p>}
+            </> },
+            { value: "bindings", label: "Group scopes", content: <>
           {dpiBindings.length > 0 ? (
             <div data-testid="migration-preview-dpi-bindings">
               <DataTable
@@ -781,20 +787,26 @@ export function MigrationPage() {
                 rowKey={(binding) => `${binding.sensor_kind}:${binding.target_group_id}:${binding.source_group}`}
                 showDensityToggle={false}
                 exportFileName={`constellation-${data.summary.source}-dlp-waf-group-scopes`}
-                testId="migration-preview-dpi-binding-table"
+                preferencesKey="migration-preview-dpi-binding-table"
+              testId="migration-preview-dpi-binding-table"
               />
             </div>
-          ) : null}
+          ) : <p className="py-6 text-sm text-muted-foreground">No group scopes in this preview.</p>}
+            </> },
+            { value: "vulnerabilities", label: "Vulnerability profiles", content: <>
           {vulnerabilityProfiles.length > 0 ? (
             <DataTable
               rows={vulnerabilityProfiles}
               columns={vulnerabilityProfileColumns}
               rowKey={(profile) => `${profile.cluster_id ?? ""}:${profile.name}`}
               showDensityToggle={false}
+              preferencesKey="migration-preview-vulnerability-profiles"
               testId="migration-preview-vulnerability-profiles"
               exportFileName={`constellation-${data.summary.source}-vulnerability-profiles`}
             />
-          ) : null}
+          ) : <p className="py-6 text-sm text-muted-foreground">No vulnerability profiles in this preview.</p>}
+            </> },
+            { value: "registries", label: "Registries", content: <>
           {registries.length > 0 ? (
             <Card title="Registry metadata" description="Imported registries use manual scan cadence and no credentials. No scans are queued. Reissue required credentials and review image scope before scanning." padded={false}>
               <DataTable
@@ -802,11 +814,14 @@ export function MigrationPage() {
                 columns={registryColumns}
                 rowKey={(registry) => registry.name}
                 showDensityToggle={false}
-                testId="migration-preview-registries"
+                preferencesKey="migration-preview-registries"
+              testId="migration-preview-registries"
                 exportFileName={`constellation-${data.summary.source}-registries`}
               />
             </Card>
-          ) : null}
+          ) : <p className="py-6 text-sm text-muted-foreground">No registries in this preview.</p>}
+            </> },
+            { value: "diagnostics", label: "Diagnostics", content: <>
           {(data.unsupported?.length ?? 0) > 0 ? (
             <Card
               title="Unsupported Diagnostics"
@@ -818,19 +833,106 @@ export function MigrationPage() {
                 columns={unsupportedColumns}
                 rowKey={(item) => `${item.kind}:${item.name}:${item.diagnosticIndex}`}
                 showDensityToggle={false}
-                testId="migration-preview-unsupported"
+                preferencesKey="migration-preview-unsupported"
+              testId="migration-preview-unsupported"
                 exportFileName={`constellation-${data.summary.source}-unsupported`}
               />
             </Card>
-          ) : null}
+          ) : <p className="py-6 text-sm text-muted-foreground">No unsupported diagnostics in this preview.</p>}
+            </> },
+            { value: "rollback", label: "Rollback preview", content: <>
           <Card title="Rollback bundle preview" description="This preview bundle is nonreplayable and cannot restore live objects. After apply, download the saved rollback bundle from import history. Later changes may block rollback.">
             <pre className="max-h-40 overflow-auto rounded bg-muted p-2 text-xs" data-testid="migration-rollback-bundle">
               {data.rollback_bundle}
             </pre>
           </Card>
+            </> },
+          ]} />
         </div>
       ) : null}
 
+        </div> },
+        { value: "readiness", label: "Readiness", content: <>
+      <section className="space-y-4" data-testid="migration-switch-readiness">
+        {importsQ.isPending ? <LoadingState label="Loading migration readiness evidence…" /> : importsQ.isError && !importsQ.isFetchNextPageError ? <ErrorState title="Migration readiness evidence is unavailable." action={<Button onClick={() => void importsQ.refetch()}>Retry history</Button>} /> : <Card
+          title="Switch Readiness"
+          description="Current preview, loaded import history, manual mapping work and rollback evidence. These checks do not validate the complete organization inventory."
+        >
+          <p className="text-sm text-muted-foreground">{readinessCounts.blocker} blockers · {readinessCounts.warning} warnings · {readinessCounts.ready} ready checks · {imports.length} loaded imports</p>
+          <div className="mt-4 space-y-2" data-testid="migration-readiness-checklist">
+            {readiness.map((item) => (
+              <article key={item.id} className="rounded-md border border-border bg-background p-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium">{item.title}</div>
+                    <p className="mt-1 text-xs text-muted-foreground">{item.detail}</p>
+                  </div>
+                  <StatusPill label={item.category} tone={readinessTone(item.category)} />
+                </div>
+                {item.href ? (
+                  <a href={item.href} className="mt-2 inline-flex items-center gap-1 text-xs text-[color:var(--color-primary)] hover:underline">
+                    Open <ArrowRight className="h-3 w-3" aria-hidden />
+                  </a>
+                ) : null}
+              </article>
+            ))}
+          </div>
+        </Card>}
+
+      </section>
+        </> },
+        { value: "report", label: "Report and follow-up", content: <div className="space-y-6">
+        {importsQ.isError && !importsQ.isFetchNextPageError && <ErrorState title="Report history is unavailable. Export is paused." action={<Button onClick={() => void importsQ.refetch()}>Retry history</Button>} />}
+        <Card
+          title="Migration Report"
+          description="Export a cutover summary with imported counts, unsupported objects, rollback state, and recommended follow-up."
+        >
+          <div className="space-y-3" data-testid="migration-report-panel">
+            <p className="text-xs text-muted-foreground">This report covers the current preview and {imports.length} loaded import records. {importsQ.hasNextPage ? "Older history remains unloaded. " : ""}It is not a full inventory or cutover validation.</p>
+            <div className="rounded-md bg-muted p-3 text-xs text-muted-foreground">
+                <div className="font-medium text-foreground">{migrationSourceLabel(data?.summary.source ?? activeImport?.source ?? source)} report</div>
+              <div className="mt-1">
+                {(data?.summary.total ?? activeImport?.summary.total ?? 0)} previewed items · {(data?.summary.unsupported ?? activeImport?.summary.unsupported ?? 0)} unsupported diagnostics · {importsQ.isSuccess || importsQ.isFetchNextPageError ? imports.length : "Unavailable"} loaded saved imports
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              onClick={() => downloadMigrationReport(reportText, data?.summary.source ?? activeImport?.source ?? source)}
+              disabled={!reportReady}
+              data-testid="migration-report-export"
+            >
+              <Download className="h-4 w-4" aria-hidden />
+              Export report
+            </Button>
+          </div>
+        </Card>
+
+
+      <Card
+        title="Post-Import Actions"
+        description="Controls that should be reviewed after policy migration so the cutover uses Constellation's stronger evidence and operations model."
+        padded={false}
+      >
+        <div className="grid gap-2 p-3 md:grid-cols-2 xl:grid-cols-4" data-testid="migration-recommended-actions">
+          {MIGRATION_RECOMMENDED_ACTIONS.map((action) => (
+            <a
+              key={action.id}
+              href={action.href}
+              className="group rounded-md border border-border bg-background p-3 transition-colors hover:border-[color:var(--color-primary)]/60 hover:bg-accent"
+              data-testid={`migration-action-${action.id}`}
+            >
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground group-hover:text-[color:var(--color-primary)]" aria-hidden />
+                {action.title}
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">{action.detail}</p>
+            </a>
+          ))}
+        </div>
+      </Card>
+
+        </div> },
+        { value: "history", label: "Import history", content: <>
       <Card
         title="Import History"
         description="Persisted previews, applied imports, partial imports, failures, and rollback state for the current organization. Load more to inspect older records."
@@ -844,12 +946,13 @@ export function MigrationPage() {
         </div>
         <p className="px-6 pt-1 text-xs text-muted-foreground">The download contains metadata only. Verify its final complete record and count before treating it as a full export.</p>
         {importsQ.isPending ? <p className="px-6 pt-4 text-xs" role="status">Loading import history…</p> : null}
-        {importsQ.isError && !importsQ.data ? <p className="px-6 pt-4 text-xs text-destructive" role="alert">Import history is unavailable.</p> : null}
+        {importsQ.isError && !importsQ.isFetchNextPageError ? <p className="px-6 pt-4 text-xs text-destructive" role="alert">Import history is unavailable. Actions are paused. <Button onClick={() => void importsQ.refetch()}>Retry history</Button></p> : null}
+        {importsQ.isFetching && !importsQ.isPending && <p role="status" className="px-6 pt-4 text-xs">Refreshing import history…</p>}
         <DataTable
           rows={imports}
           columns={historyColumns}
           rowKey={(item) => item.id}
-          showDensityToggle={false}
+          preferencesKey="migration-import-history"
           testId="migration-import-history"
           exportFileName="constellation-migration-import-history"
           emptyState={<div className="px-6 py-10 text-center text-xs text-muted-foreground">{importsQ.isPending ? "Loading import history…" : importsQ.isError ? "Import history is unavailable." : "No migration imports yet."}</div>}
@@ -862,7 +965,8 @@ export function MigrationPage() {
             </Button>
           </div>
         ) : null}
-      </Card>
+      </Card>        </> },
+      ]} />
     </div>
   );
 }

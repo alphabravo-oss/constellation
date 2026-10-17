@@ -87,7 +87,7 @@ func TestComplianceReadScope(t *testing.T) {
 				if test.cluster != "" {
 					url += "cluster_id=" + test.cluster
 				}
-				request := httptest.NewRequest(http.MethodGet, url, nil)
+				request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
 				request = request.WithContext(authctx.WithSubject(request.Context(), authctx.Subject{OrgID: test.orgID}))
 				response := httptest.NewRecorder()
 				endpoint.serve(response, request)

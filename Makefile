@@ -16,6 +16,8 @@ NODE_VERSION ?= $(shell cat .node-version)
 # image was hand-retagged. Aligned 2026-05-14.
 REGISTRY ?= ghcr.io/alphabravo-oss/constellation
 VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null || echo dev)
+BUILD_TIME ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 # PLATFORMS is the buildx target list. The local `--load` image-* targets only
 # work with a SINGLE platform (docker can't load a manifest list), so for local
 # dev builds pass one arch, e.g. `make image-api PLATFORMS=linux/amd64`.
@@ -30,11 +32,11 @@ RELEASE_PLATFORMS ?= linux/amd64
 # Dockerfile.fips path). Default off — passing it through as a build-arg is
 # cheap and lets `make image-runtime-agent FIPS=true` Just Work.
 FIPS ?= 0
-DOCKER_BUILD ?= docker buildx build --platform $(PLATFORMS) --build-arg VERSION=$(VERSION) --build-arg FIPS=$(FIPS)
+DOCKER_BUILD ?= docker buildx build --platform $(PLATFORMS) --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) --build-arg BUILD_TIME=$(BUILD_TIME) --build-arg FIPS=$(FIPS)
 
 .PHONY: all build test lint migrate helm-lint helm-template-smoke frontend-build verify \
         deploy deploy-dryrun undeploy values-prod \
-        images images-push release-images image-api image-scanner image-operator image-discoverer image-audit-archiver image-frontend image-runtime-agent image-admission image-migrate image-bootstrap image-postgres release-check \
+        images images-push release-images image-api image-scanner image-operator image-discoverer image-audit-archiver image-frontend image-runtime-agent image-admission image-migrate image-bootstrap image-postgres image-kube-bench-runner release-check \
         dp dp-clean vendor-neuvector-diff vendor-neuvector-sync \
         compose-up compose-down compose-logs compose-images compose-images-core \
         compose-image-api compose-image-scanner compose-image-operator compose-image-frontend \
@@ -54,6 +56,10 @@ test:
 test-clean-database:
 	bash scripts/test-clean-database.sh
 
+.PHONY: test-fips
+test-fips:
+	bash scripts/test-fips.sh
+
 .PHONY: test-browser
 test-browser:
 	bash scripts/test-browser.sh
@@ -62,18 +68,14 @@ vet:
 	$(GO) vet ./...
 
 lint:
-	@command -v "$(GOLANGCI_LINT)" >/dev/null || { echo "golangci-lint is required; run make tools" >&2; exit 1; }
-	@mkdir -p "$${ARTIFACT_DIR:-test-results/tooling}"
-	$(GOLANGCI_LINT) run --output.json.path="$${ARTIFACT_DIR:-test-results/tooling}/golangci-lint.json" ./...
+	GOLANGCI_LINT="$(GOLANGCI_LINT)" bash scripts/lint-go.sh
 
 .PHONY: tools fmt lint-shell test-tooling check-endpoint-mapping check-parity-plan test-race test-integration security check vet frontend-test
 tools:
 	bash scripts/install-ci-tools.sh
 
 fmt:
-	@mkdir -p "$${ARTIFACT_DIR:-test-results/tooling}"
-	$(GOLANGCI_LINT) fmt --diff ./... > "$${ARTIFACT_DIR:-test-results/tooling}/format.diff"
-	@test ! -s "$${ARTIFACT_DIR:-test-results/tooling}/format.diff" || { cat "$${ARTIFACT_DIR:-test-results/tooling}/format.diff"; exit 1; }
+	GOLANGCI_LINT="$(GOLANGCI_LINT)" bash scripts/check-go-format.sh
 
 lint-shell:
 	bash scripts/lint-shell.sh
@@ -284,6 +286,7 @@ images-push:
 	$(DOCKER_BUILD) -f deploy/docker/Dockerfile.admission     -t $(REGISTRY)/admission:$(VERSION)      --push .
 	$(DOCKER_BUILD) -f deploy/docker/Dockerfile.migrate       -t $(REGISTRY)/migrate:$(VERSION)        --push .
 	$(DOCKER_BUILD) -f deploy/docker/Dockerfile.bootstrap     -t $(REGISTRY)/bootstrap:$(VERSION)      --push .
+	$(DOCKER_BUILD) -f deploy/docker/Dockerfile.kube-bench-runner -t $(REGISTRY)/kube-bench-runner:$(VERSION) --push .
 	$(DOCKER_BUILD) -f deploy/docker/Dockerfile.runtime-agent -t $(REGISTRY)/runtime-agent:$(VERSION)  --push .
 	$(DOCKER_BUILD) -f deploy/docker/Dockerfile.postgres      -t $(REGISTRY)/postgres:$(VERSION)       --push .
 
@@ -317,7 +320,7 @@ compose-logs:
 #   make compose-image-api        # just one role
 #   PLATFORMS=linux/amd64 make compose-images   # cross-build with buildx
 # -----------------------------------------------------------------------------
-COMPOSE_BUILD ?= docker build
+COMPOSE_BUILD ?= docker build --build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) --build-arg BUILD_TIME=$(BUILD_TIME)
 
 compose-images: compose-images-core compose-image-seed compose-image-discoverer \
                 compose-image-scanner-driver compose-image-runtime-agent

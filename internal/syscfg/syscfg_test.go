@@ -362,12 +362,12 @@ func TestHTTPClient_ProxyAndTLS(t *testing.T) {
 	c.EgressProxy = EgressProxy{HTTPSProxy: "http://egress:3128", NoProxy: "internal.svc"}
 	cl = c.HTTPClient(0)
 	tr = cl.Transport.(*http.Transport)
-	reqProxied, _ := http.NewRequest(http.MethodGet, "https://registry.example.com/v2/", nil)
+	reqProxied, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://registry.example.com/v2/", nil)
 	u, _ := tr.Proxy(reqProxied)
 	if u == nil || u.Host != "egress:3128" {
 		t.Fatalf("proxied request should route via egress, got %v", u)
 	}
-	reqBypass, _ := http.NewRequest(http.MethodGet, "https://internal.svc/x", nil)
+	reqBypass, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://internal.svc/x", nil)
 	if u, _ := tr.Proxy(reqBypass); u != nil {
 		t.Fatalf("no_proxy host should bypass proxy, got %v", u)
 	}
@@ -382,7 +382,11 @@ func TestHTTPClient_ProxyAndTLS(t *testing.T) {
 	c = Default()
 	c.EgressProxy = EgressProxy{HTTPSProxy: proxy.URL}
 	cl = c.HTTPClient(2 * time.Second)
-	resp, err := cl.Get("http://example.invalid/whatever")
+	httpRequest, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.invalid/whatever", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := cl.Do(httpRequest)
 	if err == nil {
 		_ = resp.Body.Close()
 	}

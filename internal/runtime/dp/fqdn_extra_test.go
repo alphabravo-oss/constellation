@@ -21,8 +21,8 @@ func releaseIPs(msgs []IPFqdnStorageMsg) []string {
 func TestFqdnResolver_SharedIPRefcount(t *testing.T) {
 	r := NewFqdnResolver("a.com", "b.com")
 	shared := ip("203.0.113.7")
-	r.Observe("a.com", []ResolvedIP{{IP: shared, TTL: 30}}, t0)   // expires t0+30
-	r.Observe("b.com", []ResolvedIP{{IP: shared, TTL: 300}}, t0)  // expires t0+300
+	r.Observe("a.com", []ResolvedIP{{IP: shared, TTL: 30}}, t0)  // expires t0+30
+	r.Observe("b.com", []ResolvedIP{{IP: shared, TTL: 300}}, t0) // expires t0+300
 
 	// a.com's lease lapses first; the IP is still held by b.com → no release.
 	rel := r.Expire(t0.Add(60 * time.Second))
@@ -84,7 +84,7 @@ func TestFqdnResolver_DeauthSharedIPKept(t *testing.T) {
 func TestFqdnResolver_EntryCapEvicts(t *testing.T) {
 	r := NewFqdnResolver("*.evil.test")
 	r.maxEntries = 2
-	r.Observe("a.evil.test", []ResolvedIP{{IP: ip("10.0.0.1"), TTL: 30}}, t0)  // soonest
+	r.Observe("a.evil.test", []ResolvedIP{{IP: ip("10.0.0.1"), TTL: 30}}, t0) // soonest
 	r.Observe("b.evil.test", []ResolvedIP{{IP: ip("10.0.0.2"), TTL: 300}}, t0)
 	rel := r.Observe("c.evil.test", []ResolvedIP{{IP: ip("10.0.0.3"), TTL: 300}}, t0)
 

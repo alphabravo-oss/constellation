@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ArrowLeft } from "lucide-react";
@@ -57,7 +57,7 @@ export function BackupDestinationPage() {
     onSuccess: () => {
       toast.success("Backup destination saved");
       qc.invalidateQueries({ queryKey: ["backups-schedule"] });
-      navigate("/settings/backup");
+      navigate({ href: "/settings/backup" });
     },
     onError: (e: Error) => toast.error(`Save failed: ${e.message}`),
   });
@@ -135,7 +135,7 @@ export function BackupDestinationPage() {
             >
               {save.isPending ? "Saving…" : "Save destination"}
             </Button>
-            <Button type="button" variant="ghost" size="lg" onClick={() => navigate("/settings/backup")}>Cancel</Button>
+            <Button type="button" variant="ghost" size="lg" onClick={() => navigate({ href: "/settings/backup" })}>Cancel</Button>
           </div>
         </form>
       </Card>

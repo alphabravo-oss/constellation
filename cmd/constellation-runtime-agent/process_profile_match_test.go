@@ -142,8 +142,8 @@ func TestDetectSetuidEscalations(t *testing.T) {
 		300: {euid: 1000, startTicks: 9, comm: "gone", container: "c1"},
 	}
 	cur := map[uint32]uidSample{
-		100: {euid: 0, startTicks: 5, comm: "app", container: "c1"},  // escalated, same instance
-		200: {euid: 0, startTicks: 7, comm: "root", container: "c1"}, // unchanged root
+		100: {euid: 0, startTicks: 5, comm: "app", container: "c1"},    // escalated, same instance
+		200: {euid: 0, startTicks: 7, comm: "root", container: "c1"},   // unchanged root
 		300: {euid: 0, startTicks: 99, comm: "reuse", container: "c1"}, // pid reused (diff startTicks)
 	}
 	got := detectSetuidEscalations(prev, cur)

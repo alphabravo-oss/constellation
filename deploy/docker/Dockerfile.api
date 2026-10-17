@@ -4,7 +4,7 @@
 # Scales 2-3 replicas behind a Service for HA. Does NOT bundle syft/trivy/grype — those
 # live in the scanner image, which receives jobs over HTTP from this API.
 
-ARG GO_VERSION=1.26.8
+ARG GO_VERSION=1.26.9
 ARG RUNTIME_IMAGE=debian:bookworm-slim
 
 # -----------------------------------------------------------------------------
@@ -16,15 +16,21 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 ARG VERSION=dev
+ARG COMMIT=dev
+ARG BUILD_TIME=
 ENV CGO_ENABLED=0 GOOS=linux
-RUN go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
+RUN go build -trimpath -ldflags="-s -w -X github.com/alphabravocompany/constellation/pkg/version.Version=${VERSION} -X github.com/alphabravocompany/constellation/pkg/version.Commit=${COMMIT} -X github.com/alphabravocompany/constellation/pkg/version.BuildTime=${BUILD_TIME}" \
       -o /out/constellation-api ./cmd/constellation-api \
- && go build -trimpath -ldflags="-s -w" -o /out/constellationctl ./cmd/constellationctl
+ && go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/constellationctl ./cmd/constellationctl
 
 # -----------------------------------------------------------------------------
 # Runtime — minimal debian-slim, no scanner CLIs. (Off Chainguard per project policy.)
 # -----------------------------------------------------------------------------
 FROM ${RUNTIME_IMAGE} AS runtime
+ARG VERSION=dev
+ARG COMMIT=dev
+LABEL org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT}"
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates tzdata \
  && rm -rf /var/lib/apt/lists/* \

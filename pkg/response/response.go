@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/alphabravocompany/constellation/pkg/notify"
 )
@@ -210,21 +211,35 @@ type Rule struct {
 	Selector   WorkloadSelector `json:"workload_match"`
 }
 
+// ProcessTarget identifies the original kernel-observed process, never an
+// arbitrary process selected later from a workload inventory.
+type ProcessTarget struct {
+	Node        string
+	PID         uint32
+	Comm        string
+	ContainerID string
+	BootID      string
+	StartBootNS string
+	StartTicks  string
+}
+
 // Event is the normalized event that the engine matches against. Constellation's
 // Finding and RuntimeEvent both fold down to this shape at the alert router.
 type Event struct {
-	ID          string
-	Name        string
-	Type        EventType
-	Severity    string
-	Cluster     string
-	Namespace   string
-	Workload    string
-	Labels      map[string]string
-	ProcessName string
-	CVEs        []CVERef
-	Title       string
-	URL         string
+	ProcessTarget *ProcessTarget
+	ObservedAt    time.Time
+	ID            string
+	Name          string
+	Type          EventType
+	Severity      string
+	Cluster       string
+	Namespace     string
+	Workload      string
+	Labels        map[string]string
+	ProcessName   string
+	CVEs          []CVERef
+	Title         string
+	URL           string
 }
 
 // CVERef is a CVE reference attached to an Event.

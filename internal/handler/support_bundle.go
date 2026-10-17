@@ -261,7 +261,7 @@ func (h *SupportBundle) collectComponentInventory(ctx context.Context, orgID uui
 		return nil, err
 	}
 	clusterNames := loadClusterNames(ctx, h.db, hbs)
-	scored := scoreHeartbeats(hbs, clusterNames, loadRecentRestarts(ctx, h.db.Pool(), orgID))
+	scored := scoreHeartbeatInstances(hbs, clusterNames, loadRecentRestarts(ctx, h.db.Pool(), orgID))
 	instances := make([]componentInstanceDTO, 0, len(hbs))
 	for i, hb := range hbs {
 		instances = append(instances, componentInstanceFromHeartbeat(hb, scored[i]))

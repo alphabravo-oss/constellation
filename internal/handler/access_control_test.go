@@ -9,7 +9,7 @@ import (
 
 func TestAccessControl_ListWithoutStorageReturnsRoleCatalogOnly(t *testing.T) {
 	w := httptest.NewRecorder()
-	NewAccessControl().List(w, httptest.NewRequest("GET", "/api/v1/access-control", nil))
+	NewAccessControl().List(w, httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/access-control", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("status: %d", w.Code)
 	}
@@ -86,7 +86,7 @@ func TestAccessControl_RolesAndGuardrailsAreComplete(t *testing.T) {
 
 func TestAccessControl_OverviewMatchesListShape(t *testing.T) {
 	w := httptest.NewRecorder()
-	NewAccessControl().Overview(w, httptest.NewRequest("GET", "/api/v1/access-control/overview", nil))
+	NewAccessControl().Overview(w, httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/access-control/overview", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("status: %d", w.Code)
 	}

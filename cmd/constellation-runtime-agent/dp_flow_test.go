@@ -14,12 +14,12 @@ import (
 // ipResolver lights up. EPMAC stays as a separate column for forensics.
 func TestDpConnToFlowIngest_WorkloadResolution(t *testing.T) {
 	cases := []struct {
-		name       string
-		ingress    bool
-		clientIP   string
-		serverIP   string
-		wantSrc    string
-		wantDst    string
+		name     string
+		ingress  bool
+		clientIP string
+		serverIP string
+		wantSrc  string
+		wantDst  string
 	}{
 		{
 			// Ingress: pod (10.42.0.5) is the server. Peer is external (1.2.3.4).

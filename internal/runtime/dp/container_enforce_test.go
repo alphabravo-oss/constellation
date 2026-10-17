@@ -9,7 +9,7 @@ import (
 // EnforceTargets; lo/proxymesh (PMAC set) and non-enforce workloads are excluded.
 func TestContainerEnforceProvider(t *testing.T) {
 	tap := &ContainerTapProvider{
-		procRoot:       "/proc",
+		procRoot: "/proc",
 		listContainers: func(ctx context.Context) ([]RunningContainer, error) {
 			return []RunningContainer{
 				{ID: "enf", PodName: "web", PID: 10, WAF: true, Enforce: true},

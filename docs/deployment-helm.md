@@ -572,6 +572,7 @@ asynchronous bundles.
 | `postgres.embedded`                   | `true`                                               | **Always set to `false` in prod**                               |
 | `postgres.dsn`                        | `""`                                                 | DSN string (alternative to existingSecret)                      |
 | `postgres.existingSecret`             | `""`                                                 | Reference an externally-managed Postgres Secret                 |
+| `postgres.retainStatefulSetForRollback` | `false` | During a validated external-DB cutover, retain the old StatefulSet/Service with zero replicas; requires `existingSecret`. Preserve its previous `embeddedConfig`, credential Secret and PVC. |
 | `postgres.embeddedConfig.image`       | digest-pinned `pgvector/pgvector:pg16`               | Mirror or upgrade the dev/test embedded Postgres image          |
 | `postgres.embeddedConfig.storage`     | `20Gi`                                               | Sizing for the embedded PVC                                     |
 | `postgres.embeddedConfig.storageClass`| `""`                                                 | Override the cluster default StorageClass                       |
@@ -667,3 +668,41 @@ helm upgrade constellation deploy/charts/constellation -n constellation-system
 
 Same fix as scanner. The Secret is `optional: true` on the DaemonSet so the
 agent boots in stdout-only mode without a token.
+
+## Federation transport and proxy trust
+
+Federation `join-remote` requires an absolute HTTPS master URL. Join tokens are
+never replayed through redirects. Configure a certificate trusted by the API
+container; use a TLS test server for local federation testing. The joining API
+no longer fabricates `X-Forwarded-Proto` to make an HTTP connection appear secure.
+
+The chart routes `/api` directly from the Ingress/Gateway to the API service.
+This preserves the terminator's TLS/client-IP evidence instead of passing through
+the frontend's plain-HTTP proxy. The frontend still serves `/` and uses `/static/`
+for compiled assets, leaving `/assets` available to the application router.
+With NetworkPolicies enabled, `networkPolicies.frontendIngressCIDRs` also admits
+the Ingress/Gateway peers to this direct API path. Narrow it to the actual proxy
+networks; do not assume a pod source address is the same as a node source address.
+
+Set `api.env.CONSTELLATION_TRUSTED_PROXIES` to the actual trusted proxy IPs/CIDRs
+in the forwarding chain. The middleware records direct-peer trust before
+rewriting the client IP. For a trusted socket peer, it reads `X-Forwarded-For`
+from right to left and stops at the first untrusted IP. The proxy must append
+its actual client address or overwrite the header with a verified chain.
+`True-Client-IP` and `X-Real-IP` are ignored; proxies providing only those headers
+must also supply `X-Forwarded-For`. Missing headers, malformed trusted suffixes
+and chains exceeding 64 hops or 8192 bytes retain the socket address. These
+requests share the proxy's rate-limit bucket. Do not include client networks in
+the trusted proxy list. Federation honors
+forwarded TLS and a configured forwarded client-certificate header only for that
+explicitly configured trusted peer. The terminator must overwrite incoming forwarding/certificate
+headers and perform the client TLS handshake. A forwarded public certificate
+alone does not prove possession of its private key. The compatibility default
+uses private/loopback ranges for client-IP rewriting only; it does not attest
+federation TLS or client certificates. Explicit narrow CIDRs are required for
+forwarded federation transport proof.
+
+Federation admin proxy requests reject redirects, including same-host redirects
+that could escape a reader's path allowlist. Redirect Location/Set-Cookie headers
+are not relayed to the browser. Configure the final member endpoint directly.
+Live ingress/mTLS and multi-cluster acceptance are still required before release.

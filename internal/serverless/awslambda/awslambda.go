@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -127,49 +126,6 @@ func (c SyftCataloger) Catalog(ctx context.Context, path string, runtime string,
 		}
 	}
 	return packages, nil
-}
-
-type HTTPDownloader struct {
-	Client *http.Client
-}
-
-func (d HTTPDownloader) Download(ctx context.Context, url string, dst string, maxBytes int64) (int64, error) {
-	if maxBytes <= 0 {
-		maxBytes = defaultMaxZipBytes
-	}
-	client := d.Client
-	if client == nil {
-		client = http.DefaultClient
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return 0, err
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		return 0, fmt.Errorf("download lambda package: %s", resp.Status)
-	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
-		return 0, err
-	}
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
-	if err != nil {
-		return 0, err
-	}
-	defer out.Close()
-	limited := &io.LimitedReader{R: resp.Body, N: maxBytes + 1}
-	n, err := io.Copy(out, limited)
-	if err != nil {
-		return n, err
-	}
-	if n > maxBytes {
-		return n, fmt.Errorf("lambda package exceeds max zip size %d bytes", maxBytes)
-	}
-	return n, nil
 }
 
 func Collect(ctx context.Context, client LambdaAPI, downloader Downloader, cataloger Cataloger, reporter Reporter, opts Options) (Summary, error) {

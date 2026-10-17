@@ -53,7 +53,7 @@ func TestDetect_ExplicitLabel(t *testing.T) {
 func TestDetect_NonAIWorkload(t *testing.T) {
 	v := Detect(Workload{
 		Namespace: "default", Name: "web",
-		Images: []string{"nginx:1.27", "ghcr.io/example/api:1.0"},
+		Images:    []string{"nginx:1.27", "ghcr.io/example/api:1.0"},
 		Processes: []string{"nginx", "api"},
 	})
 	if v.IsAI {

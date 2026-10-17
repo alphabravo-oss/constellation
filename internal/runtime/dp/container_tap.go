@@ -22,6 +22,7 @@ import (
 type RunningContainer struct {
 	ID      string
 	PodName string
+	PodUID  string
 	PID     int
 	// Namespace + Labels are the pod's Kubernetes identity (namespace + user
 	// labels from the sandbox), carried so the tap it produces can be matched
@@ -155,7 +156,8 @@ func (p *ContainerTapProvider) Desired(ctx context.Context) ([]TapTarget, error)
 		}
 
 		// Multiple containers in a pod share one netns; read + tap it once.
-		if _, dup := seenNetns[netnsPath]; dup {
+		namespaceKey := containerNetworkIdentity(c, netnsPath)
+		if _, dup := seenNetns[namespaceKey]; dup {
 			continue
 		}
 
@@ -205,6 +207,7 @@ func (p *ContainerTapProvider) Desired(ctx context.Context) ([]TapTarget, error)
 				// synthetic MAC dp uses only for loopback attribution.
 				Namespace: c.Namespace,
 				PodName:   c.PodName,
+				PodUID:    c.PodUID,
 				Labels:    c.Labels,
 				// This NIC's IPs, carried so the enforce (NFQUEUE) provider can
 				// hand them to dp via AddMAC: on the inline path dp needs
@@ -221,7 +224,7 @@ func (p *ContainerTapProvider) Desired(ctx context.Context) ([]TapTarget, error)
 			// behavior).
 			continue
 		}
-		seenNetns[netnsPath] = struct{}{}
+		seenNetns[namespaceKey] = struct{}{}
 
 		// The mesh lo-tap attributes loopback flows to the pod's PRIMARY
 		// (eth0) MAC/IPs, so use those.
@@ -245,11 +248,12 @@ func (p *ContainerTapProvider) Desired(ctx context.Context) ([]TapTarget, error)
 		if meshLoTapEnabled() && p.meshDetect != nil && p.meshDetect(c.PID) {
 			epmac := proxyMeshMAC(mac)
 			out = append(out, TapTarget{
-				NetNS: netnsPath,
-				Iface: "lo",
-				EPMAC: epmac,
-				PMAC:  mac,
-				PIPS:  append(append([]string{}, ips...), "127.0.0.1"),
+				NetNS:     netnsPath,
+				Iface:     "lo",
+				EPMAC:     epmac,
+				PMAC:      mac,
+				PIPS:      append(append([]string{}, ips...), "127.0.0.1"),
+				Namespace: c.Namespace, PodName: c.PodName, PodUID: c.PodUID, Labels: c.Labels,
 			})
 			p.logger.Info("dp container-tap: mesh lo-tap added",
 				slog.String("id", c.ID), slog.String("pod", c.PodName),
@@ -261,6 +265,21 @@ func (p *ContainerTapProvider) Desired(ctx context.Context) ([]TapTarget, error)
 	// Sort by (netns, iface) so a pod's eth0 and lo targets order stably.
 	sort.Slice(out, func(i, j int) bool { return out[i].key() < out[j].key() })
 	return out, nil
+}
+
+// Containers in one pod share a network namespace despite different /proc
+// aliases. Keep differing known inodes separate so a contradictory identity
+// remains a conflict instead of hiding one endpoint.
+func containerNetworkIdentity(container RunningContainer, path string) string {
+	identity := container.Namespace + "\x00" + container.PodName + "\x00" + container.PodUID
+	inode := netnsInode(path)
+	if container.Namespace != "" && container.PodName != "" && container.PodUID != "" {
+		return identity + "\x00" + strconv.FormatUint(inode, 10)
+	}
+	if inode != 0 {
+		return "inode:" + strconv.FormatUint(inode, 10)
+	}
+	return path
 }
 
 func (p *ContainerTapProvider) netnsPath(pid int) string {
@@ -597,7 +616,7 @@ func (p *ContainerEnforceProvider) Desired(ctx context.Context) ([]EnforceTarget
 			// Carry the per-workload DPI opt-in onto the enforce path: an
 			// inline-only workload is skipped by the tap reconciler, so this is
 			// the only place its waf/dlp labels reach the DLP/WAF sync worker.
-			out = append(out, EnforceTarget{NetNS: t.NetNS, Iface: t.Iface, EPMAC: t.EPMAC, WAF: t.WAF, DLP: t.DLP, Apps: t.Apps, PIPS: t.PIPS})
+			out = append(out, EnforceTarget{NetNS: t.NetNS, Iface: t.Iface, EPMAC: t.EPMAC, WAF: t.WAF, DLP: t.DLP, Apps: t.Apps, PIPS: t.PIPS, Namespace: t.Namespace, PodName: t.PodName, PodUID: t.PodUID})
 		}
 	}
 	return out, nil

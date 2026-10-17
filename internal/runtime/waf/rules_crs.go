@@ -16,7 +16,7 @@ func BuiltinCRS() Sensor {
 				Phase: "request", Severity: SevCritical, Action: "block",
 				Transformations: []string{"lowercase", "urlDecode"},
 				Target:          "ARGS",
-				Operator: MatchExpr{Type: "rx", Value: `(?i)\bunion\b.+\bselect\b`},
+				Operator:        MatchExpr{Type: "rx", Value: `(?i)\bunion\b.+\bselect\b`},
 				Tags:            []string{"sqli", "OWASP_CRS"},
 			},
 			{
@@ -30,7 +30,7 @@ func BuiltinCRS() Sensor {
 				// deploy/e2e/threat-scenarios/05-waf-sqli/EVIDENCE.md).
 				Transformations: []string{"lowercase", "urlDecode"},
 				Target:          "ARGS",
-				Operator: MatchExpr{Type: "rx", Value: `(?i)(\bor\b|\band\b).{0,8}['"]?\d+['"]?\s*=\s*['"]?\d+`},
+				Operator:        MatchExpr{Type: "rx", Value: `(?i)(\bor\b|\band\b).{0,8}['"]?\d+['"]?\s*=\s*['"]?\d+`},
 				Tags:            []string{"sqli", "OWASP_CRS"},
 			},
 			// --- XSS ---
@@ -39,7 +39,7 @@ func BuiltinCRS() Sensor {
 				Phase: "request", Severity: SevCritical, Action: "block",
 				Transformations: []string{"lowercase", "urlDecode"},
 				Target:          "ARGS",
-				Operator: MatchExpr{Type: "rx", Value: `<\s*script[\s>]`},
+				Operator:        MatchExpr{Type: "rx", Value: `<\s*script[\s>]`},
 				Tags:            []string{"xss", "OWASP_CRS"},
 			},
 			{
@@ -47,7 +47,7 @@ func BuiltinCRS() Sensor {
 				Phase: "request", Severity: SevError, Action: "block",
 				Transformations: []string{"lowercase", "urlDecode"},
 				Target:          "ARGS",
-				Operator: MatchExpr{Type: "rx", Value: `javascript\s*:`},
+				Operator:        MatchExpr{Type: "rx", Value: `javascript\s*:`},
 				Tags:            []string{"xss", "OWASP_CRS"},
 			},
 			{
@@ -55,7 +55,7 @@ func BuiltinCRS() Sensor {
 				Phase: "request", Severity: SevError, Action: "alert",
 				Transformations: []string{"lowercase", "urlDecode"},
 				Target:          "ARGS",
-				Operator: MatchExpr{Type: "rx", Value: `on(error|load|click|mouse\w+)\s*=`},
+				Operator:        MatchExpr{Type: "rx", Value: `on(error|load|click|mouse\w+)\s*=`},
 				Tags:            []string{"xss", "OWASP_CRS"},
 			},
 			// --- Path traversal / LFI ---
@@ -64,7 +64,7 @@ func BuiltinCRS() Sensor {
 				Phase: "request", Severity: SevCritical, Action: "block",
 				Transformations: []string{"urlDecode"},
 				Target:          "REQUEST_URI",
-				Operator: MatchExpr{Type: "rx", Value: `(\.\./|\.\.\\)`},
+				Operator:        MatchExpr{Type: "rx", Value: `(\.\./|\.\.\\)`},
 				Tags:            []string{"lfi", "OWASP_CRS"},
 			},
 			{
@@ -72,7 +72,7 @@ func BuiltinCRS() Sensor {
 				Phase: "request", Severity: SevCritical, Action: "block",
 				Transformations: []string{"lowercase", "urlDecode"},
 				Target:          "REQUEST_URI",
-				Operator: MatchExpr{Type: "contains", Value: "/etc/passwd"},
+				Operator:        MatchExpr{Type: "contains", Value: "/etc/passwd"},
 				Tags:            []string{"lfi", "OWASP_CRS"},
 			},
 			// --- Command injection (RCE) ---
@@ -81,7 +81,7 @@ func BuiltinCRS() Sensor {
 				Phase: "request", Severity: SevCritical, Action: "block",
 				Transformations: []string{"urlDecode"},
 				Target:          "ARGS",
-				Operator: MatchExpr{Type: "rx", Value: "(?i)(;|\\|\\||&&|`).{0,3}(cat\\s|/bin/|nc\\s|bash\\s|sh\\s|wget\\s|curl\\s)"},
+				Operator:        MatchExpr{Type: "rx", Value: "(?i)(;|\\|\\||&&|`).{0,3}(cat\\s|/bin/|nc\\s|bash\\s|sh\\s|wget\\s|curl\\s)"},
 				Tags:            []string{"rce", "OWASP_CRS"},
 			},
 			{
@@ -89,7 +89,7 @@ func BuiltinCRS() Sensor {
 				Phase: "request", Severity: SevError, Action: "alert",
 				Transformations: []string{"lowercase", "urlDecode"},
 				Target:          "ARGS",
-				Operator: MatchExpr{Type: "rx", Value: `\b(uname\s*-a|whoami|id\s*;|cat\s+/etc/)`},
+				Operator:        MatchExpr{Type: "rx", Value: `\b(uname\s*-a|whoami|id\s*;|cat\s+/etc/)`},
 				Tags:            []string{"rce", "OWASP_CRS"},
 			},
 			// --- Suspicious User-Agent ---
@@ -98,7 +98,7 @@ func BuiltinCRS() Sensor {
 				Phase: "request", Severity: SevWarning, Action: "alert",
 				Transformations: []string{"lowercase"},
 				Target:          "REQUEST_HEADERS:User-Agent",
-				Operator: MatchExpr{Type: "rx", Value: `(sqlmap|nikto|nessus|nmap|acunetix|wpscan|masscan)`},
+				Operator:        MatchExpr{Type: "rx", Value: `(sqlmap|nikto|nessus|nmap|acunetix|wpscan|masscan)`},
 				Tags:            []string{"reputation", "OWASP_CRS"},
 			},
 		},

@@ -23,7 +23,6 @@ NON_INTERACTIVE=0
 ROLES_ARG=""
 DATABASE_URL_ARG=""
 LISTEN_ADDR_ARG=""
-PURGE=0
 DOWNLOAD_VERSION="${CONSTELLATION_VERSION:-latest}"
 
 # Output paths (overridden in --user mode).
@@ -73,9 +72,9 @@ declare -A ROLE_ENVS=(
 # --------------------------------------------------------------------------- color / log
 
 if [[ -t 1 ]]; then
-  C_BLD=$'\e[1m'; C_DIM=$'\e[2m'; C_RED=$'\e[31m'; C_GRN=$'\e[32m'; C_YEL=$'\e[33m'; C_RST=$'\e[0m'
+  C_BLD=$'\e[1m'; C_RED=$'\e[31m'; C_GRN=$'\e[32m'; C_YEL=$'\e[33m'; C_RST=$'\e[0m'
 else
-  C_BLD=""; C_DIM=""; C_RED=""; C_GRN=""; C_YEL=""; C_RST=""
+  C_BLD=""; C_RED=""; C_GRN=""; C_YEL=""; C_RST=""
 fi
 log()  { printf "%s==>%s %s\n" "$C_BLD" "$C_RST" "$*"; }
 warn() { printf "%s!! %s%s\n" "$C_YEL" "$*" "$C_RST" >&2; }
@@ -100,7 +99,6 @@ Options:
   --database-url=URL      Postgres URL (skips the interactive prompt).
   --listen-addr=:PORT     LISTEN_ADDR for constellation-api (default :8080).
   --version=vX.Y.Z        Release version to download (default: latest).
-  --purge                 (uninstall.sh only) also remove the system user.
   -h, --help              This text.
 EOF
 }
@@ -115,7 +113,6 @@ while [[ $# -gt 0 ]]; do
     --database-url=*)    DATABASE_URL_ARG="${1#--database-url=}"; shift ;;
     --listen-addr=*)     LISTEN_ADDR_ARG="${1#--listen-addr=}"; shift ;;
     --version=*)         DOWNLOAD_VERSION="${1#--version=}"; shift ;;
-    --purge)             PURGE=1; shift ;;
     -h|--help)           usage; exit 0 ;;
     *)                   fail "unknown arg: $1 (try --help)" ;;
   esac
@@ -237,7 +234,7 @@ build_one() {
     return 0
   fi
   log "building $bin"
-  ( cd "$REPO_ROOT" && go build -o "/tmp/.cstn-build/$bin" "./${target#$REPO_ROOT/}" )
+  ( cd "$REPO_ROOT" && go build -o "/tmp/.cstn-build/$bin" "./${target#"$REPO_ROOT/"}" )
   install -m 0755 "/tmp/.cstn-build/$bin" "$BIN_DIR/$bin"
   ok "  -> $BIN_DIR/$bin"
 }

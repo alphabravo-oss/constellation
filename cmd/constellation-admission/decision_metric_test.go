@@ -30,7 +30,7 @@ func TestValidateHandlerRecordsAllow(t *testing.T) {
 	h := validateHandler(allowEngine{}, tel)
 	body, _ := json.Marshal(admissionv1.AdmissionReview{Request: &admissionv1.AdmissionRequest{}})
 	rec := httptest.NewRecorder()
-	h(rec, httptest.NewRequest(http.MethodPost, "/validate", bytes.NewReader(body)))
+	h(rec, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/validate", bytes.NewReader(body)))
 
 	if got := testutil.ToFloat64(tel.AdmissionDecisions.WithLabelValues("allow", "")); got != 1 {
 		t.Fatalf("admission_decisions_total{result=allow} = %v, want 1", got)

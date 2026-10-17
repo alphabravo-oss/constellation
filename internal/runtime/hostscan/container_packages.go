@@ -130,12 +130,12 @@ func CollectContainerPackages(ctx context.Context, opts ContainerPackagesOptions
 // tap (/proc/<PID>/ns/net) so dp captures packets with the pod's real
 // on-wire MAC instead of the host-side veth MAC.
 type RunningContainer struct {
-	ID        string
-	Name      string
-	PodName   string
-	PodNS     string
-	PodUID    string
-	PID       int
+	ID      string
+	Name    string
+	PodName string
+	PodNS   string
+	PodUID  string
+	PID     int
 	// PodLabels are the user labels on the container's pod sandbox (from
 	// `crictl pods`), keyed by the pod UID. Used to opt a workload into DPI
 	// (WAF/DLP) per NeuVector's per-group model. Empty if the sandbox lookup

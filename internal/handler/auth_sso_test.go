@@ -19,10 +19,11 @@ import (
 	"testing"
 	"time"
 
-	authpkg "github.com/alphabravocompany/constellation/internal/auth"
-	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/go-ldap/ldap/v3"
 	"github.com/google/uuid"
+
+	authpkg "github.com/alphabravocompany/constellation/internal/auth"
+	"github.com/alphabravocompany/constellation/pkg/audit"
 )
 
 // cannedSAMLAssertion is an Okta-style <Assertion>: NameID subject + email + multi-valued groups.
@@ -84,7 +85,7 @@ VALUES ($1, $2, $3, 'Alice', $4, $5)`,
 		return samlP.ParseAssertionXML([]byte(assertion))
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/saml/acs", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/auth/saml/acs", nil)
 	rec := httptest.NewRecorder()
 	h.SAMLACS(rec, req)
 	if rec.Code != http.StatusOK {
@@ -141,7 +142,7 @@ func TestAuth_SAMLACSJITProvisioning(t *testing.T) {
 		}
 		h, _ := newHandler(orgID, subject)
 		rec := httptest.NewRecorder()
-		h.SAMLACS(rec, httptest.NewRequest(http.MethodPost, "/api/v1/auth/saml/acs", nil))
+		h.SAMLACS(rec, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/auth/saml/acs", nil))
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("status = %d (want 403), body=%s", rec.Code, rec.Body.String())
 		}
@@ -168,7 +169,7 @@ func TestAuth_SAMLACSJITProvisioning(t *testing.T) {
 		}
 		h, signer := newHandler(orgID, subject)
 		rec := httptest.NewRecorder()
-		h.SAMLACS(rec, httptest.NewRequest(http.MethodPost, "/api/v1/auth/saml/acs", nil))
+		h.SAMLACS(rec, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/auth/saml/acs", nil))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("status = %d (want 200), body=%s", rec.Code, rec.Body.String())
 		}
@@ -262,7 +263,7 @@ VALUES ($1, $2, $3, 'Bob', $4, $5)`,
 	// Drive the shared linked-session tail with the canned entry's identity (the network bind in
 	// Authenticate is out of scope for a hermetic handler test).
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/ldap/login", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/auth/ldap/login", nil)
 	h.issueLinkedSession(rec, req, issuer, id.DN, id.Email, id.Roles, id.ScopedRoles, "auth.login.ldap")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
@@ -318,7 +319,7 @@ func TestAuth_SAMLACSRejectsUnsignedAssertion(t *testing.T) {
 </samlp:Response>`, acsURL)
 
 	form := url.Values{"SAMLResponse": {base64.StdEncoding.EncodeToString([]byte(unsigned))}}
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/saml/acs", strings.NewReader(form.Encode()))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/auth/saml/acs", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
 	h.SAMLACS(rec, req)

@@ -18,7 +18,7 @@ import (
 
 func TestNetworkPolicies_ListWithoutStorageReturnsEmptyLiveState(t *testing.T) {
 	w := httptest.NewRecorder()
-	NewNetworkPolicies().List(w, httptest.NewRequest("GET", "/api/v1/network/policies/lifecycle", nil))
+	NewNetworkPolicies().List(w, httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/network/policies/lifecycle", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("status: %d", w.Code)
 	}
@@ -42,7 +42,7 @@ func TestNetworkPolicies_ListWithoutStorageReturnsEmptyLiveState(t *testing.T) {
 
 func TestNetworkPolicies_ListFiltersNamespace(t *testing.T) {
 	w := httptest.NewRecorder()
-	NewNetworkPolicies().List(w, httptest.NewRequest("GET", "/api/v1/network/policies/lifecycle?namespace=data", nil))
+	NewNetworkPolicies().List(w, httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/network/policies/lifecycle?namespace=data", nil))
 
 	var got struct {
 		Items []networkPolicyLifecycleDTO `json:"items"`
@@ -60,7 +60,7 @@ func TestNetworkPolicies_PreviewActionRequiresStorage(t *testing.T) {
 	r.Post("/api/v1/network/policies/{workload}/{action}", NewNetworkPolicies().PreviewAction)
 
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest("POST", "/api/v1/network/policies/default%2Fapi-service/approve", nil))
+	r.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/network/policies/default%2Fapi-service/approve", nil))
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status: %d body=%s", w.Code, w.Body.String())
 	}
@@ -118,7 +118,7 @@ VALUES ($1, $2, 'default/frontend', 'default', 'monitor', 'protect', 'approved',
 	r.Get("/api/v1/network/policies/lifecycle", h.List)
 
 	apiHash := networkPolicyHashForTest(t, r, orgID, userID, "default/api-service")
-	req := httptest.NewRequest("POST", "/api/v1/network/policies/default%2Fapi-service/approve", strings.NewReader(`{"candidate_hash":"`+apiHash+`"}`))
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/network/policies/default%2Fapi-service/approve", strings.NewReader(`{"candidate_hash":"`+apiHash+`"}`))
 	req.Header.Set("Idempotency-Key", "netpol-approve-"+orgID.String())
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
@@ -138,7 +138,7 @@ VALUES ($1, $2, 'default/frontend', 'default', 'monitor', 'protect', 'approved',
 		t.Fatalf("unexpected approve response: %+v", approved)
 	}
 
-	retryReq := httptest.NewRequest("POST", "/api/v1/network/policies/default%2Fapi-service/approve", strings.NewReader(`{"candidate_hash":"`+apiHash+`"}`))
+	retryReq := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/network/policies/default%2Fapi-service/approve", strings.NewReader(`{"candidate_hash":"`+apiHash+`"}`))
 	retryReq.Header.Set("Idempotency-Key", "netpol-approve-"+orgID.String())
 	retryReq = retryReq.WithContext(authctx.WithSubject(retryReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	retryResp := httptest.NewRecorder()
@@ -179,7 +179,7 @@ SELECT COUNT(*) FROM audit_events
 		t.Fatalf("expected one hash-chained audit event for idempotent approve, got %d", auditEvents)
 	}
 
-	listReq := httptest.NewRequest("GET", "/api/v1/network/policies/lifecycle", nil)
+	listReq := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/network/policies/lifecycle", nil)
 	listReq = listReq.WithContext(authctx.WithSubject(listReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	listResp := httptest.NewRecorder()
 	r.ServeHTTP(listResp, listReq)
@@ -209,7 +209,7 @@ SELECT COUNT(*) FROM audit_events
 	}
 
 	frontendHash := networkPolicyHashForTest(t, r, orgID, userID, "default/frontend")
-	applyReq := httptest.NewRequest("POST", "/api/v1/network/policies/default%2Ffrontend/apply", strings.NewReader(`{"candidate_hash":"`+frontendHash+`"}`))
+	applyReq := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/network/policies/default%2Ffrontend/apply", strings.NewReader(`{"candidate_hash":"`+frontendHash+`"}`))
 	applyReq = applyReq.WithContext(authctx.WithSubject(applyReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	applyResp := httptest.NewRecorder()
 	r.ServeHTTP(applyResp, applyReq)
@@ -236,7 +236,7 @@ INSERT INTO network_policy_apply_status (
 		orgID, clusterID, applied.Policy.CandidateHash, applied.Policy.AppliedRef); err != nil {
 		t.Fatalf("insert apply status: %v", err)
 	}
-	statusReq := httptest.NewRequest("GET", "/api/v1/network/policies/lifecycle", nil)
+	statusReq := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/network/policies/lifecycle", nil)
 	statusReq = statusReq.WithContext(authctx.WithSubject(statusReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	statusResp := httptest.NewRecorder()
 	r.ServeHTTP(statusResp, statusReq)
@@ -267,7 +267,7 @@ SELECT preview_manifests
 		t.Fatalf("missing stored manifest flavors: %+v", storedManifests)
 	}
 
-	rollbackReq := httptest.NewRequest("POST", "/api/v1/network/policies/default%2Ffrontend/rollback", nil)
+	rollbackReq := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/network/policies/default%2Ffrontend/rollback", nil)
 	rollbackReq = rollbackReq.WithContext(authctx.WithSubject(rollbackReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rollbackResp := httptest.NewRecorder()
 	r.ServeHTTP(rollbackResp, rollbackReq)
@@ -322,7 +322,7 @@ func TestNetworkPolicies_DemoteRejectsDiscover(t *testing.T) {
 	r.Post("/api/v1/network/policies/{workload}/{action}", NewNetworkPolicies(d).PreviewAction)
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/api/v1/network/policies/default%2Fapi-service/demote", nil)
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/network/policies/default%2Fapi-service/demote", nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
@@ -374,7 +374,7 @@ VALUES ($1, $2, 'default/frontend', 'default/api', 'tcp', 'grpc', 8443, 'allow',
 	r.Get("/api/v1/network/policies/lifecycle", h.List)
 	r.Post("/api/v1/network/policies/{workload}/{action}", h.PreviewAction)
 
-	req := httptest.NewRequest("GET", "/api/v1/network/policies/lifecycle?cluster_id="+clusterID.String(), nil)
+	req := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/network/policies/lifecycle?cluster_id="+clusterID.String(), nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -437,7 +437,7 @@ VALUES ($1, $2, 'default/frontend', 'default/api', 'tcp', 'grpc', 8443, 'allow',
 	if frontendHash == "" {
 		t.Fatalf("missing frontend candidate hash: %+v", got.Items)
 	}
-	approveReq := httptest.NewRequest("POST", "/api/v1/network/policies/default%2Ffrontend/approve?cluster_id="+clusterID.String(), strings.NewReader(`{"candidate_hash":"`+frontendHash+`"}`))
+	approveReq := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/network/policies/default%2Ffrontend/approve?cluster_id="+clusterID.String(), strings.NewReader(`{"candidate_hash":"`+frontendHash+`"}`))
 	approveReq = approveReq.WithContext(authctx.WithSubject(approveReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	approveResp := httptest.NewRecorder()
 	r.ServeHTTP(approveResp, approveReq)
@@ -453,7 +453,7 @@ VALUES ($1, $2, 'default/frontend', 'external/new.example', 'tcp', 'http', 443, 
 	if updatedHash == frontendHash {
 		t.Fatalf("candidate hash did not change after new flow")
 	}
-	applyReq := httptest.NewRequest("POST", "/api/v1/network/policies/default%2Ffrontend/apply?cluster_id="+clusterID.String(), strings.NewReader(`{"candidate_hash":"`+updatedHash+`"}`))
+	applyReq := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/network/policies/default%2Ffrontend/apply?cluster_id="+clusterID.String(), strings.NewReader(`{"candidate_hash":"`+updatedHash+`"}`))
 	applyReq = applyReq.WithContext(authctx.WithSubject(applyReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	applyResp := httptest.NewRecorder()
 	r.ServeHTTP(applyResp, applyReq)
@@ -554,7 +554,7 @@ func TestNetworkPolicies_RollbackRequiresStorage(t *testing.T) {
 	r.Post("/api/v1/network/policies/{workload}/rollback", NewNetworkPolicies().Rollback)
 
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest("POST", "/api/v1/network/policies/default%2Ffrontend/rollback", nil))
+	r.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/network/policies/default%2Ffrontend/rollback", nil))
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status: %d body=%s", w.Code, w.Body.String())
 	}
@@ -587,7 +587,7 @@ func TestNetworkPolicies_ActionGuardsApplyAndDemote(t *testing.T) {
 	r := chi.NewRouter()
 	r.Post("/api/v1/network/policies/{workload}/{action}", NewNetworkPolicies(d).PreviewAction)
 
-	applyReq := httptest.NewRequest("POST", "/api/v1/network/policies/default%2Fapi-service/apply", nil)
+	applyReq := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/network/policies/default%2Fapi-service/apply", nil)
 	applyReq = applyReq.WithContext(authctx.WithSubject(applyReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	applyResp := httptest.NewRecorder()
 	r.ServeHTTP(applyResp, applyReq)
@@ -595,7 +595,7 @@ func TestNetworkPolicies_ActionGuardsApplyAndDemote(t *testing.T) {
 		t.Fatalf("expected apply conflict, got %d: %s", applyResp.Code, applyResp.Body.String())
 	}
 
-	demoteReq := httptest.NewRequest("POST", "/api/v1/network/policies/default%2Ffrontend/demote", nil)
+	demoteReq := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/network/policies/default%2Ffrontend/demote", nil)
 	demoteReq = demoteReq.WithContext(authctx.WithSubject(demoteReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	demoteResp := httptest.NewRecorder()
 	r.ServeHTTP(demoteResp, demoteReq)
@@ -611,7 +611,7 @@ func networkPolicyHashForTest(t *testing.T, r http.Handler, orgID, userID uuid.U
 
 func networkPolicyHashForTestPath(t *testing.T, r http.Handler, orgID, userID uuid.UUID, workload, path string) string {
 	t.Helper()
-	req := httptest.NewRequest("GET", path, nil)
+	req := httptest.NewRequestWithContext(t.Context(), "GET", path, nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	resp := httptest.NewRecorder()
 	r.ServeHTTP(resp, req)
@@ -808,7 +808,7 @@ VALUES ($1, $2, 'default/frontend', 'default', 'monitor', 'approved', 'monitorin
 	// the persisted mode + mode_since, not a re-seeded Discover/now state.
 	h := NewNetworkPolicies(d)
 	cluster := &networkPolicyCluster{ID: clusterID.String(), Name: "netpol-net4-prod"}
-	catReq := httptest.NewRequest("GET", "/api/v1/network/policies/lifecycle", nil)
+	catReq := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/network/policies/lifecycle", nil)
 	catReq = catReq.WithContext(authctx.WithSubject(catReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	items, err := h.observedPolicyLifecycleCatalog(catReq, orgID.String(), cluster, "")
 	if err != nil {
@@ -891,7 +891,7 @@ VALUES ($1, $2, 'default/frontend', 'default', 'monitor', 'protect', 'approved',
 	}
 
 	h := NewNetworkPolicies(d)
-	req := httptest.NewRequest("GET", "/api/v1/deployments/default%2Ffrontend", nil)
+	req := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/deployments/default%2Ffrontend", nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 
 	// Independently compute the expected candidate hash/preview off the observed

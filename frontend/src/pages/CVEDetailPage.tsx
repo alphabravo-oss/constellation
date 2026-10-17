@@ -1,312 +1,863 @@
-// CVEDetailPage — single-CVE drill-down with entity breadcrumbs + KEV / EPSS
-// banner + entity tile rail + fix advisor.
-import { useMemo } from "react";
-import type { ReactNode } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, ExternalLink, Wrench, BookOpen, Bug } from "lucide-react";
-
-import { api, cve as cveApi, type CVEAffectedImage, type CVEAffectedResponse, type Severity } from "@/api/client";
-import { useCluster } from "@/hooks/useCluster";
-import { EntityHeader } from "@/components/EntityHeader";
+import { ExternalLink } from "lucide-react";
+import {
+  api,
+  cve as cveApi,
+  type CVEAffectedInventoryRows,
+  type CVEAffectedInventoryView,
+} from "@/api/client";
+import { PageHeader } from "@/components/ui/page";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { Tabs, useTabParam } from "@/components/ui/tabs";
+import { DataTable, type Column } from "@/components/ui/data-table";
 import { KevBadge, EpssBadge } from "@/components/ui/kev-badge";
-import { SeverityBadge } from "@/components/ui/severity-badge";
+import { DigestDisclosure } from "@/components/ui/digest-disclosure";
 import { Button } from "@/components/ui/button";
-import { EmptyState } from "@/components/ui/empty-state";
-import { cn } from "@/lib/cn";
+import { Pager } from "@/components/ui/pager";
+import { ErrorState, LoadingState } from "@/components/ui/states";
+import {
+  entityDetailError,
+  useEntityClusterScope,
+} from "./entity-detail-scope";
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
+import { useRouteSearchParams } from "@/lib/route-search";
+import { useDebounced } from "@/hooks/useDebounced";
+import {
+  affectedInventoryValid,
+  affectedSorts,
+} from "@/lib/cve-affected-inventory";
+import { ScanInventoryExport } from "./inventory-workspace";
 
 interface CVEDetail {
   cve_id: string;
-  title: string;
+  title?: string;
   description: string;
   cvss_base?: number;
   kev_listed: boolean;
   epss_probability?: number;
   aliases: string[];
 }
-
+const WORKSPACES = [
+  "images",
+  "workloads",
+  "clusters",
+  "packages",
+  "details",
+  "remediation",
+];
+type AffectedRow = CVEAffectedInventoryRows[CVEAffectedInventoryView];
 export function CVEDetailPage() {
-  // Two routes render this page:
-  //   global   /cve/:id                       → params.id = CVE, no cluster
-  //   cluster  /clusters/:id/cve/:cveId        → params.id = CLUSTER, params.cveId = CVE
-  // The distinct `:cveId` param name is REQUIRED: if the nested route reused `:id` it
-  // would shadow the cluster's `:id`, so useCluster() (which reads params.id) would get
-  // the CVE id, "not find" the cluster, and ClusterRouter would bounce to /clusters.
-  const { id, cveId } = useParams<{ id: string; cveId: string }>();
-  const clusterScoped = !!cveId;
-  const cveKey = cveId ?? id;
-  // useCluster reads params.id — correct (the cluster) only on the nested route.
-  const { cluster } = useCluster();
-  const clusterId = clusterScoped ? id : undefined;
+  const { id, cveId } = useParams({ strict: false });
+  const scoped = cveId !== undefined;
+  const scope = useEntityClusterScope(scoped);
+  const clusterId = scoped ? scope.clusterId : undefined;
+  const cveKey = (cveId ?? id ?? "").trim().toUpperCase();
+  const identity = useTablePreferencesIdentity();
+  const owner = identity ? `${identity.org_id}:${identity.user_id}` : undefined;
+  const [requestedTab, setTab] = useTabParam("tab", "images");
+  const tab = WORKSPACES.includes(requestedTab) ? requestedTab : "images";
+  const isInventory = ["images", "workloads", "clusters", "packages"].includes(
+    tab,
+  );
+  const view = (isInventory ? tab : "images") as CVEAffectedInventoryView;
+  const [params, setParams] = useRouteSearchParams();
+  const key = (field: string) => `${view}_${field}`;
+  const search = params.get(key("q")) ?? "";
+  const debounced = useDebounced(search, 250);
+  const namespace = params.get(key("namespace")) ?? "";
+  const severity = params.get(key("severity")) ?? "all";
+  const sort =
+    params.get(key("sort")) ?? (view === "clusters" ? "workloads" : "risk");
+  const order = params.get(key("order")) ?? "desc";
+  const rawPage = Number(params.get(key("page")) ?? "1");
+  const page = Number.isSafeInteger(rawPage) && rawPage > 0 ? rawPage - 1 : 0;
+  const invalid =
+    !WORKSPACES.includes(requestedTab) ||
+    !affectedSorts[view].includes(sort) ||
+    !["asc", "desc"].includes(order) ||
+    !["all", "critical", "high", "medium", "low", "info"].includes(severity) ||
+    !Number.isSafeInteger(rawPage) ||
+    rawPage < 1 ||
+    rawPage > 10000;
+  const update = (
+    values: Record<string, string | null>,
+    resetPage = true,
+    replace = false,
+  ) =>
+    setParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        if (!WORKSPACES.includes(requestedTab)) next.set("tab", "images");
+        for (const [field, value] of Object.entries(values)) {
+          if (value === null || value === "") next.delete(key(field));
+          else next.set(key(field), value);
+        }
+        if (resetPage) next.delete(key("page"));
+        return next;
+      },
+      { replace },
+    );
+  const request = {
+    cluster_id: clusterId,
+    q: debounced.trim() || undefined,
+    namespace: namespace.trim() || undefined,
+    severity: severity === "all" ? undefined : severity,
+    sort,
+    order: order as "asc" | "desc",
+    limit: 100,
+    offset: page * 100,
+  };
   const cveQ = useQuery({
-    queryKey: ["cve", cveKey],
-    queryFn: () => api.get<CVEDetail>(`/cve/${cveKey}`).then((r) => r.data),
-    enabled: !!cveKey,
+    queryKey: ["cve-detail", owner, clusterId ?? "organization", cveKey],
+    queryFn: async () => {
+      const { data } = await api.get<CVEDetail>(
+        `/cve/${encodeURIComponent(cveKey)}`,
+      );
+      if (
+        typeof data.cve_id !== "string" ||
+        data.cve_id.toUpperCase() !== cveKey ||
+        !Array.isArray(data.aliases)
+      )
+        throw new Error("CVE metadata does not match the requested CVE ID.");
+      return data;
+    },
+    enabled: scope.ready && !!owner && !!cveKey,
   });
   const relatedQ = useQuery({
-    queryKey: ["cve-affected", cveKey, clusterId ?? "all"],
-    queryFn: () => cveApi.affected(cveKey!, clusterId),
-    enabled: !!cveKey,
+    queryKey: [
+      "cve-affected",
+      owner,
+      cveKey,
+      clusterId ?? "organization",
+      view,
+      request,
+    ],
+    queryFn: async () => {
+      const data = await cveApi.affectedInventory(cveKey, view, request);
+      if (!affectedInventoryValid(data, cveKey, view, request))
+        throw new Error(
+          "Affected evidence does not match the requested CVE and cluster scope, filters or page.",
+        );
+      return data;
+    },
+    enabled:
+      scope.ready &&
+      !!owner &&
+      !!cveKey &&
+      cveQ.isSuccess &&
+      isInventory &&
+      !invalid &&
+      search === debounced,
   });
-
-  const affected = relatedQ.data;
-  const grouped = useMemo(() => groupByAffected(affected), [affected]);
-  const topSev = useMemo<Severity>(() => {
-    const order: Severity[] = ["critical", "high", "medium", "low", "info"];
-    const images = affected?.images ?? [];
-    for (const s of order) if (images.some((img) => (img.severity_counts?.[s] ?? 0) > 0)) return s;
-    if ((affected?.summary.max_risk_score ?? 0) >= 90) return "critical";
-    if ((affected?.summary.max_risk_score ?? 0) >= 70) return "high";
-    if ((affected?.summary.max_risk_score ?? 0) >= 40) return "medium";
-    return "medium";
-  }, [affected]);
-
-  if (cveQ.isPending) return <p className="text-xs text-muted-foreground">Loading CVE…</p>;
-  if (cveQ.isError)   return <p className="text-xs text-destructive">CVE not found.</p>;
-  const cve = cveQ.data!;
-
+  const backPath = clusterId
+    ? `/clusters/${encodeURIComponent(clusterId)}/findings`
+    : "/cve";
+  const header = (
+    <PageHeader
+      title="CVE evidence"
+      description="Review exact vulnerability intelligence and matching affected evidence."
+      backLink={
+        <a href={backPath}>{clusterId ? "Findings" : "CVE database"}</a>
+      }
+    />
+  );
+  if (!scope.ready)
+    return (
+      <div className="space-y-4">
+        {header}
+        {scope.loading ? (
+          <LoadingState label="Resolving CVE evidence cluster…" />
+        ) : (
+          <ErrorState
+            title="The requested CVE cluster could not be resolved."
+            error={scope.error}
+            action={<Button onClick={scope.retry}>Retry cluster</Button>}
+          />
+        )}
+      </div>
+    );
+  if (!owner)
+    return (
+      <div className="space-y-4">
+        {header}
+        <LoadingState label="Resolving organization…" />
+      </div>
+    );
+  if (!cveKey)
+    return (
+      <div className="space-y-4">
+        {header}
+        <ErrorState title="An exact CVE ID is required." />
+      </div>
+    );
+  if (cveQ.isError)
+    return (
+      <div className="space-y-4">
+        {header}
+        <VerdictBanner
+          status="degraded"
+          title="CVE intelligence is unavailable"
+        />
+        <ErrorState
+          title="CVE metadata could not be loaded or refreshed."
+          error={entityDetailError(cveQ.error)}
+          action={
+            <Button onClick={() => void cveQ.refetch()}>Retry CVE</Button>
+          }
+        />
+      </div>
+    );
+  if (
+    cveQ.data &&
+    (typeof cveQ.data.cve_id !== "string" ||
+      cveQ.data.cve_id.toUpperCase() !== cveKey ||
+      !Array.isArray(cveQ.data.aliases))
+  )
+    return (
+      <div className="space-y-4">
+        {header}
+        <ErrorState title="CVE metadata does not match the requested CVE ID." />
+      </div>
+    );
+  if (!cveQ.isSuccess)
+    return (
+      <div className="space-y-4">
+        {header}
+        <LoadingState label="Loading CVE intelligence…" />
+      </div>
+    );
+  const cve = cveQ.data;
+  const matches = affectedInventoryValid(relatedQ.data, cveKey, view, request);
+  const affectedError =
+    isInventory &&
+    (invalid || relatedQ.isError || (!!relatedQ.data && !matches));
+  const ready =
+    isInventory &&
+    matches &&
+    relatedQ.isSuccess &&
+    relatedQ.fetchStatus === "idle" &&
+    cveQ.fetchStatus === "idle" &&
+    search === debounced &&
+    !invalid;
+  const data = ready ? relatedQ.data : undefined;
+  const summary = data?.summary;
+  const cohortLabels = {
+    images: "image scans",
+    workloads: "workload associations",
+    clusters: "clusters",
+    packages: "package finding instances",
+  };
+  const sourceState = affectedError ? (
+    <ErrorState
+      title="Affected evidence could not be loaded or refreshed. Previous affected rows are hidden."
+      error={
+        invalid
+          ? "Invalid affected inventory URL filters."
+          : !matches && relatedQ.data
+            ? "Affected evidence does not match the requested CVE and cluster scope, filters or page."
+            : entityDetailError(relatedQ.error)
+      }
+      action={
+        <Button onClick={() => void relatedQ.refetch()}>
+          Retry affected evidence
+        </Button>
+      }
+    />
+  ) : !ready ? (
+    <LoadingState label="Loading affected evidence…" />
+  ) : null;
+  const columns = getColumns(view, clusterId);
+  const workspace = (
+    <section
+      className="space-y-3"
+      data-testid={
+        view === "packages" ? "cve-package-evidence" : `cve-affected-${view}`
+      }
+    >
+      <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card p-3">
+        <label className="min-w-0 flex-1 text-xs">
+          Search
+          <input
+            aria-label="Search affected evidence"
+            className="block w-full min-w-0 rounded-md border border-border bg-background px-3 py-2 text-sm"
+            value={search}
+            onChange={(event) => update({ q: event.target.value }, true, true)}
+          />
+        </label>
+        <label className="text-xs">
+          Namespace
+          <input
+            aria-label="Affected namespace"
+            className="block rounded-md border border-border bg-background px-3 py-2 text-sm"
+            value={namespace}
+            onChange={(event) =>
+              update({ namespace: event.target.value }, true, true)
+            }
+          />
+        </label>
+        <label className="text-xs">
+          Finding severity
+          <select
+            aria-label="Affected severity"
+            className="block rounded-md border border-border bg-background p-2 text-sm"
+            value={severity}
+            onChange={(event) =>
+              update({
+                severity:
+                  event.target.value === "all" ? null : event.target.value,
+              })
+            }
+          >
+            <option value="all">Any severity</option>
+            {["critical", "high", "medium", "low", "info"].map((level) => (
+              <option key={level} value={level}>
+                {level}
+              </option>
+            ))}
+          </select>
+        </label>
+        <Button
+          variant="outline"
+          onClick={() =>
+            update({
+              q: null,
+              namespace: null,
+              severity: null,
+              sort: null,
+              order: null,
+            })
+          }
+        >
+          Reset view filters
+        </Button>
+        <ScanInventoryExport
+          context={JSON.stringify([owner, cveKey, view, request])}
+          disabled={!ready || !summary?.total}
+          download={shouldDownload => {
+            const { limit: _limit, offset: _offset, ...filters } = request;
+            void _limit;
+            void _offset;
+            return cveApi.affectedInventoryCSV(cveKey, view, filters, shouldDownload);
+          }}
+        />
+      </div>
+      {sourceState ?? (
+        <>
+          <DataTable
+            rows={data!.items}
+            columns={columns}
+            rowKey={(row) => row.row_id}
+            pagination={false}
+            preferencesKey={`cve-affected-${view}`}
+            defaultHiddenColumnIds={["last_seen"]}
+            manualSorting
+            sort={{ id: sort, dir: order as "asc" | "desc" }}
+            onSortChange={(value) =>
+              update({
+                sort: value?.id ?? (view === "clusters" ? "workloads" : "risk"),
+                order: value?.dir ?? "desc",
+              })
+            }
+            exportFileName={`${cveKey}-${clusterId ?? "organization"}-${view}-page-${page + 1}`}
+            exportLabel="Export this page CSV"
+            emptyState={
+              <p className="p-6 text-sm text-muted-foreground">
+                No matching {cohortLabels[view]}.
+              </p>
+            }
+          />
+          <p className="text-xs text-muted-foreground">
+            Showing {data!.items.length ? page * 100 + 1 : 0}–
+            {data!.items.length ? page * 100 + data!.items.length : 0} of{" "}
+            {data!.total} matching {cohortLabels[view]}. Matching CSV covers up
+            to 100,000 rows.
+          </p>
+          {data!.items.length > 0 ? (
+            <Pager
+              page={page}
+              pageSize={100}
+              total={data!.total}
+              hasMore={data!.has_more}
+              rowsOnPage={data!.items.length}
+              onPage={(next) =>
+                update({ page: next ? String(next + 1) : null }, false)
+              }
+            />
+          ) : page > 0 ? (
+            <Button onClick={() => update({ page: null }, false)}>
+              First page
+            </Button>
+          ) : null}
+        </>
+      )}
+    </section>
+  );
+  const scopeLabel = clusterId
+    ? `Affected evidence for cluster ${scope.cluster?.name || clusterId}.`
+    : "Affected evidence across the organization.";
   return (
-    <div className="space-y-5" data-testid="cve-detail-page">
-      <EntityHeader
-        breadcrumbs={
-          clusterId
-            ? [
-                { label: "Clusters", to: "/clusters" },
-                { label: cluster?.name || clusterId.slice(0, 14), to: `/clusters/${clusterId}/dashboard` },
-                { label: "Findings", to: `/clusters/${clusterId}/findings` },
-                { label: cve.cve_id },
-              ]
-            : [
-                { label: "CVE DB", to: "/cve" },
-                { label: cve.cve_id },
-              ]
+    <div
+      className="space-y-5"
+      data-testid="cve-detail-page"
+      data-cluster-id={clusterId ?? ""}
+    >
+      <PageHeader
+        title={cve.cve_id}
+        mono
+        description={`${cve.title?.trim() || "Title not reported"} · ${scopeLabel} Intelligence metadata is global.`}
+        backLink={
+          <a href={backPath}>{clusterId ? "Findings" : "CVE database"}</a>
         }
-        title={<span className="text-mono">{cve.cve_id}</span>}
-        subtitle={clusterId ? `${cve.title} · scoped to ${cluster?.name || "this cluster"}` : cve.title}
         badges={
           <>
-            {cve.cvss_base != null && (
-              <span className="rounded bg-muted px-2 py-0.5 text-[10px] text-mono">CVSS {cve.cvss_base}</span>
-            )}
             {cve.kev_listed && <KevBadge />}
-            {cve.epss_probability != null && <EpssBadge probability={cve.epss_probability} />}
-            <SeverityBadge severity={topSev} />
+            {cve.epss_probability != null && (
+              <EpssBadge probability={cve.epss_probability} />
+            )}
           </>
         }
-        stats={[
-          { label: "Affected Images",      value: grouped.images.length,      tone: grouped.images.length > 0 ? "high" : "neutral" },
-          { label: "Affected Deployments", value: grouped.deployments.length, tone: grouped.deployments.length > 0 ? "high" : "neutral" },
-          { label: "Affected Clusters",    value: grouped.clusters.length,    tone: grouped.clusters.length > 0 ? "accent" : "neutral" },
-          { label: "Image Findings",       value: affected?.summary.finding_count ?? 0, tone: "accent" },
-        ]}
         actions={
-          <>
-            <Button size="sm" variant="outline" asChild>
-              <a href={`https://nvd.nist.gov/vuln/detail/${cve.cve_id}`} target="_blank" rel="noopener noreferrer">
-                NVD <ExternalLink className="h-3 w-3" />
+          <div className="flex flex-wrap gap-2">
+            <Button
+              onClick={() => {
+                void cveQ.refetch();
+                if (isInventory) void relatedQ.refetch();
+              }}
+              disabled={cveQ.isFetching || relatedQ.isFetching}
+            >
+              {cveQ.isFetching || relatedQ.isFetching
+                ? "Refreshing…"
+                : "Refresh evidence"}
+            </Button>
+            <Button asChild variant="outline">
+              <a
+                href={`https://nvd.nist.gov/vuln/detail/${encodeURIComponent(cve.cve_id)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                NVD
+                <ExternalLink className="h-3.5 w-3.5" />
               </a>
             </Button>
-            <Button size="sm" variant="primary" asChild>
-              <a href="#affected-images">
-                View {grouped.images.length} image{grouped.images.length === 1 ? "" : "s"}
-              </a>
-            </Button>
-          </>
+          </div>
         }
       />
-
-      {/* KEV alert banner */}
-      {cve.kev_listed && (
-        <div className="rounded-md border border-[color-mix(in_oklab,var(--color-severity-critical)_36%,var(--color-border))] bg-[color-mix(in_oklab,var(--color-severity-critical)_8%,transparent)] p-3 flex items-start gap-3">
-          <Bug className="h-4 w-4 text-[color:var(--color-severity-critical)] flex-shrink-0 mt-0.5" />
-          <div className="flex-1">
-            <div className="text-sm font-semibold text-[color:var(--color-severity-critical)]">CISA Known-Exploited Vulnerability</div>
-            <p className="text-xs text-foreground/80 mt-0.5">
-              This CVE is on CISA's KEV catalog. Active exploitation has been observed in the wild — prioritize remediation immediately.
-            </p>
-          </div>
-          <Button size="sm" variant="primary" asChild>
-            <a href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog" target="_blank" rel="noopener noreferrer">
-              CISA catalog
-            </a>
-          </Button>
-        </div>
+      <VerdictBanner
+        status={
+          affectedError
+            ? "degraded"
+            : cve.kev_listed
+              ? "critical"
+              : summary?.total
+                ? "degraded"
+                : "info"
+        }
+        title={
+          affectedError
+            ? "Affected evidence is unavailable"
+            : cve.kev_listed
+              ? "This CVE is listed as known exploited"
+              : isInventory && !ready
+                ? "Affected evidence is loading"
+                : summary
+                  ? `${summary.total.toLocaleString()} matching ${cohortLabels[view]}`
+                  : "Vulnerability intelligence is available"
+        }
+        detail="Metrics cover every match in the selected view. Image associations use digest, reference or repository/tag matches; workload and cluster finding totals repeat findings across distinct associations. Absence does not establish scan coverage."
+      />
+      {isInventory ? (
+        <StatGrid data-testid="cve-detail-stats">
+          <StatCard
+            label={`Matching ${cohortLabels[view]}`}
+            value={summary?.total ?? "—"}
+          />
+          <StatCard
+            label="Finding instances"
+            value={summary?.finding_count ?? "—"}
+          />
+          <StatCard label="Max risk" value={summary?.max_risk_score ?? "—"} />
+          <StatCard
+            label={
+              view === "workloads"
+                ? "Clusters"
+                : view === "clusters"
+                  ? "Workload associations"
+                  : "Image scans"
+            }
+            value={
+              summary?.[
+                view === "workloads"
+                  ? "cluster_count"
+                  : view === "clusters"
+                    ? "workload_count"
+                    : "image_count"
+              ] ?? "—"
+            }
+          />
+        </StatGrid>
+      ) : (
+        <StatGrid>
+          <StatCard label="CVSS base" value={cve.cvss_base ?? "Not reported"} />
+          <StatCard
+            label="Known exploited"
+            value={cve.kev_listed ? "Listed" : "Not listed"}
+            valueKind="text"
+          />
+          <StatCard
+            label="EPSS probability"
+            value={
+              cve.epss_probability == null
+                ? "Not reported"
+                : `${(cve.epss_probability * 100).toFixed(2)}%`
+            }
+            valueKind="text"
+          />
+        </StatGrid>
       )}
-
-      {/* EPSS probability bar */}
-      {cve.epss_probability != null && (
-        <section className="rounded-md border border-border bg-card p-3">
-          <div className="flex items-baseline justify-between gap-2">
-            <h2 className="text-display text-sm font-semibold tracking-tight">EPSS Exploit Probability</h2>
-            <span className="text-mono text-2xl font-semibold" style={{ color: cve.epss_probability >= 0.7 ? "var(--color-severity-critical)" : cve.epss_probability >= 0.3 ? "var(--color-severity-high)" : "var(--color-severity-medium)" }}>
-              {(cve.epss_probability * 100).toFixed(2)}%
-            </span>
-          </div>
-          <div className="mt-2 h-2 w-full rounded-full bg-muted overflow-hidden">
-            <div
-              className="h-full rounded-full transition-all duration-300"
-              style={{
-                width: `${cve.epss_probability * 100}%`,
-                background: cve.epss_probability >= 0.7 ? "var(--color-severity-critical)" : cve.epss_probability >= 0.3 ? "var(--color-severity-high)" : "var(--color-severity-medium)",
-              }}
-            />
-          </div>
-          <p className="mt-2 text-[10px] text-muted-foreground">Probability that this CVE is exploited in the wild within 30 days. Source: FIRST.org EPSS.</p>
-        </section>
+      {(cveQ.isFetching || relatedQ.isFetching) && (
+        <p role="status" className="text-sm text-muted-foreground">
+          Refreshing CVE evidence…
+        </p>
       )}
-
-      {/* Description */}
-      {cve.description && (
-        <section className="rounded-md border border-border bg-card p-3">
-          <h2 className="text-display text-sm font-semibold tracking-tight mb-1.5 flex items-center gap-1.5">
-            <BookOpen className="h-3.5 w-3.5 text-muted-foreground" />
-            Description
-          </h2>
-          <p className="text-xs text-foreground/85 leading-relaxed">{cve.description}</p>
-          {cve.aliases.length > 0 && (
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Aliases</span>
-              {cve.aliases.map((a) => (
-                <span key={a} className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-mono">{a}</span>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
-
-      {/* Fix advisor */}
-      <section className="rounded-md border border-border bg-card p-3 flex items-start gap-3">
-        <Wrench className="h-4 w-4 text-[color:var(--color-primary)] flex-shrink-0 mt-0.5" />
-        <div className="flex-1 space-y-1">
-          <h2 className="text-display text-sm font-semibold tracking-tight">Fix Advisor</h2>
-          <p className="text-xs text-foreground/85">
-            <span className="font-medium">Highest-impact action: </span>
-            Upgrade affected images to a fixed version. {grouped.images.length > 0 && (
-              <>
-                Currently observed across <span className="text-mono">{grouped.images.length} image{grouped.images.length === 1 ? "" : "s"}</span>.
-              </>
-            )}
-          </p>
-          <p className="text-[11px] text-muted-foreground">
-            Alternatives: apply a NetworkPolicy to restrict exposure · accept-risk with expiry · suppress with rationale.
-          </p>
-        </div>
-        <Button size="sm" variant="primary" asChild>
-          <a href="#affected-images">Review affected images</a>
-        </Button>
-      </section>
-
-      {/* Entity breadcrumb pivots */}
-      <nav className="flex flex-wrap items-center gap-1.5 rounded-md border border-border bg-card p-3 text-xs" data-testid="cve-breadcrumbs">
-        <Crumb label="CVE" count={1} active />
-        <Sep />
-        <Crumb label="Image"      count={grouped.images.length}      href="#affected-images" />
-        <Sep />
-        <Crumb label="Deployment" count={grouped.deployments.length} href="#affected-workloads" />
-        <Sep />
-        <Crumb label="Cluster"    count={grouped.clusters.length}    href="#affected-clusters" />
-      </nav>
-
-      {/* Tile rail */}
-      <section className="grid grid-cols-1 gap-3 md:grid-cols-3" data-testid="cve-tile-lists">
-        <TileList id="affected-images" title="Affected Images" items={grouped.images} emptyHint="No images observed with this CVE." />
-        <TileList id="affected-workloads" title="Affected Deployments" items={grouped.deployments} emptyHint="No deployments observed with this CVE." />
-        <TileList id="affected-clusters" title="Affected Clusters" items={grouped.clusters} emptyHint="No clusters observed with this CVE." />
-      </section>
+      <Tabs
+        value={tab}
+        onValueChange={setTab}
+        items={[
+          ...["images", "workloads", "clusters", "packages"].map((value) => ({
+            value,
+            label:
+              value === "packages" ? "Package evidence" : `Affected ${value}`,
+            content: value === view ? workspace : null,
+          })),
+          {
+            value: "details",
+            label: "Intelligence",
+            content: (
+              <section className="space-y-3" data-testid="cve-intelligence">
+                <h2 className="text-sm font-semibold">
+                  Vulnerability intelligence
+                </h2>
+                <p>{cve.description || "No description reported."}</p>
+                <p className="text-xs text-muted-foreground">
+                  Aliases: {cve.aliases.join(", ") || "None reported"}. EPSS
+                  estimates exploitation in the wild within 30 days; it does not
+                  describe observed cluster activity.
+                </p>
+                {cve.kev_listed && (
+                  <a
+                    href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm underline"
+                  >
+                    CISA known exploited catalog
+                  </a>
+                )}
+              </section>
+            ),
+          },
+          {
+            value: "remediation",
+            label: "Remediation guidance",
+            content: (
+              <section className="space-y-3">
+                <h2 className="text-sm font-semibold">
+                  Review remediation evidence
+                </h2>
+                <p className="text-sm">
+                  Review fixed versions in Package evidence, then inspect the
+                  exact image or workload before choosing an update. A missing
+                  fixed version means the scan has no fix version to report.
+                </p>
+                <Button onClick={() => setTab("packages")}>
+                  Review package evidence
+                </Button>
+              </section>
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }
 
-function Crumb({ label, count, href, active }: { label: string; count: number; href?: string; active?: boolean }) {
-  const inner = (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded h-6 px-2 text-[11px] transition-colors",
-        active
-          ? "bg-[color-mix(in_oklab,var(--color-primary)_18%,transparent)] text-[color:var(--color-primary)] ring-1 ring-inset ring-[color-mix(in_oklab,var(--color-primary)_36%,transparent)]"
-          : "bg-card border border-border text-foreground hover:bg-accent",
-      )}
-    >
-      <span className="font-medium">{label}</span>
-      <span className="text-mono text-[10px] opacity-80">({count})</span>
+function getColumns(
+  view: CVEAffectedInventoryView,
+  clusterID?: string,
+): Column<AffectedRow>[] {
+  const count = <T,>(
+    id: string,
+    header: string,
+    value: (item: T) => number,
+  ): Column<T> => ({
+    id,
+    header,
+    kind: "count",
+    sort: () => 0,
+    cell: value,
+    exportValue: value,
+  });
+  const lastSeen = <T extends { last_seen_at: string }>(): Column<T> => ({
+    id: "last_seen",
+    header: "Last seen",
+    kind: "date",
+    sort: () => 0,
+    cell: (item) => date(item.last_seen_at),
+    exportValue: (item) => item.last_seen_at,
+  });
+  if (view === "images")
+    return [
+      {
+        id: "image",
+        header: "Image",
+        kind: "name",
+        size: 320,
+        minSize: 260,
+        wrap: true,
+        grow: true,
+        sort: () => 0,
+        exportValue: imageName,
+        cell: (item) => (
+          <div>
+            {clusterID ? (
+              <a
+                href={`/clusters/${encodeURIComponent(clusterID)}/images/${encodeURIComponent(item.image_scan_result_id)}`}
+                className="hover:underline"
+              >
+                <ImageName image={item} />
+              </a>
+            ) : (
+              <ImageName image={item} />
+            )}
+            <DigestDisclosure digest={item.image_digest} />
+          </div>
+        ),
+      },
+      {
+        id: "platform",
+        header: "Platform",
+        kind: "text",
+        size: 128,
+        minSize: 112,
+        cell: (item) => item.platform || "Not reported",
+        exportValue: (item) => item.platform ?? "",
+      },
+      {
+        id: "scanner",
+        header: "Scanner profile",
+        kind: "text",
+        size: 160,
+        minSize: 128,
+        wrap: true,
+        cell: (item) => item.scanner_profile,
+        exportValue: (item) => item.scanner_profile,
+      },
+      count("findings", "Finding instances", (item) => item.finding_count),
+      count("risk", "Max risk", (item) => item.max_risk_score),
+      {
+        id: "scanned",
+        header: "Last scanned",
+        kind: "date",
+        sort: () => 0,
+        cell: (item) => date(item.last_scanned_at),
+        exportValue: (item) => item.last_scanned_at,
+      },
+      lastSeen<CVEAffectedInventoryRows["images"]>(),
+    ] as Column<CVEAffectedInventoryRows["images"]>[] as Column<AffectedRow>[];
+  if (view === "workloads")
+    return [
+      {
+        id: "name",
+        header: "Workload",
+        kind: "name",
+        size: 300,
+        minSize: 260,
+        wrap: true,
+        grow: true,
+        sort: () => 0,
+        cell: (item) => (
+          <a
+            href={`/clusters/${encodeURIComponent(item.cluster_id)}/deployments/${encodeURIComponent(item.deployment_id)}`}
+            className="hover:underline"
+          >
+            {item.namespace}/{item.name}
+            {item.workload_id !== `${item.namespace}/${item.name}` && (
+              <span className="block text-xs text-muted-foreground">
+                {item.workload_id}
+              </span>
+            )}
+          </a>
+        ),
+        exportValue: (item) =>
+          `${item.namespace}/${item.name} (workload: ${item.workload_id})`,
+      },
+      {
+        id: "cluster",
+        header: "Cluster",
+        kind: "text",
+        wrap: true,
+        sort: () => 0,
+        cell: (item) => item.cluster_name || item.cluster_id,
+        exportValue: (item) => item.cluster_name || item.cluster_id,
+      },
+      {
+        id: "kind",
+        header: "Kind",
+        kind: "status",
+        sort: () => 0,
+        cell: (item) => item.kind,
+        exportValue: (item) => item.kind,
+      },
+      {
+        id: "image",
+        header: "Image evidence",
+        kind: "name",
+        size: 300,
+        minSize: 260,
+        wrap: true,
+        grow: true,
+        cell: (item) => (
+          <div>
+            {item.image_evidence.map((image) => (
+              <div key={JSON.stringify(image)}>
+                <ImageName image={image} />
+                <DigestDisclosure digest={image.image_digest} />
+              </div>
+            ))}
+          </div>
+        ),
+        exportValue: (item) => JSON.stringify(item.image_evidence),
+      },
+      count("findings", "Finding instances", (item) => item.finding_count),
+      count("risk", "Max risk", (item) => item.max_risk_score),
+      lastSeen<CVEAffectedInventoryRows["workloads"]>(),
+    ] as Column<
+      CVEAffectedInventoryRows["workloads"]
+    >[] as Column<AffectedRow>[];
+  if (view === "clusters")
+    return [
+      {
+        id: "name",
+        header: "Cluster",
+        kind: "name",
+        wrap: true,
+        grow: true,
+        sort: () => 0,
+        cell: (item) => (
+          <a
+            href={`/clusters/${encodeURIComponent(item.cluster_id)}/dashboard`}
+            className="hover:underline"
+          >
+            {item.name || item.cluster_id}
+          </a>
+        ),
+        exportValue: (item) => item.name || item.cluster_id,
+      },
+      count(
+        "workloads",
+        "Workload associations",
+        (item) => item.workload_count,
+      ),
+      count("findings", "Finding instances", (item) => item.finding_count),
+      count("risk", "Max risk", (item) => item.max_risk_score),
+    ] as Column<
+      CVEAffectedInventoryRows["clusters"]
+    >[] as Column<AffectedRow>[];
+  return [
+    {
+      id: "package",
+      header: "Package",
+      kind: "name",
+      size: 240,
+      minSize: 200,
+      wrap: true,
+      grow: true,
+      sort: () => 0,
+      cell: (item) => item.package_name || "Not reported",
+      exportValue: (item) => item.package_name ?? "",
+    },
+    {
+      id: "image",
+      header: "Image scan",
+      kind: "name",
+      size: 300,
+      minSize: 260,
+      wrap: true,
+      grow: true,
+      sort: () => 0,
+      cell: (item) => (
+        <div>
+          <ImageName image={item} />
+          <DigestDisclosure digest={item.image_digest} />
+        </div>
+      ),
+      exportValue: (item) => item.image_ref,
+    },
+    {
+      id: "version",
+      header: "Version",
+      kind: "version",
+      wrap: true,
+      sort: () => 0,
+      cell: (item) => item.package_version || "Not reported",
+      exportValue: (item) => item.package_version ?? "",
+    },
+    {
+      id: "fixed",
+      header: "Fixed version",
+      kind: "version",
+      wrap: true,
+      sort: () => 0,
+      cell: (item) => item.fixed_version || "No fix reported",
+      exportValue: (item) => item.fixed_version ?? "",
+    },
+    {
+      id: "severity",
+      header: "Severity",
+      kind: "status",
+      sort: () => 0,
+      cell: (item) => item.severity,
+      exportValue: (item) => item.severity,
+    },
+    count("risk", "Risk", (item) => item.risk_score),
+    {
+      id: "finding",
+      header: "Scan finding ID",
+      kind: "id",
+      wrap: true,
+      cell: (item) => item.finding_id,
+      exportValue: (item) => item.finding_id,
+    },
+    lastSeen<CVEAffectedInventoryRows["packages"]>(),
+  ] as Column<CVEAffectedInventoryRows["packages"]>[] as Column<AffectedRow>[];
+}
+function ImageName({ image }: { image: Parameters<typeof imageName>[0] }) {
+  const name = imageName(image);
+  return (
+    <span className="line-clamp-2 break-all" title={name}>
+      {name}
     </span>
   );
-  return href ? <Link to={href}>{inner}</Link> : inner;
 }
-
-function Sep() {
-  return <ChevronRight className="h-3 w-3 text-muted-foreground/60" aria-hidden />;
+function imageName(image: {
+  image_repository?: string;
+  image_tag?: string;
+  image_ref?: string;
+}) {
+  const ref = image.image_repository
+    ? image.image_tag
+      ? `${image.image_repository}:${image.image_tag}`
+      : image.image_repository
+    : image.image_ref;
+  return !ref || ref.startsWith("sha256:")
+    ? "Unnamed image"
+    : ref.split("@sha256:")[0];
 }
-
-function TileList({ id, title, items, emptyHint }: { id: string; title: string; items: TileEntry[]; emptyHint: string }) {
-  return (
-    <div id={id} className="rounded-md border border-border bg-card">
-      <header className="border-b border-border px-3 py-2">
-        <h3 className="text-display text-sm font-semibold tracking-tight">{title}</h3>
-        <p className="text-[10px] text-muted-foreground text-mono">{items.length} observed</p>
-      </header>
-      {items.length === 0 ? (
-        <EmptyState title="None observed" hint={emptyHint} />
-      ) : (
-        <ul className="divide-y divide-border">
-          {items.map((it) => (
-            <li key={it.id}>
-              <TileLink href={it.href}>
-                <div className="text-xs text-mono truncate">{it.label}</div>
-                {it.sub && <div className="text-[10px] text-muted-foreground truncate">{it.sub}</div>}
-              </TileLink>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-function TileLink({ href, children }: { href?: string; children: ReactNode }) {
-  const className = "accent-slide block px-3 py-1.5 hover:bg-muted/40 transition-colors";
-  return href ? <Link to={href} className={className}>{children}</Link> : <div className={className}>{children}</div>;
-}
-
-interface TileEntry { id: string; label: string; sub?: string; href?: string }
-
-function groupByAffected(affected?: CVEAffectedResponse): { images: TileEntry[]; deployments: TileEntry[]; clusters: TileEntry[] } {
-  const firstWorkloadByImage = new Map<string, string>();
-  for (const workload of affected?.workloads ?? []) {
-    if (workload.image_digest) firstWorkloadByImage.set(workload.image_digest, workload.cluster_id);
-    if (workload.image_ref_normalized) firstWorkloadByImage.set(workload.image_ref_normalized, workload.cluster_id);
-    if (workload.image_ref) firstWorkloadByImage.set(workload.image_ref, workload.cluster_id);
-  }
-  const images = (affected?.images ?? []).map((image) => imageTile(image, firstWorkloadByImage));
-  const deployments = (affected?.workloads ?? []).map((workload) => ({
-    id: `${workload.cluster_id}:${workload.deployment_id}`,
-    label: `${workload.namespace}/${workload.name}`,
-    sub: `${workload.kind} · ${workload.finding_count} finding${workload.finding_count === 1 ? "" : "s"}`,
-    href: `/clusters/${workload.cluster_id}/deployments/${workload.deployment_id}`,
-  }));
-  const clusters = (affected?.clusters ?? []).map((cluster) => ({
-    id: cluster.cluster_id,
-    label: cluster.name || cluster.cluster_id.slice(0, 14),
-    sub: `${cluster.workload_count} workload${cluster.workload_count === 1 ? "" : "s"} · ${cluster.finding_count} finding${cluster.finding_count === 1 ? "" : "s"}`,
-    href: `/clusters/${cluster.cluster_id}/dashboard`,
-  }));
-  return {
-    images,
-    deployments,
-    clusters,
-  };
-}
-
-function imageTile(image: CVEAffectedImage, firstWorkloadByImage: Map<string, string>): TileEntry {
-  const label = image.image_tag ? `${image.image_repository}:${image.image_tag}` : image.image_repository || image.image_digest.slice(0, 19);
-  const clusterID =
-    firstWorkloadByImage.get(image.image_digest) ??
-    firstWorkloadByImage.get(image.image_ref_normalized) ??
-    firstWorkloadByImage.get(image.image_ref);
-  return {
-    id: image.image_scan_result_id,
-    label,
-    sub: `${image.platform || "platform"} · ${image.finding_count} package${image.finding_count === 1 ? "" : "s"}`,
-    href: clusterID ? `/clusters/${clusterID}/images/${image.image_scan_result_id}` : undefined,
-  };
+function date(value: string) {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime())
+    ? "Not reported"
+    : parsed.toLocaleString();
 }

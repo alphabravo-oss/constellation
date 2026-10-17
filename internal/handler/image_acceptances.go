@@ -3,12 +3,14 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/alphabravocompany/constellation/internal/db"
@@ -35,7 +37,13 @@ type imageAcceptanceDTO struct {
 	Status        string    `json:"status"`
 }
 
+type imageAcceptanceScope struct {
+	ExpectedImageDigest string `json:"expected_image_digest"`
+	ClusterID           string `json:"cluster_id"`
+}
+
 type createImageAcceptanceBody struct {
+	imageAcceptanceScope
 	Rationale     string `json:"rationale"`
 	AcceptedUntil string `json:"accepted_until"`
 }
@@ -62,6 +70,7 @@ func (h *ImageAcceptances) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body createImageAcceptanceBody
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
@@ -85,13 +94,13 @@ func (h *ImageAcceptances) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	subj, _ := SubjectFrom(r.Context())
-	imageDigest, err := h.imageDigest(r, subj.OrgID, assetID)
-	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "image not found"})
+	tx, imageDigest, clusterID, ok := h.lockReviewedImage(w, r, subj.OrgID, assetID, body.imageAcceptanceScope)
+	if !ok {
 		return
 	}
+	defer tx.Rollback(r.Context())
 	var id uuid.UUID
-	if err := h.db.Pool().QueryRow(r.Context(), `
+	if err := tx.QueryRow(r.Context(), `
 INSERT INTO image_acceptances (org_id, image_digest, rationale, approver_id, accepted_until)
 VALUES ($1, $2, $3, $4, $5)
 RETURNING id`, subj.OrgID, imageDigest, body.Rationale, subj.UserID, acceptedUntil).Scan(&id); err != nil {
@@ -101,6 +110,10 @@ RETURNING id`, subj.OrgID, imageDigest, body.Rationale, subj.UserID, acceptedUnt
 			return
 		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "create image acceptance failed"})
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "image acceptance commit failed"})
 		return
 	}
 	if h.auditLog != nil {
@@ -115,8 +128,8 @@ RETURNING id`, subj.OrgID, imageDigest, body.Rationale, subj.UserID, acceptedUnt
 			},
 		})
 	}
-	items, _ := h.listForAsset(r, subj.OrgID, assetID)
-	writeJSON(w, http.StatusCreated, map[string]any{"id": id, "image_acceptances": items})
+	items, _ := h.listForDigest(r, subj.OrgID, imageDigest)
+	writeJSON(w, http.StatusCreated, map[string]any{"id": id, "asset_id": assetID, "cluster_id": clusterID, "image_digest": imageDigest, "image_acceptances": items})
 }
 
 func (h *ImageAcceptances) Revoke(w http.ResponseWriter, r *http.Request) {
@@ -130,13 +143,19 @@ func (h *ImageAcceptances) Revoke(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad acceptance id"})
 		return
 	}
-	subj, _ := SubjectFrom(r.Context())
-	imageDigest, err := h.imageDigest(r, subj.OrgID, assetID)
-	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "image not found"})
+	var body imageAcceptanceScope
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && err != io.EOF {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	tag, err := h.db.Pool().Exec(r.Context(), `
+	subj, _ := SubjectFrom(r.Context())
+	tx, imageDigest, clusterID, ok := h.lockReviewedImage(w, r, subj.OrgID, assetID, body)
+	if !ok {
+		return
+	}
+	defer tx.Rollback(r.Context())
+	tag, err := tx.Exec(r.Context(), `
 UPDATE image_acceptances
    SET revoked_at = NOW()
  WHERE id = $1 AND org_id = $2 AND image_digest = $3 AND revoked_at IS NULL`,
@@ -149,6 +168,10 @@ UPDATE image_acceptances
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "acceptance not found"})
 		return
 	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "image acceptance commit failed"})
+		return
+	}
 	if h.auditLog != nil {
 		_, _, _ = h.auditLog.Log(r.Context(), audit.Event{
 			OrgID: &subj.OrgID, ActorID: &subj.UserID,
@@ -156,8 +179,8 @@ UPDATE image_acceptances
 			After: map[string]any{"asset_id": assetID.String(), "acceptance_id": acceptanceID.String()},
 		})
 	}
-	items, _ := h.listForAsset(r, subj.OrgID, assetID)
-	writeJSON(w, http.StatusOK, map[string]any{"status": "revoked", "image_acceptances": items})
+	items, _ := h.listForDigest(r, subj.OrgID, imageDigest)
+	writeJSON(w, http.StatusOK, map[string]any{"status": "revoked", "asset_id": assetID, "cluster_id": clusterID, "image_digest": imageDigest, "image_acceptances": items})
 }
 
 func (h *ImageAcceptances) imageDigest(r *http.Request, orgID uuid.UUID, assetID uuid.UUID) (string, error) {
@@ -171,13 +194,20 @@ SELECT i.digest
 }
 
 func (h *ImageAcceptances) listForAsset(r *http.Request, orgID uuid.UUID, assetID uuid.UUID) ([]imageAcceptanceDTO, error) {
+	digest, err := h.imageDigest(r, orgID, assetID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return []imageAcceptanceDTO{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return h.listForDigest(r, orgID, digest)
+}
+
+func (h *ImageAcceptances) listForDigest(r *http.Request, orgID uuid.UUID, digest string) ([]imageAcceptanceDTO, error) {
 	rows, err := h.db.Pool().Query(r.Context(), `
-SELECT ia.id, ia.image_digest, ia.rationale, ia.approver_id, ia.accepted_until, ia.created_at, ia.revoked_at
-  FROM image_acceptances ia
-  JOIN images i ON i.digest = ia.image_digest
-  JOIN assets a ON a.id = i.asset_id
- WHERE i.asset_id = $1 AND ia.org_id = $2 AND a.org_id = $2
- ORDER BY ia.created_at DESC`, assetID, orgID)
+SELECT id, image_digest, rationale, approver_id, accepted_until, created_at, revoked_at
+FROM image_acceptances WHERE image_digest=$1 AND org_id=$2 ORDER BY created_at DESC`, digest, orgID)
 	if err != nil {
 		return nil, err
 	}
@@ -203,4 +233,43 @@ SELECT ia.id, ia.image_digest, ia.rationale, ia.approver_id, ia.accepted_until, 
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+// lockReviewedImage keeps the reviewed asset/image identity stable through the
+// acceptance write. Legacy clients may omit preconditions; console forms send both.
+func (h *ImageAcceptances) lockReviewedImage(w http.ResponseWriter, r *http.Request, orgID, assetID uuid.UUID, expected imageAcceptanceScope) (pgx.Tx, string, *uuid.UUID, bool) {
+	expected.ExpectedImageDigest = strings.TrimSpace(expected.ExpectedImageDigest)
+	expected.ClusterID = strings.TrimSpace(expected.ClusterID)
+	var wantedCluster uuid.UUID
+	if expected.ExpectedImageDigest != "" || expected.ClusterID != "" {
+		var err error
+		wantedCluster, err = uuid.Parse(expected.ClusterID)
+		if err != nil || expected.ExpectedImageDigest == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "expected_image_digest and valid cluster_id must be provided together"})
+			return nil, "", nil, false
+		}
+	}
+	tx, err := h.db.Pool().Begin(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "image scope unavailable"})
+		return nil, "", nil, false
+	}
+	var digest string
+	var clusterID *uuid.UUID
+	err = tx.QueryRow(r.Context(), `SELECT i.digest, a.cluster_id FROM images i JOIN assets a ON a.id=i.asset_id WHERE i.asset_id=$1 AND a.org_id=$2 FOR SHARE OF i,a`, assetID, orgID).Scan(&digest, &clusterID)
+	if err != nil {
+		_ = tx.Rollback(r.Context())
+		status, message := http.StatusInternalServerError, "image scope unavailable"
+		if errors.Is(err, pgx.ErrNoRows) {
+			status, message = http.StatusNotFound, "image not found"
+		}
+		writeJSON(w, status, map[string]string{"error": message})
+		return nil, "", nil, false
+	}
+	if expected.ExpectedImageDigest != "" && (digest != expected.ExpectedImageDigest || clusterID == nil || *clusterID != wantedCluster) {
+		_ = tx.Rollback(r.Context())
+		writeJSON(w, http.StatusConflict, map[string]string{"error": "reviewed image digest or cluster changed; reload before submitting"})
+		return nil, "", nil, false
+	}
+	return tx, digest, clusterID, true
 }

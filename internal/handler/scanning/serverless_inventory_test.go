@@ -83,7 +83,7 @@ INSERT INTO users (id, org_id, email, display_name) VALUES ($1, $2, $3, 'Serverl
 		}},
 		ObservedAt: time.Now().UTC(),
 	})
-	reportReq := httptest.NewRequest(http.MethodPost, "/api/v1/serverless-packages:report", bytes.NewReader(body))
+	reportReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/serverless-packages:report", bytes.NewReader(body))
 	reportReq = reportReq.WithContext(authctx.WithSubject(reportReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	reportRec := httptest.NewRecorder()
 	NewServerlessPackages(d).Report(reportRec, reportReq)
@@ -98,7 +98,7 @@ INSERT INTO users (id, org_id, email, display_name) VALUES ($1, $2, $3, 'Serverl
 	}
 
 	inventory := NewServerlessInventory(d)
-	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/serverless-functions?q=payments", nil)
+	listReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/serverless-functions?q=payments", nil)
 	listReq = listReq.WithContext(authctx.WithSubject(listReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	listRec := httptest.NewRecorder()
 	inventory.List(listRec, listReq)
@@ -131,7 +131,7 @@ INSERT INTO users (id, org_id, email, display_name) VALUES ($1, $2, $3, 'Serverl
 
 	router := chi.NewRouter()
 	router.Get("/api/v1/serverless-functions/{id}", inventory.Get)
-	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/serverless-functions/"+report.ScanTargetID.String(), nil)
+	getReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/serverless-functions/"+report.ScanTargetID.String(), nil)
 	getReq = getReq.WithContext(authctx.WithSubject(getReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	getRec := httptest.NewRecorder()
 	router.ServeHTTP(getRec, getReq)

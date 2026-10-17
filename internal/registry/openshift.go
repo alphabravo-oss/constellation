@@ -5,8 +5,6 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -68,25 +66,27 @@ func (r *OpenShift) ListImages(ctx context.Context) ([]Image, error) {
 	endpoint := "https://" + host + "/v2/_catalog?n=500"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("registry: invalid request endpoint")
 	}
 	if err := r.setAuth(req); err != nil {
 		return nil, err
 	}
 	resp, err := r.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("openshift: catalog: %w", err)
+		return nil, responseFailure("openshift catalog", "request failed", 0, err)
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	body, readErr := readRegistryPage(resp, 8<<20)
+	if readErr != nil {
+		return nil, responseFailure("openshift catalog", "response read or close failed", resp.StatusCode, readErr)
+	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("openshift: catalog status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, responseFailure("openshift catalog", "response rejected", resp.StatusCode, nil)
 	}
 	var doc struct {
 		Repositories []string `json:"repositories"`
 	}
 	if err := json.Unmarshal(body, &doc); err != nil {
-		return nil, fmt.Errorf("openshift: decode catalog: %w", err)
+		return nil, responseFailure("openshift catalog", "invalid catalog response", resp.StatusCode, err)
 	}
 	out := make([]Image, 0, len(doc.Repositories))
 	for _, repo := range doc.Repositories {

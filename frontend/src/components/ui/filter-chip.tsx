@@ -33,6 +33,9 @@ export function FilterChip({
       )}
       onClick={onClick}
       role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      aria-pressed={onClick ? active : undefined}
+      onKeyDown={onClick ? (event) => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onClick(); } } : undefined}
     >
       <span className="text-muted-foreground">{label}{value != null && ":"}</span>
       {value != null && <span className="font-medium">{value}</span>}

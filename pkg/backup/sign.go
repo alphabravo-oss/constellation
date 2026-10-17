@@ -8,14 +8,16 @@
 // covers keyless / Fulcio signing which requires interactive OIDC.
 //
 // Static-key mode:
-//   sign:   ed25519.Sign(privKey, manifestBytes)            -> base64 -> manifest.json.sig
-//   verify: ed25519.Verify(pubKey, manifestBytes, sigBytes)
+//
+//	sign:   ed25519.Sign(privKey, manifestBytes)            -> base64 -> manifest.json.sig
+//	verify: ed25519.Verify(pubKey, manifestBytes, sigBytes)
 //
 // Keyless (Fulcio) mode:
-//   handled by external `cosign sign-blob --identity-token ... --bundle ...` invocation;
-//   we record the cosign bundle as manifest.json.sig and the Fulcio cert as manifest.json.cert.
-//   Verification then runs `cosign verify-blob --certificate ... --certificate-identity ...`.
-//   The library here detects the bundle format and shells out to cosign for verify-only.
+//
+//	handled by external `cosign sign-blob --identity-token ... --bundle ...` invocation;
+//	we record the cosign bundle as manifest.json.sig and the Fulcio cert as manifest.json.cert.
+//	Verification then runs `cosign verify-blob --certificate ... --certificate-identity ...`.
+//	The library here detects the bundle format and shells out to cosign for verify-only.
 package backup
 
 import (
@@ -30,15 +32,18 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+
+	"github.com/alphabravocompany/constellation/internal/securefiles"
 )
 
 // SignMode enumerates how the manifest was signed.
 type SignMode string
 
 const (
-	SignModeNone SignMode = "none"
+	SignModeNone      SignMode = "none"
 	SignModeStaticKey SignMode = "static-key"
-	SignModeKeyless SignMode = "keyless"
+	SignModeKeyless   SignMode = "keyless"
 )
 
 // SignerOptions configures Sign.
@@ -71,53 +76,61 @@ func Sign(manifestBytes []byte, opts SignerOptions) (sig []byte, cert []byte, id
 		ident := "key:" + pubKeyFingerprint(pub)
 		return []byte(base64.StdEncoding.EncodeToString(raw)), nil, ident, nil
 	case SignModeKeyless:
-		bin := opts.CosignBin
-		if bin == "" {
-			bin = "cosign"
-		}
-		if _, err := exec.LookPath(bin); err != nil {
-			return nil, nil, "", fmt.Errorf("keyless sign: %s not on PATH", bin)
-		}
-		// Write the blob to a temp file because cosign sign-blob reads from disk.
-		tmp, err := os.CreateTemp("", "cnstl-manifest-*.json")
-		if err != nil {
-			return nil, nil, "", err
-		}
-		defer os.Remove(tmp.Name())
-		if _, err := tmp.Write(manifestBytes); err != nil {
-			return nil, nil, "", err
-		}
-		_ = tmp.Close()
-
-		sigPath := tmp.Name() + ".sig"
-		certPath := tmp.Name() + ".cert"
-		defer os.Remove(sigPath)
-		defer os.Remove(certPath)
-
-		// `cosign sign-blob --yes --output-signature SIG --output-certificate CERT BLOB`.
-		// We rely on ambient OIDC ($COSIGN_IDENTITY_TOKEN, or a browser prompt) which the
-		// caller is responsible for arranging.
-		cmd := exec.Command(bin, "sign-blob", "--yes",
-			"--output-signature", sigPath,
-			"--output-certificate", certPath,
-			tmp.Name())
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			return nil, nil, "", fmt.Errorf("cosign sign-blob: %w", err)
-		}
-		sigB, err := os.ReadFile(sigPath)
-		if err != nil {
-			return nil, nil, "", err
-		}
-		certB, err := os.ReadFile(certPath)
-		if err != nil {
-			return nil, nil, "", err
-		}
-		subject, _ := extractCertSubject(certB)
-		return sigB, certB, "keyless:" + subject, nil
+		return signKeyless(manifestBytes, opts)
 	default:
 		return nil, nil, "", fmt.Errorf("unknown sign mode %q", opts.Mode)
 	}
+}
+
+func signKeyless(manifestBytes []byte, opts SignerOptions) (sig, cert []byte, identity string, err error) {
+	bin := opts.CosignBin
+	if bin == "" {
+		bin = "cosign"
+	}
+	if _, err := exec.LookPath(bin); err != nil {
+		return nil, nil, "", fmt.Errorf("keyless sign: %s not on PATH", bin)
+	}
+	// Keep the blob and cosign output paths in a private random directory.
+	// Predictable siblings of a file in the shared temp directory could be
+	// pre-created as symlinks before cosign opens them.
+	dir, err := os.MkdirTemp("", "cnstl-sign-*")
+	if err != nil {
+		return nil, nil, "", err
+	}
+	defer func() { err = errors.Join(err, os.RemoveAll(dir)) }()
+	blobPath := filepath.Join(dir, "manifest.json")
+	if err := os.WriteFile(blobPath, manifestBytes, 0o600); err != nil {
+		return nil, nil, "", err
+	}
+	sigPath := filepath.Join(dir, "manifest.sig")
+	certPath := filepath.Join(dir, "manifest.cert")
+
+	// `cosign sign-blob --yes --output-signature SIG --output-certificate CERT BLOB`.
+	// We rely on ambient OIDC ($COSIGN_IDENTITY_TOKEN, or a browser prompt) which the
+	// caller is responsible for arranging.
+	cmd := exec.Command(bin, "sign-blob", "--yes",
+		"--output-signature", sigPath,
+		"--output-certificate", certPath,
+		blobPath)
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return nil, nil, "", fmt.Errorf("cosign sign-blob: %w", err)
+	}
+	artifactRoot, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	defer func() { err = errors.Join(err, artifactRoot.Close()) }()
+	sigB, err := artifactRoot.ReadFile("manifest.sig")
+	if err != nil {
+		return nil, nil, "", err
+	}
+	certB, err := artifactRoot.ReadFile("manifest.cert")
+	if err != nil {
+		return nil, nil, "", err
+	}
+	subject, _ := extractCertSubject(certB)
+	return sigB, certB, "keyless:" + subject, nil
 }
 
 // VerifierOptions configures Verify.
@@ -153,56 +166,48 @@ func Verify(manifestBytes, sig, cert []byte, opts VerifierOptions) (identity str
 		}
 		return "key:" + pubKeyFingerprint(pub), nil
 	case SignModeKeyless:
-		bin := opts.CosignBin
-		if bin == "" {
-			bin = "cosign"
-		}
-		if _, err := exec.LookPath(bin); err != nil {
-			return "", fmt.Errorf("keyless verify: %s not on PATH", bin)
-		}
-		// Marshal artifacts to disk and call cosign verify-blob.
-		blobTmp, err := os.CreateTemp("", "cnstl-blob-*.json")
-		if err != nil {
-			return "", err
-		}
-		defer os.Remove(blobTmp.Name())
-		blobTmp.Write(manifestBytes)
-		blobTmp.Close()
-
-		sigTmp, _ := os.CreateTemp("", "cnstl-sig-*.sig")
-		defer os.Remove(sigTmp.Name())
-		sigTmp.Write(sig)
-		sigTmp.Close()
-
-		certTmp, _ := os.CreateTemp("", "cnstl-cert-*.pem")
-		defer os.Remove(certTmp.Name())
-		certTmp.Write(cert)
-		certTmp.Close()
-
-		args := []string{"verify-blob",
-			"--signature", sigTmp.Name(),
-			"--certificate", certTmp.Name(),
-		}
-		if opts.Identity != "" {
-			args = append(args, "--certificate-identity", opts.Identity)
-		}
-		args = append(args, blobTmp.Name())
-		cmd := exec.Command(bin, args...)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			return "", fmt.Errorf("cosign verify-blob: %s: %w", out, err)
-		}
-		subject, _ := extractCertSubject(cert)
-		return "keyless:" + subject, nil
+		return verifyKeyless(manifestBytes, sig, cert, opts)
 	default:
 		return "", fmt.Errorf("unknown verify mode %q", opts.Mode)
 	}
 }
 
+func verifyKeyless(manifestBytes, sig, cert []byte, opts VerifierOptions) (identity string, err error) {
+	bin := opts.CosignBin
+	if bin == "" {
+		bin = "cosign"
+	}
+	if _, err := exec.LookPath(bin); err != nil {
+		return "", fmt.Errorf("keyless verify: %s not on PATH", bin)
+	}
+	dir, err := os.MkdirTemp("", "cnstl-verify-*")
+	if err != nil {
+		return "", err
+	}
+	defer func() { err = errors.Join(err, os.RemoveAll(dir)) }()
+	for name, body := range map[string][]byte{"blob.json": manifestBytes, "blob.sig": sig, "blob.cert": cert} {
+		if err := os.WriteFile(filepath.Join(dir, name), body, 0o600); err != nil {
+			return "", err
+		}
+	}
+	args := []string{"verify-blob", "--signature", filepath.Join(dir, "blob.sig"), "--certificate", filepath.Join(dir, "blob.cert")}
+	if opts.Identity != "" {
+		args = append(args, "--certificate-identity", opts.Identity)
+	}
+	args = append(args, filepath.Join(dir, "blob.json"))
+	cmd := exec.Command(bin, args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("cosign verify-blob: %s: %w", out, err)
+	}
+	subject, _ := extractCertSubject(cert)
+	return "keyless:" + subject, nil
+}
+
 // GenerateEd25519Keypair writes an ed25519 private/public key pair to (privPath, pubPath)
 // in cosign-compatible PEM form: PRIVATE -> PKCS8 PEM, PUBLIC -> PKIX PEM. This is offered
 // as a convenience for tests + the `constellationctl backup gen-key` subcommand.
-func GenerateEd25519Keypair(privPath, pubPath string) error {
+func GenerateEd25519Keypair(privPath, pubPath string) (err error) {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return err
@@ -215,10 +220,42 @@ func GenerateEd25519Keypair(privPath, pubPath string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(privPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privDER}), 0o600); err != nil {
+	privateAbs, err := filepath.Abs(privPath)
+	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(pubPath, pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubDER}), 0o644); err != nil {
+	publicAbs, err := filepath.Abs(pubPath)
+	if err != nil {
+		return err
+	}
+	if privateAbs == publicAbs {
+		return errors.New("private and public key paths must differ")
+	}
+	// Key directories are explicit caller choices, not managed artifact stores;
+	// pin each directory without changing its existing permissions.
+	privateRoot, err := os.OpenRoot(filepath.Dir(privateAbs))
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, privateRoot.Close()) }()
+	publicRoot, err := os.OpenRoot(filepath.Dir(publicAbs))
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, publicRoot.Close()) }()
+	for root, name := range map[*os.Root]string{privateRoot: filepath.Base(privateAbs), publicRoot: filepath.Base(publicAbs)} {
+		info, err := root.Lstat(name)
+		if err == nil && !info.Mode().IsRegular() {
+			return errors.New("key output must be a regular file")
+		}
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	if err := securefiles.WriteFile(privateRoot, filepath.Base(privateAbs), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privDER}), 0o600); err != nil {
+		return err
+	}
+	if err := securefiles.WriteFile(publicRoot, filepath.Base(publicAbs), pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubDER}), 0o644); err != nil {
 		return err
 	}
 	return nil

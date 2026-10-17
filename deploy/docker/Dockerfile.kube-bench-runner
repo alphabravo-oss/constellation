@@ -1,14 +1,14 @@
 # syntax=docker/dockerfile:1.7
-# constellation-kube-bench-runner — one-shot CronJob image that execs the
+# constellation-kube-bench-runner — worker and one-shot image that execs the
 # upstream kube-bench binary, reads its --json report, and POSTs it to
-# /api/v1/compliance/ingest.
+# the authenticated /api/v1/agent/compliance routes.
 #
-# ponytail: this image MUST bundle the upstream kube-bench binary (and its
+# This image MUST bundle the upstream kube-bench binary (and its
 # cfg/ tree). We copy it straight from the official aquasec/kube-bench image
 # rather than reimplementing the benchmark. Pin KUBE_BENCH_IMAGE for a known
 # kube-bench version.
 
-ARG GO_VERSION=1.26.8
+ARG GO_VERSION=1.26.9
 ARG RUNTIME_IMAGE=debian:bookworm-slim
 ARG KUBE_BENCH_IMAGE=docker.io/aquasec/kube-bench:v0.10.7
 
@@ -18,15 +18,21 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 ARG VERSION=dev
+ARG COMMIT=dev
+ARG BUILD_TIME=
 ENV CGO_ENABLED=0 GOOS=linux
-RUN go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
+RUN go build -trimpath -ldflags="-s -w -X github.com/alphabravocompany/constellation/pkg/version.Version=${VERSION} -X github.com/alphabravocompany/constellation/pkg/version.Commit=${COMMIT} -X github.com/alphabravocompany/constellation/pkg/version.BuildTime=${BUILD_TIME}" \
       -o /out/constellation-kube-bench-runner ./cmd/constellation-kube-bench-runner
 
 FROM ${KUBE_BENCH_IMAGE} AS kubebench
 
 FROM ${RUNTIME_IMAGE} AS runtime
+ARG VERSION=dev
+ARG COMMIT=dev
+LABEL org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT}"
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates tzdata \
+ && apt-get install -y --no-install-recommends ca-certificates tzdata procps \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=build /out/constellation-kube-bench-runner /usr/local/bin/constellation-kube-bench-runner
 # kube-bench binary + its config tree (the cfg/ dir is required at runtime).

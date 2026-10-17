@@ -5,7 +5,7 @@
 # Go scanner worker. Scales horizontally by scan-job queue depth. Each pod owns a CPU/memory
 # budget tuned for trivy DB loads (~1 GB RAM, ~1 CPU per concurrent scan).
 
-ARG GO_VERSION=1.26.8
+ARG GO_VERSION=1.26.9
 ARG SYFT_VERSION=1.42.2
 ARG TRIVY_VERSION=0.69.3
 ARG GRYPE_VERSION=0.109.0
@@ -32,8 +32,10 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 ARG VERSION=dev
+ARG COMMIT=dev
+ARG BUILD_TIME=
 ENV CGO_ENABLED=0 GOOS=linux
-RUN go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
+RUN go build -trimpath -ldflags="-s -w -X github.com/alphabravocompany/constellation/pkg/version.Version=${VERSION} -X github.com/alphabravocompany/constellation/pkg/version.Commit=${COMMIT} -X github.com/alphabravocompany/constellation/pkg/version.BuildTime=${BUILD_TIME}" \
       -o /out/constellation-scanner ./cmd/constellation-scanner
 
 # -----------------------------------------------------------------------------
@@ -106,6 +108,10 @@ RUN /tools/syft --version >/dev/null \
 # Runtime
 # -----------------------------------------------------------------------------
 FROM ${RUNTIME_IMAGE} AS runtime
+ARG VERSION=dev
+ARG COMMIT=dev
+LABEL org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT}"
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates tzdata git \
  && rm -rf /var/lib/apt/lists/*

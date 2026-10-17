@@ -9,10 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alphabravocompany/constellation/internal/handler"
-	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/internal/handler"
+	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 )
 
 func TestScanJobs_ReadsIgnoreJobsLinkedToForeignOrgTargets(t *testing.T) {
@@ -48,7 +49,7 @@ func TestScanJobs_ReadsIgnoreJobsLinkedToForeignOrgTargets(t *testing.T) {
 	}
 	h := NewScanJobs(database, nil)
 	request := func(path string, endpoint http.HandlerFunc) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
 		req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: uuid.New(), OrgID: jobOrgID}))
 		req = withRouteParam(req, "id", foreignJobID.String())
 		rec := httptest.NewRecorder()
@@ -115,7 +116,7 @@ func TestScanJobs_RejectsJobWithForeignOrgTarget(t *testing.T) {
 	}
 	h := NewScanJobs(database, nil)
 	request := func(method, path string, body []byte, endpoint http.HandlerFunc) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(method, path, bytes.NewReader(body))
+		req := httptest.NewRequestWithContext(t.Context(), method, path, bytes.NewReader(body))
 		req.Header.Set("Authorization", "Bearer "+rawToken)
 		route := chi.NewRouteContext()
 		route.URLParams.Add("id", jobID.String())
@@ -203,7 +204,7 @@ func TestScanJobs_ClaimIgnoresEvidenceLinkedToForeignOrgTarget(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO scan_jobs (id, org_id, target_id, status) VALUES ($1, $2, $3, 'pending')`, jobID, jobOrgID, targetID); err != nil {
 		t.Fatal(err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/claim", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/claim", nil)
 	req.Header.Set("Authorization", "Bearer "+rawToken)
 	rec := httptest.NewRecorder()
 	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(NewScanJobs(database, nil).Claim)).ServeHTTP(rec, req)

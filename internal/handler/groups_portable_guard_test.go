@@ -56,7 +56,7 @@ func TestGroupImportCannotChangeReferencedCriteria(t *testing.T) {
 				query = "?cluster_id=" + scope[0].String()
 			}
 		}
-		request := httptest.NewRequest(http.MethodPost, "/groups:import"+query, strings.NewReader(string(body)))
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/groups:import"+query, strings.NewReader(string(body)))
 		request = request.WithContext(WithSubject(request.Context(), Subject{UserID: userID, OrgID: orgID}))
 		response := httptest.NewRecorder()
 		handler.Import(response, request)
@@ -158,7 +158,7 @@ func TestGroupImportRollsBackFailedProfilePropagation(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		request := httptest.NewRequest(http.MethodPost, "/groups:import?cluster_id="+clusterID.String(), strings.NewReader(string(encoded)))
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/groups:import?cluster_id="+clusterID.String(), strings.NewReader(string(encoded)))
 		request = request.WithContext(WithSubject(request.Context(), Subject{OrgID: orgID, UserID: userID}))
 		response := httptest.NewRecorder()
 		handler.Import(response, request)

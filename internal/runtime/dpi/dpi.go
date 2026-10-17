@@ -41,12 +41,12 @@ const (
 // Flow identifies a logical L7 conversation. WorkloadID is filled in by the agent
 // from a pid → pod mapping; for raw NFQUEUE captures it may be empty.
 type Flow struct {
-	WorkloadID string
+	WorkloadID  string
 	ContainerID string
-	Src        netip.AddrPort
-	Dst        netip.AddrPort
-	Protocol   string // "tcp" | "udp"
-	PID        uint32
+	Src         netip.AddrPort
+	Dst         netip.AddrPort
+	Protocol    string // "tcp" | "udp"
+	PID         uint32
 }
 
 // L7Event is the typed L7 record emitted by a parser. Exactly one of the protocol-
@@ -126,10 +126,10 @@ type RedisEvent struct {
 
 // KafkaEvent captures one Kafka request header.
 type KafkaEvent struct {
-	APIKey     int16
-	APIVersion int16
+	APIKey      int16
+	APIVersion  int16
 	Correlation int32
-	ClientID   string
+	ClientID    string
 }
 
 // Parser is the signature every L7 parser implements. It returns nil if the bytes

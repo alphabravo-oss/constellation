@@ -70,7 +70,7 @@ func (m *TrivyPackageMatcher) MatchPackages(ctx context.Context, ref string, pac
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	cmd.Env = registryEnv(opts)
+	cmd.Env = RegistryEnvironment(opts)
 	if err := cmd.Run(); err != nil {
 		// Trivy exits nonzero when findings exist AND on error; the JSON body is
 		// authoritative — only fail when it produced none.

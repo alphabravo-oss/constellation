@@ -38,10 +38,10 @@ async function clickNav(page: Page, linkLabel: string) {
     "Response Rules": "Response", "Policy Center": "Policy", Policies: "Policy", "Admission Control": "Policy",
     "Audit Log": "Settings & Activity",
   };
-  const scope = clusterGroups[linkLabel] || linkLabel === "Clusters" ? "Cluster" : linkLabel === "Settings" ? "Platform" : "Organization";
+  const scope = clusterGroups[linkLabel] || linkLabel === "Clusters" ? "Clusters" : linkLabel === "Settings" ? "Platform" : "Organization";
   const scopeGroup = nav.getByRole("group", { name: scope, exact: true });
   const scopeButton = scopeGroup.getByRole("button", { name: scope, exact: true });
-  if (await scopeButton.getAttribute("aria-expanded") !== "true") await scopeButton.click();
+  if (scope !== "Clusters" && await scopeButton.getAttribute("aria-expanded") !== "true") await scopeButton.click();
   const clusterGroupName = clusterGroups[linkLabel];
   if (clusterGroupName) {
     const clusterGroup = scopeGroup.getByRole("group", { name: clusterGroupName, exact: true });
@@ -95,6 +95,8 @@ test("Dashboard exposes operator health and scanner freshness links", async ({ p
   await page.goto("/dashboard");
   await page.waitForURL(/\/clusters\/[^/]+\/dashboard/);
 
+  await page.getByRole("tab", { name: "Operations", exact: true }).click();
+  await expect(page).toHaveURL(/\/dashboard\?tab=operations$/);
   await expect(page.getByTestId("dashboard-operator-strip")).toBeVisible();
   await expect(page.getByTestId("dashboard-component-health")).toContainText(/Controllers/i);
   await expect(page.getByTestId("dashboard-component-link-controller").locator("a")).toHaveAttribute("href", /\/components\?role=controller$/);
@@ -104,6 +106,8 @@ test("Dashboard exposes operator health and scanner freshness links", async ({ p
   await expect(page.getByTestId("dashboard-component-link-discoverer").locator("a")).toHaveAttribute("href", /\/components\?role=discoverer$/);
   await expect(page.getByTestId("dashboard-scanner-freshness")).toContainText(/Scanner DB/i);
   await expect(page.getByTestId("dashboard-scanner-freshness")).toHaveAttribute("href", "/settings/scanner");
+  await page.getByRole("tab", { name: "Network", exact: true }).click();
+  await expect(page).toHaveURL(/\/dashboard\?tab=network$/);
   await expect(page.getByTestId("dashboard-network-denies")).toBeVisible();
 });
 
@@ -144,7 +148,8 @@ test("Dashboard and System Health show reported scanner engine DB revisions", as
     await route.fulfill({ response, json: body });
   });
 
-  await page.goto(`/clusters/${clusterID}/dashboard`);
+  await page.goto(`/clusters/${clusterID}/dashboard?tab=operations`);
+  await expect(page.getByRole("tab", { name: "Operations", exact: true })).toHaveAttribute("data-state", "active");
   const dashboard = page.getByTestId("dashboard-scanner-freshness");
   await expect(dashboard).toContainText("3 idle / 4 slots");
   await expect(dashboard).toContainText("host-bundle-test");
@@ -159,7 +164,7 @@ test("Dashboard and System Health show reported scanner engine DB revisions", as
     await expect(health).toContainText(revision);
   }
 
-  await page.goto("/settings/scanner");
+  await page.goto("/settings/scanner?tab=workers");
   const scannerSources = page.getByTestId("scanner-db-capacity");
   await expect(scannerSources).toContainText("3 idle / 4 slots");
   await expect(scannerSources).toContainText("trivy-applied-test");
@@ -185,9 +190,14 @@ test("Scanner and registry pages expose operator queue visibility", async ({ pag
   await page.goto("/settings/scanner");
   await expect(page.getByRole("heading", { name: /^Scanner & CVE Sources$/i })).toBeVisible();
   await expect(page.getByTestId("scanner-operator-summary")).toBeVisible();
+  await expect(page.getByTestId("scanner-queue-metrics")).toBeHidden();
+  await page.getByText("Queue depth by target type", { exact: true }).click();
   await expect(page.getByTestId("scanner-queue-metrics")).toBeVisible();
   await expect(page.getByTestId("scanner-recent-jobs")).toBeVisible();
+  await page.getByRole("tab", { name: "Workers and capacity" }).click();
+  await expect(page).toHaveURL(/tab=workers/);
   await expect(page.getByTestId("scanner-workers")).toBeVisible();
+  await expect(page.getByTestId("scanner-recent-jobs")).not.toBeVisible();
 
   await page.goto("/dashboard");
   await page.waitForURL(/\/clusters\/[^/]+\/dashboard/);
@@ -206,8 +216,14 @@ test("Components page exposes NeuVector role filters and version drift matrix", 
   await page.goto(`/clusters/${clusterID}/components`);
   await expect(page.getByRole("heading", { name: /^Components$/i })).toBeVisible();
   await expect(page.getByTestId("component-nv-role-filters")).toContainText(/Controllers/i);
+  await expect(page.getByTestId("component-inventory-table")).toBeVisible();
+  await expect(page.getByTestId("component-version-matrix")).toBeHidden();
+  await page.getByRole("tab", { name: "Versions", exact: true }).click();
+  await expect(page).toHaveURL(/tab=versions/);
   await expect(page.getByTestId("component-version-matrix")).toBeVisible();
   await expect(page.getByTestId("component-version-matrix")).toContainText(/Version Drift/i);
+  await page.getByRole("tab", { name: "Inventory", exact: true }).click();
+  await expect(page.getByTestId("component-nv-role-filters")).toBeVisible();
 });
 
 test("Components role filters show matching instances and diagnostics", async ({ page }) => {
@@ -243,7 +259,12 @@ test("Components role filters show matching instances and diagnostics", async ({
       await route.fulfill({ json: {
         summary: { generated_at: "2026-01-01T01:00:00Z", components: 3, total_instances: 3, healthy: 3, degraded: 0, stale: 0, drift: 0, crashlooping: 0, missing: 0 },
         rollups: [],
-        components,
+        components: components.filter(item => !new URL(route.request().url()).searchParams.get("role") || item.role === new URL(route.request().url()).searchParams.get("role")),
+        cluster_id: clusterID, source_window_hours: 24, q: "", status: "", component: "",
+        role: new URL(route.request().url()).searchParams.get("role") || "",
+        role_counts: { all: 3, controller: 1, enforcer: 1, scanner: 1, admission: 0, discoverer: 0, other: 0 },
+        limit: 100, offset: 0, total: new URL(route.request().url()).searchParams.has("role") ? 1 : 3, has_more: false,
+        sort: new URL(route.request().url()).searchParams.get("sort") || "component", order: new URL(route.request().url()).searchParams.get("order") || "asc",
       } });
       return;
     }
@@ -271,9 +292,14 @@ test("Components role filters show matching instances and diagnostics", async ({
 
   await page.goto(`/clusters/${clusterID}/components?role=enforcer`);
   const table = page.getByTestId("component-inventory-table");
+  await table.getByRole("button", { name: "Columns", exact: true }).click();
+  await page.getByRole("menuitemcheckbox", { name: "Hostname", exact: true }).click();
+  await page.keyboard.press("Escape");
+  let previousSelection: string | null = null;
   for (const role of [roles[1], roles[0], roles[2]]) {
     await page.getByTestId(`component-nv-role-${role.id}`).click();
-    await expect(page).toHaveURL(new RegExp(`\\?role=${role.id}$`));
+    await expect.poll(() => new URL(page.url()).searchParams.get("role")).toBe(role.id);
+    expect(new URL(page.url()).searchParams.get("component")).toBe(previousSelection);
     await expect(table).toContainText(role.host);
     for (const other of roles.filter((candidate) => candidate.id !== role.id)) {
       await expect(table).not.toContainText(other.host);
@@ -282,6 +308,7 @@ test("Components role filters show matching instances and diagnostics", async ({
     await expect(page).toHaveURL(new RegExp(`role=${role.id}.*component=${role.id}$`));
     await expect(page.getByTestId("component-diagnostics")).toContainText(`${role.id} diagnostic`);
     await expect(page.getByTestId("component-preview")).toContainText(role.host);
+    previousSelection = role.id;
   }
 });
 
@@ -326,15 +353,24 @@ test("Admission Control exposes rules, criteria, and profile rollout panels", as
   await expect(page.getByRole("heading", { name: /^Admission Control$/i })).toBeVisible();
 
   await expect(page.getByTestId("admission-summary")).toBeVisible();
-  await expect(page.getByTestId("admission-state-panel")).toBeVisible();
   await expect(page.getByTestId("admission-rule-table")).toBeVisible();
+  await page.getByRole("tab", { name: "Criteria", exact: true }).click();
+  await expect(page).toHaveURL(/tab=catalog/);
   await expect(page.getByTestId("admission-options-catalog")).toBeVisible();
-  await expect(page.getByTestId("admission-profile-templates")).toBeVisible();
-  await expect(page.getByTestId("admission-profile-templates")).toContainText(/Rules/i);
-
+  await page.getByRole("button", { name: "Import profile", exact: true }).click();
+  await expect(page).toHaveURL(/admission\/import$/);
+  await expect(page.getByTestId("admission-profile-select")).toBeVisible();
+  await expect(page.getByTestId("admission-profile-compare")).toContainText(/Profile rules compared with installed policies/i);
+  await expect(page.getByTestId("admission-profile-import")).toBeDisabled();
   await page.getByRole("button", { name: /^Preview$/i }).click();
-  await expect(page.getByTestId("admission-profile-preview")).toBeVisible();
-  await expect(page.getByTestId("admission-profile-preview")).toContainText(/monitor|enforce/i);
+  await expect(page.getByRole("status").filter({ hasText: "Preview ready:" })).toBeVisible();
+  await expect(page.getByTestId("admission-profile-compare")).toContainText(/Preview compared with installed policies/i);
+  await expect(page.getByTestId("admission-profile-import")).toBeEnabled();
+  await page.getByRole("tab", { name: "Bundle JSON", exact: true }).click();
+  await expect(page).toHaveURL(/tab=bundle/);
+  await expect(page.getByTestId("admission-profile-import")).toBeDisabled();
+  await page.goBack();
+  await expect(page.getByRole("tab", { name: "Catalog", exact: true })).toHaveAttribute("aria-selected", "true");
 });
 
 test.describe("Org sidebar navigation — routes", () => {
@@ -364,16 +400,26 @@ test("Settings hub links to System Health and Access Control", async ({ page }) 
 test("Effective Config exposes source, diff, and applied revision panels", async ({ page }) => {
   await page.goto("/settings/effective-config");
   await expect(page.getByRole("heading", { name: /^Effective Config$/i })).toBeVisible();
+  await expect(page.getByTestId("effective-config-source-summary")).toBeHidden();
+  await page.getByRole("tab", { name: "Provenance", exact: true }).click();
+  await expect(page).toHaveURL(/tab=sources/);
   await expect(page.getByTestId("effective-config-source-summary")).toBeVisible();
   await expect(page.getByTestId("effective-config-default-diff")).toBeVisible();
+  await page.getByRole("tab", { name: "Revision reports", exact: true }).click();
+  await expect(page).toHaveURL(/tab=reports/);
   await expect(page.getByTestId("effective-config-applied-revisions")).toBeVisible();
+  await expect(page.getByTestId("effective-config-source-summary")).toBeHidden();
+  await page.goBack();
+  await expect(page.getByTestId("effective-config-source-summary")).toBeVisible();
 });
 
 test("Migration Imports exposes readiness, recommended actions, and report export", async ({ page }) => {
   await page.goto("/settings/migration");
   await expect(page.getByRole("heading", { name: /^Migration Imports$/i })).toBeVisible();
+  await page.getByRole("tab", { name: "Readiness", exact: true }).click();
   await expect(page.getByTestId("migration-switch-readiness")).toBeVisible();
   await expect(page.getByTestId("migration-readiness-checklist")).toBeVisible();
+  await page.getByRole("tab", { name: "Report and follow-up", exact: true }).click();
   await expect(page.getByTestId("migration-recommended-actions")).toBeVisible();
   await expect(page.getByTestId("migration-report-panel")).toBeVisible();
   await expect(page.getByTestId("migration-report-export")).toBeVisible();

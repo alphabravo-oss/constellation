@@ -20,6 +20,15 @@ spec:
   hostnames:
     - {{ .Values.gateway.host | quote }}
   rules:
+{{- if .Values.api.enabled }}
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api
+      backendRefs:
+        - name: {{ include "constellation.fullname" . }}-api
+          port: {{ .Values.api.service.port }}
+{{- end }}
     - matches:
         - path:
             type: PathPrefix

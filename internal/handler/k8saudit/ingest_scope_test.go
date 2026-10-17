@@ -103,7 +103,7 @@ VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`,
 			if err != nil {
 				t.Fatal(err)
 			}
-			request := httptest.NewRequest(http.MethodPost, "/api/v1/k8s-audit:bulk"+testCase.query, bytes.NewReader(body))
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/k8s-audit:bulk"+testCase.query, bytes.NewReader(body))
 			request.Header.Set("Authorization", "Bearer "+testCase.token)
 			recorder := httptest.NewRecorder()
 			handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(NewIngest(database).Bulk)).ServeHTTP(recorder, request)

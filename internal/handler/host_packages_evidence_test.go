@@ -93,7 +93,7 @@ func TestHostPackagesReportQueuesHostScanEvidence(t *testing.T) {
 	d := openTestDB(t)
 	defer d.Close()
 
-	ctx := httptest.NewRequest("GET", "/", nil).Context()
+	ctx := httptest.NewRequestWithContext(t.Context(), "GET", "/", nil).Context()
 	pool := d.Pool()
 	var regclass string
 	if err := pool.QueryRow(ctx, `SELECT COALESCE(to_regclass('public.scan_evidence')::text, '')`).Scan(&regclass); err != nil || regclass == "" {
@@ -126,7 +126,7 @@ func TestHostPackagesReportQueuesHostScanEvidence(t *testing.T) {
 			Arch:    "amd64",
 		}},
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/host-packages:report", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/host-packages:report", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+runtimeToken)
 	rec := httptest.NewRecorder()
 	RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(NewHostPackages(d).Report)).ServeHTTP(rec, req)
@@ -197,7 +197,7 @@ SELECT id
 	}
 
 	evidence := NewScanEvidence(d)
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/scan-evidence/"+report.ScanEvidenceID.String(), nil)
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scan-evidence/"+report.ScanEvidenceID.String(), nil)
 	req.Header.Set("Authorization", "Bearer "+scannerToken)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", report.ScanEvidenceID.String())

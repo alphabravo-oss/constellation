@@ -113,7 +113,7 @@ INSERT INTO users (id, org_id, email, display_name) VALUES
 	}
 
 	h := NewUsers(d, audit.New(pool))
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/users/"+targetID.String()+"/unlock", nil)
+	r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/users/"+targetID.String()+"/unlock", nil)
 	r = r.WithContext(WithSubject(r.Context(), Subject{UserID: adminID, OrgID: orgID}))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", targetID.String())
@@ -158,7 +158,7 @@ INSERT INTO users (id, org_id, email, display_name) VALUES
 
 	// Unlocking a user in another org must 404 (org scoping).
 	otherOrg := uuid.New()
-	r2 := httptest.NewRequest(http.MethodPost, "/api/v1/users/"+targetID.String()+"/unlock", nil)
+	r2 := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/users/"+targetID.String()+"/unlock", nil)
 	r2 = r2.WithContext(WithSubject(r2.Context(), Subject{UserID: adminID, OrgID: otherOrg}))
 	rctx2 := chi.NewRouteContext()
 	rctx2.URLParams.Add("id", targetID.String())

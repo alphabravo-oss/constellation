@@ -68,7 +68,7 @@ func TestIngestSessionsUsesTokenClusterAndRejectsInvalidSnapshots(t *testing.T) 
 		if err != nil {
 			t.Fatal(err)
 		}
-		request := httptest.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, url, bytes.NewReader(body))
 		request = request.WithContext(handler.WithRuntimeAgentToken(request.Context(), token))
 		response := httptest.NewRecorder()
 		NewNetwork(database).IngestSessions(response, request)
@@ -134,6 +134,11 @@ func TestIngestSessionsUsesTokenClusterAndRejectsInvalidSnapshots(t *testing.T) 
 		})
 	}
 
+	// Expired commands must not be delivered even before the scheduled reaper.
+	if _, err := pool.Exec(ctx, `INSERT INTO network_session_kills(org_id,cluster_id,node,session_id,requested_at)
+        VALUES ($1,$2,$3,999,now()-interval '6 minutes')`, orgID, clusterID, node); err != nil {
+		t.Fatal(err)
+	}
 	response := post(boundToken, "/api/v1/network-sessions:bulk?cluster_id="+clusterID.String(), []sessionIngestRow{{ID: 33, Node: node, ClusterID: clusterID.String(), ClientBytes: 123}})
 	if response.Code != http.StatusOK {
 		t.Fatalf("bound ingest status=%d body=%s", response.Code, response.Body.String())
@@ -163,8 +168,12 @@ func TestIngestSessionsUsesTokenClusterAndRejectsInvalidSnapshots(t *testing.T) 
 	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM network_session_kills WHERE org_id = $1 AND cluster_id = $2 AND node = $3`, orgID, clusterID, node).Scan(&remainingKills); err != nil {
 		t.Fatal(err)
 	}
-	if oldCount != 0 || otherCount != 1 || remainingKills != 0 {
+	if oldCount != 0 || otherCount != 1 || remainingKills != 1 {
 		t.Fatalf("snapshot isolation old=%d other=%d bound kills=%d", oldCount, otherCount, remainingKills)
+	}
+	var expiredID int64
+	if err := pool.QueryRow(ctx, `SELECT session_id FROM network_session_kills WHERE org_id=$1 AND cluster_id=$2 AND node=$3`, orgID, clusterID, node).Scan(&expiredID); err != nil || expiredID != 999 {
+		t.Fatalf("only expired command should await cleanup: id=%d err=%v", expiredID, err)
 	}
 	assertSnapshot(otherClusterID, 22, 202)
 }
@@ -193,7 +202,7 @@ func TestIngestSessionsAcceptsUnboundTokenForSingleCluster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/network-sessions:bulk", bytes.NewReader(body))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/network-sessions:bulk", bytes.NewReader(body))
 	request = request.WithContext(handler.WithRuntimeAgentToken(request.Context(), &handler.RuntimeAgentToken{ID: tokenID, OrgID: orgID}))
 	response := httptest.NewRecorder()
 	NewNetwork(database).IngestSessions(response, request)

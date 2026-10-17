@@ -9,8 +9,8 @@ package registry
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -70,11 +70,15 @@ func listCatalogV2(ctx context.Context, client *http.Client, kind string, cfg Co
 	if cfg.Endpoint == "" {
 		return nil, fmt.Errorf("%s: Endpoint=<registry-host[:port]> required", kind)
 	}
+	stage := "generic-v2 catalog"
+	if kind == "nexus" {
+		stage = "nexus catalog"
+	}
 	host := stripSchemeReg(cfg.Endpoint)
 	endpoint := "https://" + host + "/v2/_catalog?n=500"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("registry: invalid request endpoint")
 	}
 	switch {
 	case strings.TrimSpace(cfg.Token) != "":
@@ -84,18 +88,20 @@ func listCatalogV2(ctx context.Context, client *http.Client, kind string, cfg Co
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%s: catalog: %w", kind, err)
+		return nil, responseFailure(stage, "request failed", 0, err)
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	body, readErr := readRegistryPage(resp, 8<<20)
+	if readErr != nil {
+		return nil, responseFailure(stage, "response read or close failed", resp.StatusCode, readErr)
+	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s: catalog status %d: %s", kind, resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, responseFailure(stage, "response rejected", resp.StatusCode, nil)
 	}
 	var doc struct {
 		Repositories []string `json:"repositories"`
 	}
 	if err := json.Unmarshal(body, &doc); err != nil {
-		return nil, fmt.Errorf("%s: decode catalog: %w", kind, err)
+		return nil, responseFailure(stage, "invalid catalog response", resp.StatusCode, err)
 	}
 	out := make([]Image, 0, len(doc.Repositories))
 	for _, repo := range doc.Repositories {

@@ -27,6 +27,10 @@ spec:
       dnsPolicy: ClusterFirstWithHostNet
       tolerations: {{- toYaml .Values.runtimeAgent.tolerations | nindent 8 }}
       volumes:
+        - name: telemetry-spool
+          hostPath:
+            path: {{ .Values.runtimeAgent.telemetrySpool.hostPath | quote }}
+            type: DirectoryOrCreate
         - name: sys
           hostPath: { path: /sys, type: Directory }
         - name: bpf-fs
@@ -140,6 +144,10 @@ spec:
             # Wave 9: liveness + readiness HTTP server.
             - name: CONSTELLATION_HEALTH_ADDR
               value: ":{{ .Values.runtimeAgent.healthPort | default 9404 }}"
+            - name: CONSTELLATION_TELEMETRY_SPOOL_DIR
+              value: /var/lib/constellation/telemetry
+            - name: CONSTELLATION_TELEMETRY_SPOOL_BYTES
+              value: {{ .Values.runtimeAgent.telemetrySpool.bytesPerStream | int64 | quote }}
             {{- if .Values.runtimeAgent.dp.enabled }}
             - name: CONSTELLATION_DP_ENABLED
               value: "true"
@@ -186,6 +194,10 @@ spec:
               value: "{{ if and (eq .Values.runtimeAgent.enforcement.mode "protect") .Values.runtimeAgent.enforcement.exec }}true{{ else }}false{{ end }}"
             - name: CONSTELLATION_EXEC_ENFORCER_MODE
               value: "{{ if and (eq .Values.runtimeAgent.enforcement.mode "protect") .Values.runtimeAgent.enforcement.exec }}enforce{{ else }}monitor{{ end }}"
+            {{- if hasKey .Values.runtimeAgent "execDryRun" }}
+            - name: CONSTELLATION_EXEC_ENFORCER_DRYRUN
+              value: {{ .Values.runtimeAgent.execDryRun | quote }}
+            {{- end }}
             # Inline (NFQUEUE) network enforcement — arms ONLY when mode=protect AND
             # enforcement.network=true. Per-workload: a pod goes inline only with the
             # dpi.constellation.alphabravo.io/enforce label. Fail-open (--queue-bypass).
@@ -214,6 +226,8 @@ spec:
           readinessProbe: {{- toYaml . | nindent 12 }}
           {{- end }}
           volumeMounts:
+            - name: telemetry-spool
+              mountPath: /var/lib/constellation/telemetry
             - name: sys
               mountPath: /sys
               readOnly: true

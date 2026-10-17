@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -82,6 +84,7 @@ SELECT sc.updated_at, sc.updated_by::text, u.email
 		jsonError(w, http.StatusInternalServerError, "system config metadata could not be loaded")
 		return
 	}
+	w.Header().Set("ETag", fmt.Sprintf(`"%d"`, rev))
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -93,6 +96,11 @@ func (h *SystemConfig) Patch(w http.ResponseWriter, r *http.Request) {
 	subj, ok := SubjectFrom(r.Context())
 	if !ok {
 		jsonError(w, http.StatusUnauthorized, "no subject")
+		return
+	}
+	expectedRevision, err := configRevisionPrecondition(r)
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, "If-Match must contain one quoted nonnegative configuration revision")
 		return
 	}
 	var patch json.RawMessage
@@ -117,7 +125,8 @@ func (h *SystemConfig) Patch(w http.ResponseWriter, r *http.Request) {
 
 	// Optimistic-concurrency loop: Load the current config + revision, apply the patch
 	// onto it, and Save with that revision as a precondition. If a concurrent PATCH won
-	// the race (ErrRevisionConflict) we re-Load and re-apply the SAME patch onto the new
+	// the race (ErrRevisionConflict), conditional editors fail with 412. Legacy
+	// clients without If-Match re-Load and re-apply the SAME patch onto the new
 	// base so neither writer's distinct field changes are silently lost (the prior bug was
 	// a non-atomic read-modify-write that clobbered the loser's fields).
 	var current, merged syscfg.Config
@@ -131,6 +140,10 @@ func (h *SystemConfig) Patch(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, http.StatusInternalServerError, "system config could not be loaded")
 			return
 		}
+		if expectedRevision != nil && baseRev != *expectedRevision {
+			jsonError(w, http.StatusPreconditionFailed, "system config changed; reload current settings before saving")
+			return
+		}
 		merged, err = current.ApplyPatch(patch)
 		if err != nil {
 			writeConfigValidationError(w, err)
@@ -141,6 +154,10 @@ func (h *SystemConfig) Patch(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		if errors.Is(err, syscfg.ErrRevisionConflict) {
+			if expectedRevision != nil {
+				jsonError(w, http.StatusPreconditionFailed, "system config changed; reload current settings before saving")
+				return
+			}
 			if attempt < maxAttempts-1 {
 				continue // re-Load onto the winner's value and retry the patch
 			}
@@ -166,6 +183,7 @@ func (h *SystemConfig) Patch(w http.ResponseWriter, r *http.Request) {
 			Before: current.Redacted(), After: merged.Redacted(),
 		})
 	}
+	w.Header().Set("ETag", fmt.Sprintf(`"%d"`, rev))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"config":     merged.Redacted(),
 		"revision":   rev,
@@ -173,6 +191,32 @@ func (h *SystemConfig) Patch(w http.ResponseWriter, r *http.Request) {
 		"provenance": merged.Provenance(),
 		"applied":    map[string]any{"provider": h.provider.Applied(subj.OrgID, rev)},
 	})
+}
+
+// Editors supply the revision they loaded. Legacy field-level clients may omit
+// it and retain merge/retry behavior; conditional edits never retry over a winner.
+func configRevisionPrecondition(r *http.Request) (*int64, error) {
+	values := r.Header.Values("If-Match")
+	if len(values) == 0 {
+		return nil, nil
+	}
+	if len(values) != 1 {
+		return nil, fmt.Errorf("multiple revision preconditions")
+	}
+	raw := strings.TrimSpace(values[0])
+	if len(raw) < 3 || raw[0] != '"' || raw[len(raw)-1] != '"' {
+		return nil, fmt.Errorf("invalid revision precondition")
+	}
+	for _, ch := range raw[1 : len(raw)-1] {
+		if ch < '0' || ch > '9' {
+			return nil, fmt.Errorf("invalid revision precondition")
+		}
+	}
+	revision, err := strconv.ParseInt(raw[1:len(raw)-1], 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid revision precondition: %w", err)
+	}
+	return &revision, nil
 }
 
 func writeConfigFieldErrors(w http.ResponseWriter, fields []syscfg.FieldError) {

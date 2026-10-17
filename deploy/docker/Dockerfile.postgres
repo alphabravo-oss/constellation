@@ -1,5 +1,5 @@
 # CloudNativePG operand with the pgvector extension required by migrations.
-ARG CNPG_POSTGRES_IMAGE=ghcr.io/cloudnative-pg/postgresql:16.10-standard-bookworm@sha256:533e45e0a00c156bdab7c4d9a84fffa87259594725a3909c898e8645727d9555
+ARG CNPG_POSTGRES_IMAGE=ghcr.io/cloudnative-pg/postgresql:16.14-standard-bookworm@sha256:b459345655ea1a0438a219f599cbae509c3132dc8faad6d729d6957e70a618bb
 FROM ${CNPG_POSTGRES_IMAGE}
 
 USER root

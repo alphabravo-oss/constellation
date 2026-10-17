@@ -233,7 +233,7 @@ func (w *worker) dbRefreshLoop(ctx context.Context, envInterval time.Duration, e
 		return iv, off
 	}
 
-	iv, off := effective()
+	_, off := effective()
 	w.refreshVulnDBs(ctx, off) // initial refresh on boot
 	last := time.Now()
 	// Seed the last-applied force-refresh signal from the current config so a boot
@@ -252,7 +252,7 @@ func (w *worker) dbRefreshLoop(ctx context.Context, envInterval time.Duration, e
 		case <-ctx.Done():
 			return
 		case <-check.C:
-			iv, off = envInterval, envOffline
+			iv, off := envInterval, envOffline
 			forceNow := false
 			if cfg, ok := w.fetchScannerConfig(ctx); ok {
 				if cfg.DBRefreshMinutes > 0 {

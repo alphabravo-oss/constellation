@@ -249,8 +249,7 @@ spec:
     kinds: ["Pod"]
   scanEvidence:
     maxAge: 24h
-    requireVulnDBBundle: true
-    canonicalEngines: ["vulndb"]
+    requiredSuccessfulEngines: ["trivy", "grype"]
   vulnerability:
     maxAllowedSeverity: high
     requireKnownScanResult: true
@@ -266,7 +265,7 @@ func fixableVulnAdmissionProfile() AdmissionProfile {
 	return AdmissionProfile{
 		ID:            "fixable-vulnerabilities-blocked",
 		Name:          "Fixable vulnerabilities blocked",
-		Description:   "Blocks workloads whose fresh Constellation VulnDB scan evidence includes high or critical vulnerabilities with a known fixed version.",
+		Description:   "Blocks workloads whose fresh Trivy and Grype scan evidence includes high or critical vulnerabilities with a known fixed version.",
 		FailurePolicy: "Fail",
 		NamespaceSelector: map[string]any{
 			"matchLabels": map[string]string{"constellation.alphabravo.io/enforce": "true"},
@@ -274,7 +273,7 @@ func fixableVulnAdmissionProfile() AdmissionProfile {
 		Rules: []AdmissionProfileRule{
 			{
 				Name:        "block-fixable-high-vulnerabilities",
-				Description: "Deny images with fixable high or critical vulnerabilities from canonical VulnDB evidence.",
+				Description: "Deny images with fixable high or critical vulnerabilities from completed vulnerability scans.",
 				Engine:      "constellation-admission",
 				Category:    "vulnerability-gating",
 				Mode:        "enforce",
@@ -288,8 +287,7 @@ spec:
     kinds: ["Pod"]
   scanEvidence:
     maxAge: 24h
-    requireVulnDBBundle: true
-    canonicalEngines: ["vulndb"]
+    requiredSuccessfulEngines: ["trivy", "grype"]
   vulnerability:
     maxAllowedSeverity: medium
     requireKnownScanResult: true

@@ -16,6 +16,27 @@ import (
 	"github.com/alphabravocompany/constellation/pkg/netpolicy"
 )
 
+func TestGroupEdgesRejectInvalidProtocolAndPortBeforeMutation(t *testing.T) {
+	for _, ports := range []string{
+		`[{"protocol":"SCTP","port":443}]`,
+		`[{"protocol":"GRE","port":443}]`,
+		`[{"protocol":"TCP","port":65536}]`,
+		`[{"protocol":"UDP","port":-1}]`,
+	} {
+		t.Run(ports, func(t *testing.T) {
+			body := `{"cluster_id":"` + uuid.NewString() + `","from_group":"source","to_group":"destination","mode":"protect","expand":true,"ports":` + ports + `}`
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/group-edges", bytes.NewBufferString(body))
+			request = request.WithContext(authctx.WithSubject(request.Context(), authctx.Subject{OrgID: uuid.New(), UserID: uuid.New()}))
+			response := httptest.NewRecorder()
+			// A nil store/auditor ensures invalid input never reaches mutation work.
+			(&GroupEdgesHTTP{}).Create(response, request)
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("invalid native rule: status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
 func TestGroupEdgesAuditAttemptFailurePreventsMutation(t *testing.T) {
 	database := openTestDB(t)
 	defer database.Close()
@@ -45,7 +66,7 @@ func TestGroupEdgesAuditAttemptFailurePreventsMutation(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		request := httptest.NewRequest(method, path, bytes.NewReader(payload))
+		request := httptest.NewRequestWithContext(t.Context(), method, path, bytes.NewReader(payload))
 		request = request.WithContext(authctx.WithSubject(request.Context(), authctx.Subject{OrgID: orgID, UserID: userID}))
 		response := httptest.NewRecorder()
 		serve(response, request)

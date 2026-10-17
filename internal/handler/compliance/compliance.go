@@ -9,12 +9,9 @@ package compliance
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -60,109 +57,7 @@ func (c *Compliance) Frameworks(w http.ResponseWriter, _ *http.Request) {
 // Checks returns persisted compliance check rows for the calling org. Supports both
 // the legacy ?framework= filter (single framework match) and the bench-v2
 // ?profile= filter (matches the JSONB tags_v2 column).
-func (c *Compliance) Checks(w http.ResponseWriter, r *http.Request) {
-	subj, _ := authctx.SubjectFrom(r.Context())
-	framework := r.URL.Query().Get("framework")
-	profile := r.URL.Query().Get("profile")
-	clusterArg, err := sqlx.ParseClusterIDParam(r)
-	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-	if clusterArg != nil {
-		var owned bool
-		if err := c.db.Pool().QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM clusters WHERE id = $1 AND org_id = $2)`, clusterArg, subj.OrgID).Scan(&owned); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		if !owned {
-			httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})
-			return
-		}
-	}
-
-	rows, err := c.db.Pool().Query(r.Context(), `
-SELECT cc.framework, cc.control_id, cc.title, COALESCE(cc.description,''), cc.status, cc.severity,
-       COALESCE(cc.evidence,''), cc.evaluated_at, COALESCE(cc.tags_v2, '{}'::jsonb),
-       COALESCE(cc.remediation,''),
-       ce.id::text, ce.reason, ce.expires_at
-  FROM compliance_checks cc
-  LEFT JOIN LATERAL (
-        SELECT id, reason, expires_at, cluster_id, created_at
-          FROM compliance_exemptions ce
-         WHERE ce.org_id = cc.org_id
-           AND ce.framework = cc.framework
-           AND ce.control_id = cc.control_id
-           AND (ce.cluster_id IS NULL OR ce.cluster_id = cc.cluster_id)
-           AND (ce.cluster_id IS NULL OR EXISTS (SELECT 1 FROM clusters WHERE id = ce.cluster_id AND org_id = cc.org_id))
-           AND ce.revoked_at IS NULL
-           AND ce.expires_at > NOW()
-         ORDER BY (ce.cluster_id IS NULL), ce.created_at DESC
-         LIMIT 1
-       ) ce ON TRUE
- WHERE cc.org_id = $1
-   AND (cc.cluster_id IS NULL OR EXISTS (SELECT 1 FROM clusters WHERE id = cc.cluster_id AND org_id = cc.org_id))
-   AND ($2::text = '' OR cc.framework = $2)
-   AND ($3::text = '' OR cc.tags_v2 ? $3)
-   AND ($4::uuid IS NULL OR cc.cluster_id = $4)
- ORDER BY cc.framework, cc.control_id
- LIMIT 500`, subj.OrgID, framework, profile, clusterArg)
-	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	defer rows.Close()
-
-	out := []map[string]any{}
-	for rows.Next() {
-		var row struct {
-			Framework, ControlID, Title, Description, Status, Severity, Evidence, Remediation string
-		}
-		// evaluated_at is a timestamptz; scan into time.Time then format. Scanning
-		// into a string fails the pgx binary path (OID 1184).
-		var when time.Time
-		var exemptionID, exemptionReason *string
-		var exemptionExpiresAt *time.Time
-		var tags []byte
-		if err := rows.Scan(&row.Framework, &row.ControlID, &row.Title, &row.Description,
-			&row.Status, &row.Severity, &row.Evidence, &when, &tags, &row.Remediation, &exemptionID, &exemptionReason, &exemptionExpiresAt); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		var tagsParsed map[string]any
-		_ = json.Unmarshal(tags, &tagsParsed)
-		effectiveStatus := row.Status
-		var exemption map[string]any
-		if exemptionID != nil && exemptionReason != nil && exemptionExpiresAt != nil {
-			exemption = map[string]any{
-				"id":         *exemptionID,
-				"reason":     *exemptionReason,
-				"expires_at": exemptionExpiresAt.UTC().Format(time.RFC3339),
-			}
-			if row.Status == "fail" {
-				effectiveStatus = "exempted"
-			}
-		}
-		item := map[string]any{
-			"framework":        row.Framework,
-			"control_id":       row.ControlID,
-			"title":            row.Title,
-			"description":      row.Description,
-			"status":           row.Status,
-			"effective_status": effectiveStatus,
-			"severity":         row.Severity,
-			"evidence":         row.Evidence,
-			"remediation":      row.Remediation,
-			"evaluated_at":     when.UTC().Format(time.RFC3339),
-			"tags_v2":          tagsParsed,
-		}
-		if exemption != nil {
-			item["exemption"] = exemption
-		}
-		out = append(out, item)
-	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"checks": out})
-}
+func (c *Compliance) Checks(w http.ResponseWriter, r *http.Request) { c.checksInventory(w, r, false) }
 
 // Summary returns pass% + counts per framework.
 func (c *Compliance) Summary(w http.ResponseWriter, r *http.Request) {
@@ -183,35 +78,13 @@ func (c *Compliance) Summary(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	rows, err := c.db.Pool().Query(r.Context(), `
-WITH checks AS (
-    SELECT cc.framework,
-           cc.status,
-           ce.id IS NOT NULL AS exempted
-      FROM compliance_checks cc
-      LEFT JOIN LATERAL (
-            SELECT id, cluster_id, created_at
-              FROM compliance_exemptions ce
-             WHERE ce.org_id = cc.org_id
-               AND ce.framework = cc.framework
-               AND ce.control_id = cc.control_id
-               AND (ce.cluster_id IS NULL OR ce.cluster_id = cc.cluster_id)
-               AND (ce.cluster_id IS NULL OR EXISTS (SELECT 1 FROM clusters WHERE id = ce.cluster_id AND org_id = cc.org_id))
-               AND ce.revoked_at IS NULL
-               AND ce.expires_at > NOW()
-             ORDER BY (ce.cluster_id IS NULL), ce.created_at DESC
-             LIMIT 1
-           ) ce ON TRUE
-     WHERE cc.org_id = $1
-       AND (cc.cluster_id IS NULL OR EXISTS (SELECT 1 FROM clusters WHERE id = cc.cluster_id AND org_id = cc.org_id))
-       AND ($2::uuid IS NULL OR cc.cluster_id = $2)
-)
+	rows, err := c.db.Pool().Query(r.Context(), `WITH checks(id,cluster_id,asset_id,framework,control_id,title,description,status,effective_status,severity,evidence,evaluated_at,tags_v2,remediation,exemption_id,exemption_reason,exemption_expires_at) AS (`+complianceEffectiveRowsSQL+`)
 SELECT framework,
        COUNT(*) FILTER (WHERE status = 'pass') AS passes,
-       COUNT(*) FILTER (WHERE status = 'fail' AND NOT exempted) AS fails,
+       COUNT(*) FILTER (WHERE effective_status = 'fail') AS fails,
        COUNT(*) FILTER (WHERE status = 'manual') AS manuals,
        COUNT(*) FILTER (WHERE status = 'not_applicable') AS not_applicable,
-       COUNT(*) FILTER (WHERE status = 'fail' AND exempted) AS exempted,
+       COUNT(*) FILTER (WHERE effective_status = 'exempted') AS exempted,
        COUNT(*) AS total
   FROM checks
  GROUP BY framework
@@ -226,7 +99,8 @@ SELECT framework,
 		var fw string
 		var pass, fail, manual, notApplicable, exempted, total int
 		if err := rows.Scan(&fw, &pass, &fail, &manual, &notApplicable, &exempted, &total); err != nil {
-			continue
+			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
 		}
 		pct := 0
 		effectivePct := 0
@@ -245,6 +119,10 @@ SELECT framework,
 			"pass_pct":           pct,
 			"effective_pass_pct": effectivePct,
 		})
+	}
+	if err := rows.Err(); err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"frameworks": out})
 }
@@ -272,55 +150,11 @@ func (c *Compliance) CloudEvidence(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *Compliance) writeEvidence(w http.ResponseWriter, r *http.Request, scope string) {
-	subj, ok := authctx.SubjectFrom(r.Context())
-	if !ok {
-		jsonError(w, http.StatusUnauthorized, "subject required")
-		return
-	}
-	clusterID, err := evidenceClusterIDParam(r)
-	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-	if clusterID != nil {
-		var owned bool
-		if err := c.db.Pool().QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM clusters WHERE id = $1 AND org_id = $2)`, clusterID, subj.OrgID).Scan(&owned); err != nil {
-			jsonError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		if !owned {
-			jsonError(w, http.StatusNotFound, "cluster not found")
-			return
-		}
-	}
-	limit := 1000
-	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
-		parsed, err := strconv.Atoi(raw)
-		if err != nil {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid limit"})
-			return
-		}
-		if parsed < 1 {
-			parsed = 1
-		}
-		if parsed > 5000 {
-			parsed = 5000
-		}
-		limit = parsed
-	}
-	result, err := evidence.Collector{Pool: c.db.Pool()}.Collect(r.Context(), evidence.Query{
-		OrgID:     subj.OrgID,
-		ClusterID: clusterID,
-		Scope:     scope,
-		Framework: r.URL.Query().Get("framework"),
-		Namespace: r.URL.Query().Get("namespace"),
-		Limit:     limit,
-	})
-	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	httpx.WriteJSON(w, http.StatusOK, result)
+	c.writeEvidenceInventory(w, r, scope, false)
+}
+
+func (c *Compliance) EvidenceCSV(w http.ResponseWriter, r *http.Request) {
+	c.writeEvidenceInventory(w, r, r.URL.Query().Get("scope"), true)
 }
 
 func evidenceClusterIDParam(r *http.Request) (*uuid.UUID, error) {
@@ -338,8 +172,20 @@ func evidenceClusterIDParam(r *http.Request) (*uuid.UUID, error) {
 // Ingest accepts kube-bench JSON and persists expanded check rows. Returns the count of
 // rows inserted (with cross-framework expansions counted separately).
 func (c *Compliance) Ingest(w http.ResponseWriter, r *http.Request) {
-	subj, _ := authctx.SubjectFrom(r.Context())
-	body, err := io.ReadAll(io.LimitReader(r.Body, 16<<20))
+	scope, ok := c.userWriteScope(w, r)
+	if ok {
+		c.ingest(w, r, scope)
+	}
+}
+
+func (c *Compliance) ingest(w http.ResponseWriter, r *http.Request, scope complianceWriteScope) {
+	benchmark := strings.TrimSpace(r.URL.Query().Get("benchmark"))
+	if !compliancepkg.ValidBenchmarkID(benchmark) {
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid benchmark identifier"})
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<20)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad body"})
 		return
@@ -353,80 +199,40 @@ func (c *Compliance) Ingest(w http.ResponseWriter, r *http.Request) {
 	case "", "kube-bench", "kubebench":
 		// ?benchmark= (from the runner's BENCH_VERSION) overrides the report's
 		// per-control CIS profile id; empty keeps the report-derived tagging.
-		checks, err = compliancepkg.IngestKubeBenchProfile(body, r.URL.Query().Get("benchmark"))
+		checks, err = compliancepkg.IngestKubeBenchProfile(body, benchmark)
 	default:
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown profile"})
 		return
 	}
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid benchmark report"})
 		return
 	}
-	// CMP-CLOBBER-03: attribute host-bench rows to the reporting cluster/node so two
-	// clusters (or two nodes) in one org no longer clobber each other. The runner sends
-	// ?cluster_id= (from CONSTELLATION_CLUSTER_ID) and, where applicable, ?node=. Both are
-	// optional: a missing cluster_id stays NULL (org-wide, matching the pre-136 behaviour),
-	// and node defaults to "" (non-NULL) so it participates in the composite unique index
-	// from migration 136.
-	clusterArg, err := sqlx.ParseClusterIDParam(r)
-	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
+	clusterArg := scope.clusterID
 	node := strings.TrimSpace(r.URL.Query().Get("node"))
 	tx, err := c.db.Pool().Begin(r.Context())
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "ingest unavailable"})
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
-	var failures []complianceFailure
-	for _, ck := range checks {
-		if strings.EqualFold(ck.Status, "fail") {
-			failures = append(failures, complianceFailure{
-				CheckID:   ck.ControlID,
-				Title:     ck.Title,
-				Framework: ck.Framework,
-				Severity:  ck.Severity,
-				Detail:    ck.Evidence,
-			})
-		}
-		// Populate tags_v2 from the cross-framework expansion when the check
-		// title maps to a known internal id. Best-effort: lookup by control id title.
-		tags := compliancepkg.TagsV2{}
-		for _, m := range compliancepkg.CoreMappings {
-			if m.Title == ck.Title {
-				tags = compliancepkg.BuildTagsV2(m.InternalID)
-				break
-			}
-		}
-		tagsRaw, _ := json.Marshal(tags)
-		// CMP-CLOBBER-03: upsert on the per-cluster/per-node host-compliance key so a re-run
-		// of the kube-bench/docker-bench CronJob refreshes each control in place for THAT
-		// cluster/node instead of clobbering another cluster's rows. Matches the composite
-		// partial unique index from migration 136 (WHERE node IS NOT NULL — the k8s-object
-		// collector, which stores many rows per control with node NULL, is unaffected).
-		if _, err := tx.Exec(r.Context(), `
-INSERT INTO compliance_checks (org_id, cluster_id, node, framework, control_id, title, description, status, severity, evidence, tags_v2, remediation)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-ON CONFLICT (org_id, COALESCE(cluster_id, '00000000-0000-0000-0000-000000000000'::uuid), node, framework, control_id) WHERE node IS NOT NULL
-DO UPDATE SET
-    title = EXCLUDED.title,
-    description = EXCLUDED.description,
-    status = EXCLUDED.status,
-    severity = EXCLUDED.severity,
-    evidence = EXCLUDED.evidence,
-    tags_v2 = EXCLUDED.tags_v2,
-    remediation = EXCLUDED.remediation,
-    evaluated_at = NOW()`,
-			subj.OrgID, clusterArg, node, ck.Framework, ck.ControlID, ck.Title, ck.Description, ck.Status, ck.Severity, ck.Evidence, tagsRaw, ck.Remediation,
-		); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	if !scope.lockCluster(w, r, tx) {
+		return
+	}
+	failures, err := persistBenchChecks(r.Context(), tx, scope, node, checks)
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "ingest unavailable"})
+		return
+	}
+	if c.audit != nil {
+		_, _, err := c.audit.LogInTx(r.Context(), tx, audit.Event{OrgID: &scope.orgID, ActorID: scope.actorID, Action: "compliance.ingest", TargetKind: "compliance", After: map[string]any{"rows": len(checks), "cluster_id": scope.clusterID, "agent_token_id": scope.agentID}})
+		if err != nil {
+			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "ingest unavailable"})
 			return
 		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "ingest unavailable"})
 		return
 	}
 	// Close the compliance->response loop: failed controls fire response rules,
@@ -434,17 +240,9 @@ DO UPDATE SET
 	// cluster (CMP-CLOBBER-03) the RT-2 hook loads that cluster's rules; an unattributed
 	// (org-wide) scan falls back to the org-scoped rules (uuid.Nil).
 	fireCluster := uuid.Nil
-	if cid, ok := clusterArg.(uuid.UUID); ok {
-		fireCluster = cid
+	if clusterArg != nil {
+		fireCluster = *clusterArg
 	}
-	c.alerts.fire(r.Context(), subj.OrgID, fireCluster, failures)
-	uid := subj.UserID
-	oid := subj.OrgID
-	_, _, _ = c.audit.Log(r.Context(), audit.Event{
-		OrgID: &oid, ActorID: &uid,
-		Action:     "compliance.ingest",
-		TargetKind: "compliance",
-		After:      map[string]any{"rows": len(checks)},
-	})
+	c.alerts.fire(r.Context(), scope.orgID, fireCluster, failures)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ingested": len(checks)})
 }

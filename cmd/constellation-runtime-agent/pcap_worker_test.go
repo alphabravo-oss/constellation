@@ -13,13 +13,13 @@ func TestValidateBPFFilter(t *testing.T) {
 	// Each contains a metacharacter rejected by isBPFRune, so these fail
 	// without needing tcpdump present.
 	reject := []string{
-		"tcp port 443; rm -rf /",   // ';'
-		"tcp or `id`",              // backtick
-		"tcp port $(whoami)",       // '$'
-		"tcp and host \"evil\"",    // '"'
-		`tcp and host 'x'`,         // '\''
-		"tcp \\ndrop",              // '\\'
-		"tcp port 443\n rm x",      // newline
+		"tcp port 443; rm -rf /", // ';'
+		"tcp or `id`",            // backtick
+		"tcp port $(whoami)",     // '$'
+		"tcp and host \"evil\"",  // '"'
+		`tcp and host 'x'`,       // '\''
+		"tcp \\ndrop",            // '\\'
+		"tcp port 443\n rm x",    // newline
 	}
 	for _, f := range reject {
 		if err := validateBPFFilter(f, ""); err == nil {

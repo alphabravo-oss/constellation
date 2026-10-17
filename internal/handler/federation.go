@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -45,7 +46,7 @@ func (h *Federation) State(w http.ResponseWriter, r *http.Request) {
 	err := h.db.Pool().QueryRow(r.Context(), `
 SELECT state, master_id, cluster_name, revision, updated_at FROM federation_state WHERE org_id=$1`,
 		subj.OrgID).Scan(&m.State, &m.MasterID, &m.ClusterName, &m.Revision, &m.UpdatedAt)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		m = federation.Membership{State: federation.StateStandalone}
 	} else if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -71,10 +72,10 @@ func (h *Federation) Transition(w http.ResponseWriter, r *http.Request) {
 	var cur federation.Membership
 	if err := h.db.Pool().QueryRow(r.Context(),
 		`SELECT state, master_id, cluster_name, revision FROM federation_state WHERE org_id=$1`,
-		subj.OrgID).Scan(&cur.State, &cur.MasterID, &cur.ClusterName, &cur.Revision); err != nil && err != pgx.ErrNoRows {
+		subj.OrgID).Scan(&cur.State, &cur.MasterID, &cur.ClusterName, &cur.Revision); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
-	} else if err == pgx.ErrNoRows {
+	} else if errors.Is(err, pgx.ErrNoRows) {
 		cur.State = federation.StateStandalone
 	}
 
@@ -203,7 +204,7 @@ func (h *Federation) KickMember(w http.ResponseWriter, r *http.Request) {
 	if err := h.db.Pool().QueryRow(r.Context(),
 		`SELECT status, cluster_id FROM fed_members WHERE org_id=$1 AND id=$2`,
 		subj.OrgID, mid).Scan(&status, &clusterID); err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "member not found"})
 			return
 		}

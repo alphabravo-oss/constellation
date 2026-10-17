@@ -126,7 +126,7 @@ INSERT INTO findings (
 	}
 
 	h := NewNodes(d)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/clusters/"+clusterID.String()+"/nodes", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/clusters/"+clusterID.String()+"/nodes", nil)
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	req = withRouteParam(req, "id", clusterID.String())
 	rec := httptest.NewRecorder()
@@ -163,7 +163,7 @@ INSERT INTO findings (
 		t.Fatalf("runtime status = %q", found.RuntimeAgentStatus)
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/clusters/"+clusterID.String()+"/nodes/"+node, nil)
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/clusters/"+clusterID.String()+"/nodes/"+node, nil)
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	req = withRouteParam(req, "id", clusterID.String())
 	req = withRouteParam(req, "node", node)

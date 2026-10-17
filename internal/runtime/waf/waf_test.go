@@ -105,7 +105,7 @@ func TestMonitorAlerts(t *testing.T) {
 func TestUnknownOperatorRejected(t *testing.T) {
 	e := NewEngine()
 	err := e.AddSensor(Sensor{
-		Name: "bad",
+		Name:  "bad",
 		Rules: []Rule{{ID: 1, Operator: Operator{Type: "nope", Value: "x"}, Target: "ARGS"}},
 	})
 	if err == nil {

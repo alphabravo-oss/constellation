@@ -6,7 +6,9 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -41,7 +43,7 @@ type wireRuntimePolicyBundle struct {
 // another org's policies. Integration test; skips with no test DB.
 func TestAgentPolicyBundle_WireShapeAndOrgScope(t *testing.T) {
 	d := openTestDB(t)
-	defer d.Close()
+	t.Cleanup(d.Close)
 	ctx := context.Background()
 	pool := d.Pool()
 
@@ -101,7 +103,7 @@ func TestAgentPolicyBundle_WireShapeAndOrgScope(t *testing.T) {
 
 	// 1) Happy path: correct org token + cluster.
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/runtime/policies:bundle?cluster_id="+clusterID.String(), nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/runtime/policies:bundle?protocol=2&cluster_id="+clusterID.String(), nil)
 	req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(),
 		&handler.RuntimeAgentToken{ID: uuid.New(), OrgID: orgID, Name: "agent-test"}))
 	h.AgentPolicyBundle(rec, req)
@@ -149,7 +151,7 @@ func TestAgentPolicyBundle_WireShapeAndOrgScope(t *testing.T) {
 
 	// 2) Cross-org isolation: a token for another org must not see this cluster.
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/runtime/policies:bundle?cluster_id="+clusterID.String(), nil)
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/runtime/policies:bundle?protocol=2&cluster_id="+clusterID.String(), nil)
 	req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(),
 		&handler.RuntimeAgentToken{ID: uuid.New(), OrgID: otherOrgID, Name: "other-agent"}))
 	h.AgentPolicyBundle(rec, req)
@@ -159,9 +161,95 @@ func TestAgentPolicyBundle_WireShapeAndOrgScope(t *testing.T) {
 
 	// 3) Missing token -> 401.
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/runtime/policies:bundle?cluster_id="+clusterID.String(), nil)
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/runtime/policies:bundle?protocol=2&cluster_id="+clusterID.String(), nil)
 	h.AgentPolicyBundle(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("no-token status=%d want 401", rec.Code)
+	}
+}
+
+func TestAgentPolicyBundleRequiresTokenClusterBinding(t *testing.T) {
+	d := openTestDB(t)
+	t.Cleanup(d.Close)
+	ctx, pool := t.Context(), d.Pool()
+	org, clusterA, clusterB := uuid.New(), uuid.New(), uuid.New()
+	tokenA := seedBoundRuntimeAgentScope(t, d, org, clusterA)
+	if _, err := pool.Exec(ctx, `INSERT INTO clusters(id,org_id,name)VALUES($1,$2,'sibling')`, clusterB, org); err != nil {
+		t.Fatal(err)
+	}
+	issue := func() *handler.RuntimeAgentToken {
+		t.Helper()
+		_, id, err := handler.IssueRuntimeAgentToken(ctx, pool, org, "policy-scope-"+uuid.NewString(), time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &handler.RuntimeAgentToken{ID: id, OrgID: org}
+	}
+	bind := func(token *handler.RuntimeAgentToken, bundleOrg, cluster uuid.UUID) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `INSERT INTO cluster_init_bundles(org_id,cluster_id,name,expires_at,runtime_agent_token_id,kek_fingerprint,contents_encrypted) VALUES($1,$2,$3,NOW()+INTERVAL '1 hour',$4,'test-kek','\x00'::bytea)`, bundleOrg, cluster, "policy-scope-"+uuid.NewString(), token.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tokenB, unbound, conflicting, foreignBinding := issue(), issue(), issue(), issue()
+	bind(tokenB, org, clusterB)
+	bind(conflicting, org, clusterA)
+	bind(conflicting, org, clusterB)
+	foreignOrg, foreignCluster := uuid.New(), uuid.New()
+	seedBoundRuntimeAgentScope(t, d, foreignOrg, foreignCluster)
+	bind(foreignBinding, foreignOrg, foreignCluster)
+	store := NewRuntimePolicyStore(d, nil)
+	ids := map[uuid.UUID]uuid.UUID{}
+	for _, cluster := range []uuid.UUID{clusterA, clusterB} {
+		policy := &RuntimePolicy{OrgID: org, ClusterID: cluster, Workload: "test/" + cluster.String(), Namespace: "test", Name: "sensitive policy " + cluster.String(), Mode: PolicyModeEnforce, DefAction: dp.PolicyActionAllow, ApplyDir: dp.ApplyDirBoth, Rules: json.RawMessage("[]")}
+		id, err := store.Insert(ctx, policy, "policy-scope-"+uuid.NewString())
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids[cluster] = id
+	}
+	h := NewRuntimePoliciesHTTP(d, nil)
+	for _, tc := range []struct {
+		name    string
+		token   *handler.RuntimeAgentToken
+		cluster uuid.UUID
+		status  int
+	}{
+		{"bound owner A", tokenA, clusterA, 200},
+		{"bound owner B", tokenB, clusterB, 200},
+		{"sibling cluster", tokenA, clusterB, 403},
+		{"reverse sibling cluster", tokenB, clusterA, 403},
+		{"unbound multi cluster", unbound, clusterB, 403},
+		{"conflicting bundles", conflicting, clusterA, 403},
+		{"foreign bundle binding", foreignBinding, clusterA, 403},
+		{"foreign requested cluster", tokenA, foreignCluster, 404},
+		{"unknown cluster", tokenA, uuid.New(), 404},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requestCtx := handler.WithRuntimeAgentToken(t.Context(), tc.token)
+			req := httptest.NewRequestWithContext(requestCtx, http.MethodGet, "/runtime/policies:bundle?protocol=2&cluster_id="+tc.cluster.String(), nil)
+			w := httptest.NewRecorder()
+			h.AgentPolicyBundle(w, req)
+			assertPolicyBundleScope(t, w, tc.status, ids[tc.cluster], ids[clusterA], ids[clusterB])
+		})
+	}
+}
+
+func assertPolicyBundleScope(t *testing.T, w *httptest.ResponseRecorder, status int, expected, first, second uuid.UUID) {
+	t.Helper()
+	if w.Code != status {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if status == http.StatusOK {
+		var bundle wireRuntimePolicyBundle
+		if err := json.Unmarshal(w.Body.Bytes(), &bundle); err != nil || len(bundle.Policies) != 1 || bundle.Policies[0].ID != expected.String() {
+			t.Fatalf("wrong bundle=%s error=%v", w.Body.String(), err)
+		}
+		return
+	}
+	for _, forbidden := range []string{"policies", first.String(), second.String()} {
+		if strings.Contains(w.Body.String(), forbidden) {
+			t.Fatalf("unauthorized policy disclosure: %s", w.Body.String())
+		}
 	}
 }

@@ -77,7 +77,7 @@ VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`,
 			Namespace: "kubernetes",
 		}},
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/platform-facts:report", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/platform-facts:report", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+runtimeToken)
 	rec := httptest.NewRecorder()
 	AnyServiceTokenMiddleware(pool)(http.HandlerFunc(NewPlatformFacts(d).Report)).ServeHTTP(rec, req)
@@ -101,7 +101,7 @@ VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`,
 		t.Fatalf("report queue/package count = %+v", report)
 	}
 
-	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/clusters/"+clusterID.String()+"/platform-facts", nil)
+	getReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/clusters/"+clusterID.String()+"/platform-facts", nil)
 	getReq = getReq.WithContext(WithSubject(getReq.Context(), Subject{UserID: userID, OrgID: orgID}))
 	getReq = withRouteParam(getReq, "id", clusterID.String())
 	getRec := httptest.NewRecorder()
@@ -258,7 +258,7 @@ VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`,
 			if err != nil {
 				t.Fatal(err)
 			}
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/platform-facts:report", bytes.NewReader(body))
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/platform-facts:report", bytes.NewReader(body))
 			req.Header.Set("Authorization", "Bearer "+testCase.token)
 			rec := httptest.NewRecorder()
 			AnyServiceTokenMiddleware(pool)(http.HandlerFunc(NewPlatformFacts(d).Report)).ServeHTTP(rec, req)

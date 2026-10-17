@@ -2,8 +2,12 @@ package policy
 
 import (
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	chimw "github.com/go-chi/chi/v5/middleware"
 
@@ -33,10 +37,17 @@ func (p *Policies) DPIThreatSettings(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "cluster_id required")
 		return
 	}
+	if !p.dpiClusterOwned(w, r, subj.OrgID, clusterID) {
+		return
+	}
 	dto := dpiThreatSettingsDTO{ClusterID: clusterID.String()}
-	_ = p.db.Pool().QueryRow(r.Context(),
+	err := p.db.Pool().QueryRow(r.Context(),
 		`SELECT weak_tls_enabled FROM dpi_threat_settings WHERE org_id = $1 AND cluster_id = $2`,
 		subj.OrgID, clusterID).Scan(&dto.WeakTLSEnabled)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		jsonError(w, http.StatusInternalServerError, "could not load DPI threat settings")
+		return
+	}
 	httpx.WriteJSON(w, http.StatusOK, dto)
 }
 
@@ -52,31 +63,73 @@ func (p *Policies) UpdateDPIThreatSettings(w http.ResponseWriter, r *http.Reques
 		jsonError(w, http.StatusBadRequest, "cluster_id required")
 		return
 	}
+	if !p.dpiClusterOwned(w, r, subj.OrgID, clusterID) {
+		return
+	}
 	var body struct {
-		WeakTLSEnabled bool `json:"weak_tls_enabled"`
+		WeakTLSEnabled         *bool `json:"weak_tls_enabled"`
+		ExpectedWeakTLSEnabled *bool `json:"expected_weak_tls_enabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		jsonError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	if _, err := p.db.Pool().Exec(r.Context(), `
+	if body.WeakTLSEnabled == nil {
+		jsonError(w, http.StatusBadRequest, "weak_tls_enabled must be an explicit boolean")
+		return
+	}
+	enabled := *body.WeakTLSEnabled
+	ctx := r.Context()
+	tx, err := p.db.Pool().Begin(ctx)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "could not update DPI threat settings")
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	// The owned cluster row serializes both existing and absent-default settings.
+	var owned uuid.UUID
+	if err := tx.QueryRow(ctx, `SELECT id FROM clusters WHERE id=$1 AND org_id=$2 FOR UPDATE`, clusterID, subj.OrgID).Scan(&owned); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			jsonError(w, http.StatusNotFound, "cluster not found")
+		} else {
+			jsonError(w, http.StatusInternalServerError, "could not lock DPI settings cluster")
+		}
+		return
+	}
+	var current bool
+	if err := tx.QueryRow(ctx, `SELECT weak_tls_enabled FROM dpi_threat_settings WHERE org_id=$1 AND cluster_id=$2`, subj.OrgID, clusterID).Scan(&current); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		jsonError(w, http.StatusInternalServerError, "could not load current DPI threat settings")
+		return
+	}
+	if body.ExpectedWeakTLSEnabled != nil && *body.ExpectedWeakTLSEnabled != current {
+		jsonError(w, http.StatusConflict, "configured weak-TLS setting changed; refresh and review before saving")
+		return
+	}
+	if _, err := tx.Exec(ctx, `
 INSERT INTO dpi_threat_settings (org_id, cluster_id, weak_tls_enabled, updated_by, updated_at)
 VALUES ($1,$2,$3,$4,NOW())
 ON CONFLICT (org_id, cluster_id) DO UPDATE SET
   weak_tls_enabled = EXCLUDED.weak_tls_enabled, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
-		subj.OrgID, clusterID, body.WeakTLSEnabled, subj.UserID); err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		subj.OrgID, clusterID, enabled, subj.UserID); err != nil {
+		jsonError(w, http.StatusInternalServerError, "could not update DPI threat settings")
 		return
 	}
-	// When disabling weak-TLS detection, purge the weak-TLS threat rows AND clear the
-	// lingering references on flow rollups/raw flows — otherwise a bucket keeps
-	// max_threat_id for its lifetime and the map keeps painting a stale "threat" edge for
-	// a signature that's now off. IDs: 2011 SSLv3, 2012 TLS1.0, 2027 TLS1.1.
-	if !body.WeakTLSEnabled {
-		ctx := r.Context()
-		_, _ = p.db.Pool().Exec(ctx, `DELETE FROM runtime_threats WHERE org_id=$1 AND cluster_id=$2 AND threat_id IN (2011,2012,2027)`, subj.OrgID, clusterID)
-		_, _ = p.db.Pool().Exec(ctx, `UPDATE network_flow_rollups SET max_threat_id=0, max_severity=0 WHERE org_id=$1 AND cluster_id=$2 AND max_threat_id IN (2011,2012,2027)`, subj.OrgID, clusterID)
-		_, _ = p.db.Pool().Exec(ctx, `UPDATE network_flows SET threat_id=NULL, severity=NULL WHERE org_id=$1 AND cluster_id=$2 AND threat_id IN (2011,2012,2027)`, subj.OrgID, clusterID)
+	// Disabling and evidence cleanup commit together, or every change rolls back.
+	if !enabled {
+		for _, sql := range []string{
+			`DELETE FROM runtime_threats WHERE org_id=$1 AND cluster_id=$2 AND threat_id IN (2011,2012,2027)`,
+			`UPDATE network_flow_rollups SET max_threat_id=0, max_severity=0 WHERE org_id=$1 AND cluster_id=$2 AND max_threat_id IN (2011,2012,2027)`,
+			`UPDATE network_flows SET threat_id=NULL, severity=NULL WHERE org_id=$1 AND cluster_id=$2 AND threat_id IN (2011,2012,2027)`,
+		} {
+			if _, err := tx.Exec(ctx, sql, subj.OrgID, clusterID); err != nil {
+				jsonError(w, http.StatusInternalServerError, "could not remove weak-TLS evidence; settings change rolled back")
+				return
+			}
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		jsonError(w, http.StatusInternalServerError, "could not commit DPI threat settings")
+		return
 	}
 	if p.auditLog != nil {
 		orgID, userID := subj.OrgID, subj.UserID
@@ -87,8 +140,21 @@ ON CONFLICT (org_id, cluster_id) DO UPDATE SET
 		_, _, _ = p.auditLog.Log(r.Context(), audit.Event{
 			OrgID: &orgID, ActorID: &userID, ActorIP: actorIP,
 			Action: "dpi_threat_settings.update", TargetKind: "dpi-threat-settings", TargetID: clusterID.String(),
-			After: map[string]any{"weak_tls_enabled": body.WeakTLSEnabled}, RequestID: chimw.GetReqID(r.Context()),
+			After: map[string]any{"cluster_id": clusterID.String(), "weak_tls_enabled": enabled}, RequestID: chimw.GetReqID(r.Context()),
 		})
 	}
-	httpx.WriteJSON(w, http.StatusOK, dpiThreatSettingsDTO{ClusterID: clusterID.String(), WeakTLSEnabled: body.WeakTLSEnabled})
+	httpx.WriteJSON(w, http.StatusOK, dpiThreatSettingsDTO{ClusterID: clusterID.String(), WeakTLSEnabled: enabled})
+}
+
+func (p *Policies) dpiClusterOwned(w http.ResponseWriter, r *http.Request, orgID, clusterID uuid.UUID) bool {
+	var owned bool
+	if err := p.db.Pool().QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM clusters WHERE org_id=$1 AND id=$2)`, orgID, clusterID).Scan(&owned); err != nil {
+		jsonError(w, http.StatusInternalServerError, "could not resolve DPI settings cluster")
+		return false
+	}
+	if !owned {
+		jsonError(w, http.StatusNotFound, "cluster not found")
+		return false
+	}
+	return true
 }

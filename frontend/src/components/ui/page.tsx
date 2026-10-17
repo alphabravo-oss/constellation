@@ -40,7 +40,7 @@ export function PageHeader({
   description?: ReactNode;
   /** Small uppercase label above the title (e.g. section / breadcrumb tail). */
   eyebrow?: ReactNode;
-  /** Right-aligned actions (buttons, filters, metric grids). */
+  /** Actions and filters; metrics belong in a separate full-width stat row. */
   actions?: ReactNode;
   /** Back-navigation link rendered above the title (detail pages). */
   backLink?: ReactNode;
@@ -53,8 +53,8 @@ export function PageHeader({
   return (
     <div className={cn("space-y-2", className)}>
       {backLink ? <div className="text-xs text-muted-foreground">{backLink}</div> : null}
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0 space-y-1">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0 flex-1 basis-64 space-y-1">
           {eyebrow ? (
             <div className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
               {eyebrow}
@@ -63,7 +63,7 @@ export function PageHeader({
           <div className="flex flex-wrap items-center gap-2">
             <h1
               className={cn(
-                "text-2xl font-semibold tracking-tight text-foreground",
+                "min-w-0 max-w-full [overflow-wrap:anywhere] text-2xl font-semibold tracking-tight text-foreground",
                 mono && "font-mono",
               )}
             >
@@ -72,10 +72,10 @@ export function PageHeader({
             {badges}
           </div>
           {description ? (
-            <p className="text-sm text-muted-foreground">{description}</p>
+            <p className="[overflow-wrap:anywhere] text-sm text-muted-foreground">{description}</p>
           ) : null}
         </div>
-        {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
+        {actions ? <div className="flex max-w-full flex-wrap items-center gap-2">{actions}</div> : null}
       </div>
     </div>
   );
@@ -97,14 +97,14 @@ export function PageSection({
   return (
     <section className={cn("space-y-3", className)}>
       {title || actions ? (
-        <div className="flex items-center justify-between gap-4">
-          <div className="space-y-0.5">
-            {title ? <h2 className="text-sm font-semibold text-foreground">{title}</h2> : null}
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="min-w-0 flex-1 basis-64 space-y-0.5">
+            {title ? <h2 className="[overflow-wrap:anywhere] text-sm font-semibold text-foreground">{title}</h2> : null}
             {description ? (
-              <p className="text-xs text-muted-foreground">{description}</p>
+              <p className="[overflow-wrap:anywhere] text-xs text-muted-foreground">{description}</p>
             ) : null}
           </div>
-          {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
+          {actions ? <div className="flex max-w-full flex-wrap items-center gap-2">{actions}</div> : null}
         </div>
       ) : null}
       {children}

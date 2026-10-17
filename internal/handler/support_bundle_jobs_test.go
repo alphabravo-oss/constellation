@@ -58,28 +58,28 @@ func newSupportBundleJobsFixture(t *testing.T) *supportBundleJobsFixture {
 	return fixture
 }
 
-func (fixture *supportBundleJobsFixture) request(method, path string, tenant int, call func(http.ResponseWriter, *http.Request)) *httptest.ResponseRecorder {
-	request := httptest.NewRequest(method, path, nil)
-	request = request.WithContext(WithSubject(request.Context(), Subject{OrgID: fixture.orgs[tenant], UserID: fixture.users[tenant]}))
+func (fixture *supportBundleJobsFixture) request(ctx context.Context, method, path string, tenant int, call func(http.ResponseWriter, *http.Request)) *httptest.ResponseRecorder {
+	request := httptest.NewRequestWithContext(ctx, method, path, nil)
+	ctx = WithSubject(ctx, Subject{OrgID: fixture.orgs[tenant], UserID: fixture.users[tenant]})
 	if strings.Contains(path, "/jobs/") {
 		parts := strings.Split(path, "/")
 		for index, part := range parts {
 			if part == "jobs" && index+1 < len(parts) {
 				routeContext := chi.NewRouteContext()
 				routeContext.URLParams.Add("id", parts[index+1])
-				request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
+				ctx = context.WithValue(ctx, chi.RouteCtxKey, routeContext)
 				break
 			}
 		}
 	}
 	response := httptest.NewRecorder()
-	call(response, request)
+	call(response, request.WithContext(ctx))
 	return response
 }
 
 func (fixture *supportBundleJobsFixture) create(t *testing.T, tenant int) supportBundleJobDTO {
 	t.Helper()
-	response := fixture.request(http.MethodPost, "/api/v1/support/bundle/jobs", tenant, fixture.handler.CreateJob)
+	response := fixture.request(t.Context(), http.MethodPost, "/api/v1/support/bundle/jobs", tenant, fixture.handler.CreateJob)
 	if response.Code != http.StatusAccepted {
 		t.Fatalf("create: %d %s", response.Code, response.Body.String())
 	}
@@ -96,15 +96,15 @@ func (fixture *supportBundleJobsFixture) create(t *testing.T, tenant int) suppor
 func TestSupportBundleJobsLifecycleTenantAuditAndRedaction(t *testing.T) {
 	fixture := newSupportBundleJobsFixture(t)
 	job := fixture.create(t, 0)
-	foreign := fixture.request(http.MethodGet, "/api/v1/support/bundle/jobs/"+job.ID.String(), 1, fixture.handler.GetJob)
+	foreign := fixture.request(t.Context(), http.MethodGet, "/api/v1/support/bundle/jobs/"+job.ID.String(), 1, fixture.handler.GetJob)
 	if foreign.Code != http.StatusNotFound {
 		t.Fatalf("foreign get: %d", foreign.Code)
 	}
-	foreign = fixture.request(http.MethodGet, "/api/v1/support/bundle/jobs/"+job.ID.String()+"/download", 1, fixture.handler.DownloadJob)
+	foreign = fixture.request(t.Context(), http.MethodGet, "/api/v1/support/bundle/jobs/"+job.ID.String()+"/download", 1, fixture.handler.DownloadJob)
 	if foreign.Code != http.StatusNotFound {
 		t.Fatalf("foreign download: %d", foreign.Code)
 	}
-	foreign = fixture.request(http.MethodGet, "/api/v1/support/bundle/jobs", 1, fixture.handler.ListJobs)
+	foreign = fixture.request(t.Context(), http.MethodGet, "/api/v1/support/bundle/jobs", 1, fixture.handler.ListJobs)
 	if !strings.Contains(foreign.Body.String(), `"items":[]`) || strings.Contains(foreign.Body.String(), job.ID.String()) {
 		t.Fatalf("foreign list: %s", foreign.Body.String())
 	}
@@ -118,7 +118,7 @@ func TestSupportBundleJobsLifecycleTenantAuditAndRedaction(t *testing.T) {
 	if err != nil || !processed {
 		t.Fatalf("worker: processed=%v err=%v", processed, err)
 	}
-	get := fixture.request(http.MethodGet, "/api/v1/support/bundle/jobs/"+job.ID.String(), 0, fixture.handler.GetJob)
+	get := fixture.request(t.Context(), http.MethodGet, "/api/v1/support/bundle/jobs/"+job.ID.String(), 0, fixture.handler.GetJob)
 	var ready supportBundleJobDTO
 	if get.Code != http.StatusOK || json.Unmarshal(get.Body.Bytes(), &ready) != nil || ready.Status != "ready" || ready.StartedAt == nil || ready.FinishedAt == nil || ready.ExpiresAt == nil || ready.BundleID == nil {
 		t.Fatalf("ready receipt: %d %s", get.Code, get.Body.String())
@@ -130,7 +130,7 @@ func TestSupportBundleJobsLifecycleTenantAuditAndRedaction(t *testing.T) {
 	if strings.Contains(string(payload), "do-not-persist-raw-token") || !strings.Contains(string(payload), supportBundleRedacted) {
 		t.Fatalf("persisted payload not redacted: %s", payload)
 	}
-	download := fixture.request(http.MethodGet, "/api/v1/support/bundle/jobs/"+job.ID.String()+"/download", 0, fixture.handler.DownloadJob)
+	download := fixture.request(t.Context(), http.MethodGet, "/api/v1/support/bundle/jobs/"+job.ID.String()+"/download", 0, fixture.handler.DownloadJob)
 	if download.Code != http.StatusOK || !strings.Contains(download.Header().Get("Content-Disposition"), "attachment;") {
 		t.Fatalf("download: %d %s", download.Code, download.Body.String())
 	}
@@ -152,7 +152,7 @@ func TestSupportBundleJobsFailureExpiryAndRestart(t *testing.T) {
 	if err != nil || !processed {
 		t.Fatalf("failed worker: processed=%v err=%v", processed, err)
 	}
-	get := fixture.request(http.MethodGet, "/api/v1/support/bundle/jobs/"+job.ID.String(), 0, fixture.handler.GetJob)
+	get := fixture.request(t.Context(), http.MethodGet, "/api/v1/support/bundle/jobs/"+job.ID.String(), 0, fixture.handler.GetJob)
 	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), `"status":"failed"`) || !strings.Contains(get.Body.String(), supportBundleJobFailure) || strings.Contains(get.Body.String(), "supersecret") {
 		t.Fatalf("failed receipt: %d %s", get.Code, get.Body.String())
 	}
@@ -166,11 +166,11 @@ func TestSupportBundleJobsFailureExpiryAndRestart(t *testing.T) {
 	if err := fixture.handler.expireJobs(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	get = fixture.request(http.MethodGet, "/api/v1/support/bundle/jobs/"+job.ID.String(), 0, fixture.handler.GetJob)
+	get = fixture.request(t.Context(), http.MethodGet, "/api/v1/support/bundle/jobs/"+job.ID.String(), 0, fixture.handler.GetJob)
 	if !strings.Contains(get.Body.String(), `"status":"expired"`) || strings.Contains(get.Body.String(), supportBundleJobFailure) {
 		t.Fatalf("expired receipt: %s", get.Body.String())
 	}
-	if response := fixture.request(http.MethodGet, "/api/v1/support/bundle/jobs/"+job.ID.String()+"/download", 0, fixture.handler.DownloadJob); response.Code != http.StatusGone {
+	if response := fixture.request(t.Context(), http.MethodGet, "/api/v1/support/bundle/jobs/"+job.ID.String()+"/download", 0, fixture.handler.DownloadJob); response.Code != http.StatusGone {
 		t.Fatalf("expired download: %d", response.Code)
 	}
 
@@ -217,7 +217,7 @@ func TestSupportBundleJobsPaginationAndClaimConcurrency(t *testing.T) {
 		if cursor != "" {
 			path += "&cursor=" + cursor
 		}
-		response := fixture.request(http.MethodGet, path, 0, fixture.handler.ListJobs)
+		response := fixture.request(t.Context(), http.MethodGet, path, 0, fixture.handler.ListJobs)
 		if response.Code != http.StatusOK {
 			t.Fatalf("list: %d %s", response.Code, response.Body.String())
 		}
@@ -245,10 +245,10 @@ func TestSupportBundleJobsPaginationAndClaimConcurrency(t *testing.T) {
 	if len(seen) != len(created) {
 		t.Fatalf("pagination lost jobs: got %d want %d", len(seen), len(created))
 	}
-	if response := fixture.request(http.MethodGet, "/api/v1/support/bundle/jobs?cursor=bad", 0, fixture.handler.ListJobs); response.Code != http.StatusBadRequest {
+	if response := fixture.request(t.Context(), http.MethodGet, "/api/v1/support/bundle/jobs?cursor=bad", 0, fixture.handler.ListJobs); response.Code != http.StatusBadRequest {
 		t.Fatalf("bad cursor: %d", response.Code)
 	}
-	if response := fixture.request(http.MethodGet, "/api/v1/support/bundle/jobs?limit=101", 0, fixture.handler.ListJobs); response.Code != http.StatusOK {
+	if response := fixture.request(t.Context(), http.MethodGet, "/api/v1/support/bundle/jobs?limit=101", 0, fixture.handler.ListJobs); response.Code != http.StatusOK {
 		t.Fatalf("bounded limit: %d", response.Code)
 	}
 
@@ -293,7 +293,7 @@ func TestSupportBundleJobsAuditFailureFailsClosedAndRecovers(t *testing.T) {
 	fixture.handler.appendAudit = func(context.Context, audit.Event) (int64, string, error) {
 		return 0, "", errors.New("audit store unavailable: password=not-for-clients")
 	}
-	response := fixture.request(http.MethodPost, "/api/v1/support/bundle/jobs", 0, fixture.handler.CreateJob)
+	response := fixture.request(t.Context(), http.MethodPost, "/api/v1/support/bundle/jobs", 0, fixture.handler.CreateJob)
 	if response.Code != http.StatusServiceUnavailable || strings.Contains(response.Body.String(), "not-for-clients") {
 		t.Fatalf("create audit failure: %d %s", response.Code, response.Body.String())
 	}
@@ -318,11 +318,11 @@ func TestSupportBundleJobsAuditFailureFailsClosedAndRecovers(t *testing.T) {
 	if err := fixture.db.Pool().QueryRow(context.Background(), `SELECT status, audit_pending, audit_event_id FROM support_bundle_jobs WHERE id = $1`, job.ID).Scan(&status, &pending, &eventID); err != nil || status != "ready" || pending != "ready" || eventID != nil {
 		t.Fatalf("pending audit link: status=%s pending=%s event=%v err=%v", status, pending, eventID, err)
 	}
-	get := fixture.request(http.MethodGet, "/api/v1/support/bundle/jobs/"+job.ID.String(), 0, fixture.handler.GetJob)
+	get := fixture.request(t.Context(), http.MethodGet, "/api/v1/support/bundle/jobs/"+job.ID.String(), 0, fixture.handler.GetJob)
 	if get.Code != http.StatusOK || !strings.Contains(get.Body.String(), `"status":"running"`) {
 		t.Fatalf("audit-pending job exposed as downloadable: %d %s", get.Code, get.Body.String())
 	}
-	response = fixture.request(http.MethodGet, "/api/v1/support/bundle/jobs/"+job.ID.String()+"/download", 0, fixture.handler.DownloadJob)
+	response = fixture.request(t.Context(), http.MethodGet, "/api/v1/support/bundle/jobs/"+job.ID.String()+"/download", 0, fixture.handler.DownloadJob)
 	if response.Code != http.StatusServiceUnavailable || strings.Contains(response.Body.String(), "schema_version") {
 		t.Fatalf("pending audit released payload: %d %s", response.Code, response.Body.String())
 	}
@@ -333,12 +333,12 @@ func TestSupportBundleJobsAuditFailureFailsClosedAndRecovers(t *testing.T) {
 	fixture.handler.appendAudit = func(context.Context, audit.Event) (int64, string, error) {
 		return 0, "", errors.New("audit store unavailable: password=not-for-clients")
 	}
-	response = fixture.request(http.MethodGet, "/api/v1/support/bundle/jobs/"+job.ID.String()+"/download", 0, fixture.handler.DownloadJob)
+	response = fixture.request(t.Context(), http.MethodGet, "/api/v1/support/bundle/jobs/"+job.ID.String()+"/download", 0, fixture.handler.DownloadJob)
 	if response.Code != http.StatusServiceUnavailable || strings.Contains(response.Body.String(), "schema_version") || strings.Contains(response.Body.String(), "not-for-clients") {
 		t.Fatalf("download audit failure: %d %s", response.Code, response.Body.String())
 	}
 	fixture.handler.appendAudit = appendAudit
-	response = fixture.request(http.MethodGet, "/api/v1/support/bundle/jobs/"+job.ID.String()+"/download", 0, fixture.handler.DownloadJob)
+	response = fixture.request(t.Context(), http.MethodGet, "/api/v1/support/bundle/jobs/"+job.ID.String()+"/download", 0, fixture.handler.DownloadJob)
 	if response.Code != http.StatusOK {
 		t.Fatalf("recovered download: %d %s", response.Code, response.Body.String())
 	}
@@ -362,7 +362,7 @@ SELECT $1, $2 FROM generate_series(1, 105)`, fixture.orgs[0], fixture.users[0])
 		{path: "/api/v1/support/bundle/jobs", want: 50},
 		{path: "/api/v1/support/bundle/jobs?limit=101", want: 100},
 	} {
-		response := fixture.request(http.MethodGet, testCase.path, 0, fixture.handler.ListJobs)
+		response := fixture.request(t.Context(), http.MethodGet, testCase.path, 0, fixture.handler.ListJobs)
 		var page struct {
 			Items      []supportBundleJobDTO `json:"items"`
 			NextCursor string                `json:"next_cursor"`

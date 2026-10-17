@@ -6,9 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,7 +39,9 @@ type ServerlessArtifact struct {
 	Source string
 
 	// HTTPClient, when set, is used for https/http downloads. Defaults to a 5-minute
-	// client. Tests inject a client pointed at an httptest server.
+	// client. Untrusted downloads preserve client timeout, cookies and redirect
+	// policy and proxy, but use a restricted transport. Custom transports require
+	// the explicit trusted AllowPrivateTargets mode.
 	HTTPClient *http.Client
 
 	// MaxArtifactBytes / MaxUnpackedBytes / MaxFiles override the safety caps when > 0.
@@ -50,7 +50,7 @@ type ServerlessArtifact struct {
 	MaxFiles         int
 
 	// AllowPrivateTargets bypasses the SSRF guard that otherwise rejects http(s)
-	// sources resolving to loopback/link-local/private space. Only trusted callers
+	// sources connecting to loopback/link-local/private space. Only trusted callers
 	// (tests, in-cluster mirrors) should set it.
 	AllowPrivateTargets bool
 }
@@ -93,7 +93,7 @@ func FetchServerlessArtifact(ctx context.Context, art ServerlessArtifact) (*Unpa
 		return nil, err
 	}
 	if isTemp {
-		defer os.Remove(localZip)
+		defer func() { _ = os.Remove(localZip) }()
 	}
 
 	dir, err := os.MkdirTemp("", "constellation-serverless-*")
@@ -140,30 +140,22 @@ func downloadArtifact(ctx context.Context, art ServerlessArtifact, source string
 		client = &http.Client{Timeout: 5 * time.Minute}
 	}
 	if !art.AllowPrivateTargets {
-		if err := guardServerlessTarget(source); err != nil {
+		secured, cleanup, err := restrictedArtifactClient(client, defaultArtifactDialer())
+		if err != nil {
 			return "", false, err
 		}
-		// Copy the client so we can re-validate every redirect hop without mutating
-		// a shared/injected client; otherwise a 3xx to 169.254.169.254 would bypass
-		// the pre-flight IP check (SSRF).
-		c := *client
-		c.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 10 {
-				return errors.New("serverless: too many redirects")
-			}
-			return guardServerlessTarget(req.URL.String())
-		}
-		client = &c
+		defer cleanup()
+		client = secured
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, source, nil)
 	if err != nil {
-		return "", false, fmt.Errorf("serverless: request: %w", err)
+		return "", false, errors.New("serverless: invalid artifact request")
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", false, fmt.Errorf("serverless: download: %w", err)
+		return "", false, &artifactDownloadError{cause: err}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return "", false, fmt.Errorf("serverless: download status %d", resp.StatusCode)
 	}
@@ -191,42 +183,13 @@ func downloadArtifact(ctx context.Context, art ServerlessArtifact, source string
 	return f.Name(), true, nil
 }
 
-// guardServerlessTarget blocks server-side request forgery: it resolves the URL
-// host and rejects any target landing on loopback, link-local (which includes the
-// 169.254.169.254 cloud metadata endpoint), or private / unspecified address space.
-// ponytail: coarse deny-by-range with a single AllowPrivateTargets escape hatch;
-// upgrade path is an explicit CIDR allowlist on ServerlessArtifact plus a custom
-// DialContext to also close the DNS-rebinding TOCTOU window.
-func guardServerlessTarget(rawURL string) error {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return fmt.Errorf("serverless: parse url: %w", err)
-	}
-	host := u.Hostname()
-	if host == "" {
-		return errors.New("serverless: empty artifact host")
-	}
-	ips, err := net.LookupIP(host)
-	if err != nil {
-		return fmt.Errorf("serverless: resolve %q: %w", host, err)
-	}
-	for _, ip := range ips {
-		if isDisallowedTargetIP(ip) {
-			return fmt.Errorf("serverless: refusing artifact host %q resolving to disallowed address %s", host, ip)
-		}
-	}
-	return nil
-}
+// Both the request URL and malformed redirect Location errors can contain
+// presigned credentials. Keep errors.Is/As for callers without serializing that
+// underlying text into job errors or logs.
+type artifactDownloadError struct{ cause error }
 
-// isDisallowedTargetIP reports whether ip is in a range the scanner must never
-// reach when fetching an attacker-influenced artifact URL.
-func isDisallowedTargetIP(ip net.IP) bool {
-	return ip.IsLoopback() ||
-		ip.IsLinkLocalUnicast() ||
-		ip.IsLinkLocalMulticast() ||
-		ip.IsPrivate() ||
-		ip.IsUnspecified()
-}
+func (e *artifactDownloadError) Error() string { return "serverless: artifact download failed" }
+func (e *artifactDownloadError) Unwrap() error { return e.cause }
 
 // unzipInto extracts zipPath into dir with zip-slip, total-size, and file-count guards.
 func unzipInto(zipPath, dir string, maxBytes int64, maxFiles int) (int, int64, error) {
@@ -234,22 +197,29 @@ func unzipInto(zipPath, dir string, maxBytes int64, maxFiles int) (int, int64, e
 	if err != nil {
 		return 0, 0, fmt.Errorf("serverless: open zip: %w", err)
 	}
-	defer zr.Close()
-
-	cleanDir := filepath.Clean(dir)
+	defer func() { _ = zr.Close() }()
+	if maxBytes <= 0 || maxFiles <= 0 || len(zr.File) > maxFiles {
+		return 0, 0, fmt.Errorf("serverless: archive exceeds %d entries or has invalid limits", maxFiles)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return 0, 0, fmt.Errorf("serverless: extraction root: %w", err)
+	}
+	defer func() { _ = root.Close() }()
 	var (
 		files int
 		total int64
 	)
 	for _, zf := range zr.File {
-		// Zip-slip guard: reject entries that escape the extraction root.
-		target := filepath.Join(cleanDir, zf.Name)
-		if target != cleanDir && !strings.HasPrefix(target, cleanDir+string(os.PathSeparator)) {
+		// ZIP paths are slash-separated. Reject non-local/ambiguous names before
+		// using a directory handle that also prevents symlink traversal races.
+		target := filepath.FromSlash(zf.Name)
+		if !filepath.IsLocal(target) || strings.Contains(zf.Name, "\\") {
 			return files, total, fmt.Errorf("serverless: illegal path in zip: %q", zf.Name)
 		}
 		info := zf.FileInfo()
 		if info.IsDir() {
-			if err := os.MkdirAll(target, 0o755); err != nil {
+			if err := root.MkdirAll(target, 0o700); err != nil {
 				return files, total, fmt.Errorf("serverless: mkdir: %w", err)
 			}
 			continue
@@ -259,13 +229,10 @@ func unzipInto(zipPath, dir string, maxBytes int64, maxFiles int) (int, int64, e
 		if !info.Mode().IsRegular() {
 			continue
 		}
-		if files >= maxFiles {
-			return files, total, fmt.Errorf("serverless: archive exceeds %d files", maxFiles)
-		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		if err := root.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 			return files, total, fmt.Errorf("serverless: mkdir parent: %w", err)
 		}
-		written, err := extractZipFile(zf, target, maxBytes-total)
+		written, err := extractZipFile(root, zf, target, maxBytes-total)
 		total += written
 		if err != nil {
 			return files, total, err
@@ -275,7 +242,7 @@ func unzipInto(zipPath, dir string, maxBytes int64, maxFiles int) (int, int64, e
 	return files, total, nil
 }
 
-func extractZipFile(zf *zip.File, target string, remaining int64) (int64, error) {
+func extractZipFile(root *os.Root, zf *zip.File, target string, remaining int64) (int64, error) {
 	if remaining <= 0 {
 		return 0, fmt.Errorf("serverless: unpacked size exceeds cap")
 	}
@@ -283,9 +250,11 @@ func extractZipFile(zf *zip.File, target string, remaining int64) (int64, error)
 	if err != nil {
 		return 0, fmt.Errorf("serverless: open entry %q: %w", zf.Name, err)
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
-	out, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	// Reject duplicate paths and pre-existing links rather than overwriting
+	// another archive entry or a file shared outside the scratch directory.
+	out, err := root.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return 0, fmt.Errorf("serverless: create %q: %w", target, err)
 	}

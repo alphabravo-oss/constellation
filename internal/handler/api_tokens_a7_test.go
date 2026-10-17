@@ -119,7 +119,7 @@ INSERT INTO users (id, org_id, email, display_name) VALUES ($1, $2, $3, 'A7 Admi
 
 	mkReq := func(body map[string]any) *http.Request {
 		b, _ := json.Marshal(body)
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/api-tokens", bytes.NewReader(b))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/api-tokens", bytes.NewReader(b))
 		return req.WithContext(authctx.WithSubject(context.Background(), subj))
 	}
 

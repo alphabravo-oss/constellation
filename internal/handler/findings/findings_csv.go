@@ -13,9 +13,12 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
+	"github.com/alphabravocompany/constellation/internal/handler/platformrole"
 )
 
 type FindingsCSV struct {
@@ -25,37 +28,46 @@ type FindingsCSV struct {
 func NewFindingsCSV(d *db.DB) *FindingsCSV { return &FindingsCSV{db: d} }
 
 func (h *FindingsCSV) Stream(w http.ResponseWriter, r *http.Request) {
-	subj, _ := authctx.SubjectFrom(r.Context())
-	kind := r.URL.Query().Get("kind")
-	lifecycle := r.URL.Query().Get("lifecycle")
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	subj, ok := authctx.SubjectFrom(r.Context())
+	if !ok {
+		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "no subject"})
+		return
+	}
+	values := r.URL.Query()
+	limit, _ := strconv.Atoi(values.Get("limit"))
 	if limit <= 0 || limit > 100000 {
 		limit = 10000
 	}
-
+	where, args, err := findingFilter(subj.OrgID, values, true, true)
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	order, err := findingOrder(values)
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	args = append(args, limit, findingOffset(values))
 	rows, err := h.db.Pool().Query(r.Context(), `
 SELECT id, kind, COALESCE(external_id,'') AS external_id, title, severity, risk_score, lifecycle,
-       asset_id, first_seen_at, last_seen_at, COALESCE(accepted_until, 'epoch'::timestamptz) AS accepted_until
-  FROM findings
- WHERE org_id = $1
-   AND ($2::text = '' OR kind = $2)
-   AND ($3::text = '' OR lifecycle = $3)
- ORDER BY risk_score DESC, last_seen_at DESC
- LIMIT $4`, subj.OrgID, kind, lifecycle, limit)
+       asset_id, first_seen_at, last_seen_at, COALESCE(accepted_until, 'epoch'::timestamptz) AS accepted_until, `+platformrole.FindingPlatformRoleSQL("findings")+`, revision::text,cluster_id::text,target_cluster_id::text
+  FROM findings WHERE `+where+` ORDER BY `+order+`
+ LIMIT $`+strconv.Itoa(len(args)-1)+` OFFSET $`+strconv.Itoa(len(args)), args...)
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	defer rows.Close()
 
+	w.Header().Set("X-Export-Limit", strconv.Itoa(limit))
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="findings.csv"`)
 	cw := csv.NewWriter(w)
-	defer cw.Flush()
 
 	if err := cw.Write([]string{
 		"id", "kind", "external_id", "title", "severity", "risk_score", "lifecycle",
-		"asset_id", "first_seen_at", "last_seen_at", "accepted_until",
+		"asset_id", "first_seen_at", "last_seen_at", "accepted_until", "platform_role", "row_id", "revision", "source_cluster_id", "target_cluster_id",
 	}); err != nil {
 		return // client gone
 	}
@@ -63,21 +75,39 @@ SELECT id, kind, COALESCE(external_id,'') AS external_id, title, severity, risk_
 	var (
 		id, kindCol, extID, title, severity, lifecycleCol string
 		risk                                              int
-		assetID                                           string
+		assetID, platformRole                             string
 		firstSeen, lastSeen, acceptedUntil                time.Time
+		revision                                          string
+		sourceCluster, targetCluster                      *string
 	)
 	for rows.Next() {
 		if err := rows.Scan(&id, &kindCol, &extID, &title, &severity, &risk, &lifecycleCol,
-			&assetID, &firstSeen, &lastSeen, &acceptedUntil); err != nil {
-			return
+			&assetID, &firstSeen, &lastSeen, &acceptedUntil, &platformRole, &revision, &sourceCluster, &targetCluster); err != nil {
+			panic(http.ErrAbortHandler) // Do not deliver a successful partial export.
 		}
 		acc := ""
 		if !acceptedUntil.IsZero() && acceptedUntil.Year() > 1971 {
 			acc = acceptedUntil.UTC().Format(time.RFC3339)
 		}
-		_ = cw.Write([]string{
+		if err := cw.Write([]string{
 			id, kindCol, extID, title, severity, fmt.Sprintf("%d", risk), lifecycleCol,
-			assetID, firstSeen.UTC().Format(time.RFC3339), lastSeen.UTC().Format(time.RFC3339), acc,
-		})
+			assetID, firstSeen.UTC().Format(time.RFC3339Nano), lastSeen.UTC().Format(time.RFC3339), acc, platformRole, findingRowID(uuid.MustParse(id), firstSeen), revision, nullableCSV(sourceCluster), nullableCSV(targetCluster),
+		}); err != nil {
+			panic(http.ErrAbortHandler)
+		}
 	}
+	if err := rows.Err(); err != nil {
+		panic(http.ErrAbortHandler)
+	}
+	cw.Flush()
+	if err := cw.Error(); err != nil {
+		panic(http.ErrAbortHandler)
+	}
+}
+
+func nullableCSV(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }

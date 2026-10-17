@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -54,7 +55,7 @@ VALUES
 		t.Fatalf("session: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/network/sessions/777?cluster_id="+clusterID.String()+"&node="+node, nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/api/v1/network/sessions/777?cluster_id="+clusterID.String()+"&node="+node, nil)
 	req.RemoteAddr = "127.0.0.1:34812"
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rctx := chi.NewRouteContext()
@@ -75,6 +76,7 @@ VALUES
 		ClusterID   string `json:"cluster_id"`
 		AuditID     int64  `json:"audit_id"`
 		RequestedAt string `json:"requested_at"`
+		ExpiresAt   string `json:"expires_at"`
 		Target      struct {
 			WorkloadID  string `json:"workload_id"`
 			Application string `json:"application"`
@@ -92,6 +94,11 @@ VALUES
 	}
 	if !got.OK || !got.Queued || got.SessionID != sessionID || got.Node != node || got.ClusterID != clusterID.String() || got.AuditID == 0 || got.RequestedAt == "" {
 		t.Fatalf("unexpected response: %+v", got)
+	}
+	requested, requestErr := time.Parse(time.RFC3339Nano, got.RequestedAt)
+	expires, expireErr := time.Parse(time.RFC3339Nano, got.ExpiresAt)
+	if requestErr != nil || expireErr != nil || expires.Sub(requested) != 5*time.Minute {
+		t.Fatalf("invalid kill expiry: %s", got.ExpiresAt)
 	}
 	if got.Target.WorkloadID != "payments/frontend" || got.Target.Application != "HTTPS" || got.Target.IPProto != "TCP" ||
 		got.Target.ClientIP != "10.42.0.10" || got.Target.ClientPort != 44120 || got.Target.ServerIP != "3.18.12.8" || got.Target.ServerPort != 443 ||
@@ -164,7 +171,7 @@ VALUES
 		}
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/network/sessions?cluster_id="+clusterID.String()+"&limit=2", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/network/sessions?cluster_id="+clusterID.String()+"&limit=2", nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rec := httptest.NewRecorder()
 	NewNetwork(d).Sessions(rec, req)
@@ -224,7 +231,7 @@ func TestNetwork_SessionsPlatformRoleScopedToOwnedDeployment(t *testing.T) {
 		HasMore  bool         `json:"has_more"`
 	} {
 		t.Helper()
-		request := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/network/sessions?cluster_id=%s&limit=%d", cluster, limit), nil)
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/api/v1/network/sessions?cluster_id=%s&limit=%d", cluster, limit), nil)
 		request = request.WithContext(authctx.WithSubject(request.Context(), authctx.Subject{OrgID: orgID, UserID: uuid.New()}))
 		response := httptest.NewRecorder()
 		NewNetwork(database).Sessions(response, request)
@@ -298,7 +305,7 @@ VALUES
 	seed(2, "node-a", "payments/frontend", 17, "10.42.0.10", 53000, "10.96.0.10", 53)
 	seed(3, "node-b", "inventory/api", 6, "10.42.1.20", 43120, "10.42.2.30", 8080)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/network/sessions?cluster_id="+clusterID.String()+"&protocol=tcp&application=https&port=443&peer=3.18&workload=payments&node=node-a", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/network/sessions?cluster_id="+clusterID.String()+"&protocol=tcp&application=https&port=443&peer=3.18&workload=payments&node=node-a", nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rec := httptest.NewRecorder()
 	NewNetwork(d).Sessions(rec, req)
@@ -317,7 +324,7 @@ VALUES
 		t.Fatalf("unexpected filtered sessions: %+v", got)
 	}
 
-	groupReq := httptest.NewRequest(http.MethodGet, "/api/v1/network/sessions?cluster_id="+clusterID.String()+"&group=payments-tier", nil)
+	groupReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/network/sessions?cluster_id="+clusterID.String()+"&group=payments-tier", nil)
 	groupReq = groupReq.WithContext(authctx.WithSubject(groupReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	groupRec := httptest.NewRecorder()
 	NewNetwork(d).Sessions(groupRec, groupReq)
@@ -337,7 +344,7 @@ VALUES
 		t.Fatalf("unexpected group-filtered sessions: %+v", grouped)
 	}
 
-	bad := httptest.NewRequest(http.MethodGet, "/api/v1/network/sessions?cluster_id="+clusterID.String()+"&protocol=bad", nil)
+	bad := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/network/sessions?cluster_id="+clusterID.String()+"&protocol=bad", nil)
 	bad = bad.WithContext(authctx.WithSubject(bad.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	badRec := httptest.NewRecorder()
 	NewNetwork(d).Sessions(badRec, bad)

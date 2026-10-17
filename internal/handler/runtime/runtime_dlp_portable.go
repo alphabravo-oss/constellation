@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"sort"
@@ -112,7 +113,7 @@ func exportRuntimeDLPBundle(w http.ResponseWriter, r *http.Request, store *Runti
 	for _, category := range categories {
 		categoryRows, err := store.ListForCluster(r.Context(), sub.OrgID, clusterID, category)
 		if err != nil {
-			jsonError(w, http.StatusInternalServerError, err.Error())
+			writeDLPError(w, err)
 			return
 		}
 		rows = append(rows, categoryRows...)
@@ -135,7 +136,7 @@ func exportRuntimeDLPBundle(w http.ResponseWriter, r *http.Request, store *Runti
 	}
 	out, err := yaml.Marshal(bundle)
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		writeDLPError(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "application/x-yaml")
@@ -154,6 +155,10 @@ func importRuntimeDLPBundle(w http.ResponseWriter, r *http.Request, store *Runti
 		jsonError(w, http.StatusBadRequest, "cluster_id is required")
 		return
 	}
+	if err := store.requireOwnedCluster(r.Context(), sub.OrgID, clusterID); err != nil {
+		writeDLPError(w, err)
+		return
+	}
 	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
 		jsonError(w, http.StatusBadRequest, "read body")
@@ -168,57 +173,16 @@ func importRuntimeDLPBundle(w http.ResponseWriter, r *http.Request, store *Runti
 		jsonError(w, http.StatusBadRequest, "bundle contains no rules")
 		return
 	}
-	type result struct {
-		Name   string `json:"name"`
-		Status string `json:"status"` // created | skipped | error
-		Error  string `json:"error,omitempty"`
-	}
-	results := make([]result, 0, len(bundle.Rules))
+	results := make([]dlpImportResult, 0, len(bundle.Rules))
 	created := 0
 	for _, pr := range bundle.Rules {
-		res := result{Name: pr.Name}
-		category := DLPCategory(strings.TrimSpace(pr.Category))
-		if category == "" {
-			category = defaultCategory
+		res := importPortableDLPRule(r, store, sub.OrgID, sub.UserID, clusterID, pr, defaultCategory, allowed)
+		if res.Status == "created" {
+			created++
 		}
-		if !allowed[category] {
-			res.Status = "error"
-			res.Error = "category " + string(category) + " is not accepted by this endpoint"
-			results = append(results, res)
-			continue
-		}
-		mode := DLPModeMonitor
-		if DLPMode(pr.Mode) == DLPModeDisabled {
-			mode = DLPModeDisabled
-		}
-		patternsJSON, err := json.Marshal(portablePatternSpecs(pr.Patterns))
-		if err != nil {
-			res.Status, res.Error = "error", err.Error()
-			results = append(results, res)
-			continue
-		}
-		rule := &DLPRule{
-			OrgID: sub.OrgID, ClusterID: clusterID,
-			Name: strings.TrimSpace(pr.Name), Category: category, ApplyDir: pr.ApplyDir,
-			Severity: pr.Severity, Mode: mode, Patterns: patternsJSON,
-			ScopeMACs: pr.ScopeMACs, Description: pr.Description, CreatedBy: &sub.UserID,
-			Source:     emptyDefaultString(pr.Source, "import"),
-			CfgType:    emptyDefaultString(pr.CfgType, "imported"),
-			SourcePath: strings.TrimSpace(pr.SourcePath),
-		}
-		if _, err := store.Insert(r.Context(), rule, requestIDFrom(r)); err != nil {
-			if strings.Contains(err.Error(), "duplicate") {
-				res.Status = "skipped"
-			} else {
-				res.Status, res.Error = "error", err.Error()
-			}
-			results = append(results, res)
-			continue
-		}
-		res.Status = "created"
-		created++
 		results = append(results, res)
 	}
+
 	updated := 0 // DLP import is create-only (see doc comment); reported for a uniform client shape.
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"created": created, "updated": updated, "results": results})
 }
@@ -257,4 +221,59 @@ func portablePatternSpecs(patterns []portableDLPPattern) []dlp.PatternSpec {
 		})
 	}
 	return out
+}
+
+func dlpImportError(err error) string {
+	var input dlpInputError
+	if errors.As(err, &input) {
+		return input.Error()
+	}
+	return "rule creation failed"
+}
+
+type dlpImportResult struct {
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Error  string `json:"error,omitempty"`
+}
+
+func importPortableDLPRule(r *http.Request, store *RuntimeDLPStore, org, actor, cluster uuid.UUID, pr portableDLPRule, defaultCategory DLPCategory, allowed map[DLPCategory]bool) dlpImportResult {
+	res := dlpImportResult{Name: pr.Name}
+	category := DLPCategory(strings.TrimSpace(pr.Category))
+	if category == "" {
+		category = defaultCategory
+	}
+	if !allowed[category] {
+		res.Status = "error"
+		res.Error = "category " + string(category) + " is not accepted by this endpoint"
+		return res
+	}
+	mode := DLPModeMonitor
+	if DLPMode(pr.Mode) == DLPModeDisabled {
+		mode = DLPModeDisabled
+	}
+	patternsJSON, err := json.Marshal(portablePatternSpecs(pr.Patterns))
+	if err != nil {
+		res.Status, res.Error = "error", err.Error()
+		return res
+	}
+	rule := &DLPRule{
+		OrgID: org, ClusterID: cluster,
+		Name: strings.TrimSpace(pr.Name), Category: category, ApplyDir: pr.ApplyDir,
+		Severity: pr.Severity, Mode: mode, Patterns: patternsJSON,
+		ScopeMACs: pr.ScopeMACs, Description: pr.Description, CreatedBy: &actor,
+		Source:     emptyDefaultString(pr.Source, "import"),
+		CfgType:    emptyDefaultString(pr.CfgType, "imported"),
+		SourcePath: strings.TrimSpace(pr.SourcePath),
+	}
+	if _, err := store.Insert(r.Context(), rule, requestIDFrom(r)); err != nil {
+		if dlpConflict(err) {
+			res.Status = "skipped"
+		} else {
+			res.Status, res.Error = "error", dlpImportError(err)
+		}
+		return res
+	}
+	res.Status = "created"
+	return res
 }

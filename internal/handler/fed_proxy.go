@@ -49,7 +49,7 @@ const fedProxyCredentialTTL = 5 * time.Minute
 // limited to clearly read-only resources. The server may override it from config (B1), so it
 // is not a hardcoded policy — operators tune the surface a non-admin can observe cross-cluster.
 var fedProxyDefaultReadPaths = []string{
-	"findings", "scan-results", "scans", "assets", "images", "vulnerabilities",
+	"findings", "finding-instances", "scan-results", "scans", "assets", "images", "vulnerabilities",
 	"compliance", "audit-logs", "dashboards", "reports", "network", "runtime",
 	"federation", "health", "version",
 }
@@ -202,22 +202,35 @@ func (h *FedProxy) Forward(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp, err := client.Do(outReq)
+	// Redirects could escape the registered endpoint or the reader's path
+	// allowlist, carrying the master's ticket and mTLS identity with them.
+	// Copy the client so injected/shared clients retain their own policy.
+	proxyClient := *client
+	proxyClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := proxyClient.Do(outReq)
 	if err != nil {
 		jsonError(w, http.StatusBadGateway, "federation: joint unreachable")
 		return
 	}
 	defer resp.Body.Close()
 
-	copyProxyResponseHeaders(w.Header(), resp.Header)
-	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, resp.Body)
+	statusCode := resp.StatusCode
+	if statusCode >= 300 && statusCode < 400 && statusCode != http.StatusNotModified {
+		// Do not pass Location to the browser either: it could redirect the
+		// operator outside the authenticated federation workflow.
+		statusCode = http.StatusBadGateway
+		jsonError(w, statusCode, "federation: joint redirects are not permitted")
+	} else {
+		copyProxyResponseHeaders(w.Header(), resp.Header)
+		w.WriteHeader(statusCode)
+		_, _ = io.Copy(w, resp.Body)
+	}
 
 	oid := subj.OrgID
 	uid := subj.UserID
 	_, _, _ = h.auditLog.Log(r.Context(), audit.Event{OrgID: &oid, ActorID: &uid,
 		Action: "federation.proxy", TargetKind: "fed-cluster", TargetID: clusterID,
-		After: map[string]any{"method": r.Method, "path": "/" + subPath, "status": resp.StatusCode}})
+		After: map[string]any{"method": r.Method, "path": "/" + subPath, "status": statusCode, "upstream_status": resp.StatusCode}})
 }
 
 var errFedClusterNotFound = errors.New("federation: cluster not registered")
@@ -370,7 +383,7 @@ func fedProxyTargetURL(endpoint, subPath, rawQuery string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if base.Host == "" || (base.Scheme != "http" && base.Scheme != "https") {
+	if base.Host == "" || base.User != nil || base.Fragment != "" || (base.Scheme != "http" && base.Scheme != "https") {
 		return "", errors.New("federation: joint endpoint must be an absolute http(s) URL")
 	}
 	// The sub-path only extends the joint's own /api/v1 path; scheme+host come solely from the

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 )
@@ -38,6 +40,8 @@ func (h *Enterprise) WithCustomRoles(customRoles *CustomRoles) *Enterprise {
 }
 
 type runtimeEventEvidenceDTO struct {
+	Namespace        string   `json:"namespace,omitempty"`
+	PlatformRole     string   `json:"platform_role"`
 	ID               string   `json:"id"`
 	At               string   `json:"at"`
 	ClusterID        string   `json:"cluster_id"`
@@ -54,6 +58,9 @@ type runtimeEventEvidenceDTO struct {
 }
 
 type runtimeWorkloadEvidenceDTO struct {
+	PlatformRole    string   `json:"platform_role"`
+	ClusterID       string   `json:"cluster_id,omitempty"`
+	Namespace       string   `json:"namespace,omitempty"`
 	WorkloadID      string   `json:"workload_id"`
 	Events          int      `json:"events"`
 	Alerts          int      `json:"alerts"`
@@ -65,13 +72,14 @@ type runtimeWorkloadEvidenceDTO struct {
 }
 
 type runtimeEvidenceSummaryDTO struct {
-	WindowHours       int `json:"window_hours"`
-	Events            int `json:"events"`
-	Alerts            int `json:"alerts"`
-	Blocks            int `json:"blocks"`
-	Quarantines       int `json:"quarantines"`
-	AffectedWorkloads int `json:"affected_workloads"`
-	Techniques        int `json:"techniques"`
+	WindowStart       string `json:"window_start,omitempty"`
+	WindowHours       int    `json:"window_hours"`
+	Events            int    `json:"events"`
+	Alerts            int    `json:"alerts"`
+	Blocks            int    `json:"blocks"`
+	Quarantines       int    `json:"quarantines"`
+	AffectedWorkloads int    `json:"affected_workloads"`
+	Techniques        int    `json:"techniques"`
 }
 
 type runtimeRuleOverviewDTO struct {
@@ -147,6 +155,7 @@ func runtimeWindowHours(r *http.Request) int {
 func (h *Enterprise) attachRuntimeEvidence(r *http.Request, out map[string]any, orgID string, clusterArg any) error {
 	hours := runtimeWindowHours(r)
 	var summary runtimeEvidenceSummaryDTO
+	var windowStart time.Time
 	if err := h.db.Pool().QueryRow(r.Context(), `
 WITH scoped AS (
     SELECT *
@@ -160,26 +169,28 @@ SELECT COUNT(*)::int,
        COUNT(*) FILTER (WHERE verdict = 'block')::int,
        COUNT(*) FILTER (WHERE verdict = 'quarantine')::int,
        COUNT(DISTINCT workload_id)::int,
-       COALESCE((SELECT COUNT(DISTINCT technique)::int FROM scoped, LATERAL unnest(attack_techniques) AS technique), 0)
+       COALESCE((SELECT COUNT(DISTINCT technique)::int FROM scoped, LATERAL unnest(attack_techniques) AS technique), 0),
+ NOW() - ($2::text || ' hours')::interval
   FROM scoped`, orgID, strconv.Itoa(hours), clusterArg).
-		Scan(&summary.Events, &summary.Alerts, &summary.Blocks, &summary.Quarantines, &summary.AffectedWorkloads, &summary.Techniques); err != nil {
+		Scan(&summary.Events, &summary.Alerts, &summary.Blocks, &summary.Quarantines, &summary.AffectedWorkloads, &summary.Techniques, &windowStart); err != nil {
 		return err
 	}
 	summary.WindowHours = hours
+	summary.WindowStart = windowStart.UTC().Format(time.RFC3339Nano)
 	out["summary"] = summary
 
 	rows, err := h.db.Pool().Query(r.Context(), `
-SELECT e.id::text, e.at, e.cluster_id::text, COALESCE(c.name, ''), e.workload_id,
+SELECT e.id::text, e.at, e.cluster_id::text, COALESCE(c.name, ''), e.workload_id, COALESCE(e.namespace,''),
        COALESCE(e.payload->>'rule_id', ''), COALESCE(e.payload->>'rule_name', ''),
        e.source, e.kind,
        e.severity, e.verdict, e.attack_techniques, COALESCE(e.payload->>'message', e.payload->>'summary', '')
   FROM events e
   LEFT JOIN clusters c ON c.id = e.cluster_id
  WHERE e.org_id = $1
-   AND e.at >= NOW() - ($2::text || ' hours')::interval
+   AND e.at >= $2::timestamptz
    AND ($3::uuid IS NULL OR e.cluster_id = $3)
  ORDER BY e.at DESC
- LIMIT 20`, orgID, strconv.Itoa(hours), clusterArg)
+ LIMIT 20`, orgID, windowStart, clusterArg)
 	if err != nil {
 		return err
 	}
@@ -188,7 +199,7 @@ SELECT e.id::text, e.at, e.cluster_id::text, COALESCE(c.name, ''), e.workload_id
 	for rows.Next() {
 		var item runtimeEventEvidenceDTO
 		var at time.Time
-		if err := rows.Scan(&item.ID, &at, &item.ClusterID, &item.ClusterName, &item.WorkloadID, &item.RuleID, &item.RuleName, &item.Source, &item.Kind, &item.Severity, &item.Verdict, &item.AttackTechniques, &item.Message); err != nil {
+		if err := rows.Scan(&item.ID, &at, &item.ClusterID, &item.ClusterName, &item.WorkloadID, &item.Namespace, &item.RuleID, &item.RuleName, &item.Source, &item.Kind, &item.Severity, &item.Verdict, &item.AttackTechniques, &item.Message); err != nil {
 			return err
 		}
 		item.At = at.UTC().Format(time.RFC3339)
@@ -197,10 +208,29 @@ SELECT e.id::text, e.at, e.cluster_id::text, COALESCE(c.name, ''), e.workload_id
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	rows.Close()
+	parsedOrg, err := uuid.Parse(orgID)
+	if err != nil {
+		return err
+	}
+	identities := make([]PlatformWorkloadIdentity, len(events))
+	for i, event := range events {
+		cluster, _ := uuid.Parse(event.ClusterID)
+		identities[i] = PlatformWorkloadIdentity{ClusterID: cluster, Workload: event.WorkloadID, Namespace: event.Namespace}
+	}
+	roles, err := EvidencePlatformRoles(r.Context(), h.db.Pool(), parsedOrg, identities)
+	if err != nil {
+		return err
+	}
+	for i := range events {
+		events[i].PlatformRole = roles[i]
+	}
 	out["recent_events"] = events
 
 	workloadRows, err := h.db.Pool().Query(r.Context(), `
 SELECT workload_id,
+       CASE WHEN COUNT(DISTINCT cluster_id)=1 THEN MIN(cluster_id::text) ELSE '' END,
+       CASE WHEN COUNT(DISTINCT COALESCE(namespace,''))=1 THEN MIN(COALESCE(namespace,'')) ELSE '' END,
        COUNT(DISTINCT id)::int,
        COUNT(DISTINCT id) FILTER (WHERE verdict IN ('alert','block','quarantine'))::int,
        COUNT(DISTINCT id) FILTER (WHERE verdict = 'block')::int,
@@ -212,11 +242,11 @@ SELECT workload_id,
   FROM events
   LEFT JOIN LATERAL unnest(attack_techniques) AS technique ON TRUE
  WHERE org_id = $1
-   AND at >= NOW() - ($2::text || ' hours')::interval
+   AND at >= $2::timestamptz
    AND ($3::uuid IS NULL OR cluster_id = $3)
  GROUP BY workload_id
  ORDER BY COUNT(DISTINCT id) FILTER (WHERE verdict IN ('alert','block','quarantine')) DESC, COUNT(DISTINCT id) DESC, workload_id
- LIMIT 10`, orgID, strconv.Itoa(hours), clusterArg)
+ LIMIT 10`, orgID, windowStart, clusterArg)
 	if err != nil {
 		return err
 	}
@@ -225,7 +255,7 @@ SELECT workload_id,
 	for workloadRows.Next() {
 		var item runtimeWorkloadEvidenceDTO
 		var last time.Time
-		if err := workloadRows.Scan(&item.WorkloadID, &item.Events, &item.Alerts, &item.Blocks, &item.HighestSeverity, &last, &item.Sources, &item.Techniques); err != nil {
+		if err := workloadRows.Scan(&item.WorkloadID, &item.ClusterID, &item.Namespace, &item.Events, &item.Alerts, &item.Blocks, &item.HighestSeverity, &last, &item.Sources, &item.Techniques); err != nil {
 			return err
 		}
 		item.LastSeenAt = last.UTC().Format(time.RFC3339)
@@ -234,14 +264,27 @@ SELECT workload_id,
 	if err := workloadRows.Err(); err != nil {
 		return err
 	}
+	workloadRows.Close()
+	identities = make([]PlatformWorkloadIdentity, len(workloads))
+	for i, workload := range workloads {
+		cluster, _ := uuid.Parse(workload.ClusterID)
+		identities[i] = PlatformWorkloadIdentity{ClusterID: cluster, Workload: workload.WorkloadID, Namespace: workload.Namespace}
+	}
+	roles, err = EvidencePlatformRoles(r.Context(), h.db.Pool(), parsedOrg, identities)
+	if err != nil {
+		return err
+	}
+	for i := range workloads {
+		workloads[i].PlatformRole = roles[i]
+	}
 	out["workloads"] = workloads
-	if err := h.attachRuntimeRuleEvidence(r, out, orgID, hours, clusterArg); err != nil {
+	if err := h.attachRuntimeRuleEvidence(r, out, orgID, windowStart, clusterArg); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (h *Enterprise) attachRuntimeRuleEvidence(r *http.Request, out map[string]any, orgID string, hours int, clusterArg any) error {
+func (h *Enterprise) attachRuntimeRuleEvidence(r *http.Request, out map[string]any, orgID string, windowStart time.Time, clusterArg any) error {
 	rules, ok := out["rules"].([]runtimeRuleOverviewDTO)
 	if !ok {
 		return nil
@@ -257,10 +300,10 @@ SELECT payload->>'rule_id' AS rule_id,
        MAX(at)
   FROM events
  WHERE org_id = $1
-   AND at >= NOW() - ($2::text || ' hours')::interval
+   AND at >= $2::timestamptz
    AND COALESCE(payload->>'rule_id', '') <> ''
    AND ($3::uuid IS NULL OR cluster_id = $3)
- GROUP BY payload->>'rule_id'`, orgID, strconv.Itoa(hours), clusterArg)
+ GROUP BY payload->>'rule_id'`, orgID, windowStart, clusterArg)
 	if err != nil {
 		return err
 	}

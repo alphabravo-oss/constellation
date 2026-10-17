@@ -35,11 +35,11 @@ var DefaultWeights = Weights{
 // consensus: a KEV listing is the strongest single signal that a CVE is being actively
 // exploited in the wild). Asset criticality scales the whole result.
 type Multipliers struct {
-	KEVKicker          float64
-	CriticalityLow     float64
-	CriticalityMedium  float64
-	CriticalityHigh    float64
-	CriticalityCrit    float64
+	KEVKicker         float64
+	CriticalityLow    float64
+	CriticalityMedium float64
+	CriticalityHigh   float64
+	CriticalityCrit   float64
 }
 
 var DefaultMultipliers = Multipliers{

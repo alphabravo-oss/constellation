@@ -1,5 +1,5 @@
 import { type ElementType } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "@tanstack/react-router";
 import {
   UsersRound,
   KeyRound,
@@ -48,10 +48,10 @@ const CARDS: SettingsCard[] = [
   { to: "/openapi.json", title: "API Reference", description: "Download the generated OpenAPI spec for scripts, runbooks, and NeuVector API mapping.", icon: FileCode2, external: true },
 ];
 
-const SETTINGS_SCOPES = ["Organization", "Platform", "Integrations", "Cluster"] as const;
+const SETTINGS_SCOPES = ["Clusters", "Organization", "Platform", "Integrations"] as const;
 
 function cardScope(path: string): typeof SETTINGS_SCOPES[number] {
-  if (path === "/settings/clusters/new") return "Cluster";
+  if (path === "/settings/clusters/new") return "Clusters";
   if (path === "/settings/integrations" || path === "/settings/connectors") return "Integrations";
   if (["/settings/access", "/settings/api-tokens", "/settings/security-policy"].includes(path)) return "Organization";
   return "Platform";
@@ -98,5 +98,5 @@ function SettingsCardLink({ card }: { card: SettingsCard }) {
   if (card.external) {
     return <a href={card.to} className={className} data-testid="settings-openapi-link">{content}</a>;
   }
-  return <Link to={card.to} className={className}>{content}</Link>;
+  return <Link to="." href={card.to} className={className}>{content}</Link>;
 }

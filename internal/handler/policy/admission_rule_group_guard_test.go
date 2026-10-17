@@ -50,7 +50,7 @@ func TestCreateAdmissionRuleRejectsClusterGroupWithoutClusterScope(t *testing.T)
 		if err != nil {
 			t.Fatal(err)
 		}
-		request := httptest.NewRequest(http.MethodPost, "/policies/admission/rules"+test.query, strings.NewReader(string(body)))
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/policies/admission/rules"+test.query, strings.NewReader(string(body)))
 		request = request.WithContext(authctx.WithSubject(request.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 		response := httptest.NewRecorder()
 		handler.CreateAdmissionRule(response, request)
@@ -104,7 +104,7 @@ func TestCreateAdmissionRuleRejectsGroupRenamedDuringWrite(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		request := httptest.NewRequest(http.MethodPost, "/policies/admission/rules", strings.NewReader(string(body)))
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/policies/admission/rules", strings.NewReader(string(body)))
 		request = request.WithContext(authctx.WithSubject(request.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 		response := httptest.NewRecorder()
 		handler.CreateAdmissionRule(response, request)

@@ -94,13 +94,44 @@ func (h *Quarantine) Create(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	tx, err := h.db.Pool().Begin(r.Context())
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not begin quarantine write"})
+		return
+	}
+	defer tx.Rollback(r.Context())
+	var ownedCluster uuid.UUID
+	if err := tx.QueryRow(r.Context(), `SELECT id FROM clusters WHERE org_id=$1 AND id=$2 FOR KEY SHARE`, subj.OrgID, req.ClusterID).Scan(&ownedCluster); err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, pgx.ErrNoRows) {
+			status = http.StatusNotFound
+		}
+		httpx.WriteJSON(w, status, map[string]string{"error": "cluster not found in this organization"})
+		return
+	}
+	if req.Scope == "workload" {
+		ns, name, found := strings.Cut(req.MatchKey, "/")
+		if !found || ns == "" || name == "" {
+			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "workload match_key must be namespace/name"})
+			return
+		}
+		var workloadID uuid.UUID
+		if err := tx.QueryRow(r.Context(), `SELECT id FROM deployments WHERE org_id=$1 AND cluster_id=$2 AND namespace=$3 AND name=$4 LIMIT 1 FOR KEY SHARE`, subj.OrgID, req.ClusterID, ns, name).Scan(&workloadID); err != nil {
+			status := http.StatusInternalServerError
+			if errors.Is(err, pgx.ErrNoRows) {
+				status = http.StatusNotFound
+			}
+			httpx.WriteJSON(w, status, map[string]string{"error": "workload not found in the selected cluster"})
+			return
+		}
+	}
 	var expiresAt *time.Time
 	if req.ExpiresInHours != nil && *req.ExpiresInHours > 0 {
 		t := time.Now().UTC().Add(time.Duration(*req.ExpiresInHours) * time.Hour)
 		expiresAt = &t
 	}
 
-	row := h.db.Pool().QueryRow(r.Context(), `
+	row := tx.QueryRow(r.Context(), `
 INSERT INTO quarantine_entries
     (org_id, cluster_id, scope, match_key, reason, origin, created_by, expires_at)
 VALUES ($1, $2, $3, $4, $5, 'manual', $6, $7)
@@ -119,6 +150,10 @@ RETURNING id, created_at`,
 			return
 		}
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not persist quarantine"})
 		return
 	}
 	// Audit trail. action "quarantine.add" is mapped in pkg/audit/compliance.go.

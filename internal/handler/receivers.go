@@ -308,7 +308,7 @@ func (h *Receivers) Create(w http.ResponseWriter, r *http.Request) {
 		// attacker-controlled internal URL would let a notify rule reach cloud metadata / internal
 		// services. Require https + a public host here; the dispatcher additionally re-checks the
 		// RESOLVED IP at dial time (defeating DNS rebind).
-		if err := notify.PublicURLAllowed(req.Endpoint); err != nil {
+		if err := notify.PublicURLAllowedContext(r.Context(), req.Endpoint); err != nil {
 			jsonError(w, http.StatusBadRequest, "invalid endpoint: "+err.Error())
 			return
 		}
@@ -393,7 +393,7 @@ func (h *Receivers) Patch(w http.ResponseWriter, r *http.Request) {
 	// email receiver's endpoint is a mailto: summary (not an HTTP target), so the guard
 	// only applies to http(s) endpoints.
 	if req.Endpoint != nil && strings.HasPrefix(*req.Endpoint, "http") {
-		if err := notify.PublicURLAllowed(*req.Endpoint); err != nil {
+		if err := notify.PublicURLAllowedContext(r.Context(), *req.Endpoint); err != nil {
 			jsonError(w, http.StatusBadRequest, "invalid endpoint: "+err.Error())
 			return
 		}
@@ -669,6 +669,7 @@ func (h *Receivers) GetRoutingYAML(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	w.Header().Set("ETag", fmt.Sprintf(`"%d"`, revision))
 	writeJSON(w, http.StatusOK, map[string]any{
 		"yaml":       yamlStr,
 		"revision":   revision,
@@ -683,6 +684,11 @@ func (h *Receivers) PutRoutingYAML(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusUnauthorized, "no subject")
 		return
 	}
+	expectedRevision, err := configRevisionPrecondition(r)
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, "invalid revision precondition")
+		return
+	}
 	var body struct {
 		YAML string `json:"yaml"`
 	}
@@ -690,13 +696,36 @@ func (h *Receivers) PutRoutingYAML(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	if _, err := h.db.Pool().Exec(r.Context(), `
+	var revision int
+	switch {
+	case expectedRevision == nil:
+		// Preserve unconditional writes for existing API clients.
+		err = h.db.Pool().QueryRow(r.Context(), `
 INSERT INTO routing_configs (org_id, yaml, revision, updated_by) VALUES ($1, $2, 1, $3)
 ON CONFLICT (org_id) DO UPDATE SET yaml = EXCLUDED.yaml,
                                    revision = routing_configs.revision + 1,
                                    updated_at = NOW(),
-                                   updated_by = EXCLUDED.updated_by`,
-		subj.OrgID, body.YAML, subj.UserID); err != nil {
+                                   updated_by = EXCLUDED.updated_by
+RETURNING revision`, subj.OrgID, body.YAML, subj.UserID).Scan(&revision)
+	case *expectedRevision == 0:
+		// Revision zero represents an absent document. The unique key makes
+		// concurrent first saves atomic, just like subsequent conditional updates.
+		err = h.db.Pool().QueryRow(r.Context(), `
+INSERT INTO routing_configs (org_id, yaml, revision, updated_by) VALUES ($1, $2, 1, $3)
+ON CONFLICT (org_id) DO NOTHING
+RETURNING revision`, subj.OrgID, body.YAML, subj.UserID).Scan(&revision)
+	default:
+		err = h.db.Pool().QueryRow(r.Context(), `
+UPDATE routing_configs SET yaml = $2, revision = revision + 1,
+                          updated_at = NOW(), updated_by = $3
+WHERE org_id = $1 AND revision = $4::bigint
+RETURNING revision`, subj.OrgID, body.YAML, subj.UserID, *expectedRevision).Scan(&revision)
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		jsonError(w, http.StatusPreconditionFailed, "routing changed since it was loaded; reload before saving")
+		return
+	}
+	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -705,8 +734,9 @@ ON CONFLICT (org_id) DO UPDATE SET yaml = EXCLUDED.yaml,
 		_, _, _ = h.audit.Log(r.Context(), audit.Event{
 			OrgID: &oid, ActorID: &uid, Action: "routing.yaml.update",
 			TargetKind: "routing_config", TargetID: oid.String(),
-			After: map[string]any{"bytes": len(body.YAML)},
+			After: map[string]any{"bytes": len(body.YAML), "revision": revision},
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	w.Header().Set("ETag", fmt.Sprintf(`"%d"`, revision))
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "revision": revision})
 }

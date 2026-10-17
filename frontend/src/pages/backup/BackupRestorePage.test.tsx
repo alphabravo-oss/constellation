@@ -1,6 +1,6 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+import { TestRouter } from "@/test/router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, expect, it, vi } from "vitest";
 import { backupsApi, type BackupManifestDTO } from "@/api/client";
@@ -23,13 +23,13 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 
-function render() {
+async function render() {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
   queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
-  act(() => root!.render(
-    <QueryClientProvider client={queryClient}><MemoryRouter><BackupRestorePage /></MemoryRouter></QueryClientProvider>,
+  await act(async () => root!.render(
+    <QueryClientProvider client={queryClient}><TestRouter><BackupRestorePage /></TestRouter></QueryClientProvider>,
   ));
 }
 
@@ -50,7 +50,7 @@ async function flush() {
 
 it("requires successful validation and has no client trust override", async () => {
   vi.mocked(backupsApi.verify).mockRejectedValue(new Error("digest mismatch"));
-  render();
+  await render();
   expect(applyButton().disabled).toBe(true);
   expect(host.textContent).not.toContain("Allow unverified");
   await selectFile("bad.tar.gz");
@@ -61,7 +61,7 @@ it("requires successful validation and has no client trust override", async () =
 
 it("shows cryptographic identity only when verified", async () => {
   vi.mocked(backupsApi.verify).mockResolvedValue({ ...manifest, verified: false, signer_identity: "untrusted-claim" });
-  render();
+  await render();
   await selectFile("unsigned.tar.gz");
   await flush();
   expect(host.textContent).toContain("Signature unverified");
@@ -75,7 +75,7 @@ it("does not apply stale validation to a newly selected file", async () => {
   vi.mocked(backupsApi.verify)
     .mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }))
     .mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectSecond = reject; }));
-  render();
+  await render();
   await selectFile("first.tar.gz");
   await selectFile("second.tar.gz");
   await act(async () => resolveFirst(manifest));

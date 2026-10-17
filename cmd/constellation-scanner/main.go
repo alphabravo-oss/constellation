@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"net/http"
 	neturl "net/url"
 	"os"
@@ -43,17 +44,18 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/authn"
+	"github.com/google/go-containerregistry/pkg/name"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/google/go-containerregistry/pkg/v1/types"
+
 	"github.com/alphabravocompany/constellation/internal/imageid"
 	"github.com/alphabravocompany/constellation/internal/registry"
 	"github.com/alphabravocompany/constellation/internal/scanner"
 	"github.com/alphabravocompany/constellation/pkg/observability"
 	"github.com/alphabravocompany/constellation/pkg/sigverify"
 	"github.com/alphabravocompany/constellation/pkg/version"
-	"github.com/google/go-containerregistry/pkg/authn"
-	"github.com/google/go-containerregistry/pkg/name"
-	v1 "github.com/google/go-containerregistry/pkg/v1"
-	"github.com/google/go-containerregistry/pkg/v1/remote"
-	"github.com/google/go-containerregistry/pkg/v1/types"
 )
 
 const defaultWorkerMaxConcurrent = 1
@@ -69,7 +71,8 @@ func main() {
 		jobTimeout            = flag.Duration("job-timeout", 15*time.Minute, "Per-job timeout")
 		leaseRenewInterval    = flag.Duration("lease-renew-interval", 5*time.Minute, "How often to renew claimed job leases")
 		oneShotRef            = flag.String("ref", "", "If set: run a single scan against this image ref and exit (CLI mode)")
-		oneShotRegistryID     = flag.String("registry-id", "", "CLI mode: configured registry ID; requires --control-plane and --token")
+		oneShotJobID          = flag.String("job-id", "", "CLI mode: job currently leased to this token and --instance-id for registry credentials")
+		oneShotRegistryID     = flag.String("registry-id", "", "CLI mode: configured registry ID; requires --control-plane, --token, and --job-id")
 		oneShotSARIF          = flag.String("sarif", "", "CLI mode: write SARIF to this path")
 		oneShotJSON           = flag.String("json", "", "CLI mode: write JSON to this path")
 		listenAddr            = flag.String("listen", ":8090", "Health + metrics listen address")
@@ -93,6 +96,10 @@ func main() {
 		offlineDB             = flag.Bool("offline-db", envBool("CONSTELLATION_SCANNER_OFFLINE_DB", false), "Air-gapped mode: never pull Trivy/Grype DBs from the internet (operators pre-load them).")
 	)
 	flag.Parse()
+	if err := validateOneShotOutputs(*oneShotRef, *oneShotJSON, *oneShotSARIF); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
@@ -119,10 +126,12 @@ func main() {
 	// One-shot CLI mode.
 	if *oneShotRef != "" {
 		oneShotWorker := &worker{
-			controlPlane: strings.TrimRight(*controlPlaneURL, "/"),
-			token:        *token,
-			agg:          agg,
-			logger:       logger,
+			credentialJobID: *oneShotJobID,
+			instanceID:      strings.TrimSpace(*instanceID),
+			controlPlane:    strings.TrimRight(*controlPlaneURL, "/"),
+			token:           *token,
+			agg:             agg,
+			logger:          logger,
 		}
 		res, regAuth, cleanup, err := oneShotWorker.scanOneShot(ctx, *oneShotRef, *oneShotRegistryID, scanner.ScanOptions{Timeout: *jobTimeout, GoReachability: *goReachabilityEnabled})
 		if err != nil {
@@ -143,7 +152,7 @@ func main() {
 				cleanup()
 				os.Exit(1)
 			}
-			res.Signature = verifyImageSignature(ctx, *oneShotRef, *cosignBin, roots)
+			res.Signature = verifyImageSignature(ctx, *oneShotRef, *cosignBin, roots, regAuth)
 		}
 		res.Layers = inspectImageLayers(ctx, *oneShotRef, "", regAuth)
 		scanner.AttributeLayers(res.Layers, res.Packages, res.Findings)
@@ -151,18 +160,11 @@ func main() {
 			res.FileRisks = inspectImageFileRisks(ctx, *oneShotRef, "", *fileRiskMaxFindings, regAuth, nil)
 			res.ConfigChecks = inspectImageConfigChecks(ctx, *oneShotRef, "", regAuth, nil)
 		}
-		if *oneShotJSON != "" {
-			b, _ := json.MarshalIndent(res, "", "  ")
-			_ = os.WriteFile(*oneShotJSON, b, 0o644)
+		if err := completeOneShotScan(ctx, logger, res, *oneShotJSON, *oneShotSARIF); err != nil {
+			logger.Error("scan output", "err", err)
+			cleanup()
+			os.Exit(1)
 		}
-		if *oneShotSARIF != "" {
-			// SARIF emission happens client-side from JSON; the worker keeps the dep surface small.
-			logger.Info("CLI mode: SARIF emission expected to be done by constellationctl; use that for SARIF output")
-		}
-		logger.Info("scan complete",
-			"image", res.ImageRef,
-			"packages", len(res.Packages),
-			"findings", len(res.Findings))
 		return
 	}
 
@@ -258,25 +260,13 @@ func (w *worker) scanOneShot(ctx context.Context, imageRef, registryID string, o
 	cleanup := func() {}
 	var auth registryAuth
 	if registryID != "" {
-		if strings.TrimSpace(registryID) == "" || w.controlPlane == "" || w.token == "" {
-			return nil, auth, cleanup, errors.New("--registry-id requires a nonempty ID, --control-plane, and --token")
+		if strings.TrimSpace(registryID) == "" || w.controlPlane == "" || w.token == "" || strings.TrimSpace(w.credentialJobID) == "" {
+			return nil, auth, cleanup, errors.New("--registry-id requires a nonempty ID, --control-plane, --token, and a leased --job-id")
 		}
 		var err error
-		auth, cleanup, err = w.resolveRegistryAuth(ctx, &scanJob{RegistryID: &registryID}, imageRef)
+		auth, cleanup, err = w.resolveRegistryAuth(ctx, &scanJob{ID: w.credentialJobID, RegistryID: &registryID}, imageRef)
 		if err != nil {
 			return nil, registryAuth{}, cleanup, fmt.Errorf("one-shot registry credentials: %w", err)
-		}
-		if auth.DockerConfigDir == "" {
-			anonymousDir, err := os.MkdirTemp("", "constellation-scan-dockercfg-")
-			if err != nil {
-				return nil, registryAuth{}, cleanup, fmt.Errorf("isolate anonymous registry config: %w", err)
-			}
-			if err := os.WriteFile(filepath.Join(anonymousDir, "config.json"), []byte(`{"auths":{}}`), 0o600); err != nil {
-				_ = os.RemoveAll(anonymousDir)
-				return nil, registryAuth{}, cleanup, fmt.Errorf("isolate anonymous registry config: %w", err)
-			}
-			auth.DockerConfigDir = anonymousDir
-			cleanup = func() { _ = os.RemoveAll(anonymousDir) }
 		}
 		options.Username = auth.Username
 		options.Password = auth.Password
@@ -293,6 +283,7 @@ func (w *worker) scanOneShot(ctx context.Context, imageRef, registryID string, o
 
 // worker polls the control plane for jobs and runs them on a bounded goroutine pool.
 type worker struct {
+	credentialJobID       string
 	controlPlane          string
 	token                 string
 	instanceID            string
@@ -577,7 +568,8 @@ func (w *worker) lastError() string {
 }
 
 func (w *worker) executeJob(ctx context.Context, j *scanJob) {
-	w.logger.Info("scan start", "job_id", j.ID, "target_id", j.TargetID, "target_type", j.TargetType, "target_ref", j.TargetRef)
+	// TargetRef can itself be a presigned serverless URL; log stable identities.
+	w.logger.Info("scan start", "job_id", j.ID, "target_id", j.TargetID, "target_type", j.TargetType)
 	var (
 		res     *scanner.ScanResult
 		err     error
@@ -728,7 +720,7 @@ func (w *worker) executeJob(ctx context.Context, j *scanJob) {
 	}
 	imageRef, imageDigest := scanResultIdentity(j, res)
 	if w.signatureEnabled && j.TargetType == "image" {
-		res.Signature = verifyImageSignature(ctx, imageRef, w.cosignBin, signatureRootsForJob(w.signatureRoots, j.SignatureRoots))
+		res.Signature = verifyImageSignature(ctx, imageRef, w.cosignBin, signatureRootsForJob(w.signatureRoots, j.SignatureRoots), regAuth)
 	}
 	if j.TargetType == "image" {
 		res.Layers = inspectImageLayers(ctx, imageRef, j.Platform, regAuth)
@@ -827,7 +819,8 @@ func looksLikeArtifactSource(s string) bool {
 // aggregator over the extracted directory (Syft SBOM + vuln matching), with no deployed
 // agent. The scratch directory is always cleaned up.
 func (w *worker) scanServerlessArtifact(ctx context.Context, j *scanJob, source string) (*scanner.ScanResult, error) {
-	w.logger.Info("serverless artifact scan", "job_id", j.ID, "source", source)
+	// Artifact sources may be presigned URLs; keep credentials out of logs.
+	w.logger.Info("serverless artifact scan", "job_id", j.ID)
 	unpacked, err := scanner.FetchServerlessArtifact(ctx, scanner.ServerlessArtifact{
 		Source:     source,
 		HTTPClient: w.artifactHTTPClient,
@@ -993,7 +986,7 @@ func signatureRootsForJob(static sigverify.RootsOfTrust, jobRoots []sigverify.Ro
 	return out
 }
 
-func verifyImageSignature(ctx context.Context, imageRef, cosignBin string, roots sigverify.RootsOfTrust) *scanner.SignatureResult {
+func verifyImageSignature(ctx context.Context, imageRef, cosignBin string, roots sigverify.RootsOfTrust, auth registryAuth) *scanner.SignatureResult {
 	ref := strings.TrimSpace(imageRef)
 	identity := imageid.Parse(ref)
 	if identity.Repository == "" || identity.Digest == "" {
@@ -1007,6 +1000,7 @@ func verifyImageSignature(ctx context.Context, imageRef, cosignBin string, roots
 		ref = identity.Normalized
 	}
 	verifier := sigverify.New()
+	verifier.Env = scanner.RegistryEnvironment(scanner.ScanOptions{DockerConfigDir: auth.DockerConfigDir})
 	if cosignBin != "" {
 		verifier.CosignBinary = cosignBin
 	}
@@ -1342,7 +1336,7 @@ func (w *worker) resolveRegistryAuth(ctx context.Context, j *scanJob, imageRef s
 	}
 	registryID := strings.TrimSpace(*j.RegistryID)
 
-	creds, err := w.fetchRegistryCredentials(ctx, registryID)
+	creds, err := w.fetchRegistryCredentials(ctx, registryID, j.ID)
 	if err != nil {
 		w.logger.Warn("fetch registry credentials", "job_id", j.ID, "registry_id", registryID, "err", err)
 		return registryAuth{}, noop, err
@@ -1358,7 +1352,7 @@ func (w *worker) resolveRegistryAuth(ctx context.Context, j *scanJob, imageRef s
 	}
 	if username == "" && password == "" {
 		if strings.EqualFold(strings.TrimSpace(creds.AuthKind), "none") {
-			return registryAuth{}, noop, nil
+			return anonymousRegistryAuth()
 		}
 		return registryAuth{}, noop, errors.New("registry credentials are missing")
 	}
@@ -1397,6 +1391,21 @@ func (w *worker) resolveRegistryAuth(ctx context.Context, j *scanJob, imageRef s
 	}, cleanup, nil
 }
 
+// anonymousRegistryAuth prevents explicitly anonymous registry jobs from using
+// credentials left in the scanner's ambient Docker configuration.
+func anonymousRegistryAuth() (registryAuth, func(), error) {
+	dir, err := os.MkdirTemp("", "constellation-scan-dockercfg-")
+	if err != nil {
+		return registryAuth{}, func() {}, errors.New("cannot create isolated registry config")
+	}
+	cleanup := func() { _ = os.RemoveAll(dir) }
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"auths":{}}`), 0o600); err != nil {
+		cleanup()
+		return registryAuth{}, func() {}, errors.New("cannot write isolated registry config")
+	}
+	return registryAuth{DockerConfigDir: dir}, cleanup, nil
+}
+
 func sameRegistryAuthority(left, right string) bool {
 	canonical := func(authority string) string {
 		switch strings.ToLower(authority) {
@@ -1410,16 +1419,20 @@ func sameRegistryAuthority(left, right string) bool {
 }
 
 // fetchRegistryCredentials calls the control-plane endpoint that unseals the
-// registry's stored credentials for this scanner's org (scanner-token auth).
-func (w *worker) fetchRegistryCredentials(ctx context.Context, registryID string) (*registryCredentials, error) {
-	url := w.controlPlane + "/api/v1/scanner/registry-credentials?registry_id=" + neturl.QueryEscape(registryID)
+// registry's stored credentials for this scanner's active job lease.
+func (w *worker) fetchRegistryCredentials(ctx context.Context, registryID, jobID string) (*registryCredentials, error) {
+	if strings.TrimSpace(jobID) == "" {
+		return nil, errors.New("registry credentials require a leased job")
+	}
+	url := w.controlPlane + "/api/v1/scanner/registry-credentials?registry_id=" + neturl.QueryEscape(registryID) + "&job_id=" + neturl.QueryEscape(jobID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+w.token)
 	w.setScannerHeaders(req)
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -1427,9 +1440,14 @@ func (w *worker) fetchRegistryCredentials(ctx context.Context, registryID string
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("status %d", resp.StatusCode)
 	}
+	const maxCredentialBytes = 64 << 10
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxCredentialBytes+1))
+	if err != nil || len(body) > maxCredentialBytes {
+		return nil, errors.New("invalid registry credential response size")
+	}
 	var creds registryCredentials
-	if err := json.NewDecoder(resp.Body).Decode(&creds); err != nil {
-		return nil, err
+	if err := json.Unmarshal(body, &creds); err != nil {
+		return nil, errors.New("invalid registry credential response")
 	}
 	return &creds, nil
 }
@@ -1701,12 +1719,25 @@ func scannerCacheDirHealth(path string, includeUsage bool) map[string]any {
 	}
 	var stat syscall.Statfs_t
 	if err := syscall.Statfs(path, &stat); err == nil {
-		out["free_bytes"] = int64(stat.Bavail) * int64(stat.Bsize)
+		if free, ok := scannerCacheFreeBytes(stat); ok {
+			out["free_bytes"] = free
+		}
 	}
 	if includeUsage {
 		addScannerCacheUsage(out, path)
 	}
 	return out
+}
+
+func scannerCacheFreeBytes(stat syscall.Statfs_t) (int64, bool) {
+	if stat.Bsize <= 0 || stat.Bavail > math.MaxInt64 {
+		return 0, false
+	}
+	blocks := int64(stat.Bavail)
+	if blocks > math.MaxInt64/stat.Bsize {
+		return 0, false
+	}
+	return blocks * stat.Bsize, true
 }
 
 func addScannerCacheUsage(out map[string]any, root string) {

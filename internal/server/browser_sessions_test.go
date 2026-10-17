@@ -16,13 +16,23 @@ import (
 	"github.com/alphabravocompany/constellation/internal/auth"
 )
 
-func browserRequest(t *testing.T, server *httptest.Server, method, path string, cookies []*http.Cookie, body any, headers map[string]string) (*http.Response, map[string]any) {
+// The helper owns and closes the network body; callers receive only metadata
+// and decoded JSON, so they cannot accidentally consume a closed response.
+type browserResponse struct {
+	StatusCode int
+	Header     http.Header
+	cookies    []*http.Cookie
+}
+
+func (r browserResponse) Cookies() []*http.Cookie { return r.cookies }
+
+func browserRequest(t *testing.T, server *httptest.Server, method, path string, cookies []*http.Cookie, body any, headers map[string]string) (browserResponse, map[string]any) {
 	t.Helper()
 	payload, err := json.Marshal(body)
 	if err != nil {
 		t.Fatal(err)
 	}
-	request, err := http.NewRequest(method, server.URL+path, bytes.NewReader(payload))
+	request, err := http.NewRequestWithContext(t.Context(), method, server.URL+path, bytes.NewReader(payload))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,12 +49,12 @@ func browserRequest(t *testing.T, server *httptest.Server, method, path string, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	var result map[string]any
 	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
-	return response, result
+	return browserResponse{StatusCode: response.StatusCode, Header: response.Header, cookies: response.Cookies()}, result
 }
 
 func browserCredentials(t *testing.T, pool *pgxpool.Pool, userID uuid.UUID) map[string]string {
@@ -216,7 +226,7 @@ func TestBrowserSessionConcurrentRefreshRevokesReusedFamily(t *testing.T) {
 	_, server, pool, _, userID, _, _ := newSysConfigTestServer(t)
 	cookies := browserLogin(t, server, browserCredentials(t, pool, userID))
 	var workers sync.WaitGroup
-	responses := make(chan *http.Response, 2)
+	responses := make(chan browserResponse, 2)
 	start := make(chan struct{})
 	for worker := 0; worker < 2; worker++ {
 		workers.Go(func() {

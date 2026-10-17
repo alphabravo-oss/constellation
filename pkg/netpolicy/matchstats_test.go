@@ -47,9 +47,9 @@ func TestRuleMatchStat_IsDead_DefaultWindow(t *testing.T) {
 func TestDeadRules(t *testing.T) {
 	now := time.Now().UTC()
 	stats := []RuleMatchStat{
-		{RuleID: 1, LastMatchedAt: ptime(now.Add(-1 * time.Hour))},          // alive
-		{RuleID: 2, LastMatchedAt: nil},                                     // dead (never)
-		{RuleID: 3, LastMatchedAt: ptime(now.Add(-100 * 24 * time.Hour))},   // dead (stale)
+		{RuleID: 1, LastMatchedAt: ptime(now.Add(-1 * time.Hour))},        // alive
+		{RuleID: 2, LastMatchedAt: nil},                                   // dead (never)
+		{RuleID: 3, LastMatchedAt: ptime(now.Add(-100 * 24 * time.Hour))}, // dead (stale)
 	}
 	dead := DeadRules(stats, now, DefaultDeadRuleWindow)
 	if len(dead) != 2 {

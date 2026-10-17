@@ -1,19 +1,17 @@
 import { expect, test } from "@playwright/test";
 import { authStatePath, writeAuthState } from "./auth-state";
-import { CREDS } from "./utils";
+import { CREDS, loginRequest } from "./utils";
 
 const API = process.env.VITE_API_URL ?? "http://localhost:18080";
 
 test("prepare browser and CLI authentication", async ({ request }) => {
-  const bearer = await request.post(`${API}/api/v1/auth/login`, { data: CREDS });
+  test.setTimeout(150_000);
+  const bearer = await loginRequest(request, CREDS);
   expect(bearer.ok()).toBe(true);
   const { token } = await bearer.json() as { token: string };
   expect(token).toBeTruthy();
 
-  const browser = await request.post(`${API}/api/v1/auth/login`, {
-    data: CREDS,
-    headers: { "X-Constellation-Client": "browser", Origin: new URL(API).origin },
-  });
+  const browser = await loginRequest(request, CREDS, true);
   expect(browser.ok()).toBe(true);
   const cookies = (await request.storageState()).cookies.filter((cookie) =>
     ["__Host-constellation-session", "__Host-constellation-refresh"].includes(cookie.name));

@@ -18,21 +18,21 @@ type SourceExport struct {
 }
 
 type Policy struct {
-	ID            int            `json:"id"`
-	Name          string         `json:"name"`
-	Description   string         `json:"description"`
-	Enabled       bool           `json:"enabled"`
-	FailCICDOn    bool           `json:"fail_cicd_on"`
-	BlockOn       []string       `json:"block_on"`
-	Controls      PolicyControls `json:"controls"`
+	ID          int            `json:"id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Enabled     bool           `json:"enabled"`
+	FailCICDOn  bool           `json:"fail_cicd_on"`
+	BlockOn     []string       `json:"block_on"`
+	Controls    PolicyControls `json:"controls"`
 }
 
 type PolicyControls struct {
-	BlockHighVulns        bool `json:"block_high_vulns"`
-	BlockCritical         bool `json:"block_critical_vulns"`
-	ScanCoverage          int  `json:"scan_coverage_pct"`
-	RequireMalwareScan    bool `json:"require_malware_scan"`
-	RequireSensitiveData  bool `json:"require_sensitive_data_scan"`
+	BlockHighVulns       bool `json:"block_high_vulns"`
+	BlockCritical        bool `json:"block_critical_vulns"`
+	ScanCoverage         int  `json:"scan_coverage_pct"`
+	RequireMalwareScan   bool `json:"require_malware_scan"`
+	RequireSensitiveData bool `json:"require_sensitive_data_scan"`
 }
 
 type TargetPolicy struct {

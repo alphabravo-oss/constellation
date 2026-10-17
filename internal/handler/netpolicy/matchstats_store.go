@@ -6,7 +6,10 @@ package netpolicy
 
 import (
 	"context"
+	"slices"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/google/uuid"
 
@@ -29,16 +32,21 @@ type ruleHit struct {
 	last  time.Time
 }
 
-// RecordMatches upserts cumulative match counters for a batch of rule hits,
-// keyed by rule id (== network_flows.policy_id). Best-effort telemetry: it
-// runs its own statements (not the caller's flow-insert tx) so a stats write
-// never rolls back accepted flows, and callers ignore the error beyond
-// logging. `at` timestamps advance first_matched_at (only when unset) and
-// last_matched_at (monotonically forward).
+// RecordMatches records hits for callers without an existing transaction.
+// Flow ingestion uses recordMatches with its transaction so retries cannot
+// duplicate or lose counters relative to committed flow rows.
 func (s *MatchStatsStore) RecordMatches(ctx context.Context, orgID, clusterID uuid.UUID, hits map[int64]ruleHit) error {
 	if s == nil || s.db == nil || len(hits) == 0 {
 		return nil
 	}
+	return recordMatches(ctx, s.db.Pool(), orgID, clusterID, hits)
+}
+
+type matchExecutor interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}
+
+func recordMatches(ctx context.Context, executor matchExecutor, orgID, clusterID uuid.UUID, hits map[int64]ruleHit) error {
 	const q = `
 INSERT INTO network_rule_match_stats
   (org_id, cluster_id, rule_id, match_count, first_matched_at, last_matched_at)
@@ -47,7 +55,13 @@ ON CONFLICT (org_id, cluster_id, rule_id) DO UPDATE
    SET match_count     = network_rule_match_stats.match_count + EXCLUDED.match_count,
        first_matched_at = LEAST(network_rule_match_stats.first_matched_at, EXCLUDED.first_matched_at),
        last_matched_at  = GREATEST(network_rule_match_stats.last_matched_at, EXCLUDED.last_matched_at)`
-	for ruleID, h := range hits {
+	ids := make([]int64, 0, len(hits))
+	for id := range hits {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids) // stable lock order across producers prevents deadlocks
+	for _, ruleID := range ids {
+		h := hits[ruleID]
 		if ruleID == 0 {
 			continue // 0 = "no rule attributed" (default-action / unmatched); nothing to count
 		}
@@ -55,7 +69,7 @@ ON CONFLICT (org_id, cluster_id, rule_id) DO UPDATE
 		if at.IsZero() {
 			at = time.Now().UTC()
 		}
-		if _, err := s.db.Pool().Exec(ctx, q, orgID, clusterID, ruleID, h.count, at.UTC()); err != nil {
+		if _, err := executor.Exec(ctx, q, orgID, clusterID, ruleID, h.count, at.UTC()); err != nil {
 			return err
 		}
 	}

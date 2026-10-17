@@ -43,8 +43,13 @@ var validatedThreatIDs atomic.Pointer[map[uint32]struct{}]
 func setValidatedThreatIDs(rules []dlpRuleWire) {
 	m := map[uint32]struct{}{}
 	for _, r := range rules {
+		wireID, err := signatureWireID(r.DPRuleID)
+		if err != nil {
+			// Preserve the last confirmed set on invalid input.
+			return
+		}
 		if strings.Contains(r.Name, validatedPIIPackMarker) {
-			m[dp.DLPSigID(uint32(r.DPRuleID))] = struct{}{}
+			m[dp.DLPSigID(wireID)] = struct{}{}
 		}
 	}
 	validatedThreatIDs.Store(&m)

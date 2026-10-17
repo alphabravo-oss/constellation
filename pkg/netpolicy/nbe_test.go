@@ -4,10 +4,10 @@ import "testing"
 
 func TestEvaluateNBE(t *testing.T) {
 	cases := []struct {
-		name             string
-		src, dst         string
-		mode             NBEMode
-		wantCross        bool
+		name               string
+		src, dst           string
+		mode               NBEMode
+		wantCross          bool
 		wantFlag, wantDeny bool
 	}{
 		{"same namespace, protect", "app", "app", NBEProtect, false, false, false},

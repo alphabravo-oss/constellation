@@ -541,7 +541,7 @@ func TestEventsIngest_BulkHappyPath(t *testing.T) {
 	}
 	h := NewEventsIngest(d, audit.New(pool), bf)
 
-	req := httptest.NewRequest("POST", "/api/v1/events:bulk", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/events:bulk", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+raw)
 	w := httptest.NewRecorder()
 	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(w, req)
@@ -597,7 +597,7 @@ func TestRuntimeAgentTokenMiddleware_Rejects(t *testing.T) {
 	d := openTestDB(t)
 	defer d.Close()
 
-	r := httptest.NewRequest("POST", "/api/v1/events:bulk", nil)
+	r := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/events:bulk", nil)
 	r.Header.Set("Authorization", "Bearer not-a-real-token")
 	w := httptest.NewRecorder()
 	called := false

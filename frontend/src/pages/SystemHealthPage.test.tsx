@@ -1,6 +1,6 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+import { TestRouter } from "@/test/router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, expect, it, vi } from "vitest";
 import { supportBundles, systemHealth, type SupportBundleJob, type SystemHealth } from "@/api/client";
@@ -37,7 +37,7 @@ async function render(path = "/settings/health?tab=bundles") {
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   vi.mocked(systemHealth.overview).mockResolvedValue(overview);
   await act(async () => root!.render(
-    <QueryClientProvider client={queryClient}><MemoryRouter initialEntries={[path]}><SystemHealthPage /></MemoryRouter></QueryClientProvider>,
+    <QueryClientProvider client={queryClient}><TestRouter initialEntries={[path]}><SystemHealthPage /></TestRouter></QueryClientProvider>,
   ));
   await flush();
 }

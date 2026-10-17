@@ -3,10 +3,13 @@ package scanning
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
@@ -60,22 +63,6 @@ type serverlessFunctionDTO struct {
 	Metadata           json.RawMessage `json:"metadata,omitempty"`
 }
 
-type serverlessFunctionMetadata struct {
-	FunctionName       string          `json:"function_name"`
-	Provider           string          `json:"provider"`
-	AccountID          string          `json:"account_id"`
-	Region             string          `json:"region"`
-	Runtime            string          `json:"runtime"`
-	Version            string          `json:"version"`
-	Architecture       string          `json:"architecture"`
-	PackageCount       int             `json:"package_count"`
-	Role               string          `json:"role"`
-	Handler            string          `json:"handler"`
-	PackageType        string          `json:"package_type"`
-	Layers             []string        `json:"layers"`
-	PermissionAnalysis json.RawMessage `json:"permission_analysis"`
-}
-
 type serverlessEvidenceDTO struct {
 	ID            uuid.UUID         `json:"id"`
 	InventoryHash string            `json:"inventory_hash"`
@@ -114,26 +101,7 @@ type serverlessFindingDTO struct {
 	LastSeen   time.Time       `json:"last_seen_at"`
 }
 
-func (h *ServerlessInventoryHandler) List(w http.ResponseWriter, r *http.Request) {
-	subj, ok := authctx.SubjectFrom(r.Context())
-	if !ok {
-		jsonError(w, http.StatusUnauthorized, "subject required")
-		return
-	}
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 500 {
-		limit = 100
-	}
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	if offset < 0 {
-		offset = 0
-	}
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	provider := strings.TrimSpace(r.URL.Query().Get("provider"))
-	accountID := strings.TrimSpace(r.URL.Query().Get("account_id"))
-	region := strings.TrimSpace(r.URL.Query().Get("region"))
-
-	rows, err := h.db.Pool().Query(r.Context(), `
+const serverlessInventorySQL = `
 WITH finding_rollup AS (
     SELECT scan_target_id,
            COUNT(*) FILTER (WHERE lifecycle = 'open')::int AS open_findings,
@@ -156,7 +124,7 @@ SELECT st.id, st.ref, st.source_type, COALESCE(st.source_ref, ''),
        WHERE org_id = st.org_id
          AND scan_target_id = st.id
          AND evidence_type = 'package-inventory'
-       ORDER BY observed_at DESC
+       ORDER BY observed_at DESC, id DESC
        LIMIT 1
   ) ev ON true
   LEFT JOIN LATERAL (
@@ -164,38 +132,82 @@ SELECT st.id, st.ref, st.source_type, COALESCE(st.source_ref, ''),
         FROM scan_jobs
        WHERE org_id = st.org_id
          AND target_id = st.id
-       ORDER BY requested_at DESC
+       ORDER BY requested_at DESC, id DESC
        LIMIT 1
   ) sj ON true
   LEFT JOIN finding_rollup fr ON fr.scan_target_id = st.id
  WHERE st.org_id = $1
    AND st.type = 'serverless'
-   AND ($2 = '' OR st.ref ILIKE '%' || $2 || '%' OR st.metadata->>'function_name' ILIKE '%' || $2 || '%')
-   AND ($3 = '' OR st.metadata->>'provider' = $3)
-   AND ($4 = '' OR st.metadata->>'account_id' = $4)
-   AND ($5 = '' OR st.metadata->>'region' = $5)
- ORDER BY st.last_seen_at DESC
- LIMIT $6 OFFSET $7`, subj.OrgID, q, provider, accountID, region, limit, offset)
+   AND ($2 = '' OR strpos(lower(st.ref), lower($2)) > 0 OR strpos(lower(CASE WHEN jsonb_typeof(st.metadata->'function_name')='string' THEN st.metadata->>'function_name' ELSE '' END), lower($2)) > 0)
+   AND ($3 = '' OR CASE WHEN jsonb_typeof(st.metadata->'provider')='string' THEN st.metadata->>'provider' ELSE '' END = $3)
+   AND ($4 = '' OR CASE WHEN jsonb_typeof(st.metadata->'account_id')='string' THEN st.metadata->>'account_id' ELSE '' END = $4)
+   AND ($5 = '' OR CASE WHEN jsonb_typeof(st.metadata->'region')='string' THEN st.metadata->>'region' ELSE '' END = $5)`
+
+const serverlessLevelSQL = `lower(btrim(COALESCE(CASE WHEN jsonb_typeof(metadata->'permission_analysis'->'level')='string' THEN metadata->'permission_analysis'->>'level' ELSE '' END,''), E' \t\r\n\014\013'))`
+const serverlessCanonicalLevelSQL = `CASE WHEN ` + serverlessLevelSQL + ` IN ('critical','high','medium','low','info') THEN ` + serverlessLevelSQL + ` ELSE 'unknown' END`
+
+func serverlessInventoryDefinition(r *http.Request) (inventorylist.Definition, inventorylist.Options, error) {
+	subj, ok := authctx.SubjectFrom(r.Context())
+	if !ok {
+		return inventorylist.Definition{}, inventorylist.Options{}, fmt.Errorf("subject required")
+	}
+	values, err := inventorylist.Query(r)
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, "query: "+err.Error())
+		return inventorylist.Definition{}, inventorylist.Options{}, err
+	}
+	o, err := inventorylist.Parse(values, map[string]string{"function": "lower(COALESCE(NULLIF(CASE WHEN jsonb_typeof(metadata->'function_name')='string' THEN metadata->>'function_name' ELSE '' END,''),function_ref))", "posture": "CASE " + serverlessCanonicalLevelSQL + " WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END", "packages": "CASE WHEN latest_evidence_id IS NULL AND (metadata->>'package_count') ~ '^[0-9]{1,9}$' THEN (metadata->>'package_count')::bigint ELSE package_count END", "scan": "COALESCE(latest_observed_at,last_seen_at)", "findings": "open_findings"}, "scan")
+	if err != nil {
+		return inventorylist.Definition{}, o, err
+	}
+	posture, err := inventorylist.Filter(values, "posture", "critical", "high", "medium", "low", "info", "unknown")
+	if err != nil {
+		return inventorylist.Definition{}, o, err
+	}
+	args := []any{subj.OrgID, strings.TrimSpace(values.Get("q")), strings.TrimSpace(values.Get("provider")), strings.TrimSpace(values.Get("account_id")), strings.TrimSpace(values.Get("region")), posture}
+	where := "$6 = '' OR " + serverlessCanonicalLevelSQL + "=$6"
+	return inventorylist.Definition{SQL: serverlessInventorySQL, Columns: "id,function_ref,source_type,source_ref,inventory_hash,metadata,last_seen_at,latest_evidence_id,package_count,latest_observed_at,latest_job_id,latest_job_status,open_findings,critical_findings,high_findings", Where: where, Summary: `jsonb_build_object('total',count(*),'packages',COALESCE(sum(CASE WHEN latest_evidence_id IS NULL AND (metadata->>'package_count') ~ '^[0-9]{1,9}$' THEN (metadata->>'package_count')::bigint ELSE package_count END),0),'findings',COALESCE(sum(open_findings),0),'critical_high',COALESCE(sum(critical_findings+high_findings),0),'scanned',count(latest_evidence_id),'role_risks',count(*) FILTER(WHERE (` + serverlessCanonicalLevelSQL + `) IN('critical','high')),'providers',count(DISTINCT NULLIF(CASE WHEN jsonb_typeof(metadata->'provider')='string' THEN metadata->>'provider' ELSE '' END,'')),'regions',count(DISTINCT NULLIF(CASE WHEN jsonb_typeof(metadata->'region')='string' THEN metadata->>'region' ELSE '' END,'')))`, Args: args}, o, nil
+}
+
+func (h *ServerlessInventoryHandler) List(w http.ResponseWriter, r *http.Request) {
+	if _, ok := authctx.SubjectFrom(r.Context()); !ok {
+		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "subject required"})
 		return
 	}
-	defer rows.Close()
-
-	out := make([]serverlessFunctionDTO, 0)
-	for rows.Next() {
-		fn, err := scanServerlessFunctionRow(rows)
-		if err != nil {
-			jsonError(w, http.StatusInternalServerError, "scan: "+err.Error())
-			return
-		}
-		out = append(out, fn)
+	d, o, err := serverlessInventoryDefinition(r)
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{
-		"serverless_functions": out,
-		"limit":                limit,
-		"offset":               offset,
+	items, meta, err := inventorylist.Read(r.Context(), h.db.Pool(), d, o, func(row inventorylist.Row) (serverlessFunctionDTO, error) { return scanServerlessFunctionRow(row) })
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"serverless_functions": items, "limit": o.Limit, "offset": o.Offset, "sort": o.Sort, "order": o.Order, "total": meta.Total, "has_more": meta.HasMore, "summary": meta.Summary})
+}
+
+func (h *ServerlessInventoryHandler) ExportCSV(w http.ResponseWriter, r *http.Request) {
+	if _, ok := authctx.SubjectFrom(r.Context()); !ok {
+		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "subject required"})
+		return
+	}
+	d, o, err := serverlessInventoryDefinition(r)
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	body, meta, err := inventorylist.CSV(r.Context(), h.db.Pool(), d, o, func(row inventorylist.Row) (serverlessFunctionDTO, error) { return scanServerlessFunctionRow(row) }, []string{"ID", "Function", "Reference", "Provider", "Account", "Region", "Runtime", "Packages", "Open findings", "Critical", "High", "Role posture", "Permission status", "Job status", "Evidence observed", "Last seen"}, func(item serverlessFunctionDTO) []string {
+		observed := ""
+		if item.LatestObservedAt != nil {
+			observed = item.LatestObservedAt.Format(time.RFC3339)
+		}
+		return []string{item.ID.String(), item.FunctionName, item.FunctionRef, item.Provider, item.AccountID, item.Region, item.Runtime, strconv.Itoa(item.PackageCount), strconv.Itoa(item.OpenFindings), strconv.Itoa(item.CriticalFindings), strconv.Itoa(item.HighFindings), item.PermissionLevel, item.PermissionStatus, item.LatestJobStatus, observed, item.LastSeenAt.Format(time.RFC3339)}
 	})
+	if err != nil {
+		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	inventorylist.WriteCSV(w, "constellation-serverless-functions.csv", body, meta)
 }
 
 func (h *ServerlessInventoryHandler) Get(w http.ResponseWriter, r *http.Request) {
@@ -264,44 +276,48 @@ func scanServerlessFunctionRow(row serverlessFunctionScanner) (serverlessFunctio
 	fn.LatestEvidenceID = evidenceID
 	fn.LatestObservedAt = evidenceObservedAt
 	fn.LatestJobID = jobID
-	if evidencePackageCount != nil {
+	if evidenceID != nil && evidencePackageCount != nil {
 		fn.PackageCount = *evidencePackageCount
 	}
 	return fn, nil
 }
 
 func applyServerlessMetadata(fn *serverlessFunctionDTO, metadataRaw json.RawMessage) {
-	if fn == nil || len(metadataRaw) == 0 {
+	if fn == nil {
 		return
 	}
-	var metadata serverlessFunctionMetadata
-	if err := json.Unmarshal(metadataRaw, &metadata); err != nil {
-		return
-	}
-	fn.FunctionName = metadata.FunctionName
-	fn.Provider = metadata.Provider
-	fn.AccountID = metadata.AccountID
-	fn.Region = metadata.Region
-	fn.Runtime = metadata.Runtime
-	fn.Version = metadata.Version
-	fn.Architecture = metadata.Architecture
-	fn.Role = metadata.Role
-	fn.Handler = metadata.Handler
-	fn.PackageType = metadata.PackageType
-	fn.Layers = metadata.Layers
+	fields := inventorylist.MetadataFields(metadataRaw)
+	fn.FunctionName = inventorylist.MetadataText(fields, "function_name")
+	fn.Provider = inventorylist.MetadataText(fields, "provider")
+	fn.AccountID = inventorylist.MetadataText(fields, "account_id")
+	fn.Region = inventorylist.MetadataText(fields, "region")
+	fn.Runtime = inventorylist.MetadataText(fields, "runtime")
+	fn.Version = inventorylist.MetadataText(fields, "version")
+	fn.Architecture = inventorylist.MetadataText(fields, "architecture")
+	fn.Role = inventorylist.MetadataText(fields, "role")
+	fn.Handler = inventorylist.MetadataText(fields, "handler")
+	fn.PackageType = inventorylist.MetadataText(fields, "package_type")
+	fn.Layers = nil
+	_ = json.Unmarshal(fields["layers"], &fn.Layers)
 	if fn.PackageCount == 0 {
-		fn.PackageCount = metadata.PackageCount
+		fn.PackageCount = inventorylist.MetadataPackageCount(fields)
 	}
-	if len(metadata.PermissionAnalysis) > 0 && string(metadata.PermissionAnalysis) != "null" {
-		fn.PermissionAnalysis = metadata.PermissionAnalysis
-		var pa struct {
-			Status string `json:"status"`
-			Level  string `json:"level"`
-		}
-		if err := json.Unmarshal(metadata.PermissionAnalysis, &pa); err == nil {
-			fn.PermissionStatus = strings.TrimSpace(pa.Status)
-			fn.PermissionLevel = strings.TrimSpace(pa.Level)
-		}
+	fn.PermissionLevel = "unknown"
+	if raw := fields["permission_analysis"]; len(raw) > 0 && string(raw) != "null" {
+		fn.PermissionAnalysis = raw
+		permission := inventorylist.MetadataFields(raw)
+		fn.PermissionStatus = strings.TrimSpace(inventorylist.MetadataText(permission, "status"))
+		fn.PermissionLevel = normalizedPermissionLevel(inventorylist.MetadataText(permission, "level"))
+	}
+}
+
+func normalizedPermissionLevel(value string) string {
+	value = strings.ToLower(strings.Trim(value, " \t\r\n\f\v"))
+	switch value {
+	case "critical", "high", "medium", "low", "info":
+		return value
+	default:
+		return "unknown"
 	}
 }
 

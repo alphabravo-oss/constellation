@@ -132,7 +132,7 @@ VALUES ($1, $2, 'prod/web', 'log-writer', '/var/log/app.log', ARRAY['logger'], $
 	router.Put("/groups/{id}", h.Update)
 	router.Delete("/groups/{id}", h.Delete)
 
-	req := httptest.NewRequest(http.MethodGet, "/groups/"+groupID.String()+"/usage?cluster_id="+clusterID.String(), nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/groups/"+groupID.String()+"/usage?cluster_id="+clusterID.String(), nil)
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -168,7 +168,7 @@ VALUES ($1, $2, 'prod/web', 'log-writer', '/var/log/app.log', ARRAY['logger'], $
 		t.Fatalf("coverage omitted not-modeled families: %+v", usage.Coverage)
 	}
 
-	updateReq := httptest.NewRequest(http.MethodPut, "/groups/"+groupID.String()+"?cluster_id="+clusterID.String(), strings.NewReader(`{
+	updateReq := httptest.NewRequestWithContext(t.Context(), http.MethodPut, "/groups/"+groupID.String()+"?cluster_id="+clusterID.String(), strings.NewReader(`{
   "name":"`+groupName+`-renamed",
   "kind":"ground",
   "comment":"rename while referenced",
@@ -193,7 +193,7 @@ VALUES ($1, $2, 'prod/web', 'log-writer', '/var/log/app.log', ARRAY['logger'], $
 		t.Fatalf("update conflict = %+v", updateConflict)
 	}
 
-	delReq := httptest.NewRequest(http.MethodDelete, "/groups/"+groupID.String(), nil)
+	delReq := httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/groups/"+groupID.String(), nil)
 	delReq = delReq.WithContext(WithSubject(delReq.Context(), Subject{UserID: userID, OrgID: orgID}))
 	delRec := httptest.NewRecorder()
 	router.ServeHTTP(delRec, delReq)
@@ -220,7 +220,7 @@ VALUES ($1, $2, 'prod/web', 'log-writer', '/var/log/app.log', ARRAY['logger'], $
 	if _, err := pool.Exec(ctx, `DELETE FROM policies WHERE org_id = $1 AND engine = 'constellation-admission'`, orgID); err != nil {
 		t.Fatalf("clear admission rule: %v", err)
 	}
-	delReq = httptest.NewRequest(http.MethodDelete, "/groups/"+groupID.String(), nil)
+	delReq = httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/groups/"+groupID.String(), nil)
 	delReq = delReq.WithContext(WithSubject(delReq.Context(), Subject{UserID: userID, OrgID: orgID}))
 	delRec = httptest.NewRecorder()
 	router.ServeHTTP(delRec, delReq)
@@ -262,7 +262,7 @@ func TestOrgWideGroupReferencesCannotBeHiddenByClusterFilter(t *testing.T) {
 	router.Delete("/groups/{id}", handler.Delete)
 	request := func(method, path, body string) *httptest.ResponseRecorder {
 		t.Helper()
-		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req := httptest.NewRequestWithContext(t.Context(), method, path, strings.NewReader(body))
 		req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 		response := httptest.NewRecorder()
 		router.ServeHTTP(response, req)
@@ -365,7 +365,7 @@ VALUES ($1, $2, 'concurrent admission', '', 'constellation-admission', 'admissio
 				if method == http.MethodPut {
 					body = `{"name":"` + groupName + `-renamed","kind":"ground","criteria":[],"policy_mode":"monitor","profile_mode":"monitor"}`
 				}
-				request := httptest.NewRequest(method, "/groups/"+groupID.String(), strings.NewReader(body))
+				request := httptest.NewRequestWithContext(t.Context(), method, "/groups/"+groupID.String(), strings.NewReader(body))
 				request = request.WithContext(WithSubject(request.Context(), Subject{UserID: userID, OrgID: orgID}))
 				result := make(chan *httptest.ResponseRecorder, 1)
 				go func() {
@@ -430,7 +430,7 @@ func TestGroupDeleteWaitsForOrgDeletionBeforeTakingReferenceLocks(t *testing.T) 
 	handler := NewGroups(database, audit.New(pool))
 	router := chi.NewRouter()
 	router.Delete("/groups/{id}", handler.Delete)
-	request := httptest.NewRequest(http.MethodDelete, "/groups/"+groupID.String(), nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/groups/"+groupID.String(), nil)
 	request = request.WithContext(WithSubject(request.Context(), Subject{UserID: userID, OrgID: orgID}))
 	result := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
@@ -507,7 +507,7 @@ func TestGroupDeleteReleasesPartialReferenceLocksWhileRetrying(t *testing.T) {
 	handler := NewGroups(database, audit.New(pool))
 	router := chi.NewRouter()
 	router.Delete("/groups/{id}", handler.Delete)
-	request := httptest.NewRequest(http.MethodDelete, "/groups/"+groupID.String(), nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/groups/"+groupID.String(), nil)
 	request = request.WithContext(WithSubject(request.Context(), Subject{UserID: userID, OrgID: orgID}))
 	result := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
@@ -593,7 +593,7 @@ VALUES ($1, $2, $3, $4, 'ground', '[{"key":"namespace","op":"eq","value":"prod"}
 		t.Fatalf("group: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/groups?cluster_id="+clusterID.String(), nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/groups?cluster_id="+clusterID.String(), nil)
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	NewGroups(d, nil).List(w, req)

@@ -7,9 +7,9 @@ import (
 
 func TestParseReqImageName(t *testing.T) {
 	cases := []struct {
-		in              string
-		registry, repo  string
-		tag, digest     string
+		in             string
+		registry, repo string
+		tag, digest    string
 	}{
 		{"ubuntu", "https://docker.io/", "library/ubuntu", "latest", ""},
 		{"ubuntu:24.04", "https://docker.io/", "library/ubuntu", "24.04", ""},

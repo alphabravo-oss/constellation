@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -21,7 +22,7 @@ import (
 // the legacy field is omitted, and store every column.
 func TestNetworkFlowsIngest_DPFields(t *testing.T) {
 	d := openTestDB(t)
-	defer d.Close()
+	t.Cleanup(d.Close)
 	ctx := context.Background()
 	pool := d.Pool()
 
@@ -76,12 +77,39 @@ func TestNetworkFlowsIngest_DPFields(t *testing.T) {
 	}})
 
 	h := NewNetworkFlowsIngest(d)
-	req := httptest.NewRequest("POST", "/api/v1/network-flows:bulk", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/network-flows:bulk", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+raw)
 	w := httptest.NewRecorder()
 	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	// An acknowledged replay must not insert data or increment rule hits again.
+	producer := uuid.NewString()
+	// The original legacy upload remains a separate observation. Replay a new
+	// identified batch twice and count only its distinct EP MAC.
+	identity := uuid.MustParse(producer)
+	replayMAC := net.HardwareAddr(append([]byte{0x7a}, identity[:5]...)).String()
+	replayBody := bytes.ReplaceAll(body, []byte("76:0d:1e:a2:58:a1"), []byte(replayMAC))
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM network_flows WHERE org_id=$1 AND ep_mac=$2`, orgID, replayMAC)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM telemetry_producers WHERE producer_id=$1`, producer)
+	})
+	for range 2 {
+		request := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/network-flows:bulk", bytes.NewReader(replayBody))
+		request.Header.Set("Authorization", "Bearer "+raw)
+		request.Header.Set("X-Constellation-Producer", producer)
+		request.Header.Set("X-Constellation-Sequence", "1")
+		recorder := httptest.NewRecorder()
+		handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusOK || recorder.Header().Get("X-Constellation-Ack") != "1" {
+			t.Fatalf("replay: %d %s", recorder.Code, recorder.Body.String())
+		}
+	}
+	var copies int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM network_flows WHERE org_id=$1 AND ep_mac=$2`, orgID, replayMAC).Scan(&copies); err != nil || copies != 1 {
+		t.Fatalf("replay copies=%d err=%v", copies, err)
 	}
 
 	// Verify the row landed with every dp field populated and `bytes` was
@@ -135,6 +163,53 @@ SELECT bytes, client_bytes, server_bytes, sessions,
 	}
 	if gotEPMAC != "76:0d:1e:a2:58:a1" {
 		t.Errorf("ep_mac = %q want 76:0d:1e:a2:58:a1", gotEPMAC)
+	}
+}
+
+func TestNetworkFlowsIngestLateObservationReachesRollup(t *testing.T) {
+	d := openTestDB(t)
+	t.Cleanup(d.Close)
+	ctx := context.Background()
+	pool := d.Pool()
+	org, cluster := uuid.New(), uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id,name,display_name) VALUES ($1,$2,$2)`, org, "late-flow-"+org.String()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM network_flows WHERE org_id=$1`, org)
+		_, _ = pool.Exec(ctx, `DELETE FROM network_flow_rollups WHERE org_id=$1`, org)
+		_, _ = pool.Exec(ctx, `DELETE FROM orgs WHERE id=$1`, org)
+	})
+	if _, err := pool.Exec(ctx, `INSERT INTO clusters (id,org_id,name) VALUES ($1,$2,'late')`, cluster, org); err != nil {
+		t.Fatal(err)
+	}
+	raw, tokenID, err := handler.IssueRuntimeAgentToken(ctx, pool, org, "late", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO cluster_init_bundles (org_id,cluster_id,name,expires_at,runtime_agent_token_id,kek_fingerprint,contents_encrypted) VALUES ($1,$2,'late',now()+interval '1 hour',$3,'test','\x00'::bytea)`, org, cluster, tokenID); err != nil {
+		t.Fatal(err)
+	}
+	// Use the existing watermark instead of mutating shared aggregate state.
+	var watermark time.Time
+	if err := pool.QueryRow(ctx, `SELECT watermark FROM network_flow_rollup_state WHERE id=true`).Scan(&watermark); err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal([]handler.FlowIngestRow{{SrcWorkload: "late/source", DstWorkload: "late/destination", Protocol: "tcp", At: watermark.Add(-time.Hour), Bytes: 42, Packets: 3}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/network-flows:bulk", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+raw)
+	w := httptest.NewRecorder()
+	h := NewNetworkFlowsIngest(d)
+	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("late ingest: %d %s", w.Code, w.Body.String())
+	}
+	var count, bytes, packets int64
+	if err := pool.QueryRow(ctx, `SELECT flow_count,sum_bytes,sum_packets FROM network_flow_rollups WHERE org_id=$1 AND cluster_id=$2`, org, cluster).Scan(&count, &bytes, &packets); err != nil || count != 1 || bytes != 42 || packets != 3 {
+		t.Fatalf("late rollup count=%d bytes=%d packets=%d err=%v", count, bytes, packets, err)
 	}
 }
 
@@ -198,7 +273,7 @@ func TestNetworkFlowsIngest_HubbleSource(t *testing.T) {
 	})
 
 	h := NewNetworkFlowsIngest(d)
-	req := httptest.NewRequest("POST", "/api/v1/network-flows:bulk", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/network-flows:bulk", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+raw)
 	w := httptest.NewRecorder()
 	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(w, req)
@@ -275,7 +350,7 @@ func TestNetworkFlowsIngest_LegacyBPFStillWorks(t *testing.T) {
 		// No Source field → defaults to "bpf". No client_bytes/etc.
 	}})
 	h := NewNetworkFlowsIngest(d)
-	req := httptest.NewRequest("POST", "/api/v1/network-flows:bulk", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/network-flows:bulk", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+raw)
 	w := httptest.NewRecorder()
 	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(w, req)

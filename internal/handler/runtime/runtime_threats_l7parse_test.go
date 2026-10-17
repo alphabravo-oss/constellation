@@ -32,6 +32,29 @@ func TestParsePacketL7_HTTP(t *testing.T) {
 	}
 }
 
+// Case-variant header names remain retained evidence, but must not bypass the
+// preview's eight-header bound or replace earlier evidence after the cap.
+func TestParsePacketL7_HTTPHeaderCap(t *testing.T) {
+	packet := []byte("GET / HTTP/1.1\r\n" +
+		"Host: first.example\r\n" +
+		"User-Agent: first-agent\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"Content-Length: 0\r\n" +
+		"Referer: source\r\n" +
+		"X-Forwarded-For: 192.0.2.1\r\n" +
+		"Authorization: first-auth\r\n" +
+		"Cookie: first-cookie\r\n" +
+		"host: extra.example\r\n" +
+		"Host: overwritten.example\r\n\r\n")
+	preview := parsePacketL7(packet, 80)
+	if preview == nil || preview.HTTP == nil {
+		t.Fatal("HTTP preview missing")
+	}
+	if len(preview.HTTP.Headers) != 8 || preview.HTTP.Headers["Host"] != "first.example" || preview.HTTP.Headers["host"] != "" {
+		t.Fatalf("preview exceeded its first eight headers: %v", preview.HTTP.Headers)
+	}
+}
+
 // TestParsePacketL7_DNSQuery hand-builds a minimal A-record query for
 // "tunnel.evil.example" (the kind of payload DNS_TUNNELING fires on).
 func TestParsePacketL7_DNSQuery(t *testing.T) {

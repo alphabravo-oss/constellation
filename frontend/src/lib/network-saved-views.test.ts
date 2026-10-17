@@ -6,6 +6,8 @@ import {
   mergeNetworkSavedViews,
   networkActivitySavedViewsStorageKey,
   parseNetworkSavedViewsImport,
+  previewNetworkSavedViewsImport,
+  normalizeNetworkSavedViewSnapshot,
   suggestNetworkSavedViewName,
   type NetworkSavedView,
 } from "./network-saved-views";
@@ -48,6 +50,7 @@ describe("network activity saved views", () => {
     });
 
     expect(snapshot).toEqual({
+      conversation_filters: { from: "", to: "", verdict_group: "" },
       schema_version: 2,
       workspace_tab: "threats",
       hours: 24,
@@ -117,6 +120,7 @@ describe("network activity saved views", () => {
         cluster_id: "cluster-1",
         saved_at: "2026-08-23T00:00:00.000Z",
         filters: {
+          conversation_filters: { from: "", to: "", verdict_group: "" },
           schema_version: 2,
           workspace_tab: "map",
           hours: 168,
@@ -155,6 +159,13 @@ describe("network activity saved views", () => {
     ]);
   });
 
+  it("round-trips exact directed conversation filters in a saved view", () => {
+    const view = makeView("pair", "Exact blocked pair");
+    view.filters.conversation_filters = { from: `prod/${"a".repeat(180)}`, to: "other/api", verdict_group: "blocked" };
+    const bundle = buildNetworkSavedViewsExport("cluster-1", [view], "2026-10-12T00:00:00Z");
+    expect(parseNetworkSavedViewsImport(JSON.stringify(bundle), "cluster-1")[0].filters.conversation_filters).toEqual(view.filters.conversation_filters);
+  });
+
   it("merges imports without reusing an existing id", () => {
     const existing = makeView("view-1", "Existing");
     const imported = [makeView("view-1", "Imported"), makeView("view-2", "Second")];
@@ -180,6 +191,19 @@ describe("network activity saved views", () => {
   });
 });
 
+it.each([
+  { hours: 0 }, { workspace_tab: "unknown" }, { schema_version: 99 }, { protocols: {} }, { verdicts_visible: { allow: "false" } },
+  { session_filters: { port: "invalid" } }, { pcap_filters: { dst_port: "70000" } }, { conversation_filters: { from: "prod/api", to: "prod/ui", verdict_group: "invented" } },
+])("rejects a malformed snapshot instead of silently broadening filters: %j", invalid => {
+  expect(normalizeNetworkSavedViewSnapshot({ ...makeView("id", "Named").filters, ...invalid })).toBeNull();
+});
+it("previews rejected records and a different source cluster before explicit rebinding", () => {
+  const preview = previewNetworkSavedViewsImport(JSON.stringify({ ...buildNetworkSavedViewsExport("old-cluster", [makeView("id", "Named")]), views: [makeView("id", "Named"), { id: "bad", name: "Broken", filters: {} }] }), "new-cluster");
+  expect(preview.rejected).toBe(1); expect(preview.sourceCluster).toBe("old-cluster"); expect(preview.views[0].cluster_id).toBe("new-cluster");
+});
+it.each(["{}", "{broken", JSON.stringify({ schema_version: 3, views: [] }), JSON.stringify({ kind: "other", views: [] })])("rejects invalid import envelopes with a meaningful error", text => { expect(() => previewNetworkSavedViewsImport(text, "cluster")).toThrow(); });
+it("preserves long exact workload filters instead of truncating them", () => { const view = makeView("id", "Named"); const workload = `prod/${"api".repeat(100)}`; view.filters.session_filters.workload = workload; view.filters.pcap_filters.workload = workload; expect(normalizeNetworkSavedViewSnapshot(view.filters)?.session_filters.workload).toBe(workload); expect(parseNetworkSavedViewsImport(JSON.stringify([view]), "cluster")[0].filters.pcap_filters.workload).toBe(workload); });
+
 function makeView(id: string, name: string): NetworkSavedView {
   return {
     id,
@@ -203,3 +227,5 @@ function makeView(id: string, name: string): NetworkSavedView {
     }),
   };
 }
+
+it("preserves optional capture ledger search/namespace/node while keeping legacy snapshots unchanged", () => { const view = makeView("id", "Named"); const legacy = normalizeNetworkSavedViewSnapshot(view.filters)!; expect(legacy.pcap_filters).not.toHaveProperty("q"); const rich = { ...view.filters, pcap_filters: { ...view.filters.pcap_filters, q: " needle%_literal ", namespace: "custom-install", node: "node-a" } }; const normalized = normalizeNetworkSavedViewSnapshot(rich)!; expect(normalized.pcap_filters).toMatchObject({ q: "needle%_literal", namespace: "custom-install", node: "node-a" }); expect(parseNetworkSavedViewsImport(JSON.stringify([{ ...view, filters: rich }]), "cluster")[0].filters.pcap_filters).toMatchObject({ q: "needle%_literal", namespace: "custom-install", node: "node-a" }); expect(normalizeNetworkSavedViewSnapshot({ ...rich, pcap_filters: { ...rich.pcap_filters, node: 123 } })).toBeNull(); });

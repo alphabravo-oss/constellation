@@ -1,6 +1,6 @@
 {{- if and (eq (include "constellation.postgresMode" .) "cnpg") .Values.postgres.cloudnativepg.scheduledBackup.enabled }}
-{{- if not .Values.postgres.cloudnativepg.backup }}
-{{- fail "postgres.cloudnativepg.scheduledBackup.enabled=true requires postgres.cloudnativepg.backup configuration" }}
+{{- if not (or .Values.postgres.cloudnativepg.backup .Values.postgres.cloudnativepg.barmanCloud.enabled) }}
+{{- fail "postgres.cloudnativepg.scheduledBackup.enabled=true requires backup configuration or barmanCloud.enabled=true" }}
 {{- end }}
 apiVersion: postgresql.cnpg.io/v1
 kind: ScheduledBackup
@@ -11,6 +11,11 @@ metadata:
     {{- include "constellation.labels" . | nindent 4 }}
     app.kubernetes.io/component: postgres
 spec:
+  {{- if .Values.postgres.cloudnativepg.barmanCloud.enabled }}
+  method: plugin
+  pluginConfiguration:
+    name: {{ .Values.postgres.cloudnativepg.barmanCloud.pluginName | quote }}
+  {{- end }}
   schedule: {{ .Values.postgres.cloudnativepg.scheduledBackup.schedule | quote }}
   immediate: {{ .Values.postgres.cloudnativepg.scheduledBackup.immediate }}
   backupOwnerReference: {{ .Values.postgres.cloudnativepg.scheduledBackup.backupOwnerReference }}

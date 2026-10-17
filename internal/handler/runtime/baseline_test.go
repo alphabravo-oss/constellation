@@ -18,7 +18,7 @@ import (
 
 func TestBaselinesSetModePersistsAcrossHandlers(t *testing.T) {
 	d := openTestDB(t)
-	defer d.Close()
+	t.Cleanup(d.Close)
 
 	ctx := context.Background()
 	pool := d.Pool()
@@ -78,14 +78,14 @@ INSERT INTO events (
 
 	body, _ := json.Marshal(map[string]string{"mode": "monitor", "reason": "validated learned process set"})
 	rec := httptest.NewRecorder()
-	req := baselineRequest(http.MethodPost, "/api/v1/runtime/baselines/default%2Fapi/mode?cluster_id="+clusterID.String(), workloadID, bytes.NewReader(body), orgID, userID)
+	req := baselineRequest(t.Context(), http.MethodPost, "/api/v1/runtime/baselines/default%2Fapi/mode?cluster_id="+clusterID.String(), workloadID, bytes.NewReader(body), orgID, userID)
 	NewBaselines(d, nil).SetMode(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("set mode status=%d body=%s", rec.Code, rec.Body.String())
 	}
 
 	rec = httptest.NewRecorder()
-	req = baselineRequest(http.MethodGet, "/api/v1/runtime/baselines/default%2Fapi?cluster_id="+clusterID.String(), workloadID, nil, orgID, userID)
+	req = baselineRequest(t.Context(), http.MethodGet, "/api/v1/runtime/baselines/default%2Fapi?cluster_id="+clusterID.String(), workloadID, nil, orgID, userID)
 	NewBaselines(d, nil).Get(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("get status=%d body=%s", rec.Code, rec.Body.String())
@@ -109,7 +109,7 @@ INSERT INTO events (
 // for DB-backed workloads and drift classification silently never fired post-restart.
 func TestBaselinesHydrateFromDB(t *testing.T) {
 	d := openTestDB(t)
-	defer d.Close()
+	t.Cleanup(d.Close)
 
 	ctx := context.Background()
 	pool := d.Pool()
@@ -279,16 +279,16 @@ func TestBaselineModeForClusterScopesDuplicateWorkloads(t *testing.T) {
 	}
 }
 
-func baselineRequest(method, target, workloadID string, body *bytes.Reader, orgID, userID uuid.UUID) *http.Request {
+func baselineRequest(ctx context.Context, method, target, workloadID string, body *bytes.Reader, orgID, userID uuid.UUID) *http.Request {
 	var req *http.Request
 	if body == nil {
-		req = httptest.NewRequest(method, target, nil)
+		req = httptest.NewRequestWithContext(ctx, method, target, nil)
 	} else {
-		req = httptest.NewRequest(method, target, body)
+		req = httptest.NewRequestWithContext(ctx, method, target, body)
 	}
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("workload_id", workloadID)
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
+	ctx = context.WithValue(ctx, chi.RouteCtxKey, rctx)
+	req = req.WithContext(authctx.WithSubject(ctx, authctx.Subject{UserID: userID, OrgID: orgID}))
 	return req
 }

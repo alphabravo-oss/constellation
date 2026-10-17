@@ -26,13 +26,16 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"regexp"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/runtime/dlp"
 	"github.com/alphabravocompany/constellation/internal/runtime/waf"
+	"github.com/alphabravocompany/constellation/pkg/audit"
 )
 
 // builtinPack is one seeded runtime_dlp_rules row: a named set of PCRE
@@ -212,22 +215,43 @@ func builtinPackPatternsJSON(p builtinPack) any {
 // UPDATE existing rows here). Returns the number of rows actually inserted.
 func (s *RuntimeDLPStore) EnsureBuiltins(ctx context.Context, orgID, clusterID uuid.UUID) (int, error) {
 	inserted := 0
-	for _, p := range AllBuiltinPacks() {
-		patterns, err := json.Marshal(builtinPackPatternsJSON(p))
-		if err != nil {
-			continue
+	_, err := s.dlpTransaction(ctx, func(tx pgx.Tx) (*DLPRule, error) {
+		if err := requireLegacyPolicyCluster(ctx, tx, orgID, clusterID); err != nil {
+			return nil, err
 		}
-		tag, err := s.db.Pool().Exec(ctx, `
-INSERT INTO runtime_dlp_rules
-  (org_id, cluster_id, name, category, apply_dir, severity, mode, patterns, description, source, cfg_type)
-VALUES ($1,$2,$3,$4,$5,$6,'monitor',$7::jsonb,$8,'builtin','predefined')
-ON CONFLICT (org_id, cluster_id, name) DO NOTHING`,
-			orgID, clusterID, p.Name, string(p.Category), p.ApplyDir, p.Severity,
-			string(patterns), p.Description)
-		if err != nil {
-			return inserted, err
+		for _, pack := range AllBuiltinPacks() {
+			got, err := insertBuiltinDLP(ctx, tx, orgID, clusterID, pack)
+			if err != nil {
+				return nil, err
+			}
+			if got == nil {
+				continue
+			}
+			if err := s.appendDLPAudit(ctx, tx, audit.ActionPolicyCreate, nil, got, nil, ""); err != nil {
+				return nil, err
+			}
+			inserted++
 		}
-		inserted += int(tag.RowsAffected())
+		return nil, nil
+	})
+	if err != nil {
+		return 0, err
 	}
 	return inserted, nil
+}
+
+func insertBuiltinDLP(ctx context.Context, tx pgx.Tx, orgID, clusterID uuid.UUID, pack builtinPack) (*DLPRule, error) {
+	patterns, err := json.Marshal(builtinPackPatternsJSON(pack))
+	if err != nil {
+		return nil, err
+	}
+	got, err := scanDLP(tx.QueryRow(ctx, `INSERT INTO runtime_dlp_rules
+  (org_id,cluster_id,name,category,apply_dir,severity,mode,patterns,description,source,cfg_type)
+  VALUES($1,$2,$3,$4,$5,$6,'monitor',$7::jsonb,$8,'builtin','predefined')
+  ON CONFLICT(org_id,cluster_id,name) DO NOTHING RETURNING `+dlpSelectCols,
+		orgID, clusterID, pack.Name, string(pack.Category), pack.ApplyDir, pack.Severity, string(patterns), pack.Description))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return got, err
 }

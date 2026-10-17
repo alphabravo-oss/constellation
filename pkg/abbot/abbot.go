@@ -175,7 +175,7 @@ func (c *Client) Query(ctx context.Context, req QueryRequest) (*QueryResponse, e
 	httpReq.Header.Set("Content-Type", "application/json")
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrServiceUnreachable, err)
+		return nil, fmt.Errorf("%w: %w", ErrServiceUnreachable, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 500 || resp.StatusCode == http.StatusNotFound {

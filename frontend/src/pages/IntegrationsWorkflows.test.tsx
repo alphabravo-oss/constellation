@@ -1,0 +1,53 @@
+import { act, type ReactNode } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { receivers, routing, type Receiver } from "@/api/client";
+import { IntegrationsPage } from "./IntegrationsPage";
+import { parseRouting } from "@/lib/integration-routing";
+const route = vi.hoisted(() => ({ search: "", navigate: vi.fn() }));
+vi.mock("@/api/client", () => ({ receivers: { list: vi.fn(), deliveries: vi.fn(), pause: vi.fn(), unpause: vi.fn(), patch: vi.fn(), testFire: vi.fn(), rotateSecret: vi.fn() }, routing: { get: vi.fn(), put: vi.fn() }, integrationDeliveries: { overview: vi.fn(), testPreview: vi.fn() } }));
+vi.mock("@/lib/route-search", () => ({ useRouteSearchParams: () => [new URLSearchParams(route.search), vi.fn()] }));
+vi.mock("@tanstack/react-router", () => ({ useNavigate: () => route.navigate, Link: ({ children }: { children: ReactNode }) => <span>{children}</span> }));
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+const receiver = { id: "first", name: "First receiver", kind: "webhook", endpoint: "https://first.example.test", environment: "production", status: "healthy", supported_events: ["runtime"], rate_per_min: 60, template_id: "default", paused: false } as Receiver;
+const saved = { yaml: "route:\n  receiver: First receiver\n  group_wait: 30s\n  routes:\n    - receiver: First receiver\n      match: {severity: high}\n      matchers: ['team=platform']\n      group_interval: 5m\n", revision: 4, updated_at: "" };
+let root: Root; let host: HTMLDivElement; let client: QueryClient;
+beforeEach(() => { route.search = ""; vi.mocked(receivers.list).mockResolvedValue({ receivers: [receiver, { ...receiver, id: "second", name: "Second receiver" }], delivery_history: [] }); vi.mocked(receivers.deliveries).mockResolvedValue({ deliveries: [] }); vi.mocked(routing.get).mockResolvedValue(saved); });
+afterEach(() => { act(() => root?.unmount()); client?.clear(); host?.remove(); vi.resetAllMocks(); localStorage.clear(); });
+async function renderPage() { host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host); client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); await act(async () => root.render(<QueryClientProvider client={client}><IntegrationsPage /></QueryClientProvider>)); }
+async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
+function button(label: string) { return [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === label)!; }
+async function click(label: string) { await act(async () => button(label).click()); }
+async function select(id: string) { await act(async () => host.querySelector<HTMLElement>(`[data-testid="receiver-row-${id}"]`)!.click()); }
+
+it("routes receiver, SMTP and notification edits to dedicated forms", async () => {
+  await renderPage(); await settled(() => expect(host.querySelector('[data-testid="receivers-table"] table')).not.toBeNull()); expect(host.querySelector("form")).toBeNull(); expect(host.querySelector('[data-testid="smtp-settings"]')).toBeNull();
+  await click("Edit email server"); expect(route.navigate).toHaveBeenCalledWith({ href: "/settings/integrations/smtp/edit" }); await click("Add receiver"); expect(route.navigate).toHaveBeenCalledWith({ href: "/settings/integrations/receivers/new" });
+  await select("first"); await settled(() => expect(host.querySelector('[data-testid="receiver-drawer"]')).not.toBeNull()); expect(host.querySelector('[data-testid="receiver-drawer"] select')).toBeNull(); expect(host.querySelector('[data-testid="receiver-drawer"] input')).toBeNull(); expect(receivers.patch).not.toHaveBeenCalled();
+});
+it("shows saved routing only and binds edit links to the current revision", async () => {
+  route.search = "tab=routes"; await renderPage(); await settled(() => expect(host.querySelector('[data-testid="routes-list"]')).not.toBeNull()); expect(host.querySelector("form")).toBeNull(); expect(button("Save routing")).toBeUndefined(); await click("Add route"); expect(route.navigate).toHaveBeenCalledWith({ href: "/settings/integrations/routes/new" });
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Edit route 1"]')!.click()); expect(route.navigate).toHaveBeenCalledWith({ href: "/settings/integrations/routes/0/edit?revision=4" }); await click("Edit complete routing"); expect(route.navigate).toHaveBeenCalledWith({ href: "/settings/integrations/routing/edit" }); expect(routing.put).not.toHaveBeenCalled();
+});
+it("does not offer write actions after routing fails to load", async () => { route.search = "tab=routes"; vi.mocked(routing.get).mockRejectedValue(new Error("private")); await renderPage(); await settled(() => expect(host.textContent).toContain("Could not load saved notification routing")); expect(button("Add route")).toBeUndefined(); expect(routing.put).not.toHaveBeenCalled(); expect(host.textContent).not.toContain("private"); });
+it("preserves advanced route fields when deleting with atomic revision protection", async () => {
+  route.search = "tab=routes"; vi.mocked(routing.put).mockResolvedValue({ status: "ok", revision: 5 }); await renderPage(); await settled(() => expect(host.querySelector('[data-testid="routes-list"]')).not.toBeNull()); await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Delete route 1"]')!.click()); expect(routing.put).not.toHaveBeenCalled(); await click("Delete route"); await settled(() => expect(routing.put).toHaveBeenCalledTimes(1)); const [text, revision] = vi.mocked(routing.put).mock.calls[0]; expect(revision).toBe(4); const parsed = parseRouting(text); if (!parsed.ok) throw new Error(parsed.reason); expect(parsed.model.routes).toEqual([]); expect(parsed.model.rootRaw).toEqual({ group_wait: "30s" }); expect(parsed.model.defaultReceiver).toBe("First receiver");
+});
+it("blocks stale delete confirmations when a refreshed routing revision changes", async () => {
+  route.search = "tab=routes"; await renderPage(); await settled(() => expect(host.querySelector('[data-testid="routes-list"]')).not.toBeNull()); await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Delete route 1"]')!.click()); await act(async () => { client.setQueryData(["routing-yaml"], { ...saved, revision: 5 }); }); await settled(() => expect(button("Delete route").disabled).toBe(true)); expect(routing.put).not.toHaveBeenCalled();
+});
+it("keeps nested routing read-only on the list and available through complete YAML editing", async () => { route.search = "tab=routes"; vi.mocked(routing.get).mockResolvedValue({ ...saved, yaml: "route:\n  routes:\n    - receiver: external\n      routes: [{receiver: nested}]\n" }); await renderPage(); await settled(() => expect(host.textContent).toContain("Nested routing trees are preserved")); expect(button("Add route").disabled).toBe(true); expect(button("Edit complete routing").disabled).toBe(false); });
+it("requires explicit confirmation, blocks selection while rotating and binds the returned key", async () => {
+  let finish!: (value: { secret_key: string }) => void; vi.mocked(receivers.rotateSecret).mockImplementation(() => new Promise((resolve) => { finish = resolve; })); await renderPage(); await settled(() => expect(host.querySelector('[data-testid="receiver-row-first"]')).not.toBeNull()); await select("first"); await click("Rotate HMAC secret"); expect(receivers.rotateSecret).not.toHaveBeenCalled(); await click("Confirm rotation"); await settled(() => expect(receivers.rotateSecret).toHaveBeenCalledWith("first")); await select("second"); expect(host.querySelector('[data-testid="receiver-drawer"]')?.textContent).toContain("Send test alert"); expect(host.textContent).toContain("Rotating this receiver's secret"); expect(host.querySelector('[data-testid="receiver-detail-edit"]')?.hasAttribute("disabled")).toBe(true);
+  await act(async () => finish({ secret_key: "first-only-key" })); await settled(() => expect(host.textContent).toContain("first-only-key")); await select("second"); expect(host.textContent).not.toContain("first-only-key"); expect(host.querySelector('[data-testid="receiver-drawer"]')?.textContent).not.toContain("Confirm rotation");
+});
+it("does not label one receiver's delayed test-fire result as another's", async () => {
+  let finish!: (value: { delivery_id: string; idempotency_key: string }) => void; vi.mocked(receivers.testFire).mockImplementation(() => new Promise((resolve) => { finish = resolve; })); await renderPage(); await settled(() => expect(host.querySelector('[data-testid="receiver-row-first"]')).not.toBeNull()); await select("first"); await click("Send test alert"); await select("second"); await act(async () => finish({ delivery_id: "first-delivery", idempotency_key: "first-idempotency" })); await settled(() => expect(receivers.testFire).toHaveBeenCalledWith("first")); expect(host.textContent).not.toContain("first-delivery"); expect(host.textContent).not.toContain("first-idempotency");
+});
+it("retains the test-fire idempotency key and sortable delivery history", async () => {
+  vi.mocked(receivers.testFire).mockResolvedValue({ delivery_id: "delivery", idempotency_key: "idempotency" }); await renderPage(); await settled(() => expect(host.querySelector('[data-testid="receiver-row-first"]')).not.toBeNull()); await select("first"); await click("Send test alert"); await settled(() => expect(host.textContent).toContain("idempotency")); expect(host.querySelector('[data-testid="receiver-deliveries"] th[data-column-id="attempts"] button')).not.toBeNull(); expect(host.querySelector('[data-testid="receiver-deliveries"] th[data-column-id="latency"] button')).not.toBeNull();
+});
+it("handles unavailable clipboard synchronously and never reports a failed copy as success", async () => {
+  vi.mocked(receivers.rotateSecret).mockResolvedValue({ secret_key: "copy-key" }); await renderPage(); await settled(() => expect(host.querySelector('[data-testid="receiver-row-first"]')).not.toBeNull()); await select("first"); await click("Rotate HMAC secret"); await click("Confirm rotation"); await settled(() => expect(host.textContent).toContain("copy-key")); const original = navigator.clipboard; Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined }); try { await click("Copy"); await settled(() => expect(host.textContent).toContain("Could not copy the key")); expect(button("Copied")).toBeUndefined(); } finally { Object.defineProperty(navigator, "clipboard", { configurable: true, value: original }); }
+});

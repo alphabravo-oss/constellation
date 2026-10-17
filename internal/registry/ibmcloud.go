@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -64,27 +62,29 @@ func (r *IBMCloud) acquireToken(ctx context.Context) (string, error) {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.tokenURL(), strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", err
+		return "", errors.New("registry: invalid request endpoint")
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 	resp, err := r.client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("ibmcloud: token exchange: %w", err)
+		return "", responseFailure("ibmcloud token exchange", "request failed", 0, err)
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, readErr := readRegistryPage(resp, 1<<20)
+	if readErr != nil {
+		return "", responseFailure("ibmcloud token exchange", "response read or close failed", resp.StatusCode, readErr)
+	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("ibmcloud: token exchange status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return "", responseFailure("ibmcloud token exchange", "response rejected", resp.StatusCode, nil)
 	}
 	var tok struct {
 		AccessToken string `json:"access_token"`
 	}
 	if err := json.Unmarshal(body, &tok); err != nil {
-		return "", fmt.Errorf("ibmcloud: decode token: %w", err)
+		return "", responseFailure("ibmcloud token exchange", "invalid token response", resp.StatusCode, err)
 	}
 	if tok.AccessToken == "" {
-		return "", errors.New("ibmcloud: token exchange returned empty access_token")
+		return "", responseFailure("ibmcloud token exchange", "response missing access token", resp.StatusCode, nil)
 	}
 	return tok.AccessToken, nil
 }
@@ -105,25 +105,31 @@ func (r *IBMCloud) ListImages(ctx context.Context) ([]Image, error) {
 	endpoint := "https://" + host + "/api/v1/images"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("registry: invalid request endpoint")
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Account", r.cfg.Account)
 	req.Header.Set("Accept", "application/json")
 	resp, err := r.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("ibmcloud: list images: %w", err)
+		return nil, responseFailure("ibmcloud list images", "request failed", 0, err)
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	body, readErr := readRegistryPage(resp, 8<<20)
+	if readErr != nil {
+		return nil, responseFailure("ibmcloud list images", "response read or close failed", resp.StatusCode, readErr)
+	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("ibmcloud: list images status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, responseFailure("ibmcloud list images", "response rejected", resp.StatusCode, nil)
 	}
 	var images []ibmImage
 	if err := json.Unmarshal(body, &images); err != nil {
-		return nil, fmt.Errorf("ibmcloud: decode images: %w", err)
+		return nil, responseFailure("ibmcloud list images", "invalid image response", resp.StatusCode, err)
 	}
 
+	return collapseIBMImages(images), nil
+}
+
+func collapseIBMImages(images []ibmImage) []Image {
 	// Collapse RepoTags into one Image per repository, collecting its tags.
 	byRepo := map[string][]string{}
 	order := []string{}
@@ -145,7 +151,7 @@ func (r *IBMCloud) ListImages(ctx context.Context) ([]Image, error) {
 	for _, repo := range order {
 		out = append(out, Image{Repository: repo, Tags: byRepo[repo]})
 	}
-	return out, nil
+	return out
 }
 
 func (r *IBMCloud) ResolveDigest(ctx context.Context, ref string) (string, error) {

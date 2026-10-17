@@ -150,15 +150,6 @@ func validFlags(s string) bool {
 	return true
 }
 
-// normalizePCREList maps NormalizePCREPattern over a string slice, dropping any
-// pattern that normalizes to empty. Returns nil for a nil input so an unset
-// pattern list stays unset on the wire.
-func normalizePCREList(pats []string) []string {
-	// A nil context list body-scopes every pattern — identical to the old
-	// per-pattern NormalizePCREPattern loop this used to run inline.
-	return normalizePCREListWithContexts(pats, nil)
-}
-
 // DLPCtxURI/Header/Body/Packet are the per-pattern DLP match-context tokens the
 // rule schema {pattern, op, context} accepts. They mirror NeuVector's
 // share.DlpPatternContext* set. dpDLPContext maps them to the value dp's

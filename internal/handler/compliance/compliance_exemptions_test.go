@@ -46,7 +46,7 @@ VALUES ($1, 'cis-k8s-1.9', '1.1.1', 'API server pod spec', 'fixture', 'fail', 'h
 		"reason":     "approved compensating control for test",
 		"expires_at": expiresAt,
 	})
-	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/compliance/exemptions", bytes.NewReader(createBody))
+	createReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/compliance/exemptions", bytes.NewReader(createBody))
 	createReq = createReq.WithContext(authctx.WithSubject(createReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	createResp := httptest.NewRecorder()
 	h.CreateExemption(createResp, createReq)
@@ -78,7 +78,7 @@ VALUES ($1, 'cis-k8s-1.9', '1.1.1', 'API server pod spec', 'fixture', 'fail', 'h
 		t.Fatalf("summary after exemption = %+v, want fail=0 exempted=1", summary.Frameworks[0])
 	}
 
-	revokeReq := httptest.NewRequest(http.MethodPost, "/api/v1/compliance/exemptions/"+created.ID+"/revoke", nil)
+	revokeReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/compliance/exemptions/"+created.ID+"/revoke", nil)
 	routeCtx := chi.NewRouteContext()
 	routeCtx.URLParams.Add("id", created.ID)
 	revokeReq = revokeReq.WithContext(authctx.WithSubject(revokeReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
@@ -162,7 +162,7 @@ VALUES ($1, $2, $3, '1.1.1', 'existing boundary fixture', $4) RETURNING id`,
 		if err != nil {
 			t.Fatal(err)
 		}
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/compliance/exemptions", bytes.NewReader(body))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/compliance/exemptions", bytes.NewReader(body))
 		req = req.WithContext(authctx.WithSubject(req.Context(), subject))
 		resp := httptest.NewRecorder()
 		h.CreateExemption(resp, req)
@@ -170,7 +170,7 @@ VALUES ($1, $2, $3, '1.1.1', 'existing boundary fixture', $4) RETURNING id`,
 	}
 	list := func(url string) *httptest.ResponseRecorder {
 		t.Helper()
-		req := httptest.NewRequest(http.MethodGet, url, nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
 		req = req.WithContext(authctx.WithSubject(req.Context(), subject))
 		resp := httptest.NewRecorder()
 		h.ListExemptions(resp, req)
@@ -178,7 +178,7 @@ VALUES ($1, $2, $3, '1.1.1', 'existing boundary fixture', $4) RETURNING id`,
 	}
 	revoke := func(id uuid.UUID) *httptest.ResponseRecorder {
 		t.Helper()
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/compliance/exemptions/"+id.String()+"/revoke", nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/compliance/exemptions/"+id.String()+"/revoke", nil)
 		routeCtx := chi.NewRouteContext()
 		routeCtx.URLParams.Add("id", id.String())
 		req = req.WithContext(authctx.WithSubject(req.Context(), subject))
@@ -264,7 +264,7 @@ func complianceChecksForTest(t *testing.T, h *Compliance, orgID uuid.UUID) struc
 	} `json:"checks"`
 } {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/compliance/checks?framework=cis-k8s-1.9", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/compliance/checks?framework=cis-k8s-1.9", nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: uuid.New(), OrgID: orgID}))
 	resp := httptest.NewRecorder()
 	h.Checks(resp, req)
@@ -296,7 +296,7 @@ func complianceSummaryForTest(t *testing.T, h *Compliance, orgID uuid.UUID) stru
 	} `json:"frameworks"`
 } {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/compliance/summary", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/compliance/summary", nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: uuid.New(), OrgID: orgID}))
 	resp := httptest.NewRecorder()
 	h.Summary(resp, req)

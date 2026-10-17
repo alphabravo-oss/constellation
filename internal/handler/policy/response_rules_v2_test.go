@@ -108,7 +108,7 @@ func responseRuleV2Router(d *db.DB, pool *pgxpool.Pool) *chi.Mux {
 
 func listResponseRulesV2(t *testing.T, r http.Handler, orgID, userID, clusterID uuid.UUID) []responseRuleV2DTO {
 	t.Helper()
-	req := withSubj(httptest.NewRequest(http.MethodGet, "/api/v1/response-rules-v2?cluster_id="+clusterID.String(), nil), orgID, userID)
+	req := withSubj(httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/response-rules-v2?cluster_id="+clusterID.String(), nil), orgID, userID)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -142,7 +142,7 @@ func TestResponseRulesV2_ReorderIsScopedAndDrivesListOrder(t *testing.T) {
 		t.Fatalf("initial cluster-a order = %+v", before)
 	}
 
-	req := withSubj(httptest.NewRequest(http.MethodPatch, "/api/v1/response-rules-v2:reorder?cluster_id="+clusterA.String(),
+	req := withSubj(httptest.NewRequestWithContext(t.Context(), http.MethodPatch, "/api/v1/response-rules-v2:reorder?cluster_id="+clusterA.String(),
 		strings.NewReader(`{"ordered_ids":["`+clusterAID.String()+`","`+globalID.String()+`"]}`)), orgID, userID)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
@@ -155,7 +155,7 @@ func TestResponseRulesV2_ReorderIsScopedAndDrivesListOrder(t *testing.T) {
 	}
 
 	createBody := `{"name":"cluster-a-new","description":"","enabled":true,"event_type":"runtime","conditions":[{"type":"level","value":"high"}],"actions":[{"kind":"quarantine"}],"workload_match":{}}`
-	req = withSubj(httptest.NewRequest(http.MethodPost, "/api/v1/response-rules-v2?cluster_id="+clusterA.String(), strings.NewReader(createBody)), orgID, userID)
+	req = withSubj(httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/response-rules-v2?cluster_id="+clusterA.String(), strings.NewReader(createBody)), orgID, userID)
 	w = httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusCreated {
@@ -197,7 +197,7 @@ func TestResponseRulesV2_ReorderRejectsPartialDuplicateAndOutOfScopeIDs(t *testi
 		{"out-of-scope", `{"ordered_ids":["` + globalID.String() + `","` + clusterBID.String() + `"]}`},
 	}
 	for _, tc := range cases {
-		req := withSubj(httptest.NewRequest(http.MethodPatch, "/api/v1/response-rules-v2:reorder?cluster_id="+clusterA.String(), strings.NewReader(tc.body)), orgID, userID)
+		req := withSubj(httptest.NewRequestWithContext(t.Context(), http.MethodPatch, "/api/v1/response-rules-v2:reorder?cluster_id="+clusterA.String(), strings.NewReader(tc.body)), orgID, userID)
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, req)
 		if w.Code != http.StatusBadRequest {
@@ -224,7 +224,7 @@ func TestResponseRulesV2_ReorderAuditCompletionIsAtomic(t *testing.T) {
 	body := `{"ordered_ids":["` + secondID.String() + `","` + firstID.String() + `"]}`
 	request := func(handler *ResponseRulesV2) *httptest.ResponseRecorder {
 		t.Helper()
-		request := withSubj(httptest.NewRequest(http.MethodPatch, path, strings.NewReader(body)), orgID, userID)
+		request := withSubj(httptest.NewRequestWithContext(t.Context(), http.MethodPatch, path, strings.NewReader(body)), orgID, userID)
 		response := httptest.NewRecorder()
 		handler.Reorder(response, request)
 		return response
@@ -290,7 +290,7 @@ func TestResponseRulesV2_OptionsExposeNVEventCatalogAndReceivers(t *testing.T) {
 		t.Fatalf("receivers: %v", err)
 	}
 	router := responseRuleV2Router(d, pool)
-	req := withSubj(httptest.NewRequest(http.MethodGet, "/api/v1/response-rules-v2/options", nil), orgID, userID)
+	req := withSubj(httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/response-rules-v2/options", nil), orgID, userID)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -343,7 +343,7 @@ func TestResponseRulesV2_CreateAcceptsNVEventAndWebhookAction(t *testing.T) {
 	orgID, userID := seedOrgUser(t, pool)
 	router := responseRuleV2Router(d, pool)
 	body := `{"name":"nv-threat-webhook","description":"","enabled":true,"event_type":"threat","conditions":[{"type":"level","value":"high"}],"actions":[{"kind":"webhook","target":"sec-webhook"}],"workload_match":{}}`
-	req := withSubj(httptest.NewRequest(http.MethodPost, "/api/v1/response-rules-v2", strings.NewReader(body)), orgID, userID)
+	req := withSubj(httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/response-rules-v2", strings.NewReader(body)), orgID, userID)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusCreated {
@@ -368,7 +368,7 @@ func TestResponseRulesV2_CreateAcceptsSuppressLogAction(t *testing.T) {
 	router := responseRuleV2Router(d, pool)
 
 	body := `{"name":"nv-threat-suppress","description":"","enabled":true,"event_type":"threat","conditions":[{"type":"level","value":"high"}],"actions":[{"kind":"suppress-log"}],"workload_match":{}}`
-	req := withSubj(httptest.NewRequest(http.MethodPost, "/api/v1/response-rules-v2", strings.NewReader(body)), orgID, userID)
+	req := withSubj(httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/response-rules-v2", strings.NewReader(body)), orgID, userID)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusCreated {
@@ -395,7 +395,7 @@ func TestResponseRulesV2_CreatePreservesGroupSelector(t *testing.T) {
 	router := responseRuleV2Router(d, pool)
 
 	body := `{"name":"nv-threat-group","description":"","enabled":true,"event_type":"threat","conditions":[{"type":"level","value":"high"}],"actions":[{"kind":"suppress-log"}],"workload_match":{"group":"nv.api","namespace":"prod"}}`
-	req := withSubj(httptest.NewRequest(http.MethodPost, "/api/v1/response-rules-v2", strings.NewReader(body)), orgID, userID)
+	req := withSubj(httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/response-rules-v2", strings.NewReader(body)), orgID, userID)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusCreated {
@@ -424,8 +424,8 @@ func responseRuleV2GroupBody(name, selector string) []byte {
 	return body
 }
 
-func sendResponseRuleV2Group(r http.Handler, method, path string, orgID, userID uuid.UUID, body []byte) *httptest.ResponseRecorder {
-	req := withSubj(httptest.NewRequest(method, path, strings.NewReader(string(body))), orgID, userID)
+func sendResponseRuleV2Group(ctx context.Context, r http.Handler, method, path string, orgID, userID uuid.UUID, body []byte) *httptest.ResponseRecorder {
+	req := withSubj(httptest.NewRequestWithContext(ctx, method, path, strings.NewReader(string(body))), orgID, userID)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	return w
@@ -475,7 +475,7 @@ func TestResponseRulesV2_GroupSelectorRequiresScopedGroup(t *testing.T) {
 		{"cluster-name", "cluster-group", basePath, http.StatusCreated},
 		{"cluster-id", clusterGroupID.String(), basePath, http.StatusCreated},
 	} {
-		resp := sendResponseRuleV2Group(router, http.MethodPost, tc.path, orgID, userID, responseRuleV2GroupBody(tc.name, tc.selector))
+		resp := sendResponseRuleV2Group(t.Context(), router, http.MethodPost, tc.path, orgID, userID, responseRuleV2GroupBody(tc.name, tc.selector))
 		if resp.Code != tc.status {
 			t.Fatalf("create %s status=%d body=%s", tc.name, resp.Code, resp.Body.String())
 		}
@@ -499,7 +499,7 @@ func TestResponseRulesV2_GroupSelectorRequiresScopedGroup(t *testing.T) {
 		{"cluster-group", http.StatusOK},
 		{clusterGroupID.String(), http.StatusOK},
 	} {
-		resp := sendResponseRuleV2Group(router, http.MethodPut, updatePath, orgID, userID, responseRuleV2GroupBody("update-group", tc.selector))
+		resp := sendResponseRuleV2Group(t.Context(), router, http.MethodPut, updatePath, orgID, userID, responseRuleV2GroupBody("update-group", tc.selector))
 		if resp.Code != tc.status {
 			t.Fatalf("update %q status=%d body=%s", tc.selector, resp.Code, resp.Body.String())
 		}
@@ -508,7 +508,7 @@ func TestResponseRulesV2_GroupSelectorRequiresScopedGroup(t *testing.T) {
 		}
 	}
 	otherRuleID := insertResponseRuleV2(t, pool, orgID, otherClusterID, "update-other-cluster", 100)
-	resp := sendResponseRuleV2Group(router, http.MethodPut,
+	resp := sendResponseRuleV2Group(t.Context(), router, http.MethodPut,
 		"/api/v1/response-rules-v2/"+otherRuleID.String()+"?cluster_id="+clusterID.String(),
 		orgID, userID, responseRuleV2GroupBody("update-other-cluster", "cluster-group"))
 	if resp.Code != http.StatusBadRequest || !strings.Contains(resp.Body.String(), "workload_match.group") {
@@ -516,12 +516,12 @@ func TestResponseRulesV2_GroupSelectorRequiresScopedGroup(t *testing.T) {
 	}
 	orgWideRuleID := insertResponseRuleV2(t, pool, orgID, nil, "update-org-wide", 100)
 	orgWidePath := "/api/v1/response-rules-v2/" + orgWideRuleID.String()
-	resp = sendResponseRuleV2Group(router, http.MethodPut, orgWidePath,
+	resp = sendResponseRuleV2Group(t.Context(), router, http.MethodPut, orgWidePath,
 		orgID, userID, responseRuleV2GroupBody("update-org-wide", "cluster-group"))
 	if resp.Code != http.StatusBadRequest || !strings.Contains(resp.Body.String(), "workload_match.group") {
 		t.Fatalf("org-wide update with cluster group status=%d body=%s", resp.Code, resp.Body.String())
 	}
-	resp = sendResponseRuleV2Group(router, http.MethodPut, orgWidePath,
+	resp = sendResponseRuleV2Group(t.Context(), router, http.MethodPut, orgWidePath,
 		orgID, userID, responseRuleV2GroupBody("update-org-wide", "global-group"))
 	if resp.Code != http.StatusOK {
 		t.Fatalf("org-wide update with global group status=%d body=%s", resp.Code, resp.Body.String())
@@ -584,7 +584,7 @@ func TestResponseRulesV2_GroupMutationWinsBeforeCreateAndUpdate(t *testing.T) {
 			}
 			result := make(chan *httptest.ResponseRecorder, 1)
 			go func() {
-				result <- sendResponseRuleV2Group(router, tc.method, path, orgID, userID, responseRuleV2GroupBody(tc.name, groupName))
+				result <- sendResponseRuleV2Group(t.Context(), router, tc.method, path, orgID, userID, responseRuleV2GroupBody(tc.name, groupName))
 			}()
 			select {
 			case resp := <-result:
@@ -631,12 +631,12 @@ func TestResponseRulesV2_GroupRowLockReturnsConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 	router := responseRuleV2Router(d, pool)
-	resp := sendResponseRuleV2Group(router, http.MethodPost, "/api/v1/response-rules-v2", orgID, userID, responseRuleV2GroupBody("locked-create", groupName))
+	resp := sendResponseRuleV2Group(t.Context(), router, http.MethodPost, "/api/v1/response-rules-v2", orgID, userID, responseRuleV2GroupBody("locked-create", groupName))
 	if resp.Code != http.StatusConflict || !strings.Contains(resp.Body.String(), "workload_match.group") {
 		t.Fatalf("locked group create status=%d body=%s", resp.Code, resp.Body.String())
 	}
 	ruleID := insertResponseRuleV2(t, pool, orgID, nil, "locked-update", 100)
-	resp = sendResponseRuleV2Group(router, http.MethodPut, "/api/v1/response-rules-v2/"+ruleID.String(), orgID, userID, responseRuleV2GroupBody("locked-update", groupName))
+	resp = sendResponseRuleV2Group(t.Context(), router, http.MethodPut, "/api/v1/response-rules-v2/"+ruleID.String(), orgID, userID, responseRuleV2GroupBody("locked-update", groupName))
 	if resp.Code != http.StatusConflict || !strings.Contains(resp.Body.String(), "workload_match.group") {
 		t.Fatalf("locked group update status=%d body=%s", resp.Code, resp.Body.String())
 	}
@@ -665,7 +665,7 @@ func TestResponseRulesV2_GroupUpdateDoesNotDeadlockReorder(t *testing.T) {
 	router := responseRuleV2Router(d, pool)
 	result := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
-		result <- sendResponseRuleV2Group(router, http.MethodPut,
+		result <- sendResponseRuleV2Group(t.Context(), router, http.MethodPut,
 			"/api/v1/response-rules-v2/"+ruleID.String(), orgID, userID,
 			responseRuleV2GroupBody("reorder-lock", groupName))
 	}()

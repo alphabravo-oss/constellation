@@ -8,9 +8,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 )
 
 func TestScanAttestations_RejectForeignTargetLinksAndHideMalformedRows(t *testing.T) {
@@ -75,7 +76,7 @@ VALUES ($1, $2, $3, $4, $4, $5, $6)`,
 		if body != nil {
 			raw, _ = json.Marshal(body)
 		}
-		req := httptest.NewRequest(method, path, bytes.NewReader(raw))
+		req := httptest.NewRequestWithContext(t.Context(), method, path, bytes.NewReader(raw))
 		req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 		if routeID != "" {
 			route := chi.NewRouteContext()

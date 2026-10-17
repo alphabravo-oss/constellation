@@ -19,7 +19,7 @@
 # NFQUEUE redirects. AF_PACKET TAP mode is used as a fallback when TC is
 # unavailable.
 
-ARG GO_VERSION=1.26.8
+ARG GO_VERSION=1.26.9
 ARG DEBIAN_TAG=bookworm-slim
 ARG CRICTL_VERSION=v1.36.0
 ARG CRICTL_SHA256_AMD64=83855e114566a8a8c44c548d515670f51de3a5e1da8b2effb59870e2f10c25a3
@@ -80,14 +80,13 @@ RUN test -x /src/third_party/neuvector/dp/dp || (echo "dp build produced no bina
 #
 # FIPS=1 toggles Go 1.26's bundled FIPS 140-3 module:
 #   - GOFIPS140=v1.0.0 selects the validated crypto module
-#   - -tags fips switches pkg/observability + pkg/audit to FIPS-approved hashes
-#   - GODEBUG=fips140=on is set on the final stage to enforce at runtime
+#   - -tags fips enables the pkg/version startup guard
+#   - the binary defaults to FIPS mode; a disabled/unpinned runtime is rejected
 #
 # IMPORTANT scope: this affects the *Go agent's* crypto only. The vendored
 # C data-plane (third_party/neuvector/dp) links against hyperscan + PCRE2 +
-# jemalloc + urcu — none of which carry a FIPS 140-3 certificate. The agent
-# refuses to load policy rules tagged `fips_only=false` when FIPS=1, and
-# docs/fips.md publishes the precise scoping statement we ship.
+# jemalloc + urcu — this native stack has not been FIPS-qualified.
+# See docs/fips.md for the qualification boundary.
 # -----------------------------------------------------------------------------
 FROM golang:${GO_VERSION}-bookworm AS go-build
 WORKDIR /src
@@ -95,16 +94,18 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 ARG VERSION=dev
+ARG COMMIT=dev
+ARG BUILD_TIME=
 ARG FIPS=0
 ENV CGO_ENABLED=0 GOOS=linux
 RUN if [ "${FIPS}" = "1" ] || [ "${FIPS}" = "true" ]; then \
         echo ">> building Go agent in FIPS 140-3 mode (GOFIPS140=v1.0.0 -tags fips)" >&2 ; \
         GOFIPS140=v1.0.0 go build -trimpath -tags fips \
-          -ldflags="-s -w -X main.version=${VERSION}-fips" \
+          -ldflags="-s -w -X github.com/alphabravocompany/constellation/pkg/version.Version=${VERSION}-fips -X github.com/alphabravocompany/constellation/pkg/version.Commit=${COMMIT} -X github.com/alphabravocompany/constellation/pkg/version.BuildTime=${BUILD_TIME}" \
           -o /out/constellation-runtime-agent ./cmd/constellation-runtime-agent ; \
     else \
         go build -trimpath \
-          -ldflags="-s -w -X main.version=${VERSION}" \
+          -ldflags="-s -w -X github.com/alphabravocompany/constellation/pkg/version.Version=${VERSION} -X github.com/alphabravocompany/constellation/pkg/version.Commit=${COMMIT} -X github.com/alphabravocompany/constellation/pkg/version.BuildTime=${BUILD_TIME}" \
           -o /out/constellation-runtime-agent ./cmd/constellation-runtime-agent ; \
     fi
 
@@ -138,13 +139,17 @@ RUN ARCH="$(uname -m)" && case "$ARCH" in \
  && chmod +x /usr/local/bin/crictl
 
 FROM debian:${DEBIAN_TAG} AS runtime
+ARG VERSION=dev
+ARG COMMIT=dev
+LABEL org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT}"
 # Only the packages the agent + dp actually need at runtime. Notably NO bpftool: it's a
 # build-time codegen tool (bpf/Makefile → vmlinux.h) and dragged in ~570 CVEs; the agent
 # loads its BPF object at runtime via the pure-Go cilium/ebpf library, not the CLI. NO curl
 # either — crictl is downloaded in the stage above and copied in.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates tzdata \
-      iproute2 iptables ethtool tcpdump kmod procps \
+      iproute2 iptables conntrack ethtool tcpdump kmod procps \
       libpcap0.8 libpcre2-8-0 \
       libnetfilter-queue1 libnfnetlink0 libmnl0 \
       libvectorscan5 libjansson4 libjemalloc2 \
@@ -160,11 +165,9 @@ ENV CONSTELLATION_BPF_OBJ=/opt/constellation/runtime.bpf.o
 ENV CONSTELLATION_DP_BIN=/usr/local/bin/dp
 
 # FIPS posture is carried into the runtime stage as an OCI label so that
-# `docker inspect` (and the agent's own /metrics exposition) can report it.
-# When FIPS=1 we additionally set GODEBUG=fips140=on so the Go runtime
-# refuses to boot if the binary wasn't FIPS-built — defense-in-depth
-# against an image-mismatch deploy. The dp side keeps its own scope; see
-# docs/fips.md.
+# `docker inspect` can report the requested build mode. The tagged binary
+# rejects a disabled/unpinned module before main; labels are not runtime
+# attestation. The dp side keeps its own scope; see docs/fips.md.
 ARG FIPS=0
 ENV CONSTELLATION_FIPS_GO=${FIPS}
 LABEL org.alphabravo.constellation.fips.go="${FIPS}" \

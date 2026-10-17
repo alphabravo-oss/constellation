@@ -120,7 +120,7 @@ func TestMigrationRemainingRequiresRegistryPermission(t *testing.T) {
 	fixture := newMigrationRemainingFixture(t)
 	preview := fixture.preview(migrationRemainingExport(t, nil))
 	subject := Subject{OrgID: fixture.org, UserID: fixture.user, Assignments: []rbac.RoleAssignment{{Role: rbac.RoleSecurityAdmin, Scope: rbac.Scope{OrgID: fixture.org}}}, TokenScopes: []rbac.Verb{rbac.VerbManagePolicies}}
-	request := migrationActionRequestWithSubject(http.MethodPost, "/migration/apply", preview.ImportID, subject)
+	request := migrationActionRequestWithSubject(t.Context(), http.MethodPost, "/migration/apply", preview.ImportID, subject)
 	response := httptest.NewRecorder()
 	fixture.h.MigrationApply(response, request)
 	if response.Code != http.StatusForbidden {
@@ -128,7 +128,7 @@ func TestMigrationRemainingRequiresRegistryPermission(t *testing.T) {
 	}
 	fixture.counts(0, 0)
 	fixture.call(fixture.h.MigrationApply, http.MethodPost, preview.ImportID, http.StatusOK)
-	request = migrationActionRequestWithSubject(http.MethodPost, "/migration/rollback", preview.ImportID, subject)
+	request = migrationActionRequestWithSubject(t.Context(), http.MethodPost, "/migration/rollback", preview.ImportID, subject)
 	response = httptest.NewRecorder()
 	fixture.h.MigrationRollback(response, request)
 	if response.Code != http.StatusForbidden {
@@ -161,7 +161,7 @@ func TestMigrationRemainingRollbackRefusesOperatorChanges(t *testing.T) {
 
 func TestMigrationRemainingDuplicateNamesAreUnsupported(t *testing.T) {
 	export := `{"vulnerability_profiles":[{"name":"same","entries":[{"name":"CVE-2026-1"}]},{"name":"same","entries":[{"name":"CVE-2026-2"}]}],"registries":[{"name":"same","registry_type":"harbor","registry":"https://first.example.com"},{"name":"same","registry_type":"harbor","registry":"https://second.example.com"}]}`
-	profiles, registries, unsupported, err := NewEnterprise().convertMigrationRemaining(httptest.NewRequest(http.MethodPost, "/migration/preview", nil), Subject{}.OrgID, "neuvector", []byte(export), "")
+	profiles, registries, unsupported, err := NewEnterprise().convertMigrationRemaining(httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/migration/preview", nil), Subject{}.OrgID, "neuvector", []byte(export), "")
 	if err != nil || len(profiles) != 0 || len(registries) != 0 || len(unsupported) != 4 {
 		t.Fatalf("ambiguous duplicate names were accepted: profiles=%v registries=%v unsupported=%v error=%v", profiles, registries, unsupported, err)
 	}

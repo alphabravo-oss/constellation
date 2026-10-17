@@ -14,7 +14,7 @@ import (
 
 // RegistryCredentialsDTO is the decrypted-credential envelope returned to a
 // scanner worker. Only ever served over scanner-token auth and scoped to the
-// token's org; never exposed on any user-facing route.
+// token's org and active job lease; never exposed on any user-facing route.
 type RegistryCredentialsDTO struct {
 	RegistryID string `json:"registry_id"`
 	Kind       string `json:"kind"`
@@ -40,10 +40,10 @@ func NewRegistryCredentials(d *db.DB, a *audit.Logger) *RegistryCredentials {
 	return &RegistryCredentials{db: d, audit: a}
 }
 
-// Get unseals registries.auth_secret for ?registry_id=<uuid>, scoped to the
-// scanner token's org, and returns the decrypted credentials. Every call is
-// written to the audit chain.
+// Get unseals the registry attached to a job currently leased to this worker.
+// Every successful credential release requires a redacted audit receipt.
 func (h *RegistryCredentials) Get(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	tok, ok := ScannerTokenFrom(r.Context())
 	if !ok {
 		jsonError(w, http.StatusUnauthorized, "scanner token required")
@@ -61,22 +61,37 @@ func (h *RegistryCredentials) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// org-scoped: a scanner token can only read credentials for registries in
-	// its own org. A registry belonging to another org returns 404, identical
-	// to a registry that does not exist — no cross-org existence oracle.
-	kind, endpoint, authKind, sealed, _, err := loadRegistryRow(r.Context(), h.db.Pool(), tok.OrgID, id)
+	jobID, err := uuid.Parse(strings.TrimSpace(r.URL.Query().Get("job_id")))
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, "valid job_id required")
+		return
+	}
+	workerID := ScannerWorkerIDFromRequest(tok, r)
+	var kind, endpoint, authKind string
+	var sealed []byte
+	// Check every ownership edge as well as the unexpired lease. An unrelated,
+	// expired or foreign job returns the same response as a missing registry.
+	err = h.db.Pool().QueryRow(r.Context(), `
+SELECT reg.kind, reg.endpoint, reg.auth_kind, reg.auth_secret
+  FROM registries reg
+  JOIN scan_targets st ON st.registry_id = reg.id AND st.org_id = reg.org_id
+  JOIN scan_jobs sj ON sj.target_id = st.id AND sj.org_id = st.org_id
+ WHERE reg.id = $1 AND reg.org_id = $2 AND sj.id = $3
+   AND st.type = 'image' AND sj.status = 'running'
+   AND sj.worker_id = $4 AND sj.lease_expires_at > NOW()`,
+		id, tok.OrgID, jobID, workerID).Scan(&kind, &endpoint, &authKind, &sealed)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			jsonError(w, http.StatusNotFound, "registry not found")
 			return
 		}
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		jsonError(w, http.StatusInternalServerError, "credential lookup failed")
 		return
 	}
 
 	creds, err := openCredentials(r.Context(), h.db.Pool(), sealed)
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, "decrypt credentials: "+err.Error())
+		jsonError(w, http.StatusInternalServerError, "credential decryption failed")
 		return
 	}
 
@@ -92,6 +107,8 @@ func (h *RegistryCredentials) Get(w http.ResponseWriter, r *http.Request) {
 		After: map[string]any{
 			"scanner":          tok.Name,
 			"scanner_token_id": tok.ID.String(),
+			"job_id":           jobID.String(),
+			"worker_id":        workerID,
 			"auth_kind":        authKind,
 			"has_credentials":  creds["username"] != "" || creds["password"] != "" || creds["token"] != "",
 		},

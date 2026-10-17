@@ -53,7 +53,12 @@ func TestValidateEndpoint_AdmissionReviewFixtures(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			resp, err := http.Post(srv.URL, "application/json", bytes.NewReader(body))
+			httpRequest, err := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL, bytes.NewReader(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			httpRequest.Header.Set("Content-Type", "application/json")
+			resp, err := http.DefaultClient.Do(httpRequest)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -105,7 +110,12 @@ func TestValidateEndpoint_RejectsMalformedAdmissionReview(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			resp, err := http.Post(srv.URL, "application/json", strings.NewReader(tc.body))
+			httpRequest, err := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL, strings.NewReader(tc.body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			httpRequest.Header.Set("Content-Type", "application/json")
+			resp, err := http.DefaultClient.Do(httpRequest)
 			if err != nil {
 				t.Fatal(err)
 			}

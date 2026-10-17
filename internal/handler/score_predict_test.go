@@ -26,7 +26,7 @@ func TestComputeRiskScore_SeverityOrdering(t *testing.T) {
 	high := computeRiskScore(severityCounts{High: 1})
 	med := computeRiskScore(severityCounts{Medium: 1})
 	low := computeRiskScore(severityCounts{Low: 1})
-	if !(crit > high && high > med && med > low && low >= 0) {
+	if crit <= high || high <= med || med <= low || low < 0 {
 		t.Fatalf("severity ordering violated: crit=%d high=%d med=%d low=%d", crit, high, med, low)
 	}
 }
@@ -34,7 +34,7 @@ func TestComputeRiskScore_SeverityOrdering(t *testing.T) {
 func TestComputeRiskScore_ResolvingLowersScore(t *testing.T) {
 	before := computeRiskScore(severityCounts{Critical: 3, High: 5, Medium: 10})
 	after := computeRiskScore(severityCounts{Critical: 0, High: 5, Medium: 10}) // fixed 3 crits
-	if !(after < before) {
+	if after >= before {
 		t.Fatalf("resolving criticals must lower the score: before=%d after=%d", before, after)
 	}
 }

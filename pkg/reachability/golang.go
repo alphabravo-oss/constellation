@@ -65,7 +65,8 @@ func AnalyzeGo(ctx context.Context, modulePath string) ([]Verdict, error) {
 	cmd.Stderr = &stderr
 	// govulncheck returns 3 when vulns are found, 0 when clean. Both are "success" for us.
 	if err := cmd.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		exitErr := &exec.ExitError{}
+		if errors.As(err, &exitErr) {
 			// Exit code 3 = "vulnerabilities found"; that's not an error here.
 			if exitErr.ExitCode() != 3 {
 				return nil, fmt.Errorf("reachability: govulncheck: %w (stderr=%s)", err,
@@ -199,8 +200,8 @@ type govulnMessage struct {
 }
 
 type govulnFinding struct {
-	OSV   string         `json:"osv"`
-	Trace []govulnFrame  `json:"trace"`
+	OSV   string        `json:"osv"`
+	Trace []govulnFrame `json:"trace"`
 }
 
 type govulnFrame struct {
@@ -210,9 +211,9 @@ type govulnFrame struct {
 }
 
 type osvRecord struct {
-	ID       string         `json:"id"`
-	Aliases  []string       `json:"aliases"`
-	Affected []osvAffected  `json:"affected"`
+	ID       string        `json:"id"`
+	Aliases  []string      `json:"aliases"`
+	Affected []osvAffected `json:"affected"`
 }
 
 type osvAffected struct {

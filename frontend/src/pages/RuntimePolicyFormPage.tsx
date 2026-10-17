@@ -1,3 +1,7 @@
+import { useRuntimePolicyScope, policyMatches, policyRevision, policyFingerprint, policyRules, rulesEqual } from "./runtime-policy-context";
+import { exportQueryReady, useExportGuard } from "@/hooks/useExportGuard";
+import { Button as ScopeButton } from "@/components/ui/button";
+import { ErrorState, LoadingState } from "@/components/ui/states";
 // Runtime policy add/edit as a DEDICATED PAGE (the Astronomer pattern —
 // see frontend/CLAUDE.md "Forms & actions — DEDICATED PAGES, NOT DRAWERS").
 // Replaces the old slide-in Drawer editor. Handles both create
@@ -5,13 +9,16 @@
 // cluster comes from the parent :id route param (query-string fallback for
 // standalone routing). All data logic + testids are preserved verbatim from
 // the former PolicyEditor.
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams } from "@tanstack/react-router";
+import { useRouteSearchParams } from "@/lib/route-search";
 import { ArrowLeft } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page";
+import { Collapse } from "@/components/ui/collapse";
+import { useTabParam } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/cn";
 
@@ -24,41 +31,51 @@ import {
 } from "@/api/client";
 
 export function RuntimePolicyFormPage() {
+  const scope = useRuntimePolicyScope();
+  const [search] = useRouteSearchParams();
+  const { policyId } = useParams({ strict: false });
+  const clusterID = scope.clusterId ?? "";
+  const key = ["runtime-policy", scope.owner, clusterID, policyId];
+  const existing = useQuery({ queryKey: key, queryFn: async () => {
+    const policy = await runtimePolicies.get(policyId!);
+    if (!policyMatches(policy, scope.org, clusterID, policyId)) throw new Error("Policy identity is unavailable");
+    return policy;
+  }, enabled: scope.ready && !!policyId, gcTime: 0, refetchOnMount: "always" });
+  const context = JSON.stringify([scope.owner, clusterID, policyId]);
+  const [snapshot, setSnapshot] = useState<{ context: string; policy: RuntimePolicy } | null>(null);
+  const ready = scope.ready && (!policyId || existing.isSuccess && !existing.isFetching && exportQueryReady(scope.client, key) && policyMatches(existing.data, scope.org, clusterID, policyId));
+  const [loadedContext, setLoadedContext] = useState<string | null>(null);
+  if (ready && loadedContext !== context) setLoadedContext(context);
+  if (policyId && ready && snapshot?.context !== context) setSnapshot({ context, policy: existing.data! });
+  const initial = snapshot?.context === context ? snapshot.policy : undefined;
+  const backTo = `/clusters/${clusterID}/runtime-policies${search.size ? `?${search}` : ""}`;
+  const recheck = () => scope.recheck() && (!policyId || exportQueryReady(scope.client, key, existing.data) && policyMatches(scope.client.getQueryData(key), scope.org, clusterID, policyId));
+  const refresh = async () => { if (!scope.recheck()) return undefined; const result = await existing.refetch(); return scope.recheck() && result.isSuccess && policyMatches(result.data, scope.org, clusterID, policyId) ? result.data : undefined; };
+  const waitingHeader = <PageHeader title={policyId ? "Edit runtime policy" : "New runtime policy"} actions={<a className="text-sm underline" href={backTo}>Cancel</a>} />;
+  if (!scope.ready && loadedContext !== context) return <div className="space-y-6">{waitingHeader}{scope.isLoading ? <LoadingState label="Resolving policy cluster…" /> : <ErrorState title="Resolve the selected cluster and operator before authoring policies." action={<Button onClick={scope.retry}>Retry cluster</Button>} />}</div>;
+  if (policyId && !initial) return <div className="space-y-6">{waitingHeader}{existing.isPending || existing.isFetching ? <LoadingState label="Loading runtime policy…" /> : <ErrorState title="This policy could not be loaded for the selected cluster." action={<ScopeButton onClick={() => void existing.refetch()}>Retry</ScopeButton>} />}</div>;
+  return <RuntimePolicyEditor key={context} clusterID={clusterID} policyID={policyId ?? null} initial={initial} latest={ready ? existing.data : undefined} unavailable={!ready} recheck={recheck} refresh={refresh} scope={scope} backTo={backTo} />;
+}
+
+function RuntimePolicyEditor({ clusterID, policyID, initial, latest, unavailable, recheck, refresh, scope, backTo }: { clusterID: string; policyID: string | null; initial?: RuntimePolicy; latest?: RuntimePolicy; unavailable: boolean; recheck: () => boolean; refresh: () => Promise<RuntimePolicy | undefined>; scope: ReturnType<typeof useRuntimePolicyScope>; backTo: string }) {
   const navigate = useNavigate();
-  const [search] = useSearchParams();
-  const { id: pathClusterID, policyId } = useParams();
-  const clusterID = pathClusterID ?? search.get("cluster_id") ?? "";
-  const policyID = policyId ?? null;
-
   const queryClient = useQueryClient();
-  const existing = useQuery({
-    queryKey: ["runtime-policy", policyID],
-    queryFn: () => runtimePolicies.get(policyID as string),
-    enabled: !!policyID,
-  });
-
-  const [workload, setWorkload] = useState("");
-  const [namespace, setNamespace] = useState("");
-  const [name, setName] = useState("");
-  const [rulesText, setRulesText] = useState("[]");
+  const [workload, setWorkload] = useState(initial?.workload ?? "");
+  const [namespace, setNamespace] = useState(initial?.namespace ?? "");
+  const [name, setName] = useState(initial?.name ?? "");
+  const [rulesText, setRulesText] = useState(typeof initial?.rules === "string" ? initial.rules : JSON.stringify(initial?.rules ?? [], null, 2));
   const [err, setErr] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (existing.data) {
-      setWorkload(existing.data.workload);
-      setNamespace(existing.data.namespace);
-      setName(existing.data.name);
-      setRulesText(JSON.stringify(Array.isArray(existing.data.rules) ? existing.data.rules : [], null, 2));
-    } else if (!policyID) {
-      setWorkload("");
-      setNamespace("");
-      setName("");
-      setRulesText("[]");
-    }
-  }, [existing.data, policyID]);
-
-  const backTo = { pathname: "..", search: search.toString() };
-  const goBack = () => navigate(backTo);
+  const [reviewed, setReviewed] = useState(initial);
+  const [conflict, setConflict] = useState(false);
+  const [uncertain, setUncertain] = useState(false);
+  const changed = !!policyID && (!latest || !reviewed || policyFingerprint(latest) !== policyFingerprint(reviewed));
+  const blocked = unavailable || changed || conflict || uncertain;
+  const context = JSON.stringify([scope.owner, clusterID, policyID]);
+  const captureCurrent = useExportGuard(JSON.stringify([context, reviewed && policyFingerprint(reviewed)]), blocked, recheck);
+  const captureContext = useExportGuard(context, false);
+  const review = useMutation({ mutationFn: async () => { const current = captureContext(); const policy = await refresh(); if (!current() || !policy) throw new Error("Policy review unavailable"); return policy; }, onSuccess: policy => { setReviewed(policy); setConflict(false); setErr(null); } });
+  const goBack = () => navigate({ href: backTo });
 
   const parseRules = (): RuntimePolicyRule[] => {
     const out = JSON.parse(rulesText);
@@ -67,29 +84,20 @@ export function RuntimePolicyFormPage() {
   };
 
   const save = useMutation({
-    mutationFn: async (): Promise<RuntimePolicy> => {
+    mutationFn: async () => {
       setErr(null);
-      let parsedRules: RuntimePolicyRule[];
-      try {
-        parsedRules = parseRules();
-      } catch (e) {
-        throw new Error("Rules JSON invalid: " + (e as Error).message);
-      }
-      if (policyID) {
-        return runtimePolicies.update(policyID, { rules: parsedRules, name });
-      }
-      return runtimePolicies.create({
-        cluster_id: clusterID,
-        workload, namespace, name,
-        mode: "monitor",
-        rules: parsedRules,
-      });
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["runtime-policies", clusterID] });
+      if (blocked || !recheck()) throw new Error("Refresh policy scope before saving");
+      const current = captureCurrent(), parsedRules = parseRules();
+      const candidate = { workload: workload.trim(), namespace: namespace.trim(), name: name.trim(), rules: parsedRules };
+      const saved = policyID ? await runtimePolicies.updateReviewed(policyID, { cluster_id: clusterID, expected_version: policyRevision(reviewed!)!, name: candidate.name, rules: candidate.rules }) : await runtimePolicies.create({ cluster_id: clusterID, ...candidate, mode: "monitor" });
+      if (!current()) { setUncertain(true); throw new Error("Response is no longer current"); }
+      const matches = policyMatches(saved, scope.org, clusterID, policyID ?? undefined) && saved.workload === candidate.workload && saved.namespace === candidate.namespace && saved.name === candidate.name && rulesEqual(policyRules(saved), candidate.rules) && (policyID ? saved.mode === reviewed!.mode && saved.def_action === reviewed!.def_action && saved.apply_dir === reviewed!.apply_dir && BigInt(policyRevision(saved)!) > BigInt(policyRevision(reviewed)!) : saved.mode === "monitor");
+      if (!matches) { setUncertain(true); throw new Error("Saved policy could not be confirmed"); }
+      queryClient.setQueryData(["runtime-policy", scope.owner, clusterID, saved.id], saved);
+      void queryClient.invalidateQueries({ queryKey: ["runtime-policies", scope.owner, clusterID] });
       goBack();
     },
-    onError: (e) => setErr((e as Error).message),
+    onError: error => { if ((error as { response?: { status?: number } }).response?.status === 409) setConflict(true); setErr("Could not save this policy. Your draft is preserved. Refresh its current review before retrying."); },
   });
 
   // Wave B3: Simulate the candidate ruleset against the workload's
@@ -100,6 +108,7 @@ export function RuntimePolicyFormPage() {
   const simulate = useMutation({
     mutationFn: async (): Promise<PolicyMatchStats> => {
       setErr(null);
+      if (blocked || !recheck()) throw new Error("Refresh policy evidence first");
       let parsedRules: RuntimePolicyRule[];
       try {
         parsedRules = parseRules();
@@ -109,10 +118,14 @@ export function RuntimePolicyFormPage() {
       if (!policyID) {
         throw new Error("Save the policy first; simulation runs against the workload it's bound to.");
       }
-      return runtimePolicies.simulate(policyID, { rules: parsedRules, as_mode: "enforce" }, 24);
+      const current = captureCurrent();
+      const stats = await runtimePolicies.simulate(policyID, { rules: parsedRules, as_mode: "enforce" }, 24);
+      if (!current() || stats.workload !== workload || stats.window_hours !== 24) throw new Error("Simulation is no longer current");
+      return stats;
     },
+    onMutate: () => setSimStats(undefined),
     onSuccess: setSimStats,
-    onError: (e) => setErr((e as Error).message),
+    onError: () => setErr("Simulation could not complete. Check the rules and try again."),
   });
 
   // Wave B4: Generate rules from observed traffic for the workload.
@@ -122,83 +135,101 @@ export function RuntimePolicyFormPage() {
   const generate = useMutation({
     mutationFn: async (): Promise<GeneratePolicyResponse> => {
       setErr(null);
+      if (blocked || !recheck()) throw new Error("Refresh policy evidence first");
       if (!workload) throw new Error("Workload is required to generate from observed traffic.");
-      return runtimePolicies.generate({
+      const current = captureCurrent();
+      const result = await runtimePolicies.generate({
         cluster_id: clusterID,
         workload, namespace: namespace || undefined,
         hours: 24,
       });
+      if (!current() || result.workload !== workload || result.window_hours !== 24) throw new Error("Generated evidence is no longer current");
+      return result;
     },
     onSuccess: (g) => {
       setGenResult(g);
+      setSimStats(undefined);
       // Prefill the editor with the generated rules so the operator can
       // review + tweak before saving. We DO NOT auto-save — auto-gen is
       // a draft, not a commit.
       setRulesText(JSON.stringify(g.rules, null, 2));
     },
-    onError: (e) => setErr((e as Error).message),
+    onError: () => setErr("Rules could not be generated. Check the workload and try again."),
   });
 
+  const busy = save.isPending || simulate.isPending || generate.isPending;
+  const rulesValid = Array.isArray(tryParse(rulesText));
   return (
     <div className="space-y-6">
       <PageHeader
         title={policyID ? "Edit runtime policy" : "New runtime policy"}
         description="Author the policy's rules, simulate them against observed traffic, or generate a ruleset from what's been seen. New policies always start in monitor mode — promote separately to enforce."
-        backLink={<Link to={backTo} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Runtime Policies</Link>}
+        backLink={<a href={backTo} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Runtime Policies</a>}
       />
 
-      <Card title="Policy" description="Rules dp enforces for the selected workload.">
-        <div className="space-y-4" data-testid="runtime-policies-editor">
+      {unavailable && <ErrorState title="Current policy or cluster evidence is unavailable or refreshing. Your draft is preserved; actions are paused." action={<Button disabled={review.isPending || busy} onClick={() => { if (scope.ready) review.mutate(); else scope.retry(); }}>{scope.ready ? "Refresh policy" : "Retry cluster"}</Button>} />}
+      {(changed || conflict) && !unavailable && <ErrorState title="The saved policy changed. Review its current mode and revision before applying your retained draft." action={<Button disabled={review.isPending || busy} onClick={() => review.mutate()}>Review latest policy</Button>} />}
+      {review.isError && <ErrorState title="Current policy could not be reviewed. Your draft is preserved." />}
+      {uncertain && <ErrorState title="The saved policy could not be confirmed in this workspace. Reload before another write." />}
+      <Card title="Policy" description="Review rules for this workload before saving. New policies observe traffic until promoted.">
+        <form className="space-y-4" data-testid="runtime-policies-editor" onSubmit={(event) => { event.preventDefault(); if (!blocked && !busy && rulesValid && name.trim() && workload.trim() && namespace.trim()) save.mutate(); }}>
+          <fieldset disabled={busy} className="space-y-4">
           <div className="space-y-3" data-testid="runtime-policies-editor-form">
             <Field label="Workload" value={workload} onChange={setWorkload} placeholder="namespace/deployment" disabled={!!policyID} />
             <Field label="Namespace" value={namespace} onChange={setNamespace} placeholder="default" disabled={!!policyID} />
             <Field label="Name" value={name} onChange={setName} placeholder="block-egress-to-internet" />
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Rules (JSON)</div>
-            <textarea
+            <label htmlFor="runtime-policy-rules" className="text-sm text-muted-foreground">Rules (JSON)</label>
+            <textarea id="runtime-policy-rules"
               className="h-[300px] w-full rounded border border-input bg-card p-2 font-mono text-[11px] outline-none focus:border-[color:var(--color-primary)]"
               value={rulesText}
-              onChange={(e) => setRulesText(e.target.value)}
+              onChange={(e) => { setRulesText(e.target.value); setSimStats(undefined); setGenResult(undefined); }}
               spellCheck={false}
               data-testid="runtime-policies-editor-rules"
             />
+            {!rulesValid && <p role="alert">Rules must be a valid JSON array.</p>}
             {err && (
-              <div className="rounded border border-[color:var(--color-status-error)] bg-card p-2 text-[11px] text-[color:var(--color-status-error)]" data-testid="runtime-policies-editor-error">
+              <div className="rounded border border-[color:var(--color-status-error)] bg-card p-2 text-[11px] text-[color:var(--color-status-error)]" role="alert" data-testid="runtime-policies-editor-error">
                 {err}
               </div>
             )}
             <div className="flex items-center gap-2">
-              <Button onClick={() => save.mutate()} disabled={save.isPending} data-testid="runtime-policies-editor-save">
+              <Button type="submit" disabled={blocked || busy || !rulesValid || !name.trim() || !workload.trim() || !namespace.trim()} data-testid="runtime-policies-editor-save">
                 {policyID ? "Save changes" : "Create (in monitor mode)"}
               </Button>
               <Button
-                variant="outline"
+                type="button" variant="outline"
                 onClick={() => simulate.mutate()}
-                disabled={simulate.isPending || !policyID}
+                disabled={blocked || busy || !policyID || !rulesValid}
                 data-testid="runtime-policies-editor-simulate"
                 title={policyID ? "Run the current rules against the last 24h of observed flows for this workload" : "Save the policy first to enable simulation"}
               >
                 {simulate.isPending ? "Simulating…" : "Simulate"}
               </Button>
               <Button
-                variant="outline"
+                type="button" variant="outline"
                 onClick={() => generate.mutate()}
-                disabled={generate.isPending || !workload}
+                disabled={blocked || busy || !workload}
                 data-testid="runtime-policies-editor-generate"
                 title="Synthesize a default-deny ruleset from the last 24h of observed traffic for this workload. Threat-tagged flows are excluded."
               >
                 {generate.isPending ? "Generating…" : "Generate from traffic"}
               </Button>
-              <Button variant="ghost" onClick={goBack}>Cancel</Button>
+              <Button type="button" variant="ghost" onClick={goBack}>Cancel</Button>
               <span className="text-[10px] text-muted-foreground">
                 New policies always start in <b>monitor</b>. Promote separately to enforce.
               </span>
             </div>
           </div>
+          <Collapse label="Advanced: request preview">
+          <p className="mb-2 text-xs">Reviewed mode: {reviewed?.mode ?? "New · monitor"} · revision {policyRevision(reviewed) ?? "Not created"}</p>
+          {reviewed && <div className="mb-3 space-y-2 text-xs"><p>Saved name: {reviewed.name}. Applying the retained draft replaces its name and rules.</p><pre className="max-h-56 overflow-auto rounded border border-border p-2">{JSON.stringify(policyRules(reviewed), null, 2)}</pre></div>}
           <div className="space-y-2" data-testid="runtime-policies-editor-preview">
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Live preview</div>
             <pre className="h-[280px] overflow-auto rounded border border-border bg-background/40 p-2 font-mono text-[10px] leading-snug">
               {JSON.stringify({ cluster_id: clusterID, workload, namespace, name, rules: tryParse(rulesText) }, null, 2)}
             </pre>
+          </div>
+          </Collapse>
             {simStats && (
               <>
                 <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Simulation</div>
@@ -206,8 +237,8 @@ export function RuntimePolicyFormPage() {
               </>
             )}
             {genResult && <GenerateResultPane result={genResult} />}
-          </div>
-        </div>
+          </fieldset>
+        </form>
       </Card>
     </div>
   );
@@ -217,7 +248,8 @@ export function RuntimePolicyFormPage() {
 // looked at, how many threat-tagged flows it deliberately skipped, and
 // downloadable NetworkPolicy YAML in three flavors.
 function GenerateResultPane({ result }: { result: GeneratePolicyResponse }) {
-  const [yamlTab, setYamlTab] = useState<"native" | "cilium" | "calico">("native");
+  const [requestedFormat, setYamlTab] = useTabParam("format", "native");
+  const yamlTab = requestedFormat === "cilium" || requestedFormat === "calico" ? requestedFormat : "native";
   const yaml = result.yaml[yamlTab];
   const download = (flavor: string) => {
     const blob = new Blob([result.yaml[flavor as keyof typeof result.yaml]], { type: "text/yaml" });
@@ -309,10 +341,11 @@ function Field({
   disabled?: boolean;
 }) {
   return (
-    <div>
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+    <label className="block">
+      <span className="text-sm text-muted-foreground">{label}</span>
       <input
         type="text"
+        required
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
@@ -322,7 +355,7 @@ function Field({
           disabled && "opacity-60",
         )}
       />
-    </div>
+    </label>
   );
 }
 

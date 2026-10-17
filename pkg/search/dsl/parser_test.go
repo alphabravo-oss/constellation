@@ -7,11 +7,11 @@ import (
 
 func testSchema() Schema {
 	return Schema{Fields: map[string]Field{
-		"severity":      {Column: "f.severity", Type: FieldString},
-		"kind":          {Column: "f.kind", Type: FieldString},
-		"risk":          {Column: "f.risk_score", Type: FieldInt},
-		"last_seen":     {Column: "f.last_seen_at", Type: FieldTime},
-		"title":         {Column: "f.title", Type: FieldString},
+		"severity":  {Column: "f.severity", Type: FieldString},
+		"kind":      {Column: "f.kind", Type: FieldString},
+		"risk":      {Column: "f.risk_score", Type: FieldInt},
+		"last_seen": {Column: "f.last_seen_at", Type: FieldTime},
+		"title":     {Column: "f.title", Type: FieldString},
 	}}
 }
 

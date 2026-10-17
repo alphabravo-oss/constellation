@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { ArrowLeft } from "lucide-react";
 
@@ -66,7 +66,7 @@ export function CustomRoleFormPage() {
       void qc.invalidateQueries({ queryKey: ["access-control"] });
       void qc.invalidateQueries({ queryKey: ["custom-roles"] });
       toast.success("Custom role created");
-      navigate(BACK_TO);
+      navigate({ href: BACK_TO });
     },
     onError: (e: unknown) => toast.error((e as { response?: { data?: { error?: string } } })?.response?.data?.error || "Failed to create role"),
   });
@@ -76,7 +76,7 @@ export function CustomRoleFormPage() {
       <PageHeader
         title="New custom role"
         description="Define a named permission set by selecting the actions it grants. Built-in roles can't be edited; custom roles are yours to shape."
-        backLink={<Link to={BACK_TO} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Access Control</Link>}
+        backLink={<Link to="." href={BACK_TO} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Access Control</Link>}
       />
       <Card title="Role details">
         <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
@@ -126,7 +126,7 @@ export function CustomRoleFormPage() {
             <Button type="submit" variant="primary" size="lg" disabled={!name.trim() || selected.size === 0 || save.isPending}>
               {save.isPending ? "Creating…" : "Create role"}
             </Button>
-            <Button type="button" variant="ghost" size="lg" onClick={() => navigate(BACK_TO)}>Cancel</Button>
+            <Button type="button" variant="ghost" size="lg" onClick={() => navigate({ href: BACK_TO })}>Cancel</Button>
           </div>
         </form>
       </Card>

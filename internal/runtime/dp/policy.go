@@ -78,6 +78,7 @@ type WorkloadPolicy struct {
 	ApplyDir   int           // ApplyDirEgress | ApplyDirIngress | ApplyDirBoth
 	MACs       []string      // veth MACs of every pod replica of this workload
 	Rules      []*PolicyRule // the actual rule table
+	LocalIPs   []net.IP      // current scoped interface addresses; never serialized directly
 }
 
 // policyCfgPayload is the wire-level shape of `ctrl_cfg_policy`. Mirrors
@@ -101,6 +102,19 @@ type policyCfgReq struct {
 // listener buffer is DP_MSG_SIZE (8192); we leave 72 bytes for the JSON
 // keys/punctuation of the envelope. Mirrors NeuVector's maxMsgSize = 8120.
 const maxPolicyMsgSize = 8120
+
+// MaxExpandedPolicyRules bounds the per-endpoint wire rule table, including
+// generated defaults and ICMP compatibility rows. It keeps native uint32 rule
+// order finite and limits transfer work; it is not a per-fragment limit.
+const MaxExpandedPolicyRules = 65536
+
+// ValidatePolicyRuleCount runs before allocation, serialization and IPC.
+func ValidatePolicyRuleCount(count int) error {
+	if count < 0 || count > MaxExpandedPolicyRules {
+		return fmt.Errorf("dp policy: expanded table has %d rules; limit is %d; reduce rules or endpoint IPv4 addresses", count, MaxExpandedPolicyRules)
+	}
+	return nil
+}
 
 // initialRulesPerMsg is the first-pass estimate of how many rules fit in
 // one datagram. NeuVector's agent starts here and adapts down if the
@@ -131,8 +145,15 @@ func (s *Supervisor) PushPolicy(policy *WorkloadPolicy, cmd uint) error {
 // pushPolicy is the inner implementation; takes a raw *dpClient so it's
 // easy to unit-test without spinning up a real supervisor.
 func (c *dpClient) pushPolicy(policy *WorkloadPolicy, cmd uint) error {
-	if policy == nil {
-		return fmt.Errorf("dp policy: nil policy")
+	c.policyMu.Lock()
+	defer c.policyMu.Unlock()
+	return c.pushPolicyLocked(policy, cmd)
+}
+
+// Caller holds policyMu across every fragment (native has one staging handle).
+func (c *dpClient) pushPolicyLocked(policy *WorkloadPolicy, cmd uint) error {
+	if err := validatePolicySubmission(policy); err != nil {
+		return err
 	}
 	rules := policy.Rules
 	first := true
@@ -210,6 +231,8 @@ func (c *dpClient) pushPolicy(policy *WorkloadPolicy, cmd uint) error {
 // (auto-connect, write-deadline, reset on err) but skips json.Marshal so
 // we can re-use the same buffer for the size-adapt retry loop.
 func (c *dpClient) sendOnewayRaw(msg []byte) error {
+	c.txMu.Lock()
+	defer c.txMu.Unlock()
 	if err := c.connect(); err != nil {
 		return err
 	}
@@ -256,6 +279,8 @@ func (s *Supervisor) SetICMPPolicy(enable bool) error {
 	if s == nil || s.client == nil {
 		return fmt.Errorf("dp policy: supervisor not started")
 	}
+	s.client.policyMu.Lock()
+	defer s.client.policyMu.Unlock()
 	req := &icmpPolicyReq{}
 	req.Cfg.Enable = enable
 	return s.client.sendOneway(req)
@@ -611,4 +636,11 @@ func (s *Supervisor) ConfigureDetector(macs []string, dlpRules []*DLPRule, wafRu
 		WafRuleIds:   defaultSessionRIDs(),
 		WafRuleType:  WAFRuleTypeOutside,
 	}})
+}
+
+func validatePolicySubmission(policy *WorkloadPolicy) error {
+	if policy == nil {
+		return fmt.Errorf("dp policy: nil policy")
+	}
+	return ValidatePolicyRuleCount(len(policy.Rules))
 }

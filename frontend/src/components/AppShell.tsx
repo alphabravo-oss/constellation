@@ -1,9 +1,11 @@
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
+import { findingHref, findingRowKey } from "@/lib/finding-instance";
 // AppShell — scope navigation and cluster-scoped navigation.
 //
 // Layout (sidebar w-60/w-16, topbar h-14, content p-6 max-w-[1600px] fade-in,
 // collapsible nav groups, user menu, offline banner) mirrors /root/astronomer.
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
@@ -154,11 +156,19 @@ export const CLUSTER_NAV: NavGroup[] = [
 
 const SCOPE_NAV: NavGroup[] = [
   {
+    id: "cluster",
+    label: "Clusters",
+    items: [
+      { path: "/clusters", icon: ServerCog, label: "Clusters", exact: true },
+    ],
+  },
+  {
     id: "organization",
     label: "Organization",
     items: [
       { path: "/cve",          icon: Database,        label: "CVE Database" },
       { path: "/posture",      icon: ClipboardCheck,  label: "Posture" },
+      { path: "/organization/audit", icon: ScrollText, label: "Audit Log" },
       { path: "/federation",   icon: Globe2,          label: "Federation" },
       { path: "/settings/access", icon: UsersRound, label: "Access Control" },
       { path: "/settings/api-tokens", icon: FileText, label: "API Tokens" },
@@ -178,13 +188,6 @@ const SCOPE_NAV: NavGroup[] = [
     items: [
       { path: "/settings/integrations", icon: Bell, label: "Integrations & Routing" },
       { path: "/settings/connectors", icon: Plug, label: "Connectors" },
-    ],
-  },
-  {
-    id: "cluster",
-    label: "Cluster",
-    items: [
-      { path: "/clusters", icon: ServerCog, label: "Clusters", exact: true },
     ],
   },
 ];
@@ -285,7 +288,7 @@ export function AppShell() {
               <BrandMark />
               <div className="flex flex-col min-w-0 leading-tight">
                 <span className="text-sm font-semibold text-foreground tracking-tight truncate">Constellation</span>
-                <span className="text-[10px] text-muted-foreground truncate">Security Platform</span>
+                <span className="text-[10px] text-muted-foreground truncate">by Alphabravo</span>
               </div>
             </Link>
           )}
@@ -364,7 +367,7 @@ export function AppShell() {
           userRole={me?.roles?.[0]}
           onLaunchPalette={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))}
           onOpenHotkeys={() => setHkOpen(true)}
-          onNavigate={navigate}
+          onNavigate={(href) => { void navigate({ href }); }}
         />
         {!online && (
           <div
@@ -413,6 +416,15 @@ function SidebarGroup({
   nested?: boolean;
   children?: ReactNode;
 }) {
+  // The primary workspace entry stays visible on every route, including settings.
+  if (group.id === "cluster" && !nested) {
+    return (
+      <div role="group" aria-label="Clusters" className="mb-2 border-b border-sidebar-border pb-2">
+        {group.items.map((item) => <SidebarRow key={item.path} item={item} pathname={pathname} clusterId={clusterId} collapsed={collapsed} />)}
+        {children}
+      </div>
+    );
+  }
   if (collapsed) {
     return (
       <div role="group" aria-label={group.label} className="space-y-px">
@@ -467,8 +479,8 @@ function SidebarRow({
 
   if (collapsed) {
     return (
-      <NavLink
-        to={to}
+      <Link
+        to="." href={to}
         data-testid={item.path === "/clusters" && clusterId ? "back-to-clusters" : undefined}
         className={cn("nav-item group justify-center px-0", active && "active")}
         title={item.label}
@@ -476,13 +488,13 @@ function SidebarRow({
         aria-current={active ? "page" : undefined}
       >
         <Icon className={cn("h-4 w-4 flex-shrink-0", active ? "text-foreground" : "text-muted-foreground group-hover:text-foreground")} />
-      </NavLink>
+      </Link>
     );
   }
 
   return (
-    <NavLink
-      to={to}
+    <Link
+      to="." href={to}
       data-testid={item.path === "/clusters" && clusterId ? "back-to-clusters" : `nav-${item.path.replace(/\//g, "-")}`}
       aria-current={active ? "page" : undefined}
       className={cn(
@@ -494,7 +506,7 @@ function SidebarRow({
     >
       <Icon className={cn("h-4 w-4 flex-shrink-0", active ? "text-foreground" : "text-muted-foreground group-hover:text-foreground")} />
       <span className="truncate flex-1">{item.label}</span>
-    </NavLink>
+    </Link>
   );
 }
 
@@ -535,7 +547,7 @@ function TopHeader({
             {i === crumbs.length - 1 ? (
               <span className="text-foreground font-medium truncate">{c.label}</span>
             ) : c.to ? (
-              <Link to={c.to} className="text-muted-foreground hover:text-foreground transition-colors truncate">{c.label}</Link>
+              <Link to="." href={c.to} className="text-muted-foreground hover:text-foreground transition-colors truncate">{c.label}</Link>
             ) : (
               <span className="text-muted-foreground truncate">{c.label}</span>
             )}
@@ -650,8 +662,11 @@ function MenuItem({
 }
 
 function NotificationBell({ onNavigate }: { onNavigate: (to: string) => void }) {
+  const operator = useTablePreferencesIdentity();
+  const owner = `${operator?.org_id}:${operator?.user_id}`;
   const q = useQuery({
-    queryKey: ["bell-feed"],
+    queryKey: ["bell-feed", owner],
+    enabled: !!operator?.org_id && !!operator?.user_id,
     queryFn: () => findingsApi.list({ lifecycle: "open", limit: 50 }),
     staleTime: 30_000,
     refetchInterval: 60_000,
@@ -659,7 +674,7 @@ function NotificationBell({ onNavigate }: { onNavigate: (to: string) => void }) 
   // Runtime threats (DLP/WAF/IPS) so the bell isn't findings-only — surface recent
   // high-severity runtime detections alongside vuln findings.
   const rtQ = useQuery({
-    queryKey: ["bell-runtime"],
+    queryKey: ["bell-runtime", owner],
     queryFn: () => runtimeThreatsApi.list({ hours: 24, severity_min: 4 }),
     staleTime: 30_000,
     refetchInterval: 60_000,
@@ -737,11 +752,11 @@ function NotificationBell({ onNavigate }: { onNavigate: (to: string) => void }) 
           )}
           <ul className="max-h-80 overflow-auto">
             {items.map((f) => (
-              <li key={f.id}>
+              <li key={findingRowKey(f)}>
                 <button
                   type="button"
                   onClick={() => {
-                    if (f.cluster_id) onNavigate(`/clusters/${f.cluster_id}/findings/${f.id}`);
+                    if (f.cluster_id || f.source_cluster_id || f.target_cluster_id) onNavigate(findingHref(f));
                     else onNavigate("/clusters");
                   }}
                   className="w-full text-left flex items-start gap-3 px-4 py-3 border-b border-border last:border-0 hover:bg-accent/50 transition-colors"
@@ -797,7 +812,7 @@ function useCrumbs(pathname: string, clusterId: string | null): Array<{ label: s
   const parts = pathname.split("/").filter(Boolean);
   if (parts.length === 0) return [{ label: "Clusters" }];
   const out: Array<{ label: string; to?: string }> = [];
-  out.push({ label: toTitle(parts[0]), to: `/${parts[0]}` });
+  out.push({ label: toTitle(parts[0]), to: parts[0] === "organization" ? undefined : `/${parts[0]}` });
   for (let i = 1; i < parts.length; i++) {
     const seg = parts[i];
     const isId = seg.includes("-") || seg.length >= 8;

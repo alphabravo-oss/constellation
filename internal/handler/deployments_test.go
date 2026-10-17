@@ -459,7 +459,7 @@ VALUES ($1, $2, 'deny-shell', 'high', 'runtime', 'shell executed', $3)`, orgID, 
 		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgID)
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/deployments/"+deploymentID.String(), nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/deployments/"+deploymentID.String(), nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", deploymentID.String())
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))

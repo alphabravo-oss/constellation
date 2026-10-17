@@ -16,13 +16,13 @@ func TestClusters_HealthValidatesClusterIDAndSubject(t *testing.T) {
 	r.Get("/api/v1/clusters/{id}/health", NewClusters(nil).Health)
 
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/clusters/not-a-uuid/health", nil))
+	r.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/clusters/not-a-uuid/health", nil))
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("invalid id status: %d", w.Code)
 	}
 
 	w = httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/clusters/"+uuid.NewString()+"/health", nil))
+	r.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/clusters/"+uuid.NewString()+"/health", nil))
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("missing subject status: %d", w.Code)
 	}
@@ -72,7 +72,7 @@ VALUES ($1, $2, $3, 'prod-east', 'k3s', NOW() + INTERVAL '7 days', 'test-fingerp
 	r := chi.NewRouter()
 	r.Get("/api/v1/clusters/{id}/health", NewClusters(d).Health)
 
-	req := httptest.NewRequest("GET", "/api/v1/clusters/"+clusterID.String()+"/health", nil)
+	req := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/clusters/"+clusterID.String()+"/health", nil)
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -165,7 +165,7 @@ VALUES ($1, $2, $3, 'prod-east', 'k3s', NOW() + INTERVAL '7 days', 'test-fingerp
 		t.Fatalf("component gate: %+v", got.Gates[2])
 	}
 
-	listReq := httptest.NewRequest("GET", "/api/v1/clusters", nil)
+	listReq := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/clusters", nil)
 	listReq = listReq.WithContext(WithSubject(listReq.Context(), Subject{UserID: userID, OrgID: orgID}))
 	listW := httptest.NewRecorder()
 	NewClusters(d).List(listW, listReq)
@@ -246,7 +246,7 @@ VALUES
 
 	r := chi.NewRouter()
 	r.Get("/api/v1/clusters/{id}/health", NewClusters(d).Health)
-	req := httptest.NewRequest("GET", "/api/v1/clusters/"+clusterID.String()+"/health", nil)
+	req := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/clusters/"+clusterID.String()+"/health", nil)
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)

@@ -71,7 +71,7 @@ INSERT INTO component_heartbeats (
 		t.Fatalf("heartbeats: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/components?cluster_id="+clusterID.String(), nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/components?cluster_id="+clusterID.String(), nil)
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	rec := httptest.NewRecorder()
 	NewComponentsInventory(d).List(rec, req)
@@ -132,7 +132,7 @@ INSERT INTO component_heartbeats (
 	router := chi.NewRouter()
 	router.Get("/api/v1/components/{id}", NewComponentsInventory(d).Get)
 	router.Get("/api/v1/components/{id}/diagnostics", NewComponentsInventory(d).Diagnostics)
-	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/components/"+scannerID.String(), nil)
+	getReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/components/"+scannerID.String(), nil)
 	getReq = getReq.WithContext(WithSubject(getReq.Context(), Subject{UserID: userID, OrgID: orgID}))
 	getRec := httptest.NewRecorder()
 	router.ServeHTTP(getRec, getReq)
@@ -149,7 +149,7 @@ INSERT INTO component_heartbeats (
 		t.Fatalf("detail = %+v", detail.Component)
 	}
 
-	diagReq := httptest.NewRequest(http.MethodGet, "/api/v1/components/"+scannerID.String()+"/diagnostics", nil)
+	diagReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/components/"+scannerID.String()+"/diagnostics", nil)
 	diagReq = diagReq.WithContext(WithSubject(diagReq.Context(), Subject{UserID: userID, OrgID: orgID}))
 	diagRec := httptest.NewRecorder()
 	router.ServeHTTP(diagRec, diagReq)
@@ -197,7 +197,7 @@ INSERT INTO component_heartbeats (
 		t.Fatalf("debug gates = %+v", diag.Debug)
 	}
 
-	missingReq := httptest.NewRequest(http.MethodGet, "/api/v1/components/"+uuid.NewString()+"/diagnostics", nil)
+	missingReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/components/"+uuid.NewString()+"/diagnostics", nil)
 	missingReq = missingReq.WithContext(WithSubject(missingReq.Context(), Subject{UserID: userID, OrgID: orgID}))
 	missingRec := httptest.NewRecorder()
 	router.ServeHTTP(missingRec, missingReq)
@@ -273,7 +273,7 @@ func TestComponentsInventoryRequiredAndOptionalRoleRollups(t *testing.T) {
 		if cluster != nil {
 			path += "?cluster_id=" + cluster.String()
 		}
-		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
 		req = req.WithContext(WithSubject(req.Context(), subject))
 		rec := httptest.NewRecorder()
 		inventory.List(rec, req)
@@ -366,7 +366,7 @@ func TestComponentsInventoryRequiredAndOptionalRoleRollups(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/heartbeats", strings.NewReader(string(payload)))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/heartbeats", strings.NewReader(string(payload)))
 		req.Header.Set("Authorization", "Bearer "+scannerToken)
 		rec := httptest.NewRecorder()
 		ingestHandler.ServeHTTP(rec, req)
@@ -545,7 +545,7 @@ VALUES ($1, $2, $3, 'linux-node', 12, 1, 2, 3, '{"checks":[]}'::jsonb, $4)`,
 
 	router := chi.NewRouter()
 	router.Get("/api/v1/components/{id}/diagnostics", NewComponentsInventory(d).Diagnostics)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/components/"+heartbeatID.String()+"/diagnostics", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/components/"+heartbeatID.String()+"/diagnostics", nil)
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -644,7 +644,7 @@ VALUES ($1, $2, $3, $4, 'test', 'current-commit', $5, 60, $6::jsonb, $7, $7)`,
 	router.Get("/api/v1/components/{id}", inventory.Get)
 	router.Get("/api/v1/components/{id}/diagnostics", inventory.Diagnostics)
 	request := func(path string, authenticated bool) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
 		if authenticated {
 			req = req.WithContext(WithSubject(req.Context(), subject))
 		}
@@ -766,4 +766,113 @@ VALUES ($1, $2, $3, $4, 'test', 'current-commit', $5, 60, $6::jsonb, $7, $7)`,
 			}
 		})
 	}
+}
+
+func TestComponentInstanceScoringPreservesRowsAndHealthCollapse(t *testing.T) {
+	now := time.Now().UTC()
+	clusterA, clusterB := uuid.New(), uuid.New()
+	rows := []HeartbeatRow{
+		{ID: uuid.New(), Component: "scanner", ClusterID: &clusterA, Hostname: "scanner-old", Commit: "old", LastSeenAt: now.Add(-10 * time.Minute)},
+		{ID: uuid.New(), Component: "operator", ClusterID: &clusterB, Hostname: "operator", Commit: "current", LastSeenAt: now.Add(-time.Minute)},
+		{ID: uuid.New(), Component: "scanner", ClusterID: &clusterA, Hostname: "scanner-current", Commit: "current", LastSeenAt: now},
+		{ID: uuid.New(), Component: "scanner", ClusterID: &clusterB, Hostname: "scanner-other-cluster", Commit: "current", LastSeenAt: now.Add(-time.Minute)},
+	}
+	names := map[uuid.UUID]string{clusterA: "alpha", clusterB: "beta"}
+	scores := scoreHeartbeatInstances(rows, names, nil)
+	if len(scores) != len(rows) {
+		t.Fatalf("instance scores=%d, rows=%d", len(scores), len(rows))
+	}
+	for i, hb := range rows {
+		instance := componentInstanceFromHeartbeat(hb, scores[i])
+		wantStatus := "healthy"
+		if i == 0 {
+			wantStatus = "stale"
+		}
+		if instance.ID != hb.ID || scores[i].Hostname != hb.Hostname || instance.Status != wantStatus || instance.ClusterName != names[*hb.ClusterID] {
+			t.Errorf("score association for row %d = %+v / %+v", i, instance, scores[i])
+		}
+	}
+	health := scoreHeartbeats(rows, names, nil)
+	if len(health) != 3 {
+		t.Fatalf("health must retain its collapsed view: %+v", health)
+	}
+	for _, score := range health {
+		if score.Hostname == "scanner-old" || score.Status != "healthy" {
+			t.Errorf("health included superseded instance or mismatched status: %+v", score)
+		}
+	}
+}
+
+func TestComponentsInventorySupersededInstanceListDetailAndBundle(t *testing.T) {
+	d := openTestDB(t)
+	t.Cleanup(d.Close)
+	ctx := t.Context()
+	orgID, userID := uuid.New(), uuid.New()
+	if _, err := d.Pool().Exec(ctx, `INSERT INTO orgs (id, name, display_name) VALUES ($1, $2, 'Superseded Inventory Test')`, orgID, "superseded-"+orgID.String()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = d.Pool().Exec(context.Background(), `DELETE FROM orgs WHERE id=$1`, orgID) })
+	oldID, currentID, operatorID := uuid.New(), uuid.New(), uuid.New()
+	now := time.Now().UTC()
+	if _, err := d.Pool().Exec(ctx, `
+INSERT INTO component_heartbeats (id, org_id, component, hostname, commit, last_seen_at, first_seen_at)
+VALUES ($1,$4,'scanner','scanner-a-old','old',$5,$5),
+       ($2,$4,'scanner','scanner-z-current','current',$6,$6),
+       ($3,$4,'operator','operator-current','current',$6,$6)`,
+		oldID, currentID, operatorID, orgID, now.Add(-10*time.Minute), now); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewComponentsInventory(d)
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/v1/components", nil)
+	req = req.WithContext(WithSubject(req.Context(), Subject{OrgID: orgID, UserID: userID}))
+	rec := httptest.NewRecorder()
+	handler.List(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var listed struct {
+		Components []componentInstanceDTO `json:"components"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
+		t.Fatal(err)
+	}
+	assertInstances := func(instances []componentInstanceDTO) {
+		t.Helper()
+		if len(instances) != 3 {
+			t.Fatalf("instance count=%d, want 3", len(instances))
+		}
+		seen := map[uuid.UUID]string{}
+		for _, instance := range instances {
+			seen[instance.ID] = instance.Status
+		}
+		if seen[oldID] != "stale" || seen[currentID] != "healthy" || seen[operatorID] != "healthy" {
+			t.Errorf("instance statuses = %v", seen)
+		}
+	}
+	assertInstances(listed.Components)
+	router := chi.NewRouter()
+	router.Get("/api/v1/components/{id}", handler.Get)
+	router.Get("/api/v1/components/{id}/diagnostics", handler.Diagnostics)
+	for _, suffix := range []string{"", "/diagnostics"} {
+		for _, tc := range []struct {
+			id     uuid.UUID
+			status string
+		}{{oldID, "stale"}, {currentID, "healthy"}} {
+			detailReq := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/v1/components/"+tc.id.String()+suffix, nil)
+			detailReq = detailReq.WithContext(WithSubject(detailReq.Context(), Subject{OrgID: orgID, UserID: userID}))
+			detailRec := httptest.NewRecorder()
+			router.ServeHTTP(detailRec, detailReq)
+			var detail struct {
+				Component componentInstanceDTO `json:"component"`
+			}
+			if err := json.Unmarshal(detailRec.Body.Bytes(), &detail); err != nil || detailRec.Code != http.StatusOK || detail.Component.ID != tc.id || detail.Component.Status != tc.status {
+				t.Errorf("exact-ID detail %s%s status=%d body=%s err=%v", tc.id, suffix, detailRec.Code, detailRec.Body.String(), err)
+			}
+		}
+	}
+	bundle, err := NewSupportBundle(d, nil).collectComponentInventory(ctx, orgID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertInstances(bundle.(map[string]any)["components"].([]componentInstanceDTO))
 }

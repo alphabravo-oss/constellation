@@ -88,7 +88,7 @@ VALUES ($1, $2, 'node-a', 'kill_process', 'ns/target', 'pending') RETURNING id`,
 		{"foreign bundle", foreignToken},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			get := httptest.NewRequest(http.MethodGet, "/api/v1/runtime/response-actions:pending?cluster_id="+clusterB.String()+"&node=node-a", nil)
+			get := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/runtime/response-actions:pending?cluster_id="+clusterB.String()+"&node=node-a", nil)
 			get = get.WithContext(handler.WithRuntimeAgentToken(get.Context(), testCase.token))
 			gotPending := httptest.NewRecorder()
 			h.Pending(gotPending, get)
@@ -99,7 +99,7 @@ VALUES ($1, $2, 'node-a', 'kill_process', 'ns/target', 'pending') RETURNING id`,
 			if err != nil {
 				t.Fatal(err)
 			}
-			post := httptest.NewRequest(http.MethodPost, "/api/v1/runtime/response-actions:result", bytes.NewReader(body))
+			post := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/runtime/response-actions:result", bytes.NewReader(body))
 			post = post.WithContext(handler.WithRuntimeAgentToken(post.Context(), testCase.token))
 			gotResult := httptest.NewRecorder()
 			h.Result(gotResult, post)

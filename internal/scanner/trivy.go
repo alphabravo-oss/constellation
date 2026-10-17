@@ -61,7 +61,7 @@ func (t *TrivyEngine) Scan(ctx context.Context, ref string, opts ScanOptions) (*
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	cmd.Env = registryEnv(opts)
+	cmd.Env = RegistryEnvironment(opts)
 
 	if err := cmd.Run(); err != nil {
 		// Trivy returns nonzero when there are findings AND when there are errors; we treat

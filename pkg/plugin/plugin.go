@@ -65,8 +65,8 @@ type Package struct {
 
 // ScanRequest is the input to a Scanner.Scan call.
 type ScanRequest struct {
-	Target   string            `json:"target"`   // image ref / path / artifact id
-	Options  map[string]string `json:"options"`
+	Target  string            `json:"target"` // image ref / path / artifact id
+	Options map[string]string `json:"options"`
 }
 
 // ScanResult is the response.
@@ -128,7 +128,7 @@ var (
 	_ Exporter = (*nopExporter)(nil)
 )
 
-type nopScanner  struct{}
+type nopScanner struct{}
 type nopEnricher struct{}
 type nopExporter struct{}
 

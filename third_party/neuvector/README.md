@@ -1,6 +1,6 @@
 # third_party/neuvector — vendored NeuVector data-plane
 
-This directory holds a verbatim copy of the NeuVector C data-plane (`dp/`)
+This directory holds a copy of the NeuVector C data-plane (`dp/`)
 together with the two top-level NeuVector headers it depends on
 (`base.h`, `defs.h`). It exists so the constellation runtime-agent can run
 the NeuVector enforcer's wire-level inspection (NFQUEUE / AF_PACKET
@@ -19,7 +19,8 @@ third_party/neuvector/
 ├── README.md    This file
 ├── base.h       Shared macros (FLAGS_*, byte-order helpers).
 ├── defs.h       Wire-format types for agent↔dp IPC (DPMsgConnect, …).
-└── dp/          C data-plane daemon source.
+├── local-patches/ Documented, ordered upstream correctness patches.
+└── dp/          C data-plane daemon source plus those patches.
 ```
 
 The `dp/` Makefile expects `base.h` and `defs.h` to live one directory
@@ -49,35 +50,48 @@ layout.
 upstream code. Behavior changes belong on our side of the IPC boundary
 (`internal/runtime/dp/`).
 
-The only exception is build-glue (e.g. tweaking `dp/Makefile` to honor
-`$(CC)` from the environment). If such a tweak is needed, document it in
-the "Local patches" section below so the next sync knows to re-apply.
+Build glue and explicitly reviewed correctness/security backports may be
+maintained as documented local patches. Keep the upstream revision unchanged,
+record attribution in NOTICE, and test the patch roundtrip before syncing.
 
 ## Local patches
 
-Patches we *intentionally* keep on top of the upstream sources live under
-`local-patches/*.patch` and are re-applied by the sync tooling after each
-upstream refresh, in lexical order.
+Patches under `local-patches/*.patch` apply to this vendor directory with
+`patch -p1` in lexical order. `--diff` compares the current source to the
+recorded upstream revision **plus these declared patches**; undeclared drift
+still fails. Sync validates all patches on a temporary candidate before
+replacing source. It preserves undeclared drift as an ordered patch and restores
+the prior source if the build gate fails.
 
-When that directory is empty (current state — NOTICE confirms byte-for-byte
-identical to upstream), the vendored tree is a clean mirror. The sync
-tool's `--diff` mode (run by CI) will fail the build the moment that
-invariant is broken.
+- `000-existing-threat-controls.patch` (recorded 2026-10-17): provenance-only
+  capture of behavior already present in snapshot `6a8057c`: the threat-toggle
+  control IPC and disabled TCP_SMALL_MSS/SSL_VER_2OR3 defaults. No behavior change
+  is introduced by declaring these existing differences; the prior pristine
+  mirror claim was stale.
+- `010-connection-lookup-application.patch` (2026-10-17): initialize the IPv4
+  connection lookup key and populate Application before `conn4_match`. The
+  upstream comparator already compares Application, so reading the uninitialized
+  key could split identical reports. This aggregation occurs before IPC and
+  cannot be corrected in the Go consumer. The actual `dp_ctrl_connect_report`
+  regression lives in `tests/native-policy/connect_report.c`; it preserves
+  existing tuple identity, counters, timestamps and selected-map semantics.
+  This is a narrow downstream correctness backport, not a claim of upstream
+  acceptance or a diagnosis of the separate Protect packet-evidence gap.
 
-To add a local patch (only for things like a CVE backport we genuinely need
-ahead of upstream):
+- `011-connection-report-wall-time.patch` (2026-10-17): derive connection
+  observation timestamps from checked wall time minus the existing coarse Idle
+  duration. A native packet diagnostic observed a fresh matching allow report
+  whose startup-relative timestamp trailed the probe's wall second. Only the
+  two report timestamp paths change; timeout/Idle processing, debug/rate clocks,
+  aggregate keys/counters, preserved FirstSeenAt and latest-action selection stay
+  unchanged. Nonzero Idle still gives an approximate last-activity time, not an
+  exact historical packet timestamp. Invalid or unrepresentable wall time fails
+  before any aggregate or rate-counter mutation. Actual reporter boundary and
+  negative-control tests live in `tests/native-policy/connect_report.c`.
 
-```bash
-# Edit directly in third_party/neuvector/dp/, then:
-git diff --no-color third_party/neuvector/dp/ > \
-    third_party/neuvector/local-patches/010-cve-XXXX-backport.patch
-git checkout -- third_party/neuvector/dp/
-make vendor-neuvector-sync REV=$(awk '/^Source rev:/{print $3}' \
-    third_party/neuvector/NOTICE)
-# Round-trip succeeds = patch applies cleanly at the current rev.
-```
-
-Then explain *why* the patch exists in this section.
+New patches must use vendor-relative `a/` and `b/` paths (for example
+`a/dp/ctrl.c`). Verify forward/reverse/forward application, declared-patch clean
+`--diff`, undeclared drift detection, and repeated sync before review.
 
 ## Syncing from upstream
 
@@ -101,16 +115,16 @@ make vendor-neuvector-sync REV=main UPSTREAM=../neuvector
 
 The script:
 
-1. Captures any pre-existing drift in the vendored tree as a patch at
-   `local-patches/000-pre-sync-drift-<timestamp>.patch` (so a re-vendor
+1. Captures undeclared drift relative to the declared stack as an ordered
+   `local-patches/*.post-sync-drift-<timestamp>.patch` (so a re-vendor
    doesn't silently discard hand-edits).
-2. Replaces `dp/`, `base.h`, `defs.h`, `LICENSE` with the upstream rev.
-3. Re-applies every `local-patches/*.patch` in lexical order. Aborts on
-   the first failure with exit code 3.
+2. Stages `dp/`, `base.h`, `defs.h`, `LICENSE` from the upstream rev.
+3. Applies every `local-patches/*.patch` in lexical order to the staged tree.
+   Aborts on the first failure with exit code 3 before replacing source; only a
+   completely patched candidate replaces the existing source.
 4. Rewrites the provenance lines in NOTICE.
-5. Runs the build-validation gate. If it fails (exit 4), the working tree
-   is left in place — inspect, then revert with
-   `git checkout -- third_party/neuvector/`.
+5. Runs the build-validation gate. If it fails (exit 4), the previous source
+   is restored and any captured drift patch remains available for inspection.
 
 Exit codes: 0 success / clean, 1 usage, 2 drift detected (`--diff` mode),
 3 patch apply failure, 4 build failure, 5 unexpected.

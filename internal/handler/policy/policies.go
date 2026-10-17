@@ -825,7 +825,7 @@ func evaluateAdmissionPolicies(ctx context.Context, workload admissionSimulation
 			continue
 		}
 		reason := ""
-		action := "warn"
+		var action string
 		evidenceItems := []string{"engine=constellation-admission"}
 		evidenceDetails := []admissionSimulationEvidenceDetailDTO{}
 		if podErr == nil {

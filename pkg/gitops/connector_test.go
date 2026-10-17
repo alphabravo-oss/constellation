@@ -2,6 +2,7 @@ package gitops
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -36,7 +37,7 @@ func TestConnectorReady(t *testing.T) {
 
 func TestPushConfigDisabled(t *testing.T) {
 	err := PushConfig(context.Background(), ConnectorConfig{Provider: ProviderGitHub}, []byte("x"), "m")
-	if err != ErrConnectorDisabled {
+	if !errors.Is(err, ErrConnectorDisabled) {
 		t.Fatalf("want ErrConnectorDisabled, got %v", err)
 	}
 }

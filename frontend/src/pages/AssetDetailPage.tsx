@@ -1,281 +1,88 @@
-import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams } from "react-router-dom";
-import { Boxes, FileJson, ShieldAlert, ShieldCheck, Undo2 } from "lucide-react";
-import { toast } from "sonner";
-
-import { assets, sbom, type ImageAcceptance } from "@/api/client";
-import { dateInputDaysFromNow, dateInputEndOfDayWithinDays } from "@/lib/format";
-import { useCluster } from "@/hooks/useCluster";
+import { AssetFindingsInventory, useAssetFindingsInventory } from "./AssetFindingsInventory";
+import { assetDisplayName } from "@/lib/asset-identity";
+import { DigestDisclosure } from "@/components/ui/digest-disclosure";
+import { useRef, useState } from "react";
+import { Boxes, FileJson, ShieldAlert } from "lucide-react";
+import { sbom, type AssetDetail, type AssetSBOM, type ImageAcceptance } from "@/api/client";
 import { PageHeader, PageContainer } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { Tabs, useTabParam } from "@/components/ui/tabs";
+import { Collapse } from "@/components/ui/collapse";
+import { Button } from "@/components/ui/button";
+import { ErrorState, LoadingState } from "@/components/ui/states";
+import { assetDate, assetErrorMessage, useAssetDetailScope } from "./asset-detail-scope";
 
-const ACCEPT_RISK_MAX_DAYS = 30;
+const WORKSPACES = ["findings", "image", "acceptance", "sbom", "labels"];
 
 export function AssetDetailPage() {
-  const { aid } = useParams<{ aid: string }>();
-  const { clusterId } = useCluster();
-  const qc = useQueryClient();
-  const [rationale, setRationale] = useState("");
-  const [acceptedUntil, setAcceptedUntil] = useState(
-    () => dateInputDaysFromNow(14),
-  );
-  const q = useQuery({
-    queryKey: ["asset", aid],
-    queryFn: () => assets.get(aid!),
-    enabled: !!aid,
-  });
-  const createAcceptance = useMutation({
-    mutationFn: () =>
-      assets.createImageAcceptance(aid!, {
-        rationale,
-        accepted_until: dateInputEndOfDayWithinDays(acceptedUntil, ACCEPT_RISK_MAX_DAYS),
-      }),
-    onSuccess: () => {
-      toast.success("Image risk accepted");
-      setRationale("");
-      qc.invalidateQueries({ queryKey: ["asset", aid] });
-    },
-    onError: () => toast.error("Image accept-risk failed"),
-  });
-  const revokeAcceptance = useMutation({
-    mutationFn: (acceptanceID: string) => assets.revokeImageAcceptance(aid!, acceptanceID),
-    onSuccess: () => {
-      toast.success("Image acceptance revoked");
-      qc.invalidateQueries({ queryKey: ["asset", aid] });
-    },
-    onError: () => toast.error("Revoke failed"),
-  });
-
-  if (q.isPending) return <p className="text-sm text-muted-foreground">Loading asset...</p>;
-  if (q.isError || !q.data) return <p className="text-sm text-status-error">Asset not found.</p>;
-
-  const { asset, image, image_scan_result, findings, sboms, image_acceptances } = q.data;
-  const activeAcceptance = image_acceptances.find((item) => item.status === "active");
-  type AssetFinding = (typeof findings)[number];
-  const findingColumns: Column<AssetFinding>[] = [
-    {
-      id: "finding",
-      header: "Finding",
-      cell: (f) => (
-        <>
-          {f.image_scan_result_id ? (
-            <span className="font-medium">{f.title}</span>
-          ) : (
-            <Link to={`/clusters/${clusterId}/findings/${f.id}`} className="font-medium hover:underline">{f.title}</Link>
-          )}
-          <div className="text-xs text-muted-foreground">{f.external_id}</div>
-        </>
-      ),
-    },
-    { id: "kind", header: "Kind", cell: (f) => f.kind, className: "text-xs" },
-    { id: "severity", header: "Severity", cell: (f) => f.severity, className: "text-xs" },
-    { id: "risk", header: "Risk", cell: (f) => f.risk_score, className: "font-semibold" },
+  const scope = useAssetDetailScope();
+  const inventory = useAssetFindingsInventory(scope);
+  const { clusterId, aid, resolved, clusterLoading, clusterError, q } = scope;
+  const [requestedTab, setTab] = useTabParam("tab", "findings");
+  const tab = WORKSPACES.includes(requestedTab) ? requestedTab : "findings";
+  const listPath = clusterId ? `/clusters/${encodeURIComponent(clusterId)}/assets` : "/clusters";
+  const header = <PageHeader title="Asset evidence" description="Inspect findings, image metadata, software inventories and digest-scoped risk decisions for this asset." backLink={<a href={listPath}>Assets</a>} />;
+  if (!resolved) return <PageContainer>{header}{clusterLoading ? <LoadingState label="Resolving asset cluster…" /> : <ErrorState title="The requested cluster could not be resolved." error={clusterError} action={<Button onClick={scope.retryCluster}>Retry cluster</Button>} />}</PageContainer>;
+  if (!aid) return <PageContainer>{header}<ErrorState title="An exact asset ID is required." /></PageContainer>;
+  if (q.isError) return <PageContainer>{header}<VerdictBanner status="degraded" title="Asset evidence is unavailable" detail="The asset could not be loaded or refreshed. Previous evidence is hidden until a successful retry." /><ErrorState title="Asset evidence could not be loaded or refreshed." error={assetErrorMessage(q.error)} action={<Button onClick={() => void q.refetch()}>Retry asset</Button>} /></PageContainer>;
+  if (!q.isSuccess || !q.data || q.data.asset.id !== aid || q.data.asset.cluster_id !== clusterId) return <PageContainer>{header}<LoadingState label="Loading asset evidence…" /></PageContainer>;
+  const data = q.data;
+  const { asset, image, sboms, image_acceptances: acceptances } = data;
+  const basePath = `${listPath}/${encodeURIComponent(aid)}`;
+  const total = inventory.available ? inventory.q.data!.total : undefined;
+  const highSeverity = inventory.available ? inventory.q.data!.summary.critical + inventory.q.data!.summary.high : undefined;
+  const active = acceptances.filter((item) => item.status === "active");
+  const acceptanceColumns: Column<ImageAcceptance>[] = [
+    { id: "rationale", header: "Rationale", kind: "name", wrap: true, cell: (item) => item.rationale, sort: (a, b) => a.rationale.localeCompare(b.rationale) },
+    { id: "status", header: "Status", kind: "status", cell: (item) => item.status },
+    { id: "digest", header: "Image digest", kind: "id", size: 240, maxSize: 480, wrap: true, cell: (item) => item.image_digest },
+    { id: "expiry", header: "Accepted until", kind: "date", size: 224, minSize: 208, maxSize: 240, cell: (item) => assetDate(item.accepted_until), exportValue: (item) => item.accepted_until, sort: (a, b) => a.accepted_until.localeCompare(b.accepted_until) },
+    { id: "action", header: "Actions", kind: "actions", cell: (item) => item.status === "active" && item.image_digest === image?.digest ? <a aria-disabled={q.isFetching} href={q.isFetching ? undefined : `${basePath}/image-acceptance/${encodeURIComponent(item.id)}/revoke`} className="text-xs hover:underline">Revoke</a> : "—", exportValue: () => "" },
   ];
-  return (
-    <PageContainer>
-      <PageHeader
-        eyebrow={<Link to={`/clusters/${clusterId}/assets`} className="hover:underline">Assets</Link>}
-        title={asset.name}
-        description={`${asset.kind} · ${asset.criticality} criticality — image, supply-chain evidence, and accepted-risk history for this asset.`}
-      />
-
-      <section className="grid grid-cols-3 gap-3" data-testid="asset-stats">
-        <StatCard label="Findings" value={findings.length} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={findings.length > 0 ? "high" : "neutral"} />
-        <StatCard label="SBOMs" value={sboms.length} icon={<FileJson className="h-3.5 w-3.5" />} />
-        <StatCard label="Layers" value={image?.layers.length ?? 0} icon={<Boxes className="h-3.5 w-3.5" />} />
-      </section>
-
-      <div className="space-y-4">
-        <div className="rounded-lg border border-border bg-card p-4" data-testid="asset-image-card">
-          <h2 className="text-sm font-semibold">Image and supply chain</h2>
-          {image ? (
-            <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
-              <Field label="Registry" value={image.registry} />
-              <Field label="Repository" value={image.repository} />
-              <Field label="Tag" value={image.tag || "-"} />
-              <Field label="Signed" value={image.signed ? "yes" : "no"} />
-              <Field label="Architectures" value={image.architectures.join(", ")} />
-              <Field label="Size" value={formatBytes(image.size_bytes ?? 0)} />
-              <Field label="Digest" value={image.digest} wide />
-            </dl>
-          ) : (
-            <p className="mt-2 text-xs text-muted-foreground">No image metadata for this asset type.</p>
-          )}
-        </div>
-
-        <div className="overflow-hidden rounded-lg border border-border bg-card" data-testid="asset-findings">
-          {image_scan_result ? (
-            <div className="border-b border-border px-3 py-2 text-xs text-muted-foreground">
-              Image scan {image_scan_result.image_digest} · {image_scan_result.scanner_profile} · {image_scan_result.finding_count} findings
-            </div>
-          ) : null}
-          <DataTable rows={findings} columns={findingColumns} rowKey={(f) => f.id} />
-        </div>
-
-        <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
-          <div className="rounded-lg border border-border bg-card p-4" data-testid="image-acceptance-card">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-semibold">Image accept-risk</h2>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Digest scoped, audited, and expires automatically.
-                </p>
-              </div>
-              <StatusBadge status={activeAcceptance ? "active" : "none"} />
-            </div>
-
-            {activeAcceptance ? (
-              <AcceptanceSummary
-                item={activeAcceptance}
-                onRevoke={() => revokeAcceptance.mutate(activeAcceptance.id)}
-                disabled={revokeAcceptance.isPending}
-              />
-            ) : (
-              <div className="mt-3 space-y-3">
-                <textarea
-                  value={rationale}
-                  onChange={(e) => setRationale(e.target.value)}
-                  disabled={!image || createAcceptance.isPending}
-                  placeholder="Compensating control, ticket, or deployment justification"
-                  rows={3}
-                  className="w-full rounded-md border border-border bg-background p-2 text-sm"
-                  data-testid="image-accept-rationale"
-                />
-                <div className="flex flex-wrap items-end gap-2">
-                  <label className="block text-xs font-medium">
-                    Accepted Until
-                    <input
-                      type="date"
-                      value={acceptedUntil}
-                      max={dateInputDaysFromNow(ACCEPT_RISK_MAX_DAYS)}
-                      onChange={(e) => setAcceptedUntil(e.target.value)}
-                      disabled={!image || createAcceptance.isPending}
-                      className="mt-1 block rounded-md border border-border bg-background p-2 text-sm"
-                      data-testid="image-accept-until"
-                    />
-                  </label>
-                  <button
-                    type="button"
-                    disabled={!image || createAcceptance.isPending || rationale.trim().length < 12}
-                    onClick={() => createAcceptance.mutate()}
-                    className="inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-                    data-testid="image-accept-submit"
-                  >
-                    <ShieldCheck className="h-4 w-4" aria-hidden />
-                    Accept Image Risk
-                  </button>
-                </div>
-                {image_acceptances.length > 0 ? <AcceptanceHistory items={image_acceptances} /> : null}
-              </div>
-            )}
-          </div>
-
-          <div className="rounded-lg border border-border bg-card p-4" data-testid="asset-sbom-card">
-            <h2 className="text-sm font-semibold">SBOM exports</h2>
-            <ul className="mt-3 space-y-2">
-              {sboms.map((doc) => (
-                <li key={doc.id} className="rounded-md border border-border p-3">
-                  <div className="text-sm font-medium">{doc.format}</div>
-                  <div className="mt-1 truncate font-mono text-xs text-muted-foreground">{doc.sha256}</div>
-                </li>
-              ))}
-            </ul>
-            <div className="mt-3 flex flex-wrap gap-2 text-xs">
-              <button type="button" className="rounded-md border border-border px-2 py-1 hover:bg-accent" onClick={() => sbom.downloadSpdx(asset.id).catch((e: Error) => toast.error(`SBOM export failed: ${e.message}`))}>SPDX</button>
-              <button type="button" className="rounded-md border border-border px-2 py-1 hover:bg-accent" onClick={() => sbom.downloadCyclonedx(asset.id).catch((e: Error) => toast.error(`SBOM export failed: ${e.message}`))}>CycloneDX</button>
-              <button type="button" className="rounded-md border border-border px-2 py-1 hover:bg-accent" onClick={() => sbom.downloadMbom(asset.id).catch((e: Error) => toast.error(`SBOM export failed: ${e.message}`))}>MBOM</button>
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-lg border border-border bg-card p-4">
-          <h2 className="text-sm font-semibold">Labels</h2>
-          <pre className="mt-3 overflow-x-auto rounded-md bg-muted p-3 text-xs">{JSON.stringify(asset.labels, null, 2)}</pre>
-        </div>
-      </div>
-    </PageContainer>
-  );
+  const findingsView = <AssetFindingsInventory inventory={inventory} />;
+  const imageView = <section className="space-y-4" data-testid="asset-image-card"><div><h2 className="text-sm font-semibold">Image and supply chain</h2><p className="text-xs text-muted-foreground">Reported image metadata. Signature presence is not a verification or trust verdict.</p></div>{image ? <>
+    <dl className="grid gap-3 text-sm sm:grid-cols-2"><Metadata label="Registry" value={image.registry} /><Metadata label="Repository" value={image.repository} /><Metadata label="Tag" value={image.tag || "Not reported"} /><Metadata label="Signature reported" value={image.signed ? "yes" : "no"} /><Metadata label="Architectures" value={image.architectures.join(", ") || "Not reported"} /><Metadata label="Size" value={image.size_bytes == null ? "Not reported" : formatBytes(image.size_bytes)} /><div className="sm:col-span-2"><DigestDisclosure digest={image.digest} /></div></dl>
+    <Collapse label="Image layers and signature metadata"><div className="space-y-4"><DataTable rows={image.layers.map((layer, index) => ({ ...layer, rowId: index }))} columns={layerColumns} rowKey={(layer) => `${layer.digest}:${layer.rowId}`} preferencesKey="asset-image-layers" exportFileName={`asset-${asset.id}-layers`} emptyState={<p className="p-6 text-sm text-muted-foreground">No image layers reported.</p>} /><pre className="overflow-auto rounded-md bg-muted p-3 text-xs">{JSON.stringify(image.signature_info, null, 2)}</pre></div></Collapse>
+  </> : <p className="text-sm text-muted-foreground">No image metadata reported for this asset type.</p>}</section>;
+  const acceptanceView = <section className="space-y-3" data-testid="image-acceptance-card"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-sm font-semibold">Image risk acceptance</h2><p className="text-xs text-muted-foreground">{active.length} active acceptance records returned. Decisions apply organization-wide to the exact image digest, including other assets using it; they are audited and expire automatically. Findings remain visible.</p></div>{image?.digest && active.length === 0 && <a href={q.isFetching ? undefined : `${basePath}/image-acceptance/new`} aria-disabled={q.isFetching} className="rounded-md border border-border px-3 py-2 text-sm hover:bg-accent">Accept image risk</a>}</div>{!image && <p className="text-sm text-muted-foreground">Image metadata is required to accept image risk.</p>}<DataTable rows={acceptances} columns={acceptanceColumns} rowKey={(item) => item.id} preferencesKey="asset-image-acceptances" exportFileName={`asset-${asset.id}-image-acceptances`} emptyState={<p className="p-6 text-sm text-muted-foreground">No image acceptance history returned.</p>} /></section>;
+  return <PageContainer>
+    <PageHeader title={assetDisplayName(asset, image)} backLink={<a href={listPath}>Assets</a>} description={`${asset.kind} · ${asset.criticality} criticality — reported evidence for this exact cluster asset.`} actions={<Button onClick={() => { void q.refetch(); void inventory.q.refetch(); }} disabled={q.isFetching || inventory.q.isFetching}>{q.isFetching ? "Refreshing…" : "Refresh evidence"}</Button>} />
+    <VerdictBanner status={highSeverity ? "degraded" : "info"} title={highSeverity === undefined ? "Finding evidence is unavailable" : highSeverity ? `${highSeverity} high or critical matching findings` : "No high or critical matching findings"} detail="Counts cover every finding matching the active filters, across pages. Asset records and the latest shared digest scan are separate evidence sources. A zero count does not establish complete scan coverage." />
+    <StatGrid data-testid="asset-stats"><StatCard label="Matching findings" value={total ?? "—"} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={total ? "high" : "neutral"} /><StatCard label="High / critical matching" value={highSeverity ?? "—"} tone={highSeverity ? "high" : "neutral"} /><StatCard label="SBOM formats returned" value={sboms.length} icon={<FileJson className="h-3.5 w-3.5" />} /><StatCard label="Image layers reported" value={image?.layers.length ?? "Not reported"} icon={<Boxes className="h-3.5 w-3.5" />} /></StatGrid>
+    {q.isFetching && <p role="status" className="text-xs text-muted-foreground">Refreshing asset evidence. Finding counts and exports are paused until this request settles.</p>}
+    <Tabs value={tab} onValueChange={setTab} items={[
+      { value: "findings", label: "Findings", content: findingsView },
+      { value: "image", label: "Image metadata", content: imageView },
+      { value: "acceptance", label: "Risk acceptance", content: acceptanceView },
+      { value: "sbom", label: "Software inventories", content: <SBOMView key={`${clusterId}:${aid}`} data={data} canExport={!q.isFetching} recheck={scope.recheck} /> },
+      { value: "labels", label: "Asset labels", content: <section className="space-y-3"><h2 className="text-sm font-semibold">Asset labels</h2><pre className="overflow-auto rounded-md bg-muted p-3 text-xs">{JSON.stringify(asset.labels, null, 2)}</pre></section> },
+    ]} />
+  </PageContainer>;
 }
 
-function Field({ label, value, wide = false }: { label: string; value: string; wide?: boolean }) {
-  return (
-    <div className={`rounded-md border border-border p-2 ${wide ? "sm:col-span-2" : ""}`}>
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="mt-1 break-all font-medium">{value}</dd>
-    </div>
-  );
-}
-
-function AcceptanceSummary({
-  item,
-  onRevoke,
-  disabled,
-}: {
-  item: ImageAcceptance;
-  onRevoke: () => void;
-  disabled: boolean;
-}) {
-  return (
-    <div className="mt-3 rounded-md border border-border p-3">
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <div className="break-all font-mono text-xs text-muted-foreground">{item.image_digest}</div>
-          <p className="mt-2 text-sm">{item.rationale}</p>
-          <p className="mt-2 text-xs text-muted-foreground">Expires {formatDate(item.accepted_until)}</p>
-        </div>
-        <button
-          type="button"
-          onClick={onRevoke}
-          disabled={disabled}
-          className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-          data-testid="image-accept-revoke"
-        >
-          <Undo2 className="h-3.5 w-3.5" aria-hidden />
-          Revoke
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function AcceptanceHistory({ items }: { items: ImageAcceptance[] }) {
-  return (
-    <div className="space-y-2" data-testid="image-accept-history">
-      {items.map((item) => (
-        <div key={item.id} className="rounded-md border border-border p-2 text-xs">
-          <div className="flex items-center justify-between gap-2">
-            <StatusBadge status={item.status} />
-            <span className="text-muted-foreground">{formatDate(item.accepted_until)}</span>
-          </div>
-          <p className="mt-1 text-sm">{item.rationale}</p>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function StatusBadge({ status }: { status: ImageAcceptance["status"] | "none" }) {
-  const classes = {
-    active: "border-status-success/40 bg-status-success/10 text-status-success",
-    revoked: "border-muted bg-muted text-muted-foreground",
-    expired: "border-status-warning/40 bg-status-warning/10 text-status-warning",
-    none: "border-border bg-muted text-muted-foreground",
+function SBOMView({ data, canExport, recheck }: { data: AssetDetail; canExport: boolean; recheck: () => AssetDetail | undefined }) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  const exporting = useRef(false);
+  const download = async (format: "spdx" | "cyclonedx" | "mbom") => {
+    if (exporting.current || !canExport || !recheck()) return;
+    exporting.current = true; setPending(true); setError("");
+    try { await ({ spdx: sbom.downloadSpdx, cyclonedx: sbom.downloadCyclonedx, mbom: sbom.downloadMbom })[format](data.asset.id); }
+    catch (failure) { setError(assetErrorMessage(failure)); }
+    finally { exporting.current = false; setPending(false); }
   };
-  return (
-    <span className={`rounded-md border px-2 py-0.5 text-xs font-medium ${classes[status]}`}>
-      {status}
-    </span>
-  );
+  return <section className="space-y-3" data-testid="asset-sbom-card"><div><h2 className="text-sm font-semibold">Software inventories and exports</h2><p className="text-xs text-muted-foreground">The API returns the latest inventory per format, preferring image-scan artifacts. These rows are not a complete document history. JSON exports request server-generated formats for this asset; availability is determined by the server.</p></div><DataTable rows={data.sboms} columns={sbomColumns} rowKey={(doc) => doc.id} preferencesKey="asset-sbom-formats" exportFileName={`asset-${data.asset.id}-sbom-metadata`} emptyState={<p className="p-6 text-sm text-muted-foreground">No software inventory documents returned.</p>} /><div className="flex flex-wrap gap-3">{(["spdx", "cyclonedx", "mbom"] as const).map((format) => <Button key={format} disabled={!canExport || pending} onClick={() => void download(format)}>{format === "spdx" ? "SPDX" : format === "cyclonedx" ? "CycloneDX" : "MBOM"}</Button>)}</div>{pending && <p role="status" className="text-sm">Requesting export…</p>}{error && <p role="alert" className="text-sm text-status-error">SBOM export failed: {error}</p>}</section>;
 }
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(value));
-}
-
-function formatBytes(bytes: number) {
-  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`;
-  if (bytes >= 1_000) return `${(bytes / 1_000).toFixed(1)} KB`;
-  return `${bytes} B`;
-}
+const sbomColumns: Column<AssetSBOM>[] = [
+  { id: "format", header: "Format", kind: "name", cell: (doc) => doc.format, sort: (a, b) => a.format.localeCompare(b.format) },
+  { id: "sha", header: "Document digest", kind: "id", size: 320, maxSize: 640, grow: true, wrap: true, cell: (doc) => doc.sha256 },
+  { id: "created", header: "Created", kind: "date", size: 224, minSize: 208, maxSize: 240, cell: (doc) => assetDate(doc.created_at), exportValue: (doc) => doc.created_at, sort: (a, b) => a.created_at.localeCompare(b.created_at) },
+];
+const layerColumns: Column<NonNullable<AssetDetail["image"]>["layers"][number]>[] = [
+  { id: "digest", header: "Layer digest", kind: "name", code: true, wrap: true, cell: (layer) => layer.digest },
+  { id: "size", header: "Size", kind: "text", align: "right", size: 160, minSize: 136, maxSize: 192, cell: (layer) => layer.size == null ? "Not reported" : formatBytes(layer.size) },
+];
+function Metadata({ label, value, wide = false }: { label: string; value: string; wide?: boolean }) { return <div className={`rounded-md border border-border p-3 ${wide ? "sm:col-span-2" : ""}`}><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-1 break-all text-sm">{value || "Not reported"}</dd></div>; }
+function formatBytes(bytes: number) { return bytes >= 1_000_000 ? `${(bytes / 1_000_000).toFixed(1)} MB` : bytes >= 1_000 ? `${(bytes / 1_000).toFixed(1)} KB` : `${bytes} B`; }

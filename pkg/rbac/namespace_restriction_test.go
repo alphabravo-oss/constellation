@@ -18,10 +18,10 @@ func TestNamespaceRestriction(t *testing.T) {
 	v := VerbReadFindings
 
 	cases := []struct {
-		name       string
-		asg        []RoleAssignment
-		wantNS     []string
-		wantRestr  bool
+		name      string
+		asg       []RoleAssignment
+		wantNS    []string
+		wantRestr bool
 	}{
 		{
 			name:      "org-wide grant → unrestricted",

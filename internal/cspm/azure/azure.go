@@ -58,7 +58,7 @@ func (c *Connector) Scan(ctx context.Context) ([]Finding, error) {
 	storF, serr := c.ScanStorage(ctx)
 	out := append(roleF, storF...)
 	if rerr != nil && serr != nil {
-		return out, fmt.Errorf("azure: both scans failed: %v; %v", rerr, serr)
+		return out, fmt.Errorf("azure: both scans failed: %w; %w", rerr, serr)
 	}
 	return out, nil
 }

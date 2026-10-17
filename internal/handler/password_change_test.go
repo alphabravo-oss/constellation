@@ -19,7 +19,7 @@ import (
 func changePassword(t *testing.T, h *Auth, subj Subject, body map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 	payload, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/change-password", bytes.NewReader(payload))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/auth/change-password", bytes.NewReader(payload))
 	req = req.WithContext(WithSubject(req.Context(), subj))
 	rec := httptest.NewRecorder()
 	h.ChangePassword(rec, req)
