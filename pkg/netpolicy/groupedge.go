@@ -16,6 +16,7 @@
 package netpolicy
 
 import (
+	"slices"
 	"sort"
 	"strings"
 )
@@ -53,6 +54,8 @@ func (e *GroupEdge) Validate() error {
 	default:
 		return errBadEdge("invalid mode " + e.Mode)
 	}
+	// Value copies can share the caller's port slice; normalization must stay local.
+	e.Ports = slices.Clone(e.Ports)
 	for i := range e.Ports {
 		p := &e.Ports[i]
 		p.Protocol = strings.ToUpper(strings.TrimSpace(p.Protocol))
