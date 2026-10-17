@@ -21,7 +21,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"mime"
@@ -88,7 +87,7 @@ type scheduleDTO struct {
 }
 
 type createBackupRequest struct {
-	// SignMode overrides the org's schedule.sign_mode for this one-off backup.
+	// SignMode selects this one-off backup independently of the saved schedule.
 	// Default "none" (the dev posture; production callers should pass static-key).
 	SignMode string `json:"sign_mode,omitempty"`
 }
@@ -102,18 +101,26 @@ func (h *Backups) Create(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusUnauthorized, "no subject")
 		return
 	}
+	var req createBackupRequest
+	if !decodeBackupRequest(w, r, &req, true, "sign_mode") {
+		return
+	}
+	mode, err := backup.ResolveSignMode(req.SignMode, backup.SignModeNone)
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	req.SignMode = string(mode)
 	if h.dirErr != nil {
 		jsonError(w, http.StatusInternalServerError, "backup artifact directory unavailable")
 		return
 	}
-	var req createBackupRequest
-	_ = json.NewDecoder(r.Body).Decode(&req) // body optional
 	id := uuid.New()
 	// Insert in-flight row up-front so polling sees status=running immediately.
-	_, err := h.db.Pool().Exec(r.Context(), `
+	_, err = h.db.Pool().Exec(r.Context(), `
 INSERT INTO backups (id, org_id, mode, status, started_at, signed, format_version)
 VALUES ($1, $2, 'org-backup', 'running', NOW(), $3, $4)`,
-		id, subj.OrgID, req.SignMode != "" && req.SignMode != "none", backup.FormatVersion)
+		id, subj.OrgID, mode != backup.SignModeNone, backup.FormatVersion)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -137,6 +144,11 @@ func (h *Backups) runBackupJob(id uuid.UUID, orgID, userID, signMode string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
+	mode, err := backup.ResolveSignMode(signMode, backup.SignModeNone)
+	if err != nil {
+		h.markFailed(ctx, id, err.Error())
+		return
+	}
 	var orgName string
 	if err := h.db.Pool().QueryRow(ctx, `SELECT name FROM orgs WHERE id=$1`, orgID).Scan(&orgName); err != nil {
 		h.markFailed(ctx, id, "org lookup: "+err.Error())
@@ -152,14 +164,9 @@ func (h *Backups) runBackupJob(id uuid.UUID, orgID, userID, signMode string) {
 		GeneratedBy:    userID,
 		SourceInstance: "constellation-api",
 	}
-	switch signMode {
-	case "static-key":
-		opts.Sign.Mode = backup.SignModeStaticKey
+	opts.Sign.Mode = mode
+	if mode == backup.SignModeStaticKey {
 		opts.Sign.KeyPath = os.Getenv("CONSTELLATION_BACKUP_SIGN_KEY")
-	case "keyless":
-		opts.Sign.Mode = backup.SignModeKeyless
-	default:
-		// none — pass through
 	}
 
 	res, err := backup.ExportManaged(ctx, h.db.Pool(), h.dir, fname, opts)
@@ -474,16 +481,18 @@ func (h *Backups) PutSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var s scheduleDTO
-	if err := json.NewDecoder(r.Body).Decode(&s); err != nil {
-		jsonError(w, http.StatusBadRequest, "decode: "+err.Error())
+	if !decodeBackupRequest(w, r, &s, false, "cron_expr", "enabled", "s3_bucket", "s3_prefix", "s3_endpoint", "sign_mode", "last_run_at", "last_status", "next_run_at") {
 		return
 	}
+	mode, err := backup.ResolveSignMode(s.SignMode, backup.SignModeStaticKey)
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.SignMode = string(mode)
 	s.CronExpr = strings.TrimSpace(s.CronExpr)
 	if s.CronExpr == "" {
 		s.CronExpr = "0 3 * * *"
-	}
-	if s.SignMode == "" {
-		s.SignMode = "static-key"
 	}
 	if _, err := h.db.Pool().Exec(r.Context(), `
 INSERT INTO backup_schedules(org_id, cron_expr, enabled, s3_bucket, s3_prefix, s3_endpoint, sign_mode)

@@ -190,13 +190,20 @@ func tickSchedules(ctx context.Context, pool *pgxpool.Pool, cfg ScheduleExecutor
 // and advances next_run_at. Failures are recorded on the schedule row, not fatal.
 func runScheduledBackup(ctx context.Context, pool *pgxpool.Pool, cfg ScheduleExecutorConfig, s schedule, now time.Time, logger *slog.Logger) {
 	id := uuid.New()
-	signed := s.SignMode == "static-key" || s.SignMode == "keyless"
+	mode, signingErr := ResolveSignMode(s.SignMode, SignModeStaticKey)
+	signed := signingErr == nil && mode != SignModeNone
 	if _, err := pool.Exec(ctx, `
 INSERT INTO backups (id, org_id, mode, status, started_at, signed, format_version)
 VALUES ($1, $2, 'org-backup', 'running', NOW(), $3, $4)`, id, s.OrgID, signed, FormatVersion); err != nil {
 		if logger != nil {
 			logger.Warn("backup executor: insert row failed", slog.String("org", s.OrgID.String()), slog.String("err", err.Error()))
 		}
+		return
+	}
+
+	if signingErr != nil {
+		_, _ = pool.Exec(ctx, `UPDATE backups SET status='failed',error=$2,finished_at=NOW() WHERE id=$1`, id, signingErr.Error())
+		recordScheduleRun(ctx, pool, s, now, "failed", signingErr.Error())
 		return
 	}
 
@@ -209,12 +216,9 @@ VALUES ($1, $2, 'org-backup', 'running', NOW(), $3, $4)`, id, s.OrgID, signed, F
 		GeneratedBy:    "backup-scheduler",
 		SourceInstance: "constellation-api",
 	}
-	switch s.SignMode {
-	case "static-key":
-		opts.Sign.Mode = SignModeStaticKey
+	opts.Sign.Mode = mode
+	if mode == SignModeStaticKey {
 		opts.Sign.KeyPath = cfg.SignKeyPath
-	case "keyless":
-		opts.Sign.Mode = SignModeKeyless
 	}
 
 	res, err := ExportManaged(ctx, pool, cfg.BackupDir, fname, opts)
