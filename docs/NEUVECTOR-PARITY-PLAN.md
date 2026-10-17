@@ -65,12 +65,16 @@ infrastructure continuation after the selected console scope. Off-host recovery
 and deliberate real-node failure remain deferred. The checklist remains **66
 checked / 87 open**; bounded fixes below do not close their parent acceptance gates.
 
-Current main development deployment: **Helm77/schema178**, API/runtime-agent
-source **ce667d1**; other roles retain the prior qualified images. All seven
+Current main development deployment: **Helm78/schema178**, API/runtime-agent
+source **6c4a1cc**; other roles retain the prior qualified images. All seven
 deployments and the runtime DaemonSet are ready. Process and native dataplane
 enforcement remain disabled. Live v2 queue reads pass; anonymous, foreign-cluster
 and duplicate-node selectors return 401/403/400. The live queue and policy bundle
-are empty, so positive content/enforcement remains separate test evidence.
+are empty, so positive content/enforcement remains separate test evidence. Scoped
+policy bundles require protocol v2; legacy bundle reads return 426. Exact-image
+backup/PITR, restored credentials/audit/login, wrong-key rejection and restored
+pod restart pass (195 seconds). Deployment evidence:
+`/tmp/constellation-scope-6c4a1cc/evidence/deployment-status.json`.
 
 Frozen candidate source **034f2baf49c1** includes:
 
@@ -248,9 +252,14 @@ edge-generated policy create/update/retraction audits transactional. Row locks
 preserve authored/federated rules and existing posture; concurrent first inserts
 retry safely, while an edge refuses a newly appeared policy it does not own.
 Audits reflect the final edge ownership marks and persisted version. The full
-runtime fresh178 suite passes 802 executions without skips. Separate edge-entity
-completion audit remains a follow-up; policy audit is now atomic. Evidence:
-`/tmp/security-generated-qualified-db/`.
+runtime fresh178 suite passes 802 executions without skips. Evidence:
+`/tmp/security-generated-qualified-db/`. Commit `ae8cd73` subsequently makes edge
+entity and membership completion audits transactional too: HTTP completion-audit
+failure returns 503 and rolls back all edge/policy effects, while failed commit
+acknowledgements are recorded as unknown. The full runtime suite passes 826
+executions; the final receipt refinement passes 150 focused fresh178 executions,
+all without skips. Evidence: `/tmp/security-edge-qualified-db/` and
+`/tmp/security-edge-final-focused-db/`.
 
 Commit `c04cf85` makes compliance ingest/enqueue audits atomic and holds exact
 cluster ownership through all writes. The runner validates claim receipts and
@@ -271,8 +280,17 @@ of previously programmed legacy tables. Unit qualification passes 650 executions
 with two DB skips, resolved by 26 fresh177 executions without skips. Independent
 review caught and corrected native port/IP translation, shared-pod namespace,
 keepalive-generation and nested application-rule-ID issues. These are source and
-IPC checks, including Go assertions against native matcher semantics; actual
-native parser/matcher and CNI packet acceptance remain separate work. Root
+IPC checks, including Go assertions against native matcher semantics. Commit
+`d28433e` adds actual unchanged native parser/staging/matcher acceptance: production
+Go translation and IPC encoding feed real C control functions and native policy
+lookup, with 34 assertions repeated twice, one fixture-generation test, and
+malformed-command, wrong-expectation and stale-image negative controls. All
+execute without skips in the dedicated harness. Ordinary integration runs skip
+two explicit opt-in tests unless this harness is configured. Source/object
+provenance and isolated nonroot containers are verified; no vendor source changes
+are required. Live CNI interception, packet verdicts, session re-evaluation and
+application classification remain unproven. Evidence:
+`/tmp/run1-native-proof-hardened/`. Root
 OpenAPI contracts pass. Evidence: `/tmp/run1-owned-final-manifest.json` and
 `/tmp/run1-fresh177-final/`.
 
@@ -280,8 +298,24 @@ Commit `5c35b82` guards scanner free-capacity overflow and removes four other
 unnecessary numeric narrowing conversions. Its 406 unit and 38 fresh178
 executions pass without skips; five G115 findings are removed with no new lint
 findings. All these post-`ce667d1` changes are combined in frozen candidate
-`6c4a1cc`, under qualification at `/tmp/constellation-scope-6c4a1cc/`; they are
-not yet in the main deployment.
+`6c4a1cc`, under qualification at `/tmp/constellation-scope-6c4a1cc/`. Its combined
+fresh178 suite passes 2,194 executions without skips. API/runtime image startup
+metadata reports the exact source, and native dependencies/conntrack/BPF object
+checks pass. Server-side Helm dry run changes only those images and normal hook
+revision names. Exact-image isolated backup/PITR/restart qualification passes,
+including 195-second restored pod restart, wrong-key rejection and retained-key
+recovery. The candidate is deployed at Helm78/schema178; all seven deployments
+and the runtime DaemonSet are ready. Live protocol/authentication smoke checks
+pass with empty queues/policy bundle and both enforcement flags unchanged off.
+The first isolated source database waited for evicted cached dependencies;
+restoring their exact local images allowed the drill to proceed. Private drill
+evidence: `/tmp/constellation-cnpg-test.sgYbTe/`.
+
+Hosted run `39009181481` at `200f8c4` has green frontend, unit, FIPS, vulnerability
+and dependency jobs; browser/integration are still running at this checkpoint.
+Quality remains red with 1,566 findings (previously 1,695), and gosec remains red
+with 205 findings (previously 218). Gitleaks also remains red. Reports:
+`/tmp/constellation-ci-39009181481/`. These reductions do not waive any gate.
 
 ## October 12 implementation continuation
 

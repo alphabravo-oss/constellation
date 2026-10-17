@@ -494,3 +494,47 @@ pass, and process/dataplane enforcement remain disabled. Recovery and rollout
 evidence is retained under `/tmp/constellation-response-ce667d1/`.
 The repository's global security and quality gates remain failing and no findings
 have been suppressed by this candidate.
+
+
+### Scoped policy and compliance follow-up, Helm 78
+
+Frozen source `6c4a1cc` combines the scoped native bundle protocol, DLP cluster
+ownership, generated-policy atomic auditing, compliance authoring/claim audit
+transactions, strict benchmark request parsing and numeric boundary fixes.
+The combined fresh178 suite passes 2,194 executions without skips. API/runtime
+images report the exact source revision at startup; native library, conntrack
+and BPF-object checks pass. Exact-image isolated CNPG/RustFS backup and PITR,
+restored session/credentials/audit/fresh login, wrong-key rejection, retained-key
+recovery and 195-second database-pod restart pass. This remains a same-host,
+single-node drill, not HA or off-host recovery.
+
+Helm78/schema178 deploys those two images; migration and other roles retain
+previously qualified images. Seven deployments and the runtime DaemonSet are
+ready. Live scope bundle v2 succeeds, legacy bundle reads return 426, unknown
+cluster returns 404, and v2 response queue anonymous/foreign/duplicate-node
+requests return 401/403/400. Live policy and response queues are empty; process
+and native dataplane enforcement stay disabled. Evidence:
+`/tmp/constellation-scope-6c4a1cc/`.
+
+Commit `d28433e` separately adds a test-only actual native parser/staging/matcher
+harness. Production Go translation and Unix-datagram encoding feed unchanged
+vendored C control/matching objects in nonroot containers with no network,
+capabilities, host namespaces or host mounts. Thirty-four matcher assertions run
+twice, plus fixture generation, all without skips. Malformed/unknown commands,
+a deliberately wrong expected action and a stale-image source manifest are
+rejected. Exact vendor/harness/object provenance is recorded; copied build
+objects are removed and native compilation is forced. Ordinary integration
+runs report two explicit opt-in skips unless this harness is configured.
+Evidence: `/tmp/run1-native-proof-hardened/summary.json`. This proves policy
+parsing, table staging, two-endpoint scope, keyed/range/application/default
+matching, monitor/protect actions, ICMP transitions, partial-transfer retention,
+scoped deletion and shared-handle isolation. Packet interception, live CNI
+verdict delivery, session re-evaluation and application classification remain
+separate acceptance work.
+
+Commit `ae8cd73` makes edge entity/membership completion audits transactional;
+HTTP audit failure rolls back edge and policy mutations with 503, and uncertain
+commit acknowledgements remain explicitly unknown. Full runtime qualification
+passes 826 executions; final focused qualification passes 150, without skips.
+These edge-entity changes and the benchmark lifecycle179 work are not in the
+Helm78 image.
