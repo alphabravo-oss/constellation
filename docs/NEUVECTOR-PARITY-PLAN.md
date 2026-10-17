@@ -714,6 +714,23 @@ frontend, FIPS and dependency jobs pass; browser/integration are still running
 at this checkpoint. These counts precede `46df2d6`; they do not qualify later
 signing or CLI changes.
 
+Source `76c3262` validates backup signing requests before job, audit or artifact
+creation. A bounded 64KiB single JSON object rejects malformed/trailing documents,
+duplicate or unknown fields, null/non-string modes and unknown enum values.
+One-off empty bodies/omitted modes still mean `none`; schedule omission still
+means `static-key`. Both workers validate again, preventing an unknown mode from
+silently producing an unsigned successful archive. Valid modes with unavailable
+signing infrastructure fail asynchronously without publishing an unsigned archive.
+
+Qualification passes 88 unit and 266 selected fresh180 repeated race/shuffle
+executions with zero skips, plus vet. Scoped lint remains340 with no added
+findings or suppressions. Eight failed original-worker test executions confirm
+the prior false-success behavior; the initial unused-import compilation failure
+is preserved separately. All three owned database fixtures are verified removed.
+This source is not yet deployed; CLI flag/transport work remains separate.
+Evidence: `/tmp/constellation-backup-signing-4e5b62c/evidence/frozen-manifest.json`
+(SHA256 `3b12d66aa6e9f45533f9f1c2cb54c93b4945fa426ccdd5c3e6e8bb8822fe680d`).
+
 ## October 12 implementation continuation
 
 The user selected **Astronomer-style console behavior and workflows** as the
