@@ -226,21 +226,30 @@ func TestAgentPolicyBundleRequiresTokenClusterBinding(t *testing.T) {
 		{"unknown cluster", tokenA, uuid.New(), 404},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/runtime/policies:bundle?cluster_id="+tc.cluster.String(), nil)
-			req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(), tc.token))
+			requestCtx := handler.WithRuntimeAgentToken(t.Context(), tc.token)
+			req := httptest.NewRequestWithContext(requestCtx, http.MethodGet, "/runtime/policies:bundle?cluster_id="+tc.cluster.String(), nil)
 			w := httptest.NewRecorder()
 			h.AgentPolicyBundle(w, req)
-			if w.Code != tc.status {
-				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
-			}
-			if tc.status == 200 {
-				var bundle wireRuntimePolicyBundle
-				if err := json.Unmarshal(w.Body.Bytes(), &bundle); err != nil || len(bundle.Policies) != 1 || bundle.Policies[0].ID != ids[tc.cluster].String() {
-					t.Fatalf("wrong bundle=%s error=%v", w.Body.String(), err)
-				}
-			} else if strings.Contains(w.Body.String(), "policies") || strings.Contains(w.Body.String(), ids[clusterA].String()) || strings.Contains(w.Body.String(), ids[clusterB].String()) {
-				t.Fatalf("unauthorized policy disclosure: %s", w.Body.String())
-			}
+			assertPolicyBundleScope(t, w, tc.status, ids[tc.cluster], ids[clusterA], ids[clusterB])
 		})
+	}
+}
+
+func assertPolicyBundleScope(t *testing.T, w *httptest.ResponseRecorder, status int, expected, first, second uuid.UUID) {
+	t.Helper()
+	if w.Code != status {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if status == http.StatusOK {
+		var bundle wireRuntimePolicyBundle
+		if err := json.Unmarshal(w.Body.Bytes(), &bundle); err != nil || len(bundle.Policies) != 1 || bundle.Policies[0].ID != expected.String() {
+			t.Fatalf("wrong bundle=%s error=%v", w.Body.String(), err)
+		}
+		return
+	}
+	for _, forbidden := range []string{"policies", first.String(), second.String()} {
+		if strings.Contains(w.Body.String(), forbidden) {
+			t.Fatalf("unauthorized policy disclosure: %s", w.Body.String())
+		}
 	}
 }

@@ -85,6 +85,10 @@ func (h *RuntimePoliciesHTTP) reviewedMutation(w http.ResponseWriter, r *http.Re
 		jsonError(w, 400, "name must not be empty")
 		return
 	}
+	if err := validatePolicyPatch(req.DefAction, req.ApplyDir, req.Rules); err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	tx, err := h.store.db.Pool().BeginTx(r.Context(), pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		jsonError(w, 500, err.Error())
@@ -152,9 +156,14 @@ func (h *RuntimePoliciesHTTP) reviewedMutation(w http.ResponseWriter, r *http.Re
 			return
 		}
 	} else {
+		direction, err := policyDatabaseDirection(&after)
+		if err != nil {
+			jsonError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		// The historic trigger omits name-only edits. Explicitly bumping once also
 		// makes reviewed no-op/mode actions invalidate a previous review safely.
-		got, err := scanPolicy(tx.QueryRow(r.Context(), `UPDATE runtime_policies SET rules=$1::jsonb,def_action=$2,apply_dir=$3,name=$4,mode=$5,updated_by=$6,version=version+1,updated_at=NOW() WHERE id=$7 AND org_id=$8 AND cluster_id=$9 AND version=$10 RETURNING `+policySelectCols, string(after.Rules), int16(after.DefAction), int16(after.ApplyDir), after.Name, string(after.Mode), sub.UserID, id, sub.OrgID, req.ClusterID, version))
+		got, err := scanPolicy(tx.QueryRow(r.Context(), `UPDATE runtime_policies SET rules=$1::jsonb,def_action=$2,apply_dir=$3,name=$4,mode=$5,updated_by=$6,version=version+1,updated_at=NOW() WHERE id=$7 AND org_id=$8 AND cluster_id=$9 AND version=$10 RETURNING `+policySelectCols, string(after.Rules), int16(after.DefAction), direction, after.Name, string(after.Mode), sub.UserID, id, sub.OrgID, req.ClusterID, version))
 		if errors.Is(err, pgx.ErrNoRows) {
 			jsonError(w, 409, "policy changed")
 			return

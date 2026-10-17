@@ -165,6 +165,10 @@ func (h *RuntimePoliciesHTTP) Create(w http.ResponseWriter, r *http.Request) {
 		Rules:     req.Rules,
 		CreatedBy: &sub.UserID,
 	}
+	if _, err := policyDatabaseDirection(p); err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	id, err := h.store.Insert(r.Context(), p, requestIDFrom(r))
 	if err != nil {
 		if strings.Contains(err.Error(), "duplicate") {
@@ -197,6 +201,10 @@ func (h *RuntimePoliciesHTTP) Update(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "invalid body: "+err.Error())
 		return
 	}
+	if err := validatePolicyPatch(req.DefAction, req.ApplyDir, req.Rules); err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	// Build a SET clause dynamically. Empty body → no-op (we still return
 	// the current row so the UI can refresh).
 	current, err := h.store.Get(r.Context(), sub.OrgID, id)
@@ -220,11 +228,16 @@ func (h *RuntimePoliciesHTTP) Update(w http.ResponseWriter, r *http.Request) {
 	if req.Name != nil {
 		current.Name = *req.Name
 	}
+	direction, err := policyDatabaseDirection(current)
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	_, err = h.store.db.Pool().Exec(r.Context(), `
 UPDATE runtime_policies
    SET rules = $1::jsonb, def_action = $2, apply_dir = $3, name = $4, updated_by = $5, version = version + 1, updated_at = NOW()
  WHERE id = $6 AND org_id = $7`,
-		string(current.Rules), int16(current.DefAction), int16(current.ApplyDir),
+		string(current.Rules), int16(current.DefAction), direction,
 		current.Name, sub.UserID, id, sub.OrgID)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())

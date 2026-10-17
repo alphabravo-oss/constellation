@@ -86,6 +86,11 @@ func (p *RuntimePolicy) DecodeRules() ([]*dp.PolicyRule, error) {
 	if err := json.Unmarshal(p.Rules, &out); err != nil {
 		return nil, fmt.Errorf("decode rules: %w", err)
 	}
+	for _, rule := range out {
+		if rule == nil || rule.Action > dp.PolicyActionDeny {
+			return nil, errors.New("rules must contain supported non-null dataplane rules")
+		}
+	}
 	return out, nil
 }
 
@@ -113,6 +118,10 @@ func (p *RuntimePolicy) EncodeRules(rules []*dp.PolicyRule) error {
 // keeps `deny`. `disabled` mode returns an empty rule list so dp clears
 // the workload's table.
 func (p *RuntimePolicy) ToWorkloadPolicy(macs []string) (*dp.WorkloadPolicy, error) {
+	wireID, err := policyWireID(p.DPPolicyID)
+	if err != nil {
+		return nil, err
+	}
 	rules, err := p.DecodeRules()
 	if err != nil {
 		return nil, err
@@ -140,7 +149,6 @@ func (p *RuntimePolicy) ToWorkloadPolicy(macs []string) (*dp.WorkloadPolicy, err
 	// We deliberately overwrite any caller-supplied rule.ID — the runtime
 	// policy ID is the only stable bridge between our UUID + dp's uint32.
 	if p.DPPolicyID > 0 {
-		wireID := uint32(p.DPPolicyID)
 		for _, r := range rules {
 			r.ID = wireID
 		}
@@ -199,14 +207,18 @@ func (s *RuntimePolicyStore) Insert(ctx context.Context, p *RuntimePolicy, reque
 	}
 	var id uuid.UUID
 	var dpPolicyID int64
-	err := s.db.Pool().QueryRow(ctx, `
+	direction, err := policyDatabaseDirection(p)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	err = s.db.Pool().QueryRow(ctx, `
 INSERT INTO runtime_policies
   (org_id, cluster_id, workload, namespace, name, mode,
    def_action, apply_dir, rules, version, created_by, updated_by)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,1,$10,$10)
 RETURNING id, dp_policy_id`,
 		p.OrgID, p.ClusterID, p.Workload, p.Namespace, p.Name, string(p.Mode),
-		int16(p.DefAction), int16(p.ApplyDir), string(p.Rules), p.CreatedBy).Scan(&id, &dpPolicyID)
+		int16(p.DefAction), direction, string(p.Rules), p.CreatedBy).Scan(&id, &dpPolicyID)
 	if err != nil {
 		return uuid.Nil, err
 	}
@@ -384,30 +396,7 @@ func (s *RuntimePolicyStore) upsertLearnedPolicyTx(ctx context.Context, tx pgx.T
 	}
 	tagged := netpolicy.Tag(learned, netpolicy.CfgTypeLearned)
 	if existing == nil {
-		encoded, err := json.Marshal(tagged)
-		if err != nil {
-			return uuid.Nil, false, err
-		}
-		if policy.Mode == "" {
-			policy.Mode = PolicyModeMonitor
-		}
-		if !policy.Mode.Valid() || policy.Workload == "" || policy.Namespace == "" || policy.Name == "" {
-			return uuid.Nil, false, errors.New("invalid learned policy")
-		}
-		policy.Rules = encoded
-		var dpPolicyID int64
-		if err := tx.QueryRow(ctx, `
-INSERT INTO runtime_policies
-  (org_id, cluster_id, workload, namespace, name, mode, def_action, apply_dir, rules, version, created_by, updated_by)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,1,$10,$10)
-RETURNING id, dp_policy_id`, policy.OrgID, policy.ClusterID, policy.Workload, policy.Namespace,
-			policy.Name, string(policy.Mode), int16(policy.DefAction), int16(policy.ApplyDir), string(policy.Rules), by).
-			Scan(&policy.ID, &dpPolicyID); err != nil {
-			return uuid.Nil, false, err
-		}
-		policy.DPPolicyID = dpPolicyID
-		policy.Version = 1
-		return policy.ID, true, nil
+		return insertLearnedPolicyTx(ctx, tx, policy, tagged, by)
 	}
 	prior, err := netpolicy.DecodeSourced(existing.Rules)
 	if err != nil {
@@ -423,6 +412,37 @@ RETURNING id, dp_policy_id`, policy.OrgID, policy.ClusterID, policy.Workload, po
 		return uuid.Nil, false, err
 	}
 	return existing.ID, false, nil
+}
+
+func insertLearnedPolicyTx(ctx context.Context, tx pgx.Tx, policy *RuntimePolicy, tagged []*netpolicy.SourcedRule, by *uuid.UUID) (uuid.UUID, bool, error) {
+	encoded, err := json.Marshal(tagged)
+	if err != nil {
+		return uuid.Nil, false, err
+	}
+	if policy.Mode == "" {
+		policy.Mode = PolicyModeMonitor
+	}
+	if !policy.Mode.Valid() || policy.Workload == "" || policy.Namespace == "" || policy.Name == "" {
+		return uuid.Nil, false, errors.New("invalid learned policy")
+	}
+	policy.Rules = encoded
+	direction, err := policyDatabaseDirection(policy)
+	if err != nil {
+		return uuid.Nil, false, err
+	}
+	var dpPolicyID int64
+	if err := tx.QueryRow(ctx, `
+INSERT INTO runtime_policies
+  (org_id, cluster_id, workload, namespace, name, mode, def_action, apply_dir, rules, version, created_by, updated_by)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,1,$10,$10)
+RETURNING id, dp_policy_id`, policy.OrgID, policy.ClusterID, policy.Workload, policy.Namespace,
+		policy.Name, string(policy.Mode), int16(policy.DefAction), direction, string(policy.Rules), by).
+		Scan(&policy.ID, &dpPolicyID); err != nil {
+		return uuid.Nil, false, err
+	}
+	policy.DPPolicyID = dpPolicyID
+	policy.Version = 1
+	return policy.ID, true, nil
 }
 
 // GetByName fetches one policy by its natural key (org, cluster, workload,
@@ -460,6 +480,9 @@ func scanPolicy(s rowScanner) (*RuntimePolicy, error) {
 	}
 	p.Mode = PolicyMode(mode)
 	p.Revision = strconv.FormatInt(p.Version, 10)
+	if defAct < 0 || defAct > 255 {
+		return nil, errors.New("stored policy action exceeds the wire range")
+	}
 	p.DefAction = uint8(defAct)
 	p.ApplyDir = int(applyDir)
 	p.Rules = json.RawMessage(rulesText)
