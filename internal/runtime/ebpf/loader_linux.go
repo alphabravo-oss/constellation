@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,6 +48,10 @@ type linuxLoader struct {
 // does NOT yet attach — the eBPF collection. Attaching happens in Start so that the
 // caller can control program lifetime via ctx.
 func newLoader(opts Options) (loader, error) {
+	ringSize, err := validatedRingBufferSize(opts.RingBufferSize)
+	if err != nil {
+		return nil, err
+	}
 	if err := rlimit.RemoveMemlock(); err != nil {
 		return nil, fmt.Errorf("ebpf: remove memlock rlimit: %w", err)
 	}
@@ -58,17 +63,28 @@ func newLoader(opts Options) (loader, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ebpf: load collection spec %s: %w", objPath, err)
 	}
-	// Adjust the ring-buffer size if user asked for a non-default.
-	if opts.RingBufferSize > 0 {
-		if m, ok := spec.Maps["events"]; ok {
-			m.MaxEntries = uint32(opts.RingBufferSize)
-		}
+	if m, ok := spec.Maps["events"]; ok {
+		m.MaxEntries = ringSize
 	}
 	coll, err := ciliumebpf.NewCollection(spec)
 	if err != nil {
 		return nil, fmt.Errorf("ebpf: new collection: %w", err)
 	}
 	return &linuxLoader{opts: opts, coll: coll}, nil
+}
+
+// Validate the effective size before changing rlimits or creating kernel maps.
+// Zero retains the public Options default; negative or overflowing sizes must
+// not become a different allocation through an unsigned conversion.
+func validatedRingBufferSize(requested int) (uint32, error) {
+	value := int64(requested)
+	if value == 0 {
+		value = 256 << 10
+	}
+	if value < 0 || value > math.MaxUint32 || value&(value-1) != 0 || value%int64(os.Getpagesize()) != 0 {
+		return 0, errors.New("ebpf: ring buffer size must fit uint32 and be a page-aligned positive power of two")
+	}
+	return uint32(value), nil
 }
 
 // resolveObjectPath walks a few candidate locations: $CONSTELLATION_BPF_OBJ,

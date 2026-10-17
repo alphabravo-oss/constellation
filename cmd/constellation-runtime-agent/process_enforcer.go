@@ -2,6 +2,7 @@ package main
 
 import (
 	"log/slog"
+	"math"
 	"os"
 	"path"
 	"slices"
@@ -65,13 +66,14 @@ type processEnforcer struct {
 	cfg       processEnforcerConfig
 	granular  bool
 	zeroDrift string // off|monitor|enforce
+	signal    func(int, syscall.Signal) error
 }
 
 func newProcessEnforcer(cfg processEnforcerConfig) *processEnforcer {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
-	e := &processEnforcer{cfg: cfg}
+	e := &processEnforcer{cfg: cfg, signal: syscall.Kill}
 	e.granular = cfg.Granular || processMatchGranularFromEnv(os.Getenv("CONSTELLATION_PROCESS_MATCH_GRANULAR"))
 	e.zeroDrift = normalizeZeroDriftMode(firstNonEmpty(cfg.ZeroDrift, os.Getenv("CONSTELLATION_PROCESS_ZERO_DRIFT")))
 	return e
@@ -91,6 +93,9 @@ func (e *processEnforcer) namespaceForContainer(containerID string) string {
 // disabled config (no-op), so the event loop can call it unconditionally.
 func (e *processEnforcer) onExec(pid int, containerID, comm, filename, workloadID string) {
 	if e == nil || e.cfg.Disabled || e.cfg.Sync == nil {
+		return
+	}
+	if _, ok := processPID(pid); !ok {
 		return
 	}
 	// Non-overridable self/host/system protection (checked BEFORE any rule): never
@@ -127,7 +132,16 @@ func (e *processEnforcer) onExec(pid int, containerID, comm, filename, workloadI
 // block performs the SIGKILL + status/callback bookkeeping shared by the baseline
 // and zero-drift enforce paths.
 func (e *processEnforcer) block(pid int, containerID, comm, filename, wl, cause string) {
-	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
+	// Linux kill uses signed pid_t: zero/negative values signal process groups,
+	// and a larger Go int must never wrap into that special-value domain.
+	if _, ok := processPID(pid); !ok || pid == 1 {
+		return
+	}
+	signal := e.signal
+	if signal == nil {
+		signal = syscall.Kill
+	}
+	if err := signal(pid, syscall.SIGKILL); err != nil {
 		e.cfg.Logger.Warn("process-enforcer: kill failed",
 			slog.Int("pid", pid), slog.String("comm", comm), slog.String("err", err.Error()))
 		return
@@ -147,6 +161,9 @@ func (e *processEnforcer) block(pid int, containerID, comm, filename, wl, cause 
 // baselineViolation is the enforce-mode allowlist decision. In granular mode it uses
 // the rich processProfileEntry matcher; otherwise the legacy basename matcher.
 func (e *processEnforcer) baselineViolation(pid int, comm, filename, wl string) bool {
+	if _, ok := processPID(pid); !ok {
+		return false
+	}
 	rows := e.cfg.Sync.Rows()
 	if !e.granular {
 		return processEnforceShouldKill(rows, wl, comm, filename)
@@ -173,9 +190,13 @@ func (e *processEnforcer) baselineViolation(pid int, comm, filename, wl string) 
 // execContext builds the enriched matcher input from /proc. The sha256 is only read
 // in granular mode (it is the only consumer today).
 func (e *processEnforcer) execContext(pid int, comm, filename string) processExecContext {
-	meta := enrichExecMeta(uint32(pid))
+	wirePID, ok := processPID(pid)
+	if !ok {
+		return processExecContext{}
+	}
+	meta := enrichExecMeta(wirePID)
 	if e.granular {
-		meta = meta.withHash(uint32(pid))
+		meta = meta.withHash(wirePID)
 	}
 	exe := meta.ExePath
 	if strings.TrimSpace(exe) == "" {
@@ -193,6 +214,10 @@ func (e *processEnforcer) execContext(pid int, comm, filename string) processExe
 // dormant unless a mode is set AND cfg.Workloads is wired (so a container start time
 // is available). Returns (drift, reason). Fail-open on unknown start time.
 func (e *processEnforcer) driftViolation(pid int, containerID, wl string) (bool, string) {
+	wirePID, ok := processPID(pid)
+	if !ok {
+		return false, ""
+	}
 	if e.zeroDrift == "" || e.zeroDrift == "off" || e.cfg.Workloads == nil {
 		return false, ""
 	}
@@ -204,7 +229,7 @@ func (e *processEnforcer) driftViolation(pid int, containerID, wl string) (bool,
 	if ident.StartUnixNano == 0 {
 		return false, "" // unknown start -> cannot judge provenance, fail open
 	}
-	z := zeroDriftContextFromProc(procRoot, uint32(pid), cid, ident.StartUnixNano)
+	z := zeroDriftContextFromProc(procRoot, wirePID, cid, ident.StartUnixNano)
 	if !execIsDrift(z) {
 		return false, ""
 	}
@@ -287,4 +312,20 @@ func firstNonEmpty(a, b string) string {
 		return a
 	}
 	return b
+}
+
+// Process identity uses Linux's positive signed32 pid_t domain, not an unsigned
+// bit-pattern ID. Zero may represent unavailable attribution only in telemetry.
+func processPID(pid int) (uint32, bool) {
+	if pid <= 0 || pid > math.MaxInt32 {
+		return 0, false
+	}
+	return uint32(pid), true
+}
+
+func processObservationPID(pid int) (uint32, bool) {
+	if pid == 0 {
+		return 0, true
+	}
+	return processPID(pid)
 }

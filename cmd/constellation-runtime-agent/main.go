@@ -511,6 +511,11 @@ func main() {
 			Protected: protectedNS,
 			Sync:      procBaselineWorker,
 			OnDeny: func(event fanotifyDecisionEvent, ruleID string) {
+				wirePID, validPID := processObservationPID(int(event.Pid))
+				if !validPID {
+					nDropped.Add(1)
+					return
+				}
 				if toUpload == nil {
 					return
 				}
@@ -520,7 +525,7 @@ func main() {
 					Node:              node,
 					WorkloadID:        event.WorkloadID,
 					ContainerID:       event.ContainerID,
-					PID:               uint32(event.Pid),
+					PID:               wirePID,
 					Comm:              event.Comm,
 					Path:              event.Path,
 					Blocked:           true,
@@ -539,6 +544,11 @@ func main() {
 			// drift to the server; Blocked reflects whether it was actually denied
 			// (enforce) vs merely observed (monitor). Mirrors OnDeny above.
 			OnExecDeny: func(event fanotifyDecisionEvent, reason string, denied bool) {
+				wirePID, validPID := processObservationPID(int(event.Pid))
+				if !validPID {
+					nDropped.Add(1)
+					return
+				}
 				if toUpload == nil {
 					return
 				}
@@ -548,7 +558,7 @@ func main() {
 					Node:            node,
 					WorkloadID:      event.WorkloadID,
 					ContainerID:     event.ContainerID,
-					PID:             uint32(event.Pid),
+					PID:             wirePID,
 					Comm:            event.Comm,
 					Filename:        event.Path,
 					Blocked:         denied,
@@ -578,6 +588,11 @@ func main() {
 			HashMaxBytes: fileProfileHashMaxBytes(),
 			Logger:       logger,
 			OnChange: func(ev hostFIMEvent) {
+				wirePID, validPID := processObservationPID(int(ev.Pid))
+				if !validPID {
+					nDropped.Add(1)
+					return
+				}
 				if toUpload == nil {
 					return
 				}
@@ -585,7 +600,7 @@ func main() {
 					At:     time.Now().UTC(),
 					Kind:   "host_file_change",
 					Node:   node,
-					PID:    uint32(ev.Pid),
+					PID:    wirePID,
 					Comm:   ev.Comm,
 					Path:   ev.Path,
 					Sha256: ev.Sha256,
@@ -650,6 +665,11 @@ func main() {
 			// Without it CONSTELLATION_PROCESS_ZERO_DRIFT is a no-op.
 			Workloads: workloads,
 			OnKill: func(pid int, workloadID, containerID, comm, filename, reason string) {
+				wirePID, validPID := processObservationPID(pid)
+				if !validPID {
+					nDropped.Add(1)
+					return
+				}
 				if toUpload == nil {
 					return
 				}
@@ -659,7 +679,7 @@ func main() {
 					Node:        node,
 					WorkloadID:  workloadID,
 					ContainerID: containerID,
-					PID:         uint32(pid),
+					PID:         wirePID,
 					Comm:        comm,
 					Filename:    filename,
 					Blocked:     true,
@@ -681,6 +701,11 @@ func main() {
 			// OnAlert surfaces a monitor-mode zero-drift observation (not killed) to
 			// the server, carrying the drift reason. Mirrors OnKill but Blocked=false.
 			OnAlert: func(pid int, workloadID, containerID, comm, filename, reason string) {
+				wirePID, validPID := processObservationPID(pid)
+				if !validPID {
+					nDropped.Add(1)
+					return
+				}
 				if toUpload == nil {
 					return
 				}
@@ -690,7 +715,7 @@ func main() {
 					Node:            node,
 					WorkloadID:      workloadID,
 					ContainerID:     containerID,
-					PID:             uint32(pid),
+					PID:             wirePID,
 					Comm:            comm,
 					Filename:        filename,
 					ZeroDriftReason: reason,

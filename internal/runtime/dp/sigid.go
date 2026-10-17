@@ -23,7 +23,13 @@ const (
 // (40000-49999). Built-in packs are a small fixed list, so a sequential index
 // is stable and collision-free.
 func WAFSigID(index int) uint32 {
-	return dpMinWAFSigID + uint32(index)%dpWAFSigSpan
+	if index < 0 {
+		return 0 // invalid signature; never reinterpret a negative index as bits
+	}
+	// The modulo is intentional protocol mapping. Reduce before converting so
+	// large positive indices follow the same mapping on every architecture.
+	offset := index % int(dpWAFSigSpan)
+	return dpMinWAFSigID + uint32(offset)
 }
 
 // dpUserWAFBase splits dp's WAF sig-id range (40000-49999): the built-in CRS

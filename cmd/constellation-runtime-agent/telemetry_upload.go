@@ -132,7 +132,7 @@ func persistTelemetryBatch[T any](logger *slog.Logger, q *telemetryspool.Queue, 
 func deliverTelemetry(ctx context.Context, logger *slog.Logger, q *telemetryspool.Queue, url, token string, uploaded *atomic.Uint64) {
 	backoff := time.Second
 	for ctx.Err() == nil {
-		batch, err := q.Peek()
+		batch, records, err := validatedTelemetryBatch(q)
 		if err != nil {
 			logger.Error("telemetry spool unreadable; retaining queue", slog.String("error", err.Error()))
 			if !waitUpload(ctx, 30*time.Second) {
@@ -155,7 +155,7 @@ func deliverTelemetry(ctx context.Context, logger *slog.Logger, q *telemetryspoo
 				}
 				continue
 			}
-			uploaded.Add(uint64(batch.Count))
+			uploaded.Add(records)
 			backoff = time.Second
 			continue
 		}
@@ -171,6 +171,19 @@ func deliverTelemetry(ctx context.Context, logger *slog.Logger, q *telemetryspoo
 		}
 		backoff = min(backoff*2, 30*time.Second)
 	}
+}
+
+// Keep the captured count validated alongside the batch until its durable ack.
+// Invalid retained data must not be uploaded, discarded, or wrap a counter.
+func validatedTelemetryBatch(q *telemetryspool.Queue) (*telemetryspool.Batch, uint64, error) {
+	batch, err := q.Peek()
+	if err != nil || batch == nil {
+		return batch, 0, err
+	}
+	if batch.Count <= 0 {
+		return nil, 0, errors.New("telemetry batch count must be positive")
+	}
+	return batch, uint64(batch.Count), nil
 }
 
 func waitUpload(ctx context.Context, d time.Duration) bool {

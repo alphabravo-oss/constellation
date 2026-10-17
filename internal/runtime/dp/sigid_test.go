@@ -1,6 +1,9 @@
 package dp
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func TestSigIDAndName(t *testing.T) {
 	// WAF ids land in 40000-49999.
@@ -30,6 +33,18 @@ func TestSigIDAndName(t *testing.T) {
 			if r == ' ' || r == '\t' {
 				t.Fatalf("SanitizeSigName(%q)=%q still has whitespace", tc.in, got)
 			}
+		}
+	}
+}
+
+func TestWAFSignatureIndexNumericDomain(t *testing.T) {
+	if got := WAFSigID(-1); got != 0 {
+		t.Fatalf("negative index became valid signature %d", got)
+	}
+	for _, index := range []int{0, 9999, 10000, 10001, math.MaxInt} {
+		expected := int64(dpMinWAFSigID) + int64(index%10000)
+		if got := WAFSigID(index); int64(got) != expected {
+			t.Fatalf("index=%d got=%d want=%d", index, got, expected)
 		}
 	}
 }

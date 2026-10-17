@@ -69,8 +69,8 @@ func metricsHandler(m *metricsSource) http.HandlerFunc {
 			if value, ok := telemetryQueues.Load(stream); ok {
 				pending, bytes := value.(*telemetryspool.Queue).Stats()
 				labels := nodeLabel + fmt.Sprintf(",stream=%q", stream)
-				emitGauge(&sb, "constellation_runtime_agent_spool_batches", "Durable batches awaiting acknowledgement.", labels, uint64(pending))
-				emitGauge(&sb, "constellation_runtime_agent_spool_bytes", "Bytes awaiting durable acknowledgement.", labels, uint64(bytes))
+				emitNonNegativeGauge(&sb, "constellation_runtime_agent_spool_batches", "Durable batches awaiting acknowledgement.", labels, int64(pending))
+				emitNonNegativeGauge(&sb, "constellation_runtime_agent_spool_bytes", "Bytes awaiting durable acknowledgement.", labels, bytes)
 			}
 		}
 
@@ -149,9 +149,9 @@ func metricsHandler(m *metricsSource) http.HandlerFunc {
 					"timeout": ka.Timeout,
 					"errors":  ka.Errors,
 				})
-			emitGauge(&sb, "constellation_runtime_agent_dp_taps_current",
+			emitNonNegativeGauge(&sb, "constellation_runtime_agent_dp_taps_current",
 				"Active dp AF_PACKET taps on this node.", nodeLabel,
-				uint64(taps.CurrentTaps))
+				int64(taps.CurrentTaps))
 			emitCounter(&sb, "constellation_runtime_agent_dp_taps_total",
 				"Lifetime dp tap add / remove / error counters.", nodeLabel,
 				map[string]uint64{
@@ -181,4 +181,13 @@ func emitGauge(sb *strings.Builder, name, help, nodeLabel string, value uint64) 
 	fmt.Fprintf(sb, "# HELP %s %s\n", name, help)
 	fmt.Fprintf(sb, "# TYPE %s gauge\n", name)
 	fmt.Fprintf(sb, "%s{%s} %d\n", name, nodeLabel, value)
+}
+
+// Invalid negative source counts are unavailable; never invent zero or wrap
+// them into a huge gauge. Other fields in the same scrape remain visible.
+func emitNonNegativeGauge(sb *strings.Builder, name, help, labels string, value int64) {
+	if value < 0 {
+		return
+	}
+	emitGauge(sb, name, help, labels, uint64(value))
 }
