@@ -12,7 +12,8 @@ import (
 func TestSupervisorReadiness(t *testing.T) {
 	s := &Supervisor{}
 	c := newDPClient(slog.Default())
-	c.onReply = func() { s.readyGen.Store(s.generation.Load()) }
+	c.probeGeneration = s.Generation
+	c.onReply = s.noteReady
 
 	// Fresh supervisor: no dp launched yet.
 	if s.Generation() != 0 || s.Ready() {
@@ -21,25 +22,49 @@ func TestSupervisorReadiness(t *testing.T) {
 
 	// First dp instance launches (runOnce bumps generation).
 	s.generation.Store(1)
+	s.activeGen.Store(1)
 	if s.Ready() {
 		t.Fatalf("gen1 before reply: Ready()=true; want false")
 	}
 
 	// dp answers a keepalive -> onReply fires.
-	c.onReply()
+	c.onReply(s.Generation())
 	if !s.Ready() || s.Generation() != 1 {
 		t.Fatalf("gen1 after reply: ready=%v gen=%d; want true/1", s.Ready(), s.Generation())
 	}
 
 	// dp crashes and restarts: generation bumps, readyGen is stale.
 	s.generation.Store(2)
+	s.activeGen.Store(2)
 	if s.Ready() {
 		t.Fatalf("gen2 before fresh reply: Ready()=true; want false")
 	}
 
 	// Fresh dp answers -> ready again for the new generation.
-	c.onReply()
+	c.onReply(s.Generation())
 	if !s.Ready() || s.Generation() != 2 {
 		t.Fatalf("gen2 after reply: ready=%v gen=%d; want true/2", s.Ready(), s.Generation())
+	}
+}
+
+func TestSupervisorReadinessRejectsBufferedPreviousEpochReply(t *testing.T) {
+	supervisor := &Supervisor{}
+	supervisor.generation.Store(1)
+	supervisor.activeGen.Store(1)
+	oldProbe := supervisor.Generation()
+	supervisor.generation.Store(2)
+	supervisor.activeGen.Store(2)
+	supervisor.noteReady(oldProbe)
+	if supervisor.Ready() {
+		t.Fatal("old buffered reply qualified a new native generation")
+	}
+	supervisor.noteReady(2)
+	if !supervisor.Ready() {
+		t.Fatal("fresh reply did not qualify current native generation")
+	}
+	supervisor.activeGen.Store(0)
+	supervisor.noteReady(2)
+	if supervisor.Ready() {
+		t.Fatal("late reply resurrected exited native process")
 	}
 }

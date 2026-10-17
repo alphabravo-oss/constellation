@@ -103,7 +103,7 @@ func TestAgentPolicyBundle_WireShapeAndOrgScope(t *testing.T) {
 
 	// 1) Happy path: correct org token + cluster.
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/runtime/policies:bundle?cluster_id="+clusterID.String(), nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/runtime/policies:bundle?protocol=2&cluster_id="+clusterID.String(), nil)
 	req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(),
 		&handler.RuntimeAgentToken{ID: uuid.New(), OrgID: orgID, Name: "agent-test"}))
 	h.AgentPolicyBundle(rec, req)
@@ -151,7 +151,7 @@ func TestAgentPolicyBundle_WireShapeAndOrgScope(t *testing.T) {
 
 	// 2) Cross-org isolation: a token for another org must not see this cluster.
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/runtime/policies:bundle?cluster_id="+clusterID.String(), nil)
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/runtime/policies:bundle?protocol=2&cluster_id="+clusterID.String(), nil)
 	req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(),
 		&handler.RuntimeAgentToken{ID: uuid.New(), OrgID: otherOrgID, Name: "other-agent"}))
 	h.AgentPolicyBundle(rec, req)
@@ -161,7 +161,7 @@ func TestAgentPolicyBundle_WireShapeAndOrgScope(t *testing.T) {
 
 	// 3) Missing token -> 401.
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/runtime/policies:bundle?cluster_id="+clusterID.String(), nil)
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/runtime/policies:bundle?protocol=2&cluster_id="+clusterID.String(), nil)
 	h.AgentPolicyBundle(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("no-token status=%d want 401", rec.Code)
@@ -227,7 +227,7 @@ func TestAgentPolicyBundleRequiresTokenClusterBinding(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			requestCtx := handler.WithRuntimeAgentToken(t.Context(), tc.token)
-			req := httptest.NewRequestWithContext(requestCtx, http.MethodGet, "/runtime/policies:bundle?cluster_id="+tc.cluster.String(), nil)
+			req := httptest.NewRequestWithContext(requestCtx, http.MethodGet, "/runtime/policies:bundle?protocol=2&cluster_id="+tc.cluster.String(), nil)
 			w := httptest.NewRecorder()
 			h.AgentPolicyBundle(w, req)
 			assertPolicyBundleScope(t, w, tc.status, ids[tc.cluster], ids[clusterA], ids[clusterB])

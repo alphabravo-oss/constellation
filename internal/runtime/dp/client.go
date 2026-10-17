@@ -226,12 +226,17 @@ type dpClient struct {
 	// keepalive read never blocks connect/close/resetOnErr.
 	txMu sync.Mutex
 
+	// policyMu serializes native global policy staging and endpoint replacement.
+	// Lock order: policyMu, manager current-map mutex, txMu, mu.
+	policyMu sync.Mutex
+
 	// onReply, if non-nil, is invoked after every successful keepalive reply.
 	// The supervisor installs it (before keepAliveLoop starts) to advance its
 	// readiness generation. It must not block or take a mutex — it runs on the
 	// keepalive hot path. Set-once before the loop launches, so reading it here
 	// without synchronization is race-free.
-	onReply func()
+	onReply         func(uint64)
+	probeGeneration func() uint64
 
 	// onSessionDump, if non-nil, receives each COMPLETE ctrl_list_session dump.
 	// dp sends session-list datagrams to the CLIENT (request) socket via
@@ -322,6 +327,10 @@ func (c *dpClient) keepAliveLoop(ctx context.Context) {
 // matching reply. The reply is binary: 4-byte DPMsgHdr + 4-byte seq_num,
 // both big-endian. See dp/ctrl.c:141-156.
 func (c *dpClient) keepAliveOnce(ctx context.Context) error {
+	var generation uint64
+	if c.probeGeneration != nil {
+		generation = c.probeGeneration()
+	}
 	if err := c.connect(); err != nil {
 		c.kaErrors.Add(1)
 		return err
@@ -416,7 +425,7 @@ func (c *dpClient) keepAliveOnce(ctx context.Context) error {
 		}
 		c.kaReplied.Add(1)
 		if c.onReply != nil {
-			c.onReply()
+			c.onReply(generation)
 		}
 		return nil
 	}

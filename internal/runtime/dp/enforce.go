@@ -23,8 +23,10 @@ package dp
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -34,9 +36,13 @@ import (
 // EnforceTarget is one veth that should be in NFQUEUE inline mode.
 // Extends TapTarget with the queue number the agent allocated.
 type EnforceTarget struct {
-	NetNS string
-	Iface string
-	EPMAC string
+	NetNS        string
+	Iface        string
+	EPMAC        string
+	Namespace    string
+	PodName      string
+	PodUID       string
+	Registration uint64
 	// Qnum is the kernel NFQUEUE number dp will bind. Set by enforceManager
 	// from QnumAllocator before the AddNfqPort RPC; providers leave it 0.
 	Qnum int
@@ -82,10 +88,13 @@ type EnforceProvider interface {
 
 // enforceManager is the parallel of tapManager for the NFQUEUE path.
 type enforceManager struct {
-	client   *dpClient
-	provider EnforceProvider
-	logger   *slog.Logger
-	interval time.Duration
+	client            *dpClient
+	provider          EnforceProvider
+	logger            *slog.Logger
+	interval          time.Duration
+	ready             func() bool
+	generation        func() uint64
+	currentGeneration uint64
 
 	ipt   *ipt
 	qnums *QnumAllocator
@@ -153,6 +162,9 @@ func (m *enforceManager) waitForSocket(ctx context.Context, timeout time.Duratio
 }
 
 func (m *enforceManager) reconcileOnce(ctx context.Context) {
+	if ctx.Err() != nil || m.ready != nil && !m.ready() {
+		return
+	}
 	desired, err := m.provider.Desired(ctx)
 	if err != nil {
 		m.errors.Add(1)
@@ -164,73 +176,46 @@ func (m *enforceManager) reconcileOnce(ctx context.Context) {
 		want[d.key()] = d
 	}
 
+	m.client.policyMu.Lock()
+	defer m.client.policyMu.Unlock()
+	if ctx.Err() != nil || m.ready != nil && !m.ready() {
+		return
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	if m.generation != nil && m.currentGeneration != m.generation() {
+		for key, target := range m.current {
+			target.PodUID = "\x00retired"
+			m.current[key] = target
+		}
+		m.currentGeneration = m.generation()
+	}
+	m.retireChanged(ctx, want)
+
 	// Add new entries.
 	for k, t := range want {
-		if _, has := m.current[k]; has {
+		if current, has := m.current[k]; has {
+			if !sameEnforceIdentity(current, t) {
+				continue
+			}
+			t.EPMAC, t.Qnum, t.Registration = current.EPMAC, current.Qnum, current.Registration
+			m.current[k] = t
 			continue
 		}
-		if t.EPMAC == "" {
-			if mac, err := resolveMAC(t.Iface); err == nil {
-				t.EPMAC = mac
-			}
-		}
-		qnum, err := m.qnums.Allocate()
+		registered, err := m.registerTarget(ctx, t)
 		if err != nil {
 			m.errors.Add(1)
-			m.logger.Error("dp enforce: qnum allocator exhausted",
-				slog.String("iface", t.Iface), slog.String("err", err.Error()))
+			m.logger.Warn("dp enforce: register endpoint", "iface", t.Iface, "err", err)
 			continue
 		}
-		t.Qnum = qnum
-		// 1) dp binds the queue.
-		if err := m.client.AddNfqPort(t.NetNS, t.Iface, qnum, t.EPMAC, nil); err != nil {
-			m.qnums.Release(qnum)
-			m.errors.Add(1)
-			m.logger.Warn("dp enforce: AddNfqPort",
-				slog.String("iface", t.Iface), slog.String("err", err.Error()))
-			continue
-		}
-		// 2) dp learns the workload MAC for policy matching.
-		if t.EPMAC != "" {
-			if err := m.client.AddMAC(t.Iface, t.EPMAC, t.PIPS); err != nil {
-				m.errors.Add(1)
-				m.logger.Warn("dp enforce: AddMAC",
-					slog.String("iface", t.Iface), slog.String("err", err.Error()))
-				// Continue — iptables redirect still works, just no MAC tag.
-			} else {
-				// 2b) Seed ep->app_map with the pod's listening-port hints, exactly
-				// like the tap path (taps.go ConfigMAC). Without this, dp can't fix
-				// mid-stream session direction on the inline ep, never recruits the
-				// L7 (HTTP) parser, and so DLP/WAF never scan -> enforce can't drop.
-				// tap=false: this is the inline (NFQUEUE) ep, not a mirror. Must come
-				// after AddMAC (dp skips MACs not yet in its ep map). Best-effort.
-				inline := false
-				if err := m.client.ConfigMAC([]string{t.EPMAC}, &inline, t.Apps); err != nil {
-					m.logger.Debug("dp enforce: ConfigMAC (best-effort)",
-						slog.String("iface", t.Iface), slog.String("err", err.Error()))
-				}
-			}
-		}
-		// 3) Kernel rules send packets to the queue. THIS IS THE TRAFFIC-
-		//    AFFECTING STEP — fail-open via --queue-bypass means dp not
-		//    listening => kernel ACCEPTs.
-		if err := m.ipt.addRedirect(ctx, t.NetNS, t.Iface, qnum); err != nil {
-			// Roll back the dp side so we don't leak queues.
-			_ = m.client.DelNfqPort(t.NetNS, t.Iface)
-			_ = m.client.DelMAC(t.Iface, t.EPMAC)
-			m.qnums.Release(qnum)
-			m.errors.Add(1)
-			m.logger.Error("dp enforce: iptables install failed; rolled back",
-				slog.String("iface", t.Iface), slog.String("err", err.Error()))
-			continue
-		}
+		t = registered
+
+		t.Registration = endpointRegistration.Add(1)
 		m.added.Add(1)
 		m.current[k] = t
 		m.logger.Info("dp enforce: added",
-			slog.String("iface", t.Iface), slog.Int("qnum", qnum),
+			slog.String("iface", t.Iface), slog.Int("qnum", t.Qnum),
 			slog.String("epmac", t.EPMAC))
 	}
 
@@ -248,29 +233,85 @@ func (m *enforceManager) reconcileOnce(ctx context.Context) {
 			continue
 		}
 		if err := m.client.ConfigMAC([]string{t.EPMAC}, &inline, t.Apps); err != nil {
-			m.logger.Debug("dp enforce: ConfigMAC re-assert (best-effort)",
+			m.errors.Add(1)
+			m.logger.Warn("dp enforce: ConfigMAC re-assert failed",
 				slog.String("iface", t.Iface), slog.String("err", err.Error()))
 		}
 	}
 
-	// Remove gone entries.
-	for k, t := range m.current {
-		if _, still := want[k]; still {
+}
+
+// No redirect is installed until the endpoint clear, native queue, MAC and
+// inline flag have all been submitted successfully. Failures release the slot.
+func (m *enforceManager) registerTarget(ctx context.Context, target EnforceTarget) (EnforceTarget, error) {
+	if target.EPMAC == "" {
+		mac, err := resolveMAC(target.Iface)
+		if err != nil {
+			return target, err
+		}
+		target.EPMAC = mac
+	}
+	if err := m.client.clearEndpointPolicy(target.EPMAC); err != nil {
+		return target, err
+	}
+	queue, err := m.qnums.Allocate()
+	if err != nil {
+		return target, err
+	}
+	target.Qnum = queue
+	if err := m.client.AddNfqPort(target.NetNS, target.Iface, queue, target.EPMAC, nil); err != nil {
+		m.qnums.Release(queue)
+		return target, err
+	}
+	err = m.configureEndpoint(target)
+	if err == nil {
+		err = m.ipt.addRedirect(ctx, target.NetNS, target.Iface, queue)
+	}
+	if err != nil {
+		m.qnums.Release(queue)
+		return target, errors.Join(err, m.client.DelNfqPort(target.NetNS, target.Iface), m.client.DelMAC(target.Iface, target.EPMAC))
+	}
+	return target, nil
+}
+
+func (m *enforceManager) configureEndpoint(target EnforceTarget) error {
+	if err := m.client.AddMAC(target.Iface, target.EPMAC, target.PIPS); err != nil {
+		return err
+	}
+	inline := false
+	return m.client.ConfigMAC([]string{target.EPMAC}, &inline, target.Apps)
+}
+
+func sameEnforceIdentity(current, desired EnforceTarget) bool {
+	return current.Namespace == desired.Namespace && current.PodName == desired.PodName && current.PodUID == desired.PodUID && slices.Equal(current.PIPS, desired.PIPS) && (desired.EPMAC == "" || current.EPMAC == desired.EPMAC)
+}
+
+func (m *enforceManager) retireChanged(ctx context.Context, want map[string]EnforceTarget) {
+	for key, target := range m.current {
+		if desired, exists := want[key]; exists && sameEnforceIdentity(target, desired) {
 			continue
 		}
-		// Remove iptables FIRST so packets stop going to a queue we're
-		// about to close (avoids dp seeing packets for a queue it's
-		// tearing down — harmless but noisy).
-		_ = m.ipt.removeRedirect(ctx, t.NetNS, t.Iface, t.Qnum)
-		if t.EPMAC != "" {
-			_ = m.client.DelMAC(t.Iface, t.EPMAC)
+		err := m.ipt.removeRedirect(ctx, target.NetNS, target.Iface, target.Qnum)
+		if err == nil {
+			err = m.client.clearEndpointPolicy(target.EPMAC)
 		}
-		_ = m.client.DelNfqPort(t.NetNS, t.Iface)
-		m.qnums.Release(t.Qnum)
+		if err == nil && target.EPMAC != "" {
+			err = m.client.DelMAC(target.Iface, target.EPMAC)
+		}
+		if err == nil {
+			err = m.client.DelNfqPort(target.NetNS, target.Iface)
+		}
+		if err != nil {
+			m.errors.Add(1)
+			m.logger.Warn("dp enforce: endpoint retirement failed", "iface", target.Iface, "err", err)
+			target.Namespace, target.PodName, target.PodUID = "", "", ""
+			target.Registration = endpointRegistration.Add(1)
+			m.current[key] = target
+			continue
+		}
+		m.qnums.Release(target.Qnum)
 		m.removed.Add(1)
-		delete(m.current, k)
-		m.logger.Info("dp enforce: removed",
-			slog.String("iface", t.Iface), slog.Int("qnum", t.Qnum))
+		delete(m.current, key)
 	}
 }
 
@@ -278,6 +319,8 @@ func (m *enforceManager) reconcileOnce(ctx context.Context) {
 // installed iptables rule + dp NFQUEUE binding so a clean exit leaves the
 // host in the same state we found it in.
 func (m *enforceManager) teardown(ctx context.Context) {
+	m.client.policyMu.Lock()
+	defer m.client.policyMu.Unlock()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, t := range m.current {

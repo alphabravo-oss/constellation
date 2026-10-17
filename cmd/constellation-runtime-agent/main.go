@@ -1283,7 +1283,7 @@ func crictlContainerLister(enforceActive bool) dp.ContainerLister {
 		for _, c := range raw {
 			waf, dlp, enforce := dpiOptIn(c.PodLabels)
 			out = append(out, dp.RunningContainer{
-				ID: c.ID, PodName: c.PodName, PID: c.PID,
+				ID: c.ID, PodName: c.PodName, PodUID: c.PodUID, PID: c.PID,
 				WAF: waf, DLP: dlp,
 				// Pod identity for group→sensor binding resolution (NET-43): the
 				// namespace + user labels the group selectors match on.

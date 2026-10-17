@@ -4,13 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"math"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/alphabravocompany/constellation/internal/runtime/dp"
 )
@@ -60,46 +58,25 @@ func TestPolicyMergeNeverAliasesLargeIDAndPreservesLegacyZero(t *testing.T) {
 	}
 }
 func TestNetworkBundleInvalidIdentityPreservesLastGoodResolverAndRIDs(t *testing.T) {
-	var payload atomic.Value
-	payload.Store(`{"policies":[{"dp_policy_id":7,"mode":"enforce","rules":[{"fqdn":"retained.example.test","action":2}]}]}`)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/runtime/policies:bundle" || r.URL.Query().Get("cluster_id") != "selected-cluster" {
-			t.Error("wrong bundle scope")
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(payload.Load().(string)))
-	}))
-	defer server.Close()
-	supervisor := dp.New(dp.Options{})
-	worker := NewRuntimePolicySyncWorker(RuntimePolicySyncConfig{APIBaseURL: server.URL, ClusterID: "selected-cluster", DPSup: supervisor})
-	worker.SyncOnce(context.Background())
-	saved := pushedPolicyRIDs.Load()
-	t.Cleanup(func() { pushedPolicyRIDs.Store(saved) })
-	storePolicyRIDs([]uint32{7})
-	worker.fingerprint = "last-known-good"
-	worker.pushedNonEmpty = true
+	policy := scopedPolicyFixture("a", "a-1", "uid-a", 7, "enforce")
+	policy.Rules[0].Fqdn = "retained.example.test"
+	worker, dataplane, payload := scopedPolicyHarness(t, policy)
+	worker.SyncOnce(t.Context())
+	confirmed := worker.confirmed[scopedMACA]
 	for _, id := range []int64{-1, int64(math.MaxUint32) + 1, int64(math.MaxUint32) + 8} {
-		body, err := json.Marshal(runtimePolicyBundle{Policies: []runtimePolicyWire{{DPPolicyID: 9, Mode: "enforce", Rules: []*dp.PolicyRule{{Fqdn: "new.example.test", Action: dp.PolicyActionAllow}}}, {DPPolicyID: id, Mode: "enforce"}}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		payload.Store(string(body))
+		invalid := scopedPolicyFixture("b", "b-1", "uid-b", id, "enforce")
+		storeScopedPolicyPayload(t, payload, scopedPolicyEnvelope(policy, invalid))
 		before := worker.Snapshot()
-		worker.SyncOnce(context.Background())
+		worker.SyncOnce(t.Context())
 		after := worker.Snapshot()
-		if after.Errors != before.Errors+1 || after.Pushes != before.Pushes || after.Deletes != before.Deletes || worker.fingerprint != "last-known-good" || !worker.pushedNonEmpty || !reflect.DeepEqual(loadPolicyRIDs(), []uint32{7}) {
-			t.Fatal("invalid bundle altered confirmed state")
-		}
-		if got := supervisor.Fqdns().Observe("new.example.test", []dp.ResolvedIP{{IP: net.ParseIP("1.2.3.4"), TTL: 60}}, time.Now()); len(got) != 0 {
-			t.Fatal("partially accepted invalid bundle resolver entries")
+		if after.Errors != before.Errors+1 || after.Pushes != before.Pushes || after.Deletes != before.Deletes || worker.confirmed[scopedMACA].Source != confirmed.Source || !reflect.DeepEqual(loadPolicyRIDs(), []uint32{7}) || !reflect.DeepEqual(dataplane.allowed, []string{"retained.example.test"}) {
+			t.Fatal("invalid bundle altered confirmed scope")
 		}
 	}
-	if got := supervisor.Fqdns().Observe("retained.example.test", []dp.ResolvedIP{{IP: net.ParseIP("1.2.3.4"), TTL: 60}}, time.Now()); len(got) == 0 {
-		t.Fatal("last confirmed resolver entries were removed")
-	}
-	payload.Store(`{"policies":[{"mode":"monitor","rules":[]}]}`)
-	if policies, err := worker.fetch(context.Background()); err != nil || len(policies) != 1 || policies[0].DPPolicyID != 0 {
-		t.Fatal("legacy omitted identity rejected", err)
+	policy.DPPolicyID = 0
+	storeScopedPolicyPayload(t, payload, scopedPolicyEnvelope(policy))
+	if policies, err := worker.fetch(t.Context()); err != nil || len(policies) != 1 || policies[0].DPPolicyID != 0 {
+		t.Fatal("legacy zero wire identity rejected in scoped protocol", err)
 	}
 }
 func TestSignatureBundleRejectsInvalidIDsBeforePublishingPIISet(t *testing.T) {

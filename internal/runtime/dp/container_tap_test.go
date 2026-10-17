@@ -301,3 +301,26 @@ func TestContainerTapSkipsHostNetwork(t *testing.T) {
 		t.Fatalf("host-network container should be skipped, got %d: %+v", len(got), got)
 	}
 }
+
+func TestContainerTapSharedPodNamespaceDeduplicatesProcAliases(t *testing.T) {
+	containers := []RunningContainer{
+		{ID: "application", PID: 10001, Namespace: "custom", PodName: "api-pod", PodUID: "same-pod"},
+		{ID: "sidecar", PID: 10002, Namespace: "custom", PodName: "api-pod", PodUID: "same-pod"},
+	}
+	provider := &ContainerTapProvider{logger: quietLogger(), procRoot: t.TempDir(), listContainers: func(context.Context) ([]RunningContainer, error) { return containers, nil }, readIface: func(string) (string, string, []string, error) {
+		return "eth0", "02:00:00:00:00:01", []string{"10.1.0.2"}, nil
+	}}
+	targets, err := provider.Desired(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 1 || targets[0].PodUID != "same-pod" {
+		t.Fatalf("shared pod created ambiguous duplicate registrations: %+v", targets)
+	}
+	// Distinct pod generations reusing the MAC must remain visible as a conflict.
+	containers[1].PodUID = "different-pod"
+	targets, err = provider.Desired(t.Context())
+	if err != nil || len(targets) != 2 {
+		t.Fatalf("genuine identity collision hidden: %+v %v", targets, err)
+	}
+}
