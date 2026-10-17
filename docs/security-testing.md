@@ -1241,3 +1241,43 @@ failure, which prevents catalog/report advancement. Tests use injected transport
 and no cloud credentials. This source-only follow-up awaits integrated artifacts
 and deployment; deployed source remains 314afad. Broader serverless acceptance and
 release gates remain open.
+
+
+### Cloud registry credential-cache isolation qualification
+
+Shared cloud tokens now require trusted organization and registry identity plus
+the effective credentials and authentication target. The two owned-row handler
+paths supply that scope; payload credential fields cannot supply it. Direct or
+legacy callers without complete scope still authenticate but bypass shared
+caching. GCP binds the private key; static ACR binds its client secret; managed
+ACR resolves its current identity token before lookup. ECR captures the actual SDK
+credentials and uses the same snapshot for minting. Incomplete explicit ECR
+credentials fail before ambient or anonymous fallback; fully ambient mode remains
+supported. Length-prefixed hashed keys and 256-entry / 8-MiB bounds limit retained
+rotations without exposing raw credentials in cache keys.
+
+The full registry ancestor passes 476 repeated race/shuffle executions. Its five
+production files are byte-identical to the final candidate; affected test-fixture
+cleanup passes 92 repeated executions. Actual connection Test and SyncOnce paths
+pass six repeated executions against fresh schema180, proving valid reuse, wrong
+and rotated credential handling, sibling organization/registry isolation, ignored
+payload scope spoofing and uncached legacy authentication. The corresponding old
+caller control records six failure events: four failing workflow executions and
+their parent tests. Six direct old-cache regression functions also fail as intended. Vet passes and
+configured registry/handler lint remains 332 with identical diagnostic identities.
+No skips, suppressions or configuration exceptions were introduced.
+
+Initial test-fixture lint findings and an insufficient old anonymous-fallback
+control that attempted reserved .example DNS are retained. Corrected controls
+intercept that path; final caller tests terminate cloud traffic at an owned local
+proxy. Root verified all 215 sealed records, eleven imported source hashes, full-
+suite production lineage and absence of all four owned caller-test databases.
+Evidence: `/tmp/constellation-registry-cache-51abb25/FINAL-MANIFEST.json`
+(SHA256 `65578c941d2a92a6a766668c271253ef9152aa94afbb8351a66c71ed0f76351a`).
+
+This is source qualification, not real cloud-credential acceptance or deployment.
+ECR AuthToken currently has no non-test repository caller; its exported capability
+and the live list/digest credential checks have distinct reachability. Existing
+authentication destinations/redirects and broader provider acceptance are unchanged.
+Raw cloud/IBM error-message disclosure is a separate pending correction. Deployed
+source remains 314afad; integrated artifacts and the next rollout are still due.

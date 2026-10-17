@@ -73,7 +73,7 @@ func (cfg Config) gcpAccessToken(ctx context.Context, client *http.Client) (stri
 		tokenURI = gcpDefaultTokenURI
 	}
 
-	key := tokenCacheKey("gcp", sa.ClientEmail, tokenURI, gcpCloudPlatformScope)
+	key := cfg.credentialCacheKey("gcp", sa.ClientEmail, tokenURI, gcpCloudPlatformScope, sa.PrivateKey)
 	if tok, ok := tokenCacheGet(key); ok {
 		return tok, nil
 	}
@@ -166,9 +166,15 @@ func (cfg Config) acrAccessToken(ctx context.Context, client *http.Client, host 
 		return "", errors.New("acr: Token, or tenant_id+client_id+client_secret, or azure-managed-id auth required")
 	}
 
-	cacheKey := tokenCacheKey("acr", host, cfg.TenantID, cfg.ClientID, boolStr(managed))
-	if tok, ok := tokenCacheGet(cacheKey); ok {
-		return tok, nil
+	// Static credentials establish the identity before cache lookup. Managed
+	// identity must first resolve the current token; public client IDs alone do
+	// not establish which ambient credential is effective.
+	cacheKey := ""
+	if !managed {
+		cacheKey = cfg.credentialCacheKey("acr", host, cfg.TenantID, cfg.ClientID, cfg.ClientSecret, acrPullScope)
+		if tok, ok := tokenCacheGet(cacheKey); ok {
+			return tok, nil
+		}
 	}
 
 	// 1. AAD access token.
@@ -183,6 +189,13 @@ func (cfg Config) acrAccessToken(ctx context.Context, client *http.Client, host 
 	}
 	if err != nil {
 		return "", err
+	}
+
+	if managed {
+		cacheKey = cfg.credentialCacheKey("acr-managed", host, cfg.TenantID, cfg.ClientID, aadTok, acrPullScope)
+		if tok, ok := tokenCacheGet(cacheKey); ok {
+			return tok, nil
+		}
 	}
 
 	// 2. Exchange the AAD token for an ACR refresh token.
@@ -371,13 +384,6 @@ func parseRSAPrivateKey(pemStr string) (*rsa.PrivateKey, error) {
 }
 
 func b64url(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
-
-func boolStr(b bool) string {
-	if b {
-		return "1"
-	}
-	return "0"
-}
 
 func parseUnixString(s string) (int64, error) {
 	s = strings.TrimSpace(s)

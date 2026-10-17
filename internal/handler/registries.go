@@ -679,6 +679,7 @@ func (h *Registries) Test(w http.ResponseWriter, r *http.Request) {
 	}
 
 	conn, err := BuildConnectorWithOptions(r.Context(), h.db.Pool(), subj.OrgID, kind, endpoint, authKind, sealed, RegistryConnectorOptions{
+		RegistryID:  id,
 		IgnoreProxy: policy.IgnoreProxy,
 	})
 	if err != nil {
@@ -934,6 +935,7 @@ func BuildConnector(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, ki
 // RegistryConnectorOptions carries per-registry transport controls that should not
 // change the persisted credential shape.
 type RegistryConnectorOptions struct {
+	RegistryID  uuid.UUID // Trusted owned row identity; zero disables shared token caching.
 	IgnoreProxy bool
 }
 
@@ -951,12 +953,13 @@ func BuildConnectorWithOptions(ctx context.Context, pool *pgxpool.Pool, orgID uu
 		httpClient = cfg.HTTPClient(30 * time.Second)
 	}
 	cfg := registry.Config{
-		Username: creds["username"],
-		Password: creds["password"],
-		Token:    creds["token"],
-		Region:   creds["region"],
-		Endpoint: endpoint,
-		AuthKind: authKind,
+		CredentialCacheScope: registryCredentialCacheScope(orgID, opts.RegistryID),
+		Username:             creds["username"],
+		Password:             creds["password"],
+		Token:                creds["token"],
+		Region:               creds["region"],
+		Endpoint:             endpoint,
+		AuthKind:             authKind,
 		// Cloud-native auth material (REG-CLOUDAUTH-12). Connectors mint + cache
 		// short-lived registry tokens from these so scheduled cadences survive TTL.
 		ServiceAccountJSON: firstNonEmptyCred(creds, "service_account_json", "json_key", "service_account_key"),
@@ -1021,6 +1024,13 @@ func BuildConnectorWithOptions(ctx context.Context, pool *pgxpool.Pool, orgID uu
 	default:
 		return nil, fmt.Errorf("unknown registry kind %q", kind)
 	}
+}
+
+func registryCredentialCacheScope(orgID, registryID uuid.UUID) string {
+	if orgID == uuid.Nil || registryID == uuid.Nil {
+		return ""
+	}
+	return "org:" + orgID.String() + "/registry:" + registryID.String()
 }
 
 func stripScheme(s string) string {
@@ -1157,6 +1167,7 @@ SELECT name, kind, endpoint, auth_kind, auth_secret, image_globs, scan_policy
 		slog.String("endpoint", endpoint))
 
 	conn, err := BuildConnectorWithOptions(ctx, pool, orgID, kind, endpoint, authKind, sealed, RegistryConnectorOptions{
+		RegistryID:  registryID,
 		IgnoreProxy: policy.IgnoreProxy,
 	})
 	if err != nil {
