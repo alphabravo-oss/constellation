@@ -207,13 +207,3 @@ func (s *RuntimePolicyStore) appendLegacyPolicyAudit(ctx context.Context, tx pgx
 	_, _, err := s.auditLog.LogInTx(ctx, tx, audit.Event{OrgID: &target.OrgID, ActorID: actor, Action: action, TargetKind: audit.TargetKindPolicy, TargetID: target.ID.String(), Before: legacyPolicyAuditPayload(before), After: legacyPolicyAuditPayload(after), RequestID: requestID})
 	return err
 }
-
-// ptrSnap remains available to existing policy generation callers; legacy CRUD
-// uses transaction-bound payloads with explicit cluster and revision metadata.
-func ptrSnap(p *RuntimePolicy) *audit.PolicySnapshot {
-	if p == nil {
-		return nil
-	}
-	snap := snapshot(p)
-	return &snap
-}

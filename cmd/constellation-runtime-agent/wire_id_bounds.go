@@ -23,15 +23,6 @@ func signatureWireID(id int64) (uint32, error) {
 	return uint32(id), nil
 }
 
-func validateNetworkPolicyWireIDs(policies []runtimePolicyWire) error {
-	for _, policy := range policies {
-		if _, err := networkPolicyWireID(policy.DPPolicyID); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func validateSignatureWireIDs(rules []dlpRuleWire) error {
 	for _, rule := range rules {
 		if _, err := signatureWireID(rule.DPRuleID); err != nil {
