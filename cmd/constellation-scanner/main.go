@@ -96,6 +96,10 @@ func main() {
 		offlineDB             = flag.Bool("offline-db", envBool("CONSTELLATION_SCANNER_OFFLINE_DB", false), "Air-gapped mode: never pull Trivy/Grype DBs from the internet (operators pre-load them).")
 	)
 	flag.Parse()
+	if err := validateOneShotOutputs(*oneShotRef, *oneShotJSON, *oneShotSARIF); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
@@ -156,18 +160,11 @@ func main() {
 			res.FileRisks = inspectImageFileRisks(ctx, *oneShotRef, "", *fileRiskMaxFindings, regAuth, nil)
 			res.ConfigChecks = inspectImageConfigChecks(ctx, *oneShotRef, "", regAuth, nil)
 		}
-		if *oneShotJSON != "" {
-			b, _ := json.MarshalIndent(res, "", "  ")
-			_ = os.WriteFile(*oneShotJSON, b, 0o644)
+		if err := completeOneShotScan(ctx, logger, res, *oneShotJSON, *oneShotSARIF); err != nil {
+			logger.Error("scan output", "err", err)
+			cleanup()
+			os.Exit(1)
 		}
-		if *oneShotSARIF != "" {
-			// SARIF emission happens client-side from JSON; the worker keeps the dep surface small.
-			logger.Info("CLI mode: SARIF emission expected to be done by constellationctl; use that for SARIF output")
-		}
-		logger.Info("scan complete",
-			"image", res.ImageRef,
-			"packages", len(res.Packages),
-			"findings", len(res.Findings))
 		return
 	}
 
