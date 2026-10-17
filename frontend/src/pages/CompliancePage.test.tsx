@@ -60,8 +60,15 @@ it("updates filter URL and restores the earlier cohort on Back without losing re
 it("keeps server order and a controlled sorting header synchronized with URL history",async()=>{
  await render("?framework=all&status=graded&sort=framework&order=desc");await settle(()=>expect(rows()).toHaveLength(3));
  expect(host.querySelector('th[aria-sort="descending"]')!.textContent).toContain("Framework");
+ let finishSort!:()=>void;
+ vi.mocked(compliance.checks).mockImplementationOnce(params=>new Promise(resolve=>{finishSort=()=>resolve(response(params as ComplianceChecksParams));}));
  await act(async()=>host.querySelector<HTMLButtonElement>('th[aria-sort="descending"] button')!.click());await settle(()=>expect(compliance.checks).toHaveBeenLastCalledWith(expect.objectContaining({sort:"framework",order:"asc"})));
- expect(host.querySelector('th[aria-sort="ascending"]')!.textContent).toContain("Framework");await act(async()=>history.back());await settle(()=>expect(host.querySelector('th[aria-sort="descending"]')).not.toBeNull());
+ // Dispatching a request does not mean its response has rendered the table.
+ await settle(()=>expect(host.textContent).toContain("Loading controls"));
+ expect(rows()).toHaveLength(0);
+ await act(async()=>finishSort());
+ await settle(()=>expect(host.querySelector('th[aria-sort="ascending"]')?.textContent).toContain("Framework"));
+ await act(async()=>history.back());await settle(()=>expect(host.querySelector('th[aria-sort="descending"]')?.textContent).toContain("Framework"));
  expect([...rows()].map(item=>item.textContent)).toEqual(expect.arrayContaining([expect.stringContaining("Evidence target 1"),expect.stringContaining("Evidence target 2")]));
 });
 it("retains current successful reads during refresh then withholds failed evidence and export",async()=>{
