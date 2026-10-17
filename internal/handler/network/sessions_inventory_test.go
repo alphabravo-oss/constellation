@@ -250,6 +250,7 @@ func TestNetworkSessionFullInventoryAndCSV(t *testing.T) {
 		}
 	})
 	t.Run("rejects cross tenant cluster group and malformed requests", func(t *testing.T) {
+		ctx := t.Context()
 		for _, serve := range []http.HandlerFunc{handler.Sessions, handler.SessionsCSV, handler.SessionsSummary} {
 			for _, scope := range []uuid.UUID{foreignCluster, uuid.New()} {
 				w := request(t, serve, org, scope, "")
@@ -262,7 +263,7 @@ func TestNetworkSessionFullInventoryAndCSV(t *testing.T) {
 					t.Fatalf("invalid %s %d %s", query, w.Code, w.Body.String())
 				}
 			}
-			r := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/network/sessions?cluster_id="+cluster.String(), nil)
+			r := httptest.NewRequestWithContext(ctx, http.MethodGet, "/network/sessions?cluster_id="+cluster.String(), nil)
 			w := httptest.NewRecorder()
 			serve(w, r)
 			if w.Code != 401 {

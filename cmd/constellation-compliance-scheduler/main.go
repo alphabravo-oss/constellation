@@ -292,19 +292,12 @@ UPDATE compliance_schedules
 		_ = finalize("failed", "", "", 0, summary, err)
 		return err
 	}
-	frameworkName := s.Framework
-	for _, fw := range compliance.AllFrameworks() {
-		if fw.ID == s.Framework {
-			frameworkName = fw.Name
-			break
-		}
-	}
 
 	artifact, ext, err := renderArtifact(s.ReportFormat, report.ComplianceData{
 		OrgName:       orgName,
 		GeneratedAt:   time.Now().UTC(),
 		Framework:     s.Framework,
-		FrameworkName: fmt.Sprintf("%s (cluster: %s)", frameworkName, clusterName),
+		FrameworkName: fmt.Sprintf("%s (cluster: %s)", complianceFrameworkName(s.Framework), clusterName),
 		Summary: report.FrameworkSummary{
 			Total: summary["total"], Pass: summary["pass"], Fail: summary["fail"], Manual: summary["manual"], Exempted: summary["exempted"], NotApplicable: summary["not_applicable"],
 		},
@@ -329,24 +322,9 @@ UPDATE compliance_schedules
 	artifactFormat, artifactMediaType, artifactFilename = ext, report.ArtifactMediaType(ext), filename
 	size := int64(len(artifact))
 
-	// Sign the artifact bytes (best-effort).
-	sig := ""
-	if d.signer != nil {
-		raw, err := d.signer.Sign(ctx, localPath)
-		if err != nil {
-			d.logger.Warn("cosign sign", "err", err.Error())
-		} else {
-			sig = raw
-			// Persist the signature next to the artifact so cosign verify-blob works.
-			if err := securefiles.WriteFile(artifactRoot, filename+".sig", []byte(sig), 0o600); err != nil {
-				return errors.Join(err, finalize("failed", "", "", 0, summary, err))
-			}
-		}
-	} else {
-		// Fallback: sha256 the artifact so the UI can show *something* in
-		// X-Constellation-Cosign-Signature when cosign isn't installed.
-		h := sha256.Sum256(artifact)
-		sig = "sha256:" + hex.EncodeToString(h[:])
+	sig, err := d.signArtifact(ctx, artifactRoot, filename, localPath, artifact)
+	if err != nil {
+		return errors.Join(err, finalize("failed", "", "", 0, summary, err))
 	}
 
 	primaryURI, deliveryErr := d.deliverAll(ctx, s, localPath, artifact, sig, ext)
@@ -354,6 +332,33 @@ UPDATE compliance_schedules
 		return errors.Join(deliveryErr, finalize("failed", primaryURI, sig, size, summary, deliveryErr))
 	}
 	return finalize("succeeded", primaryURI, sig, size, summary, nil)
+}
+
+func complianceFrameworkName(id string) string {
+	for _, framework := range compliance.AllFrameworks() {
+		if framework.ID == id {
+			return framework.Name
+		}
+	}
+	return id
+}
+
+// signArtifact retains best-effort signing and the established checksum fallback.
+// A successful signature must be persisted beside the artifact before delivery.
+func (d *daemon) signArtifact(ctx context.Context, root *os.Root, filename, localPath string, artifact []byte) (string, error) {
+	if d.signer == nil {
+		h := sha256.Sum256(artifact)
+		return "sha256:" + hex.EncodeToString(h[:]), nil
+	}
+	sig, err := d.signer.Sign(ctx, localPath)
+	if err != nil {
+		d.logger.Warn("cosign sign", "err", err.Error())
+		return "", nil
+	}
+	if err := securefiles.WriteFile(root, filename+".sig", []byte(sig), 0o600); err != nil {
+		return "", err
+	}
+	return sig, nil
 }
 
 // deliverAll attempts every configured destination and retains the local artifact
