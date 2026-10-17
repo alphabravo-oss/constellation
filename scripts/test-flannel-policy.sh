@@ -16,7 +16,9 @@ source_root="$work/source"
 [[ "$work" == /tmp/constellation-flannel-policy-* ]] || { echo 'Evidence must use a dedicated /tmp/constellation-flannel-policy-* directory.' >&2; exit 1; }
 docker_local() { env -u DOCKER_HOST -u DOCKER_CONTEXT -u DOCKER_TLS -u DOCKER_TLS_VERIFY -u DOCKER_CERT_PATH docker --host unix:///var/run/docker.sock "$@"; }
 k3d_local() { env -u DOCKER_CONTEXT -u DOCKER_TLS -u DOCKER_TLS_VERIFY -u DOCKER_CERT_PATH DOCKER_HOST=unix:///var/run/docker.sock k3d "$@"; }
-free_kib() { df --output=avail "$work" | tail -1 | tr -d ' '; }
+docker_storage="$(docker_local info --format '{{.DockerRootDir}}')"
+[[ -d "$docker_storage" ]] || { echo 'Local Docker storage path unavailable; refusing to guess disk headroom.' >&2; exit 1; }
+free_kib() { df --output=avail "$docker_storage" | tail -1 | tr -d ' '; }
 [[ "$(docker_local image inspect "$runtime_image" --format '{{.Id}}')" == "$runtime_id" ]] || { echo 'Qualified native image identity changed.' >&2; exit 1; }
 prepare() {
   [[ ! -e "$source_root" ]] || { echo 'Use a fresh dedicated evidence directory for preparation.' >&2; exit 1; }
@@ -36,6 +38,7 @@ prepare() {
 if [[ "$mode" == prepare ]]; then prepare; exit; fi
 [[ "$mode" == run && "${CONSTELLATION_FLANNEL_POLICY_APPROVED_RUN:-0}" == 1 ]] || { echo 'Run requires a separate root-reviewed fixture execution signal.' >&2; exit 1; }
 for executable in k3d kubectl docker python3; do command -v "$executable" >/dev/null; done
+(( $(df --output=avail "$work" | tail -1 | tr -d ' ') >= 2 * 1024 * 1024 )) || { echo 'At least2GiB of evidence/tmp space required.' >&2; exit 1; }
 (( $(free_kib) >= 48 * 1024 * 1024 )) || { echo 'At least48GiB free required before isolated cluster creation.' >&2; exit 1; }
 (cd /; sha256sum -c "$work/binaries.sha256")
 sha256sum -c "$work/source.sha256"
