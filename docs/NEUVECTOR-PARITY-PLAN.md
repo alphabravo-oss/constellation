@@ -65,10 +65,11 @@ infrastructure continuation after the selected console scope. Off-host recovery
 and deliberate real-node failure remain deferred. The checklist remains **66
 checked / 87 open**; bounded fixes below do not close their parent acceptance gates.
 
-Current main development deployment: **Helm81/schema180**, runtime-agent source
-**950ca77**; API, migration and frontend source **5b82b12**. Other roles retain
-the prior qualified images. The execution dry-run setting is explicitly preserved
-by chart **8beefb4**. All seven deployments and the runtime DaemonSet are ready. Process and
+Current main development deployment: **Helm82/schema180**, runtime-agent source
+**950ca77**; API source **7d54c3d**, migration/frontend source **5b82b12**. Capture
+storage is mounted on a retained RWO volume with leader-driven expiry enabled.
+Other roles retain their prior qualified images. Chart **7d54c3d** preserves the
+explicit execution dry-run setting introduced in **8beefb4**. All seven deployments and the runtime DaemonSet are ready. Process and
 native dataplane enforcement and benchmark workers remain disabled. Live v2 queue
 reads pass; anonymous, foreign-cluster and duplicate-node selectors return
 401/403/400. The live queue and policy bundle are empty, so positive execution
@@ -79,7 +80,7 @@ credentials/audit/login, wrong-key rejection and restored pod restart pass
 main-cluster backup completed before migration. Public
 login branding/provider visibility pass; the stored bootstrap credential returns
 401, so authenticated main-browser navigation is not claimed. Deployment evidence:
-`/tmp/constellation-threat180-5b82b12/evidence/deployment-status.json`.
+`/tmp/constellation-pcap-main-7d54c3d/evidence/deployment-status.json`.
 
 Deployed schema180 preserves full unsigned native threat IDs and marks unproven
 historical maxima in compact row details. Its full-chain migration checks exact
@@ -617,7 +618,7 @@ reporter assertions without object reuse. A canonical optimized production DP
 build at `5b417c0` compiles 51 C units; all 23 linked runtime dependency files
 match the qualified base byte-for-byte. New agent/native binaries are assembled
 with unchanged BPF/base layers and verified hashes/modes in candidate
-`controls-20261017-5b417c0-r2`; isolated packet qualification is still pending.
+`controls-20261017-5b417c0-r2`; its actual packet acceptance fails as detailed below.
 An initial private assembly had agent mode0700 from the host umask; its image is
 preserved and explicit0755 COPY fixes the candidate. Neither image is deployed.
 Evidence: `/tmp/constellation-combined-5b417c0-db/evidence-manifest.json`,
@@ -625,15 +626,66 @@ Evidence: `/tmp/constellation-combined-5b417c0-db/evidence-manifest.json`,
 `/tmp/constellation-native-prod-5b417c0/review-manifest.json` and
 `/tmp/constellation-runtime-combined-5b417c0/image-manifest.json`.
 
-Main remains Helm81/schema180. Exact7d API cache preparation and fresh CNPG
-backup completed (08:56:55UTC). Storage preparation created only the owned new
-claim/bootstrap Pod; the existing admission rule rejects the local-path BusyBox
-helper because its scan is older than24h. The storage phase timed out with the
-claim/Pod preserved, before API shutdown or Helm upgrade. Refresh must use a
-real scan of the exact admitted digest; no policy bypass or fabricated freshness
-is allowed. Phase receipts remain under `/tmp/constellation-pcap-main-7d54c3d/`.
+The combined runtime's first isolated attempt stopped before traffic because an
+inner test still pinned the previous image. A second attempt corrected only two
+test image literals and retained every strict acceptance condition. Four baseline
+and four Monitor probes pass, including four fresh native verdicts. The first
+Protect allow reaches the expected server and advances its queue from 20 to 30,
+but no fresh matching native verdict arrives within 35 seconds. Acceptance fails;
+Protect and denial behavior are unqualified for this image. The cause remains
+under investigation. All nine owned resources are verified absent; both failed
+runs remain preserved. This does not invalidate or extend the separate earlier
+24-probe proof for `6a8057c`. Current failure evidence:
+`/tmp/constellation-flannel-policy-controls5b417c0-attempt2/actual-packet-evidence-manifest.json`
+(SHA256 `0cd69c8d0dbd6a9d7368963e2c2238075a9b537793ee2c4bef451c77701e0615`).
 
-Hosted `39018641255` at `f2b5607` has completed: unit/integration, browser,
+Main is now **Helm82/schema180**, with API source `7d54c3d` on its retained
+RWO capture volume and leader-driven retention enabled. Runtime remains
+`950ca77`; migration/frontend remain `5b82b12`; other roles and hooks are unchanged.
+The fresh CNPG backup completed at 08:56:55 UTC before the controlled API replacement.
+Exact API/CLI binaries, volume identity and Retain policy, 0700 capture permissions,
+new leader ownership, health/readiness and protocol/tenant boundary reads pass.
+Live queues are empty, so positive execution remains separate fixture evidence.
+The 2Gi local-path request is not a quota; real traffic capture, node loss and
+off-host recovery are not established by this rollout.
+
+The initial storage attempt stopped before API shutdown because admission
+rejected the provisioner helper's stale scan. A reviewed single-operation helper
+used the deployed API's official target upsert and atomic audit transaction to
+queue the exact immutable image, without impersonating a user or altering policy.
+Its disposable schema180 checks pass 22 repeated race executions plus seven
+wrapper guards. The real scanner completed at 09:25:00 UTC: exact digest and
+linux/amd64, successful Syft/Trivy/Grype, one busybox 1.37.0 package, two medium
+and four low findings, none with fixes. The original PVC then actually bound
+under the unchanged policy. Recovery preserved the failed receipt and exact
+resource identities. A second check stopped on an inherited setgid bit; clearing
+only that bit changed the same empty directory from 2700 to 0700. The verified PV
+was set to Retain and only the owned bootstrap Pod removed before the upgrade.
+Original failures, scan results and successful deployment are sealed in
+`/tmp/constellation-pcap-main-7d54c3d/evidence/deployment-manifest.json`
+(SHA256 `eeaf02b7d276c9c0679fca7151a557e6628cbdfafa638bb11753adefe81f9f13`).
+
+Source `4e5b62c` makes API/scheduled backup filenames unique to their existing job
+IDs and publishes completed private archives atomically. CLI output paths and
+regular-file overwrite remain supported without changing caller directory modes.
+Explicit directory configuration failures no longer silently fall back. Legacy
+external download paths remain usable with checked file identity and safe headers;
+retention preserves artifacts referenced by another catalog row, including foreign
+or null-owned rows. This does not provide a filesystem/database transaction,
+repair old overwritten files, or fix the separate CLI S3 naming paths.
+
+Backup qualification passes 366 fresh180 repeated race executions with no test
+skips, plus 32 preparation unit executions. Both CLI consumers compile; the
+standalone backup command has no test files. Original writer and scheduler
+negative controls each fail twice as expected. Vet passes; scoped lint decreases
+447 to 443 with no new findings. One test-only G306 annotation deliberately keeps
+an existing 0644 hardlink fixture to prove private replacement without changing
+the original. No production suppression or scanner configuration changed. These
+backup and later session-server fixes are not in the deployed `7d54c3d` image.
+Evidence: `/tmp/constellation-backup-artifacts-fcfe91b/frozen-manifest.json`
+(SHA256 `8223867e0cc9634214d2967c4ed33304802147115bd2743e4d686a0dc0d85f85`).
+
+Hosted `39020011292` at `29a11dd` has completed: unit/integration, browser,
 frontend, FIPS and dependency/vulnerability checks pass. Lint1509, gosec166 and
 historical gitleaks remain failed. These are blocking results, not a baseline
 waiver. No overall parity acceptance row is closed by these bounded corrections.
