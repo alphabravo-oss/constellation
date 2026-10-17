@@ -13,8 +13,9 @@ vi.mock("@tanstack/react-router", () => ({ useParams: () => ({ ruleId: "rule" })
 let root: Root; let host: HTMLDivElement; let client: QueryClient;
 const rule: ResponseRuleV2 = { id: "rule", name: "Saved rule", description: "", enabled: false, priority: 9, event_type: "runtime", conditions: [{ type: "name", value: "test" }], actions: [{ kind: "notify", target: "slack" }], workload_match: { namespace: "proof", labels: { app: "test" } } };
 afterEach(() => { act(() => root?.unmount()); client?.clear(); host?.remove(); vi.resetAllMocks(); });
-async function renderPage() {
-  vi.mocked(responseRulesV2.options).mockResolvedValue({ event_types: [], condition_types: [], action_kinds: [], receivers: [], webhooks: [], response_rule_options: {} });
+const options = { event_types: [], condition_types: [], action_kinds: [], receivers: [], webhooks: [], response_rule_options: {} };
+async function renderPage(optionsResult = Promise.resolve(options)) {
+  vi.mocked(responseRulesV2.options).mockReturnValue(optionsResult);
   host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   await act(async () => root.render(<QueryClientProvider client={client}><ResponseRuleFormPage /></QueryClientProvider>));
@@ -29,7 +30,15 @@ it.each(["failed", "missing"])("blocks a %s edit load", async (scenario) => {
 it("preserves the loaded draft across refresh and save failure", async () => {
   vi.mocked(responseRulesV2.list).mockResolvedValue({ rules: [rule] });
   vi.mocked(responseRulesV2.update).mockRejectedValue(new Error("private details"));
-  await renderPage(); await settled(() => expect(host.querySelector("form")).not.toBeNull());
+  let resolveOptions!: (value: typeof options) => void;
+  const pendingOptions = new Promise<typeof options>((resolve) => { resolveOptions = resolve; });
+  await renderPage(pendingOptions); await settled(() => expect(host.querySelector("form")).not.toBeNull());
+  const save = host.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+  expect(save.disabled).toBe(true);
+  await act(async () => { host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
+  expect(responseRulesV2.update).not.toHaveBeenCalled();
+  await act(async () => { resolveOptions(options); });
+  await settled(() => expect(save.disabled).toBe(false));
   await act(async () => { client.setQueryData(["response-rule-editor", "cluster", "rule"], { rules: [{ ...rule, name: "Remote change", enabled: true }] }); });
   expect(host.querySelector<HTMLInputElement>('input[required]')?.value).toBe("Saved rule");
   await act(async () => { host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
