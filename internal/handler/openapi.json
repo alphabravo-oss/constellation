@@ -9415,6 +9415,175 @@
             }
           }
         }
+      },
+      "BackupCreateRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "sign_mode": {
+            "type": "string",
+            "enum": [
+              "",
+              "none",
+              "static-key",
+              "keyless"
+            ],
+            "default": "none",
+            "description": "Exact signing mode. Omitted/empty selects none; null is invalid. Independent of saved schedule signing."
+          }
+        }
+      },
+      "BackupCreateAccepted": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "status"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "const": "running"
+          }
+        }
+      },
+      "BackupScheduleRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "cron_expr": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": "0 3 * * *",
+            "description": "Trimmed cron expression; omitted, empty, null or whitespace-only uses the default."
+          },
+          "enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "default": false,
+            "description": "Omitted/null is false."
+          },
+          "s3_bucket": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional stored S3 bucket; omitted, empty or null clears it."
+          },
+          "s3_prefix": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional stored S3 prefix; omitted, empty or null clears it."
+          },
+          "s3_endpoint": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional stored S3 endpoint; omitted, empty or null clears it."
+          },
+          "sign_mode": {
+            "type": "string",
+            "enum": [
+              "",
+              "none",
+              "static-key",
+              "keyless"
+            ],
+            "default": "static-key",
+            "description": "Exact signing mode. Omitted/empty selects static-key; null is invalid."
+          },
+          "last_run_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Read-only execution metadata accepted for DTO repost compatibility; may be echoed but is not persisted."
+          },
+          "last_status": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Read-only execution metadata accepted for DTO repost compatibility; may be echoed but is not persisted."
+          },
+          "next_run_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Read-only execution metadata accepted for DTO repost compatibility; may be echoed but is not persisted."
+          }
+        }
+      },
+      "BackupScheduleDTO": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "cron_expr",
+          "enabled",
+          "sign_mode"
+        ],
+        "properties": {
+          "cron_expr": {
+            "type": "string",
+            "description": "Normalized cron expression."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "Stored schedule enabled flag."
+          },
+          "s3_bucket": {
+            "type": "string",
+            "description": "Optional stored S3 setting; omitted when empty."
+          },
+          "s3_prefix": {
+            "type": "string",
+            "description": "Optional stored S3 setting; omitted when empty."
+          },
+          "s3_endpoint": {
+            "type": "string",
+            "description": "Optional stored S3 setting; omitted when empty."
+          },
+          "sign_mode": {
+            "type": "string",
+            "enum": [
+              "none",
+              "static-key",
+              "keyless"
+            ],
+            "description": "Normalized effective signing mode."
+          },
+          "last_run_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Read-only execution metadata accepted for DTO repost compatibility; may be echoed but is not persisted.",
+            "readOnly": true
+          },
+          "last_status": {
+            "type": "string",
+            "description": "Read-only execution metadata accepted for DTO repost compatibility; may be echoed but is not persisted.",
+            "readOnly": true
+          },
+          "next_run_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Read-only execution metadata accepted for DTO repost compatibility; may be echoed but is not persisted.",
+            "readOnly": true
+          }
+        }
       }
     },
     "responses": {
@@ -12124,14 +12293,54 @@
       },
       "post": {
         "responses": {
-          "200": {
-            "description": "ok"
+          "202": {
+            "description": "Backup job accepted; completion and signing results are asynchronous.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupCreateAccepted"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid single-object request or signing mode; no backup side effects.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body exceeds 65,536 bytes; no backup side effects.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Create backups"
+        "summary": "Start an organization backup",
+        "description": "Requires manage-org. A nonempty body must be exactly one JSON object of at most 65,536 bytes (64 KiB), including whitespace. Duplicate keys (including escaped aliases), unknown or incorrectly cased property names, malformed JSON, trailing JSON or garbage, a null/array/scalar body, and null or non-string sign_mode are rejected. Signing modes are case-sensitive and are not trimmed: only none, static-key, keyless, or the empty-string default are accepted. Rejection occurs before any job, audit, asynchronous work, artifact, or schedule update. A valid requested signer that is unavailable fails the backup; it never downgrades to unsigned. An absent, empty or JSON-whitespace-only body, {}, or omitted/empty sign_mode selects none independently of the saved schedule. The 202 response confirms a running job, not a completed or verified artifact; poll GET /backups/{id} for the result.",
+        "requestBody": {
+          "required": false,
+          "description": "Optional single JSON object. Empty input selects an unsigned one-off backup; it does not inherit schedule signing. The raw body byte limit includes leading/trailing whitespace.",
+          "x-max-body-bytes": 65536,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackupCreateRequest"
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/backups/inventory": {
@@ -12491,13 +12700,53 @@
       "post": {
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Normalized submitted schedule DTO after persistence. Compatibility execution fields are echoes, not proof of a run or a read of current execution metadata.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupScheduleDTO"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid single-object request or signing mode; the saved schedule and audit remain unchanged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body exceeds 65,536 bytes; the saved schedule and audit remain unchanged.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "default": {
             "$ref": "#/components/responses/Error"
           }
         },
-        "summary": "Create schedule"
+        "summary": "Save the organization backup schedule",
+        "description": "Requires manage-org. A nonempty body must be exactly one JSON object of at most 65,536 bytes (64 KiB), including whitespace. Duplicate keys (including escaped aliases), unknown or incorrectly cased property names, malformed JSON, trailing JSON or garbage, a null/array/scalar body, and null or non-string sign_mode are rejected. Signing modes are case-sensitive and are not trimmed: only none, static-key, keyless, or the empty-string default are accepted. Rejection occurs before any job, audit, asynchronous work, artifact, or schedule update. A valid requested signer that is unavailable fails the backup; it never downgrades to unsigned. Unlike one-off backups, a body is required; {} is accepted. Omitted/empty sign_mode selects static-key. Omitted, empty, null or whitespace-only cron_expr selects 0 3 * * *; otherwise cron_expr is trimmed. Omitted/null enabled is false. Empty/null S3 strings clear the optional stored values. The accepted schedule DTO also includes last_run_at, last_status and next_run_at for read-only repost compatibility: these values may be echoed in this response but are not persisted by POST. GET /backups/schedule supplies current execution metadata. Saving a schedule does not execute or validate signer availability.",
+        "requestBody": {
+          "required": true,
+          "description": "Single JSON object; empty/whitespace-only input is rejected. All properties are optional, but only the documented exact names are accepted.",
+          "x-max-body-bytes": 65536,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackupScheduleRequest"
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/backups/verify": {
