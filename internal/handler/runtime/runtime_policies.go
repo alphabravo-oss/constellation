@@ -17,7 +17,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strconv"
 	"time"
 
@@ -194,49 +193,11 @@ func snapshot(p *RuntimePolicy) audit.PolicySnapshot {
 // rules JSON before writing so a bad input fails fast with a 4xx-shaped error.
 // Writes a runtime.policy.create audit row.
 func (s *RuntimePolicyStore) Insert(ctx context.Context, p *RuntimePolicy, requestID string) (uuid.UUID, error) {
-	if !p.Mode.Valid() {
-		return uuid.Nil, fmt.Errorf("invalid mode %q", p.Mode)
-	}
-	if p.Workload == "" || p.Namespace == "" || p.Name == "" {
-		return uuid.Nil, errors.New("workload, namespace, and name are required")
-	}
-	if len(p.Rules) == 0 {
-		p.Rules = json.RawMessage("[]")
-	} else if !json.Valid(p.Rules) {
-		return uuid.Nil, errors.New("rules is not valid JSON")
-	}
-	var id uuid.UUID
-	var dpPolicyID int64
-	direction, err := policyDatabaseDirection(p)
+	got, err := s.insertLegacyPolicy(ctx, p, requestID)
 	if err != nil {
 		return uuid.Nil, err
 	}
-	err = s.db.Pool().QueryRow(ctx, `
-INSERT INTO runtime_policies
-  (org_id, cluster_id, workload, namespace, name, mode,
-   def_action, apply_dir, rules, version, created_by, updated_by)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,1,$10,$10)
-RETURNING id, dp_policy_id`,
-		p.OrgID, p.ClusterID, p.Workload, p.Namespace, p.Name, string(p.Mode),
-		int16(p.DefAction), direction, string(p.Rules), p.CreatedBy).Scan(&id, &dpPolicyID)
-	if err != nil {
-		return uuid.Nil, err
-	}
-	p.ID = id
-	p.DPPolicyID = dpPolicyID
-	p.Version = 1
-	p.Revision = "1"
-	if s.auditLog != nil {
-		if auditErr := s.auditLog.LogPolicyCreate(ctx, p.OrgID, p.CreatedBy, snapshot(p), requestID); auditErr != nil {
-			// Audit write failure does NOT roll back the policy — losing
-			// an audit row is preferable to refusing a legitimate edit. Log
-			// at warn so operators notice if it persists.
-			slog.Default().Warn("audit write failed; policy still committed",
-				slog.String("action", audit.ActionPolicyCreate),
-				slog.String("err", auditErr.Error()))
-		}
-	}
-	return id, nil
+	return got.ID, nil
 }
 
 // SetMode flips a policy's mode. The bump-version trigger handles the
@@ -247,39 +208,8 @@ RETURNING id, dp_policy_id`,
 // auto_rollback in that case).
 func (s *RuntimePolicyStore) SetMode(ctx context.Context, orgID, id uuid.UUID,
 	mode PolicyMode, by uuid.UUID, system bool, requestID string) error {
-	if !mode.Valid() {
-		return fmt.Errorf("invalid mode %q", mode)
-	}
-	// Snapshot before so the audit row can show the transition.
-	before, err := s.Get(ctx, orgID, id)
-	if err != nil {
-		return err
-	}
-	tag, err := s.db.Pool().Exec(ctx,
-		`UPDATE runtime_policies SET mode = $1, updated_by = $2
-		  WHERE id = $3 AND org_id = $4`,
-		string(mode), by, id, orgID)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return errors.New("not found")
-	}
-	if s.auditLog != nil {
-		after, err := s.Get(ctx, orgID, id)
-		if err == nil {
-			actor := &by
-			if system {
-				actor = nil // actor_id NULL for system-initiated transitions
-			}
-			if auditErr := s.auditLog.LogPolicyModeChange(ctx, orgID, actor,
-				snapshot(before), snapshot(after), system, requestID); auditErr != nil {
-				slog.Default().Warn("audit write failed for SetMode",
-					slog.String("err", auditErr.Error()))
-			}
-		}
-	}
-	return nil
+	_, err := s.setLegacyPolicyMode(ctx, orgID, id, mode, by, system, requestID)
+	return err
 }
 
 // policySelectCols is the canonical column list used by Get / List / etc.
@@ -492,23 +422,5 @@ func scanPolicy(s rowScanner) (*RuntimePolicy, error) {
 // Delete removes one policy. Org-scoped. Writes a runtime.policy.delete
 // audit row using a snapshot taken before the DELETE.
 func (s *RuntimePolicyStore) Delete(ctx context.Context, orgID, id uuid.UUID, by *uuid.UUID, requestID string) error {
-	before, err := s.Get(ctx, orgID, id)
-	if err != nil {
-		return err
-	}
-	tag, err := s.db.Pool().Exec(ctx,
-		`DELETE FROM runtime_policies WHERE id = $1 AND org_id = $2`, id, orgID)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return errors.New("not found")
-	}
-	if s.auditLog != nil {
-		if auditErr := s.auditLog.LogPolicyDelete(ctx, orgID, by, snapshot(before), requestID); auditErr != nil {
-			slog.Default().Warn("audit write failed for Delete",
-				slog.String("err", auditErr.Error()))
-		}
-	}
-	return nil
+	return s.deleteLegacyPolicy(ctx, orgID, id, by, requestID)
 }
