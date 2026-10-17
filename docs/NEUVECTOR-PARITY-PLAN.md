@@ -1,8 +1,8 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-13** (selected console scope complete and live on
-Helm75/schema177; prior feature/infrastructure evidence stays dated)
+Last reconciled: **2026-10-17** (selected console scope complete; security and
+release-readiness continuation active, qualification evidence remains dated)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -57,6 +57,102 @@ Parity and switchability are release-ready only when:
 - Every applicable Technology Selection Guide requirement has implementation and
   acceptance evidence, or an explicitly reviewed deviation with rationale, owner,
   risk, and review date. Report deviations separately from strict conformance.
+
+## October 17 security and release-readiness continuation
+
+The user authorized the broader CI, tenant/fail-path, enforcement, migration and
+infrastructure continuation after the selected console scope. Off-host recovery
+and deliberate real-node failure remain deferred. The checklist remains **66
+checked / 87 open**; bounded fixes below do not close their parent acceptance gates.
+
+Frozen candidate source **034f2baf49c1** includes:
+
+- Legacy backup list/detail/download reads require exact organization ownership;
+  null-owned archives cannot become visible to another tenant. Runtime policy
+  bundles require the authenticated agent's resolved cluster, including rejection
+  of same-organization sibling-cluster requests.
+- Process responses reject missing/mismatched process and container identity;
+  conntrack deletion requires explicit protocol, both addresses and both ports.
+  These tests use injected operations and do not claim live process enforcement.
+- Artifact downloads validate every resolved address at connection time and dial
+  only checked numeric addresses. Redirects retain the guard. Configured HTTP and
+  HTTPS proxies use numeric CONNECT targets with independently verified proxy
+  and destination TLS identities. Download errors and worker logs omit signed
+  URL credentials; cancellation identity remains inspectable.
+- Audit, signing and compliance artifacts use private directories/files and
+  atomic confined writes. File-delivery destinations must remain within the
+  operator-configured `REPORT_OUT_DIR`; deployments relying on destinations
+  outside that root must change their configuration. Public verification keys
+  remain public, and mounted-key read compatibility is preserved.
+- Network, DLP and WAF identifiers outside the wire range are refused before
+  replacing confirmed enforcement state. Legacy zero network IDs remain valid.
+- Compliance delivery failures now fail the persisted run and schedule instead
+  of reporting success. Missing SMTP configuration or recipient is an error;
+  the rendered artifact remains available and remaining targets are attempted.
+- CLI output and response-read failures propagate to callers. Obsolete unused
+  evidence collectors were removed; active inventory evidence remains intact.
+  Configured formatting was applied to 88 source files. Quality package discovery
+  now follows `go list`, as formatting/security checks already do; no module-owned
+  packages or tests are excluded and no gate threshold was relaxed.
+
+Bounded validation includes 40 fresh-database tenant/responder executions, 108
+artifact/signing executions, 126 CLI executions and 40 delivery executions, all
+passing without skips. The runtime-agent package passes 408 repeated race-test
+executions with two occurrences of its existing DB-required replay-test skip;
+these skips are not claimed as qualification. Scanner proxy tests cover separate
+TLS names, proxy authentication isolation, oversized headers, complete large
+bodies and misleading CONNECT body framing. The scanner changed-source lint and
+vet checks pass without new suppressions. The combined frozen-source fresh-database suite passes **3,370 executions with
+zero failures/skips**. The candidate is deployed on the main development cluster
+at **Helm76/schema177**: API/scanner use `security-20261017-034f2baf49c1`;
+discoverer/operator/runtime-agent use `recovery-20261017-034f2baf49c1`. All seven
+application deployments and the runtime-agent DaemonSet are ready. API health and
+readiness return 200; the live agent can read its policy bundle, while unknown
+cluster and unauthenticated requests return 404/401 without policy disclosure.
+The live bundle is empty, so positive policy-content isolation remains database
+evidence. The public login renders the expected branding and configured-provider
+visibility. Candidate image smoke verifies native libraries, BPF/BTF and build
+provenance; previously DB-gated controller tests pass 28 fresh177 executions.
+Evidence is under `/tmp/constellation-security-034f2baf49c1/`,
+`/tmp/p0-tenant-responder-db/`, `/tmp/security-artifacts-final-fresh-db/`,
+`/tmp/quality-cli-output-fresh-db/`, `/tmp/security-smtp-final-fresh-db/` and
+`/tmp/scanner-proxy-framing-final.json` on the development host.
+
+The fresh baseline remains non-green: hosted CI at `7ba816e` failed quality,
+gosec and historical gitleaks; unit/integration, browser, frontend, FIPS and
+vulnerability/dependency checks passed. Local baseline quality reported 2,024
+findings (including four downloaded JS-fixture Go files); standalone gosec
+reported 256. The frozen candidate reports **1,813 quality findings** and its
+standalone gosec reports **224 findings**,
+with no Go loading errors. Remaining findings are not waived. Historical secret
+remediation still requires external trust/revocation evidence and a reviewed
+history-remediation decision. A new read-only main-cluster inventory examined 39
+certificate occurrences with zero historical certificate/key matches and zero
+errors; this does not establish external trust-store coverage.
+
+Operational recovery found the existing main deployment unschedulable from disk
+pressure since October 13. Removing only unused Docker build cache older than 72
+hours reclaimed 33.55 GB; kubelet cleared DiskPressure without forced taint
+removal. Exact cached API/frontend/scanner/admission/CNPG/Postgres/Barman images
+were restored to containerd. API health/readiness, public frontend and schema177
+are verified. Three old local-only `0.1.0` images were no longer available;
+explicitly versioned discoverer/operator/runtime-agent replacements are now
+deployed from the frozen candidate with native runtime dependencies preserved.
+The migration image was also restored from its exact cached tag before the
+revision76 migration job completed. One old compliance job had never started
+and blocked subsequent collection; its metadata was retained, the stalled job
+was replaced from the updated CronJob, and the new collector completed 51 rows.
+Persistent volumes and database contents were not removed. This incident is not
+an off-host recovery or node-failure qualification.
+
+Subsequent source-only changes remove 96 HTTP test-context findings (736 fresh177
+executions), simplify tenant/signing helpers (74 executions), and fail configured
+signing errors or empty signatures before any delivery (60 executions). Signature
+failures retain the local report metadata and produce no webhook, email or file
+delivery; an explicitly unconfigured signer retains the documented checksum-only
+mode. Runtime policy fields now reject overflowing IDs/directions, invalid actions
+and null rules before storage/wire conversion; 84 fresh177 executions pass. These
+follow-ups are not included in the deployed `034f2baf49c1` images.
 
 ## October 12 implementation continuation
 
@@ -1617,8 +1713,9 @@ or backup writes were performed. Evidence: `/tmp/console-parity-final-deploy.log
 
 The preceding frozen console source passes **2,284 frontend tests in 153 files**,
 lint and production typecheck/build. The final Backup export-receipt/CORS follow-up
-requires its focused checks and rebuilt frontend/API before deployment; those
-results are not implied by this predecessor suite. The schema177 parent
+subsequently passed 74 focused frontend tests, lint and typecheck, and is included
+in the deployed console-parity frontend/API artifacts; the larger predecessor
+suite is not counted as a rerun of that follow-up. The schema177 parent
 production-image browser suite passes **275 cases**, one worker, without retries/skips. The final artifact adds
 **three Backup cases** and **four reviewed runtime/peer cases**, all passing;
 the runtime run requalifies three existing cases plus the new disabled-policy

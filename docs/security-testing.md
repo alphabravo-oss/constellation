@@ -401,3 +401,38 @@ enabled; all 78 tooling tests, ShellCheck and module formatting pass. Evidence:
 `/tmp/constellation-fixed-tooling-final.log`. The failed hosted browser
 run 38191094639 predates this repair; subsequent full/hosted evidence is recorded
 in the canonical tracker. Reports remain local artifacts and are not committed.
+
+
+## October 17 release-readiness continuation
+
+Hosted CI at `7ba816e` still fails quality, gosec and historical gitleaks.
+A local baseline reports 2,024 quality findings and 256 standalone gosec findings;
+the frozen remediation candidate `034f2baf49c1` reports 1,813 and 224 respectively.
+The quality baseline includes four downloaded JavaScript-fixture Go findings
+outside the Go module. Quality now enumerates the module with `go list`, matching
+formatting and security scans; empty/failed discovery and linter failures remain
+blocking. No rule thresholds, security exits or historical-secret exclusions
+were relaxed. The full repository is not security-clean.
+
+The candidate fixes backup tenant reads, agent policy-bundle cluster scope,
+unsafe process/conntrack response selectors, private artifact writes, signing
+staging paths, wire-ID overflow, CLI false-success output and compliance delivery
+false success. Serverless downloads validate DNS results at dial time, pin numeric
+addresses and retain destination TLS identity through numeric CONNECT tunnels.
+Proxy authentication stays on the proxy hop. Signed URLs are excluded from scan
+logs and persisted failure reports; wrapped cancellation remains identifiable.
+Focused negative tests and fresh-database evidence are indexed in the canonical
+parity plan. Candidate images and the combined source qualification are recorded
+under `/tmp/constellation-security-034f2baf49c1/` on the development host.
+
+The new all-ref redacted history scan still reports 21 detections. They include
+previously documented actual historical private keys and false-positive fixtures;
+removing current source does not revoke an exposed certificate or rewrite history.
+The additional admission-inventory test detection contains an intentionally
+invalid fixture, not a new usable credential. No history rewriting or finding
+suppression was performed. The main-cluster read-only trust audit on October 17
+examined 39 certificate occurrences across Secrets, ConfigMaps and webhooks, with
+zero historical certificate/key matches and zero read errors. Its JSON report is
+`/tmp/constellation-admission-trust-main-20261017.json`. External clusters and
+trust stores remain unproven; this local audit does not authorize a global
+revocation-complete claim.
