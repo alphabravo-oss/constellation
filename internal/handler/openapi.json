@@ -8678,6 +8678,232 @@
             ]
           }
         }
+      },
+      "RuntimeProcessActionV2": {
+        "type": "object",
+        "properties": {
+          "protocol_version": {
+            "type": "integer",
+            "enum": [
+              2
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "action_token": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "kill_process"
+            ]
+          },
+          "node": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 253,
+            "description": "Limited to 253 UTF-8 bytes."
+          },
+          "workload_id": {
+            "type": "string",
+            "maxLength": 4096,
+            "description": "Limited to 4096 UTF-8 bytes."
+          },
+          "container_id": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "Limited to 256 UTF-8 bytes."
+          },
+          "pid": {
+            "type": "integer",
+            "minimum": 2,
+            "maximum": 2147483647
+          },
+          "comm": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 16,
+            "description": "Limited to 16 UTF-8 bytes."
+          },
+          "boot_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "process_start_ticks": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,18}$",
+            "description": "Original kernel process start identity as decimal USER_HZ ticks; kept as a string to preserve integer precision."
+          },
+          "start_boot_ns": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,19}$",
+            "description": "Exact kernel process start_boottime in nanoseconds, positive uint64 (at most 18446744073709551615). Agents verify this identity after opening the pidfd; process_start_ticks must equal floor(start_boot_ns / 10000000)."
+          }
+        },
+        "required": [
+          "protocol_version",
+          "id",
+          "action_token",
+          "type",
+          "node",
+          "workload_id",
+          "container_id",
+          "pid",
+          "comm",
+          "boot_id",
+          "process_start_ticks",
+          "start_boot_ns"
+        ],
+        "additionalProperties": false
+      },
+      "RuntimeProcessPendingV2": {
+        "type": "object",
+        "properties": {
+          "protocol_version": {
+            "type": "integer",
+            "enum": [
+              2
+            ]
+          },
+          "cluster_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "node": {
+            "type": "string"
+          },
+          "actions": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "$ref": "#/components/schemas/RuntimeProcessActionV2"
+            }
+          }
+        },
+        "required": [
+          "protocol_version",
+          "cluster_id",
+          "node",
+          "actions"
+        ],
+        "additionalProperties": false
+      },
+      "RuntimeProcessResultV2": {
+        "type": "object",
+        "properties": {
+          "protocol_version": {
+            "type": "integer",
+            "enum": [
+              2
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "action_token": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "kill_process"
+            ]
+          },
+          "node": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 253,
+            "description": "Limited to 253 UTF-8 bytes."
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "applied",
+              "refused",
+              "uncertain"
+            ],
+            "description": "applied means the SIGKILL syscall was accepted for the verified pidfd; it does not establish that the process has exited. uncertain means a crash interrupted execution accounting and the effect will not be retried."
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 4096,
+            "description": "Optional diagnostic, limited to 4096 UTF-8 bytes."
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "id",
+          "action_token",
+          "type",
+          "node",
+          "outcome",
+          "at"
+        ],
+        "additionalProperties": false
+      },
+      "RuntimeProcessReceiptV2": {
+        "type": "object",
+        "properties": {
+          "acknowledged": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "protocol_version": {
+            "type": "integer",
+            "enum": [
+              2
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "action_token": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "node": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "applied",
+              "refused",
+              "uncertain"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "done",
+              "failed",
+              "uncertain"
+            ]
+          }
+        },
+        "required": [
+          "acknowledged",
+          "protocol_version",
+          "id",
+          "action_token",
+          "node",
+          "outcome",
+          "state"
+        ],
+        "additionalProperties": false
       }
     },
     "responses": {
@@ -30149,6 +30375,232 @@
           }
         },
         "summary": "Get process-baselines:bundle"
+      }
+    },
+    "/api/v1/runtime/response-actions/v2/pending": {
+      "get": {
+        "summary": "Poll exact-process response actions",
+        "description": "Requires a runtime-agent token bound to the requested cluster. Returns at most 100 oldest pending actions for the exact organization, cluster and node. Each query parameter must appear exactly once. The node selector is not independent node authentication; tokens remain cluster-bound. This versioned queue isolates process actions from legacy agents during rolling upgrades.",
+        "security": [
+          {
+            "runtimeAgent": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "cluster_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "node",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bounded exact-node pending actions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeProcessPendingV2"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing, malformed or repeated selector.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Runtime-agent authentication required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Agent token cluster mismatch.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Scope resolution or queue read failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/runtime/response-actions/v2/result": {
+      "post": {
+        "summary": "Record and acknowledge an exact-process result",
+        "description": "Commits the terminal result and audit event atomically. A receipt is returned only after durable commit or exact replay of the prior result. ID, action token, organization, token-bound cluster and queued node must match. A different terminal result conflicts. Agents retain their durable journal until receiving the matching receipt and never repeat a signal after an uncertain crash outcome.",
+        "security": [
+          {
+            "runtimeAgent": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuntimeProcessResultV2"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Durable matching result receipt; outcome uncertain is explicitly retained.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuntimeProcessReceiptV2"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid identity, version, type, outcome or result body.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Runtime-agent authentication required.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Agent token cluster mismatch.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No matching owned action, node or action token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Action already has a different terminal result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Result or audit transaction failed; no receipt.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/runtime/response-actions:pending": {

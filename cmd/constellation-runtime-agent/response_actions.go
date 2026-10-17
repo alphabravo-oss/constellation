@@ -19,13 +19,10 @@
 // Transport: the responder is driven by a pull-poller against the control plane
 // (responseActionWorker), mirroring the other runtime sync workers.
 //
-// STATUS (RT-KILL-02): the responder EXECUTION layer below (killProcess SIGKILL,
-// killSession conntrack-delete, decision logic) is complete and unit-tested, and
-// the poller is gated OFF by default and 404s harmlessly until a producer exists.
-// Pre-exec/inline blocking is delivered by the enforcer path. Response-rule
-// kill actions use the server-side pending/result endpoints and this worker to
-// act on already-running processes or sessions. End-to-end live validation is
-// tracked as RUN-1 in docs/NEUVECTOR-PARITY-PLAN.md.
+// Exact process actions use the isolated V2 queue and a durable execution journal.
+// Kernel start identity and pidfd verification prevent selecting another process;
+// legacy process requests are refused. The legacy poller still handles sessions.
+// Actual deployed signal/termination proof remains RUN-1 acceptance work.
 package main
 
 import (
@@ -42,7 +39,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -80,13 +76,14 @@ type responderConfig struct {
 	HostRoot           string
 	KillProcessEnabled bool
 	KillSessionEnabled bool
+	Protected          *protectedSet
 	Workloads          *workloadResolver
 	Logger             *slog.Logger
 
-	// conntrackBin / killFn are injection seams for tests. Empty/nil fall back to
-	// the real "conntrack" binary and syscall.Kill.
-	conntrackBin string
-	killFn       func(pid int, sig syscall.Signal) error
+	// Process handles and the conntrack executable are injectable in isolated tests.
+	conntrackRun        func(context.Context, []string) ([]byte, error)
+	openProcess         func(int) (responseProcessHandle, error)
+	currentProcessStart func(uint32) (uint64, bool)
 }
 
 type responder struct {
@@ -94,14 +91,17 @@ type responder struct {
 }
 
 func newResponder(cfg responderConfig) *responder {
+	if cfg.openProcess == nil {
+		cfg.openProcess = openResponseProcess
+	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
-	if cfg.killFn == nil {
-		cfg.killFn = func(pid int, sig syscall.Signal) error { return syscall.Kill(pid, sig) }
-	}
-	if strings.TrimSpace(cfg.conntrackBin) == "" {
-		cfg.conntrackBin = "conntrack"
+
+	if cfg.conntrackRun == nil {
+		cfg.conntrackRun = func(ctx context.Context, args []string) ([]byte, error) {
+			return exec.CommandContext(ctx, "conntrack", args...).CombinedOutput()
+		}
 	}
 	return &responder{cfg: cfg}
 }
@@ -117,8 +117,7 @@ func (r *responder) Execute(ctx context.Context, a responseAction) responseActio
 			res.Reason = "disabled"
 			return res
 		}
-		applied, reason := r.killProcess(a)
-		res.Applied, res.Reason = applied, reason
+		res.Reason = "legacy process actions require exact V2 process identity"
 	case "kill_session":
 		if !r.cfg.KillSessionEnabled {
 			res.Reason = "disabled"
@@ -138,23 +137,6 @@ func (r *responder) Execute(ctx context.Context, a responseAction) responseActio
 			slog.String("reason", res.Reason))
 	}
 	return res
-}
-
-// killProcess verifies the target then SIGKILLs it.
-func (r *responder) killProcess(a responseAction) (bool, string) {
-	procRootDir := responderProcRoot(r.cfg.HostRoot)
-	procComm := readProcComm(procRootDir, a.PID)
-	procContainerID := containerIDFromProcCgroup(procRootDir, a.PID)
-	if ok, reason := killProcessDecision(a, procComm, procContainerID); !ok {
-		return false, reason
-	}
-	if err := r.cfg.killFn(a.PID, syscall.SIGKILL); err != nil {
-		return false, "kill failed: " + err.Error()
-	}
-	r.cfg.Logger.Info("responder: killed process",
-		slog.Int("pid", a.PID), slog.String("comm", procComm),
-		slog.String("workload", a.WorkloadID))
-	return true, ""
 }
 
 // killProcessDecision is the pure guard for a kill_process action. It refuses:
@@ -209,8 +191,7 @@ func (r *responder) killSession(ctx context.Context, a responseAction) (bool, st
 	}
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(cctx, r.cfg.conntrackBin, args...)
-	out, err := cmd.CombinedOutput()
+	out, err := r.cfg.conntrackRun(cctx, args)
 	if err != nil {
 		// conntrack exits non-zero when no matching flow exists; treat "0 flows
 		// deleted" as not-applied rather than an error the operator must chase.

@@ -1503,6 +1503,9 @@ func (s *Server) buildRouter() chi.Router {
 			rap := runtime.NewResponseActions(s.db)
 			r.Get("/runtime/response-actions:pending", rap.Pending)
 			r.Post("/runtime/response-actions:result", rap.Result)
+			// V2 isolates exact-process requests from legacy agents during rollout.
+			r.Get("/runtime/response-actions/v2/pending", rap.PendingV2)
+			r.Post("/runtime/response-actions/v2/result", rap.ResultV2)
 
 			// E1: enabled declarative response rules for the agent's stream evaluator,
 			// priority-ordered. Same :sync pull shape + runtime-agent-token auth as the

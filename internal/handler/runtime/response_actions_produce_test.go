@@ -11,6 +11,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/alphabravocompany/constellation/pkg/response"
+
 	"github.com/alphabravocompany/constellation/internal/handler"
 )
 
@@ -173,7 +175,8 @@ func TestQuarantineRuntime_KillEnqueues(t *testing.T) {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM runtime_response_actions WHERE org_id=$1`, orgID)
 	})
 
-	q := &quarantineRuntime{db: d, orgID: orgID, clusterID: clusterID}
+	seedBoundRuntimeAgentScope(t, d, orgID, clusterID)
+	q := &quarantineRuntime{db: d, orgID: orgID, clusterID: clusterID, processWorkload: workload, sourceAt: time.Now().UTC(), processTarget: &response.ProcessTarget{Node: "node-a", PID: 4242, Comm: "nginx", BootID: uuid.NewString(), StartTicks: "1234", StartBootNS: "12349999999"}}
 	if err := q.Kill(ctx, workload, "shell-in-container"); err != nil {
 		t.Fatalf("Kill: %v", err)
 	}
@@ -182,7 +185,7 @@ func TestQuarantineRuntime_KillEnqueues(t *testing.T) {
 	var typ, state string
 	if err := pool.QueryRow(ctx, `
 SELECT count(*), COALESCE(max(type),''), COALESCE(max(state),'')
-  FROM runtime_response_actions
+  FROM runtime_response_actions_v2
  WHERE org_id=$1 AND cluster_id=$2 AND workload_id=$3`,
 		orgID, clusterID, workload).Scan(&n, &typ, &state); err != nil {
 		t.Fatal(err)
@@ -192,7 +195,7 @@ SELECT count(*), COALESCE(max(type),''), COALESCE(max(state),'')
 	}
 
 	// Empty workload is a no-op (nothing to target).
-	if err := q.Kill(ctx, "  ", "noop"); err != nil {
+	if err := q.Kill(ctx, "  ", "noop"); err == nil {
 		t.Fatalf("Kill(empty): %v", err)
 	}
 }

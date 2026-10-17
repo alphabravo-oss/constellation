@@ -144,12 +144,15 @@ type IngestEvent struct {
 	ContainerID string    `json:"container_id,omitempty"`
 
 	// Process fields (kind=process_exec).
-	PID      uint32   `json:"pid,omitempty"`
-	PPID     uint32   `json:"ppid,omitempty"`
-	UID      uint32   `json:"uid,omitempty"`
-	Comm     string   `json:"comm,omitempty"`
-	Filename string   `json:"filename,omitempty"`
-	Args     []string `json:"args,omitempty"`
+	ProcessStartTicks  string   `json:"process_start_ticks,omitempty"`
+	ProcessStartBootNS string   `json:"start_boot_ns,omitempty"`
+	BootID             string   `json:"boot_id,omitempty"`
+	PID                uint32   `json:"pid,omitempty"`
+	PPID               uint32   `json:"ppid,omitempty"`
+	UID                uint32   `json:"uid,omitempty"`
+	Comm               string   `json:"comm,omitempty"`
+	Filename           string   `json:"filename,omitempty"`
+	Args               []string `json:"args,omitempty"`
 
 	// RT-4 /proc enrichment from the agent (optional; absent => current behavior).
 	// UID above is the EFFECTIVE uid; Ruid is the REAL uid read from /proc/<pid>/status.
@@ -567,13 +570,15 @@ func (h *EventsIngest) dispatchResponse(ctx context.Context, orgID, clusterID uu
 
 func responseEventForIngest(clusterID uuid.UUID, ev *IngestEvent, cls eventClassification) response.Event {
 	revt := response.Event{
-		ID:        uuid.NewString(),
-		Name:      ev.Kind,
-		Type:      response.EventRuntime,
-		Severity:  cls.Severity,
-		Cluster:   clusterID.String(),
-		Namespace: ev.Namespace,
-		Workload:  ev.WorkloadID,
+		ObservedAt:    ev.At,
+		ProcessTarget: &response.ProcessTarget{Node: ev.Node, PID: ev.PID, Comm: ev.Comm, ContainerID: ev.ContainerID, BootID: ev.BootID, StartTicks: ev.ProcessStartTicks, StartBootNS: ev.ProcessStartBootNS},
+		ID:            uuid.NewString(),
+		Name:          ev.Kind,
+		Type:          response.EventRuntime,
+		Severity:      cls.Severity,
+		Cluster:       clusterID.String(),
+		Namespace:     ev.Namespace,
+		Workload:      ev.WorkloadID,
 		Labels: map[string]string{
 			"event_kind":  ev.Kind,
 			"node":        ev.Node,

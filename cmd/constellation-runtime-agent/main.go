@@ -715,12 +715,14 @@ func main() {
 	killSessEnabled := responseKillSessionEnabledFromEnv(os.Getenv("CONSTELLATION_RESPONSE_KILL_SESSION"))
 	if uploadEnabled && (killProcEnabled || killSessEnabled) {
 		resp := newResponder(responderConfig{
-			Node:               node,
-			HostRoot:           hostScanHostRootFromEnv(),
-			KillProcessEnabled: killProcEnabled,
-			KillSessionEnabled: killSessEnabled,
-			Workloads:          workloads,
-			Logger:             logger,
+			Node:                node,
+			HostRoot:            hostScanHostRootFromEnv(),
+			KillProcessEnabled:  killProcEnabled,
+			KillSessionEnabled:  killSessEnabled,
+			Workloads:           workloads,
+			Protected:           protectedNS,
+			currentProcessStart: a.ProcessStartIdentity,
+			Logger:              logger,
 		})
 		respWorker := &responseActionWorker{
 			APIBaseURL: apiURL,
@@ -734,6 +736,14 @@ func main() {
 			slog.Bool("kill_process", killProcEnabled),
 			slog.Bool("kill_session", killSessEnabled))
 		go respWorker.Run(ctx)
+		if killProcEnabled {
+			processWorker, err := newProcessResponseWorker(apiURL, apiToken, clusterID, node, resp, logger)
+			if err != nil {
+				logger.Error("exact process responder disabled: durable journal unavailable", "error", err.Error())
+			} else {
+				go processWorker.Run(ctx)
+			}
+		}
 	}
 
 	// Wave C3.5 + C4.5: DP pull-pollers. These depend on dp being up
@@ -1015,6 +1025,10 @@ func main() {
 					ie.Args = readProcCmdline(ev.Process.PID)
 				}
 				ie.ContainerID = ev.Process.ContainerID
+				ie.BootID, ie.ProcessStartTicks = captureResponseProcessIdentity(responderProcRoot(hostScanHostRootFromEnv()), ev.Process.PID, ev.Process.StartBootNS)
+				if ie.BootID != "" {
+					ie.ProcessStartBootNS = strconv.FormatUint(ev.Process.StartBootNS, 10)
+				}
 				// RT-4: enrich from /proc — real uid + stdio-socket (reverse shell).
 				// Best-effort and cheap (one readdir + one small read); a missing
 				// /proc entry (exec already exited) leaves the fields at zero.
@@ -1143,12 +1157,15 @@ type ingestEvent struct {
 	Pod         string    `json:"pod,omitempty"`
 	ContainerID string    `json:"container_id,omitempty"`
 
-	PID      uint32   `json:"pid,omitempty"`
-	PPID     uint32   `json:"ppid,omitempty"`
-	UID      uint32   `json:"uid,omitempty"`
-	Comm     string   `json:"comm,omitempty"`
-	Filename string   `json:"filename,omitempty"`
-	Args     []string `json:"args,omitempty"`
+	ProcessStartTicks  string   `json:"process_start_ticks,omitempty"`
+	ProcessStartBootNS string   `json:"start_boot_ns,omitempty"`
+	BootID             string   `json:"boot_id,omitempty"`
+	PID                uint32   `json:"pid,omitempty"`
+	PPID               uint32   `json:"ppid,omitempty"`
+	UID                uint32   `json:"uid,omitempty"`
+	Comm               string   `json:"comm,omitempty"`
+	Filename           string   `json:"filename,omitempty"`
+	Args               []string `json:"args,omitempty"`
 
 	// RT-4 /proc enrichment (optional; absent => current behavior). UID above is the
 	// effective uid from the kernel record; Ruid is the real uid read from

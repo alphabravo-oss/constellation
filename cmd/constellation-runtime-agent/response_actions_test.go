@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
-	"syscall"
 	"testing"
 )
 
@@ -120,7 +119,7 @@ func TestResponderExecute_DisabledAndGated(t *testing.T) {
 	r := newResponder(responderConfig{
 		Node:               "node-a",
 		KillProcessEnabled: false, // gated OFF
-		killFn:             func(pid int, sig syscall.Signal) error { killed++; return nil },
+		openProcess:        func(int) (responseProcessHandle, error) { killed++; return nil, errors.New("unexpected process open") },
 	})
 	res := r.Execute(context.Background(), responseAction{ID: "a1", Type: "kill_process", PID: 4242})
 	if res.Applied || res.Reason != "disabled" {
@@ -139,103 +138,110 @@ func TestResponderExecute_DisabledAndGated(t *testing.T) {
 
 // Temporary /proc files and an injected kill function ensure successful cases
 // cannot signal a real process.
+type responderProcessCase struct {
+	name, comm, cgroup string
+	host               bool
+	action             responseAction
+	want               bool
+	reason             string
+	killError          error
+}
+
 func TestResponderExecute_KillProcessIdentity(t *testing.T) {
 	containerID := strings.Repeat("a", 64)
-	cases := []struct {
-		name, comm, cgroup string
-		action             responseAction
-		want               bool
-		reason             string
-		killError          error
-	}{
+	cases := []responderProcessCase{
 		{name: "missing proc entry", action: responseAction{PID: 4242, Comm: "nginx"}, reason: "process comm unavailable"},
 		{name: "empty comm file", comm: "\n", action: responseAction{PID: 4242, Comm: "nginx"}, reason: "process comm unavailable"},
 		{name: "reused pid", comm: "sshd\n", action: responseAction{PID: 4242, Comm: "nginx"}, reason: "comm mismatch"},
 		{name: "missing cgroup file", comm: "nginx\n", action: responseAction{PID: 4242, Comm: "nginx", ContainerID: containerID}, reason: "process container unavailable"},
 		{name: "unrecognized cgroup", comm: "nginx\n", cgroup: "0::/user.slice\n", action: responseAction{PID: 4242, Comm: "nginx", ContainerID: containerID}, reason: "process container unavailable"},
 		{name: "different container", comm: "nginx\n", cgroup: "0::/docker/" + strings.Repeat("b", 64) + "\n", action: responseAction{PID: 4242, Comm: "nginx", ContainerID: containerID}, reason: "container mismatch"},
-		{name: "bare pid", comm: "nginx\n", action: responseAction{PID: 4242}, reason: "missing target comm"},
-		{name: "verified host process", comm: "nginx\n", action: responseAction{PID: 4242, Comm: "nginx"}, want: true},
+		{name: "bare pid", comm: "nginx\n", action: responseAction{PID: 4242}, reason: "incomplete process action identity"},
+		{name: "verified host process", host: true, comm: "nginx\n", action: responseAction{PID: 4242, Comm: "nginx"}, reason: "protected host process"},
 		{name: "verified container process", comm: "nginx\n", cgroup: "0::/kubepods.slice/cri-containerd-" + containerID + ".scope\n", action: responseAction{PID: 4242, Comm: "nginx", ContainerID: "containerd://" + containerID}, want: true},
-		{name: "kill failure not applied", comm: "nginx\n", action: responseAction{PID: 4242, Comm: "nginx"}, killError: errors.New("denied"), reason: "kill failed: denied"},
+		{name: "kill failure not applied", comm: "nginx\n", action: responseAction{PID: 4242, Comm: "nginx"}, killError: errors.New("denied"), reason: "process signal failed"},
 	}
 	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			root := t.TempDir()
-			proc := filepath.Join(root, "proc", "4242")
-			if err := os.MkdirAll(proc, 0700); err != nil {
+		t.Run(tc.name, func(t *testing.T) { runResponderProcessCase(t, tc) })
+	}
+}
+
+func runResponderProcessCase(t *testing.T, tc responderProcessCase) {
+	t.Helper()
+
+	root := t.TempDir()
+	writeResponseIdentityFixture(t, root, 4242, "1234")
+	proc := filepath.Join(root, "proc", "4242")
+	if err := os.MkdirAll(proc, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if tc.action.ContainerID != "" && tc.cgroup == "" {
+		if err := os.Remove(filepath.Join(proc, "cgroup")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, value := range map[string]string{"comm": tc.comm, "cgroup": tc.cgroup} {
+		if value != "" {
+			if err := os.WriteFile(filepath.Join(proc, name), []byte(value), 0600); err != nil {
 				t.Fatal(err)
 			}
-			for name, value := range map[string]string{"comm": tc.comm, "cgroup": tc.cgroup} {
-				if value != "" {
-					if err := os.WriteFile(filepath.Join(proc, name), []byte(value), 0600); err != nil {
-						t.Fatal(err)
-					}
-				}
+		}
+	}
+	calls := 0
+	r := newResponder(responderConfig{Workloads: responseFixtureWorkloads(), Protected: newProtectedSet("platform", nil), Node: "node-a", HostRoot: root, KillProcessEnabled: true, currentProcessStart: func(uint32) (uint64, bool) { return 12349999999, true },
+		openProcess: func(pid int) (responseProcessHandle, error) {
+			if pid != 4242 {
+				t.Fatalf("unexpected process handle %d", pid)
 			}
-			calls := 0
-			r := newResponder(responderConfig{Node: "node-a", HostRoot: root, KillProcessEnabled: true, killFn: func(pid int, sig syscall.Signal) error {
-				calls++
-				if pid != 4242 || sig != syscall.SIGKILL {
-					t.Fatalf("unexpected kill target (%d,%v)", pid, sig)
-				}
-				return tc.killError
-			}})
-			a := tc.action
-			a.ID, a.Type = "action", "kill_process"
-			res := r.Execute(context.Background(), a)
-			if res.Applied != tc.want || res.Reason != tc.reason {
-				t.Fatalf("result=%+v, want applied=%v reason=%q", res, tc.want, tc.reason)
-			}
-			wantCalls := 0
-			if tc.want || tc.killError != nil {
-				wantCalls = 1
-			}
-			if calls != wantCalls {
-				t.Fatalf("kill called %d times, want %d", calls, wantCalls)
-			}
-		})
+			return &responseTestHandle{signal: func() error { calls++; return tc.killError }}, nil
+		}})
+	a := responseFixtureAction()
+	a.PID, a.Comm = tc.action.PID, tc.action.Comm
+	if tc.action.ContainerID != "" || tc.host {
+		a.ContainerID = tc.action.ContainerID
+	}
+	res := r.ExecuteProcessV2(a)
+	applied := res.Outcome == "applied"
+	if applied != tc.want || res.Reason != tc.reason {
+		t.Fatalf("result=%+v, want applied=%v reason=%q", res, tc.want, tc.reason)
+	}
+	wantCalls := 0
+	if tc.want || tc.killError != nil {
+		wantCalls = 1
+	}
+	if calls != wantCalls {
+		t.Fatalf("kill called %d times, want %d", calls, wantCalls)
 	}
 }
 
 func TestResponderExecute_KillSessionRequiresExactTuple(t *testing.T) {
-	// This private executable only records arguments. Never invoke conntrack.
-	root := t.TempDir()
-	program := filepath.Join(root, "fake-conntrack")
-	marker := program + ".called"
-	if err := os.WriteFile(program, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$0.called\"\n"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	r := newResponder(responderConfig{KillSessionEnabled: true, conntrackBin: program})
+	calls := 0
+	var received []string
+	r := newResponder(responderConfig{KillSessionEnabled: true, conntrackRun: func(_ context.Context, args []string) ([]byte, error) {
+		calls++
+		received = append([]string{}, args...)
+		return nil, nil
+	}})
 	a := responseAction{ID: "session", Type: "kill_session", Protocol: "tcp", SrcIP: "10.0.0.1", DstIP: "10.0.0.2", SrcPort: 12345, DstPort: 443}
 	for _, missing := range []string{"src", "dst", "protocol"} {
-		t.Run(missing, func(t *testing.T) {
-			incomplete := a
-			switch missing {
-			case "src":
-				incomplete.SrcPort = 0
-			case "dst":
-				incomplete.DstPort = 0
-			case "protocol":
-				incomplete.Protocol = ""
-			}
-			if res := r.Execute(context.Background(), incomplete); res.Applied || res.Reason == "" {
-				t.Fatalf("incomplete tuple reported applied: %+v", res)
-			}
-			if _, err := os.Stat(marker); !os.IsNotExist(err) {
-				t.Fatalf("incomplete tuple invoked executable: %v", err)
-			}
-		})
+		incomplete := a
+		switch missing {
+		case "src":
+			incomplete.SrcPort = 0
+		case "dst":
+			incomplete.DstPort = 0
+		case "protocol":
+			incomplete.Protocol = ""
+		}
+		if res := r.Execute(t.Context(), incomplete); res.Applied || res.Reason == "" || calls != 0 {
+			t.Fatalf("incomplete tuple dispatched: %+v calls%d", res, calls)
+		}
 	}
-	if res := r.Execute(context.Background(), a); !res.Applied || res.Reason != "" {
+	if res := r.Execute(t.Context(), a); !res.Applied || res.Reason != "" {
 		t.Fatalf("complete tuple not applied: %+v", res)
 	}
-	raw, err := os.ReadFile(marker)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := "-D\n-s\n10.0.0.1\n-d\n10.0.0.2\n-p\ntcp\n--sport\n12345\n--dport\n443\n"
-	if string(raw) != want {
-		t.Fatalf("executable arguments=%q, want %q", raw, want)
+	expected := []string{"-D", "-s", "10.0.0.1", "-d", "10.0.0.2", "-p", "tcp", "--sport", "12345", "--dport", "443"}
+	if calls != 1 || !reflect.DeepEqual(received, expected) {
+		t.Fatalf("runner calls%d arguments%v", calls, received)
 	}
 }
