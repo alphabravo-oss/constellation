@@ -268,14 +268,12 @@ func (r *GroupMembershipReconciler) writeMembership(ctx context.Context, orgID, 
 			return name, false, err
 		}
 	}
-	for _, edge := range edges {
-		_, _, err := r.edges.expandTx(ctx, tx, orgID, edge.ClusterID, netpolicy.GroupEdge{
-			ID: edge.ID.String(), FromGroup: edge.FromGroup, ToGroup: edge.ToGroup,
-			Ports: edge.Ports, Mode: edge.Mode, Comment: edge.Comment,
-		}, nil)
-		if err != nil {
-			return name, false, err
-		}
+	if err := r.expandMembershipEdgesTx(ctx, tx, orgID, edges); err != nil {
+		return name, false, err
+	}
+
+	if err := r.auditMembershipTx(ctx, tx, orgID, groupID, clusterID, name, current.Members, nextMembers); err != nil {
+		return name, false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return name, false, err
