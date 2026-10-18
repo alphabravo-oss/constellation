@@ -20,7 +20,7 @@ function BrandMark({ compact = false }: { compact?: boolean }) {
       />
       <div className="flex flex-col leading-tight">
         <span className={`${compact ? "text-xl" : "text-2xl"} font-semibold text-white`}>Constellation</span>
-        <span className="text-[11px] text-zinc-500">by AlphaBravo</span>
+        <span className="text-[11px] text-zinc-500">by Alphabravo</span>
       </div>
     </div>
   );

@@ -4,6 +4,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
 import { compliance, type ComplianceCheck } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
+import { useEditorVisit } from "@/hooks/useEditorVisit";
 import { useRouteSearchParams } from "@/lib/route-search";
 import { PageHeader } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
@@ -21,6 +22,7 @@ export function ComplianceExemptionFormPage() {
   const retryScope = () => { void queryClient.invalidateQueries({ queryKey: ["clusters"] }); void queryClient.invalidateQueries({ queryKey: ["cluster", clusterId] }); };
   const framework = search.get("framework") ?? "";
   const controlID = search.get("control_id") ?? "";
+  const { visit } = useEditorVisit(["compliance-exemption", clusterId, framework, controlID]);
   const backSearch = new URLSearchParams(search);
   backSearch.delete("control_id"); backSearch.set("tab", "frameworks");
   const backTo = clusterId ? `/clusters/${encodeURIComponent(clusterId)}/compliance?${backSearch}` : "/clusters";
@@ -55,12 +57,13 @@ export function ComplianceExemptionFormPage() {
         {checks.isFetching && <p role="status" className="text-sm text-muted-foreground">Refreshing this control before saving…</p>}
         {currentChecks.length === 0 && <p role="alert" className="text-sm text-status-error">This control is no longer available in the current results. Your draft is preserved; saving is paused. <Button variant="outline" onClick={() => void checks.refetch()}>Retry</Button></p>}
         {currentChecks.length > 0 && !eligible && <p role="alert" className="text-sm text-muted-foreground">This control is no longer eligible for a new exemption. Review its current status before proceeding.</p>}
-        <ExemptionEditor key={`${clusterId}:${framework}:${controlID}`} clusterId={clusterId} clusterLabel={cluster?.name || clusterId} framework={framework} controlID={controlID} controlChecks={controlChecks} total={checks.data?.total} fullFailures={checks.data?.summary?.fail} lastLoaded={currentChecks.length === 0 || checks.isError || checks.isFetching || !scopeReady} backTo={backTo} canSave={scopeReady && eligible && !checks.isError && !checks.isFetching} />
+        <ExemptionEditor key={visit.context} editorContext={visit.context} clusterId={clusterId} clusterLabel={cluster?.name || clusterId} framework={framework} controlID={controlID} controlChecks={controlChecks} total={checks.data?.total} fullFailures={checks.data?.summary?.fail} lastLoaded={currentChecks.length === 0 || checks.isError || checks.isFetching || !scopeReady} backTo={backTo} canSave={scopeReady && eligible && !checks.isError && !checks.isFetching} />
       </>}
   </div>;
 }
 
-function ExemptionEditor({ clusterId, clusterLabel, framework, controlID, controlChecks, total, fullFailures, lastLoaded, backTo, canSave }: { clusterId: string; clusterLabel: string; framework: string; controlID: string; controlChecks: ComplianceCheck[]; total?: number; fullFailures?: number; lastLoaded: boolean; backTo: string; canSave: boolean }) {
+function ExemptionEditor({ editorContext, clusterId, clusterLabel, framework, controlID, controlChecks, total, fullFailures, lastLoaded, backTo, canSave }: { editorContext: string; clusterId: string; clusterLabel: string; framework: string; controlID: string; controlChecks: ComplianceCheck[]; total?: number; fullFailures?: number; lastLoaded: boolean; backTo: string; canSave: boolean }) {
+  const { isCurrent } = useEditorVisit([editorContext]);
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [reason, setReason] = useState("");
@@ -78,7 +81,7 @@ function ExemptionEditor({ clusterId, clusterLabel, framework, controlID, contro
     },
     onSuccess: () => {
       for (const family of ["summary", "checks", "evidence", "exemptions"]) void qc.invalidateQueries({ queryKey: ["compliance", family] });
-      navigate({ href: backTo });
+      if (isCurrent()) navigate({ href: backTo });
     },
   });
   const failingCount = controlChecks.filter((check) => check.status === "fail" && (check.effective_status ?? check.status) === "fail").length;

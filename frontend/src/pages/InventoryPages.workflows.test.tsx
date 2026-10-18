@@ -126,3 +126,43 @@ it("connector scan jobs opens the canonical empty ledger with verified counts ra
  const data = coverage(); data.recent_jobs = [{ id: "old-job", target_ref: "Old summary job", status: "running" }] as ConnectorCoverageOverview["recent_jobs"]; vi.mocked(connectorCoverage.overview).mockResolvedValue(data);
  await render("connectors", "?tab=scan-jobs"); await settle(() => expect(host.textContent).toContain("0 matching jobs")); expect(host.querySelector('[data-testid="scan-jobs-table"]')).not.toBeNull(); expect(host.textContent).toContain("No scan jobs match these filters or page"); expect(host.textContent).not.toContain("Old summary job"); expect(host.querySelector('[aria-label="Search scan jobs"]')).not.toBeNull();
 });
+
+it.each(["tagged", "reference-with-digest", "digest-only"] as const)("keeps %s image names readable and digests disclosed in inventory and preview", async kind => {
+ const digest = `sha256:${"a".repeat(64)}`;
+ const named = "registry.example.test/team/app:v2";
+ const record = { ...image(0), image_ref: kind === "digest-only" ? digest : `${named}@${digest}`, image_ref_normalized: kind === "digest-only" ? digest : `${named}@${digest}`, image_repository: kind === "tagged" ? "registry.example.test/team/app" : kind === "digest-only" ? digest : "", image_tag: kind === "tagged" ? "v2" : "", source_ref: `${named}@${digest}`, vulndb_bundle_hash: `sha256:${"f".repeat(64)}` };
+ vi.mocked(imageScanResults.list).mockImplementation(async params => ({ image_scan_results: [record], ...metadata(params), total: 1, has_more: false, summary: { ...inventorySummary, total: 1 } }));
+ await render("image", `?selected=record-0&q=${encodeURIComponent(digest)}&image_digest=${encodeURIComponent(digest)}&context=keep`);
+ await settle(() => expect(host.querySelectorAll('[data-testid="image-scans-table"] tbody tr')).toHaveLength(1));
+ const row = host.querySelector('[data-testid="image-scans-table"] tbody tr')!;
+ const preview = host.querySelector('[data-testid="image-scan-preview"]')!;
+ const expected = kind === "digest-only" ? "Unnamed image" : named;
+ expect(row.querySelector('a[href$="/images/record-0"]')?.textContent).toBe(expected);
+ expect(preview.querySelector("h2")?.textContent).toBe(expected);
+ const source = [...preview.querySelectorAll<HTMLDetailsElement>("details")].find(item => item.querySelector("summary")?.textContent.includes("Source reference"))!;
+ expect(source.open).toBe(false);
+ expect(source.querySelector("code")?.textContent).toBe(record.source_ref);
+ const bundle = [...preview.querySelectorAll<HTMLDetailsElement>("details")].find(item => item.querySelector("code")?.textContent === record.vulndb_bundle_hash)!;
+ expect(bundle.open).toBe(false);
+ await act(async () => bundle.querySelector("summary")!.click());
+ expect(bundle.open).toBe(true);
+ expect(bundle.querySelector("code")?.textContent).toBe(record.vulndb_bundle_hash);
+ await act(async () => bundle.querySelector("summary")!.click());
+ for (const area of [row, preview]) {
+   const disclosure = [...area.querySelectorAll<HTMLDetailsElement>("details")].find(item => item.querySelector("summary")?.textContent === "Show digest")!;
+   expect(disclosure.open).toBe(false);
+   expect(disclosure.querySelector("code")?.textContent).toBe(digest);
+   const shown = area.cloneNode(true) as HTMLElement;
+   shown.querySelectorAll("details:not([open])").forEach(item => item.remove());
+   expect(shown.textContent).not.toContain("sha256:");
+   await act(async () => disclosure.querySelector("summary")!.click());
+   expect(disclosure.open).toBe(true);
+   expect(disclosure.querySelector("code")?.textContent).toBe(digest);
+ }
+ expect(new URLSearchParams(history.location.search).get("selected")).toBe("record-0");
+ expect(imageScanResults.list).toHaveBeenLastCalledWith(expect.objectContaining({ q: digest, image_digest: digest, cluster_id: "cluster" }));
+ await act(async () => button("Export this page CSV").click());
+ expect(vi.mocked(downloadCsv).mock.calls[0][2][0][0]).toBe(`${record.image_ref} · ${digest}`);
+ await act(async () => button("Export matching CSV").click());
+ await settle(() => expect(imageScanResults.exportCSV).toHaveBeenCalledWith(expect.objectContaining({ q: digest, image_digest: digest, cluster_id: "cluster" }), expect.any(Function)));
+});

@@ -65,12 +65,27 @@ It retains custom values, complete delivery targets and unsaved drafts, and
 sends only changed fields without requesting a run. All 73 focused workflow
 tests, TypeScript and production build pass. A separate Timeline test now waits
 for its refetched result to render; all 30 cases pass with production Timeline
-unchanged. The new combined 284-case browser snapshot remains pending. Existing
-server PATCH concurrency and scheduler delivery acceptance remain open; these
-changes are not deployed and the checklist remains 66 checked / 87 open.
+unchanged. Exact `029958a` hosted CI passes all 2,374 frontend cases, 3,469
+unit tests and 9,506 integration tests. Browser evidence records 283 passes and
+one direct-edit test failure: its exact Name locator does not match the rendered
+required label Name*. The correction uses the existing field ID and retains the
+failed-save and Cancel assertions. Existing server PATCH concurrency and
+scheduler delivery acceptance remain open; these changes are not deployed and
+the checklist remains 66 checked / 87 open.
 Visit-specific ownership prevents an older save from redirecting after leaving
 and returning to the same context. Observed conflicts retain the draft and
 explain how to copy edits before canceling and reopening the schedule.
+
+The next source follow-up extends the shared editor-visit guard to Registry,
+Groups, Exemptions, schedule creation, Policy and Admission Settings. Older
+successful writes retain safe cache invalidation but cannot redirect a later
+editor visit. Images use shared readable naming and digest disclosure throughout
+inventory, previews, identity, workload references, layer evidence and bundle
+provenance; raw API and CSV identity is preserved. Login branding now agrees
+with the shell's “by Alphabravo.” New tests and browser fixtures are authored,
+not yet accepted: local startup capacity was below the retained reserve, so no
+local test, typecheck or build was invoked. Exact-head hosted verification is
+required before qualification. No checklist item closes.
 
 Both original host scanner-cache trees are restored: five files totaling
 4,701,282,746 bytes match their original hashes and restorable metadata. Recovery

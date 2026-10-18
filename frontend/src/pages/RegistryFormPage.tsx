@@ -7,11 +7,13 @@ import { PageHeader } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
 import { Collapse } from "@/components/ui/collapse";
 import { useCluster } from "@/hooks/useCluster";
+import { useEditorVisit } from "@/hooks/useEditorVisit";
 import { KINDS, AUTH_KINDS, CADENCES, PROMOTION_THRESHOLDS, type RegistryScheduleMode, buildScanPolicy, scheduleFromRegistry, buildScanCadence, registryCredentialsForSave } from "@/lib/registry-form";
 
 export function RegistryFormPage() {
   const { regId } = useParams({ strict: false });
   const { clusterId, isLoading } = useCluster();
+  const { visit } = useEditorVisit(["registry", clusterId, regId ?? "new"]);
   const navigate = useNavigate();
   const q = useQuery({ queryKey: ["registry", regId], queryFn: () => registriesApi.get(regId!), enabled: !!regId });
   const back = `/clusters/${clusterId}/registries`;
@@ -21,11 +23,12 @@ export function RegistryFormPage() {
     <PageHeader title={regId ? `Edit registry — ${q.data!.name}` : "Add container registry"}
       description="Save the connection and scan schedule. Test the saved connection from the registry list."
       backLink={<Link to="." href={back} className="inline-flex items-center gap-1"><ChevronLeft className="h-4 w-4" />Registries</Link>} />
-    <Card><RegistryForm key={regId ?? "new"} editing={regId ? q.data! : null} onSaved={() => void navigate({ href: back })} onCancel={() => void navigate({ href: back })} /></Card>
+    <Card><RegistryForm key={visit.context} editorContext={visit.context} editing={regId ? q.data! : null} onSaved={() => void navigate({ href: back })} onCancel={() => void navigate({ href: back })} /></Card>
   </div>;
 }
 
-function RegistryForm({ editing, onSaved, onCancel }: { editing: RegistryDTO | null; onSaved: () => void; onCancel: () => void }) {
+function RegistryForm({ editorContext, editing, onSaved, onCancel }: { editorContext: string; editing: RegistryDTO | null; onSaved: () => void; onCancel: () => void }) {
+  const { isCurrent } = useEditorVisit([editorContext]);
   const qc = useQueryClient();
   const [name, setName] = useState(editing?.name ?? "");
   const [kind, setKind] = useState<RegistryKind>(editing?.kind ?? "docker-hub");
@@ -96,7 +99,7 @@ function RegistryForm({ editing, onSaved, onCancel }: { editing: RegistryDTO | n
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["registries"] });
       if (editing) qc.invalidateQueries({ queryKey: ["registry", editing.id] });
-      onSaved();
+      if (isCurrent()) onSaved();
     },
   });
 

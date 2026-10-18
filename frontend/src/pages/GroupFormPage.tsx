@@ -5,6 +5,7 @@ import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 
 import { groupsApi, policies, type Group, type GroupCriterion, type GroupKind, type GroupMode } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
+import { useEditorVisit } from "@/hooks/useEditorVisit";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Collapse } from "@/components/ui/collapse";
@@ -17,14 +18,15 @@ const MODES: GroupMode[] = ["discover", "monitor", "protect"];
 export function GroupFormPage() {
   const { clusterId, isLoading, cluster, error } = useCluster();
   const { groupId } = useParams({ strict: false });
+  const { visit } = useEditorVisit(["group", clusterId, groupId ?? "new"]);
   const listPath = clusterId ? `/clusters/${clusterId}/groups` : "/groups";
   return <div className="space-y-6" data-testid="group-form-page">
     <PageHeader title={groupId ? "Edit group" : "Add group"}
       description="Choose workload selectors and the network and process modes applied to matching members."
       backLink={<Link to="." href={listPath} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Groups</Link>} />
     {!clusterId ? <ErrorState title="Select an available cluster to manage groups." />
-      : <GroupAuthoringScope key={`${clusterId}:${groupId ?? "new"}`} clusterId={clusterId} resolvedClusterId={cluster?.id} isLoading={isLoading} hasError={Boolean(error)}>
-          {(scopeReady, recheckScope) => <GroupFormLoader clusterId={clusterId} groupId={groupId} listPath={listPath} scopeReady={scopeReady} recheckScope={recheckScope} />}
+      : <GroupAuthoringScope key={visit.context} clusterId={clusterId} resolvedClusterId={cluster?.id} isLoading={isLoading} hasError={Boolean(error)}>
+          {(scopeReady, recheckScope) => <GroupFormLoader editorContext={visit.context} clusterId={clusterId} groupId={groupId} listPath={listPath} scopeReady={scopeReady} recheckScope={recheckScope} />}
         </GroupAuthoringScope>}
   </div>;
 }
@@ -61,7 +63,7 @@ export function GroupAuthoringScope({ clusterId, resolvedClusterId, isLoading, h
   </>;
 }
 
-function GroupFormLoader({ clusterId, groupId, listPath, scopeReady, recheckScope }: { clusterId: string; groupId?: string; listPath: string; scopeReady: boolean; recheckScope: () => boolean }) {
+function GroupFormLoader({ editorContext, clusterId, groupId, listPath, scopeReady, recheckScope }: { editorContext: string; clusterId: string; groupId?: string; listPath: string; scopeReady: boolean; recheckScope: () => boolean }) {
   const q = useQuery({
     queryKey: ["group-editor", clusterId, groupId],
     queryFn: () => groupsApi.list({ cluster_id: clusterId }),
@@ -94,11 +96,12 @@ function GroupFormLoader({ clusterId, groupId, listPath, scopeReady, recheckScop
   return <>
     {recordUnavailable && scopeReady && <ErrorState title={`${groupId ? "The saved group" : "Group defaults"} could not be refreshed. Your draft is preserved; retry before saving.`}
       action={<Button onClick={() => groupId ? void q.refetch() : void defaultsQ.refetch()}>Retry</Button>} />}
-    <GroupEditor clusterId={clusterId} initial={initial} initialModes={loadedDefaults ?? undefined} listPath={listPath} unavailable={unavailable} recheckScope={recheckScope} />
+    <GroupEditor editorContext={editorContext} clusterId={clusterId} initial={initial} initialModes={loadedDefaults ?? undefined} listPath={listPath} unavailable={unavailable} recheckScope={recheckScope} />
   </>;
 }
 
-function GroupEditor({ clusterId, initial, initialModes, listPath, unavailable, recheckScope }: { clusterId: string; initial?: Group; initialModes?: { policy_mode: GroupMode; profile_mode: GroupMode }; listPath: string; unavailable: boolean; recheckScope: () => boolean }) {
+function GroupEditor({ editorContext, clusterId, initial, initialModes, listPath, unavailable, recheckScope }: { editorContext: string; clusterId: string; initial?: Group; initialModes?: { policy_mode: GroupMode; profile_mode: GroupMode }; listPath: string; unavailable: boolean; recheckScope: () => boolean }) {
+  const { isCurrent } = useEditorVisit([editorContext]);
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [name, setName] = useState(initial?.name ?? "");
@@ -130,7 +133,7 @@ function GroupEditor({ clusterId, initial, initialModes, listPath, unavailable, 
       void qc.invalidateQueries({ queryKey: ["groups", clusterId] });
       void qc.invalidateQueries({ queryKey: ["group-usage", clusterId] });
       void qc.invalidateQueries({ queryKey: ["dashboard", clusterId] });
-      void navigate({ href: listPath });
+      if (isCurrent()) void navigate({ href: listPath });
     },
   });
   const conflict = (save.error as { response?: { status?: number } } | null)?.response?.status === 409;

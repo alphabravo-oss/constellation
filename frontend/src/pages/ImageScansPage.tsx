@@ -9,6 +9,8 @@ import { ErrorState } from "@/components/ui/states";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { Collapse } from "@/components/ui/collapse";
 import { cn } from "@/lib/cn";
+import { imageReferenceName, imageScanDisplayName } from "@/lib/asset-identity";
+import { DigestDisclosure } from "@/components/ui/digest-disclosure";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { scanEngineEvidence } from "@/lib/scan-evidence";
@@ -53,9 +55,9 @@ export function ImageScansPage() {
             {isStale(item.last_scanned_at) ? <Pill tone="warn">stale scan</Pill> : null}
           </div>
           <a href={`/clusters/${clusterId}/images/${item.id}`} className="mt-2 block break-all font-mono text-xs font-medium hover:underline">
-            {displayImage(item)}
+            {imageScanDisplayName(item)}
           </a>
-          <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{item.image_digest}</div>
+          <DigestDisclosure digest={item.image_digest} />
         </>
       ),
     },
@@ -196,8 +198,8 @@ function ImagePreview({ item, clusterId }: { item: ImageScanResult | null; clust
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <ImageKindBadge item={item} />
-            <h2 className="mt-2 break-all font-mono text-sm font-semibold">{displayImage(item)}</h2>
-            <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{item.image_digest}</p>
+            <h2 className="mt-2 break-all font-mono text-sm font-semibold">{imageScanDisplayName(item)}</h2>
+            <DigestDisclosure digest={item.image_digest} />
           </div>
           <a href={`/clusters/${clusterId}/images/${item.id}`} className="rounded-md border border-border px-2 py-1 text-xs hover:bg-accent">
             Full Details
@@ -214,24 +216,18 @@ function ImagePreview({ item, clusterId }: { item: ImageScanResult | null; clust
       <div className="rounded-lg border border-border bg-card p-4">
         <h3 className="text-sm font-semibold">Scan identity</h3>
         <dl className="mt-3 grid gap-2 text-sm">
-          <Field label="Repository" value={item.image_repository || "-"} />
+          <Field label="Repository" value={imageReferenceName(item.image_repository) || "-"} />
           <Field label="Tag" value={item.image_tag || "-"} />
           <Field label="Platform" value={item.platform || "-"} />
           <Field label="Scanner Profile" value={item.scanner_profile} />
           <Field label="Source" value={sourceLabel(item)} />
-          <Field label="Source Ref" value={item.source_ref || "-"} />
+          <Field label="Source Ref" value={<Collapse label="Source reference"><code className="break-all text-xs">{item.source_ref || "-"}</code></Collapse>} />
           {item.vulndb_bundle_version && <Field label="VulnDB Bundle" value={item.vulndb_bundle_version} />}
-          {item.vulndb_bundle_hash && <Field label="Bundle Hash" value={item.vulndb_bundle_hash} />}
+          {item.vulndb_bundle_hash && <Field label="Bundle Hash" value={<DigestDisclosure digest={item.vulndb_bundle_hash} />} />}
         </dl>
       </div>
     </aside>
   );
-}
-
-function displayImage(item: ImageScanResult): string {
-  if (item.image_repository && item.image_tag) return `${item.image_repository}:${item.image_tag}`;
-  if (item.image_repository && item.image_repository !== item.image_digest) return item.image_repository;
-  return item.image_ref || item.image_digest;
 }
 
 function isLocalImage(item: ImageScanResult): boolean {
@@ -278,7 +274,7 @@ function MiniMetric({ label, value, tone }: { label: string; value: number; tone
   );
 }
 
-function Field({ label, value }: { label: string; value: string }) {
+function Field({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="rounded-md border border-border p-2">
       <dt className="text-xs text-muted-foreground">{label}</dt>

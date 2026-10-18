@@ -4,12 +4,14 @@ import { createMemoryHistory, type RouterHistory } from "@tanstack/react-router"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { imageScanResults, type ImageScanResult, type ImageScanFinding, type ImpactedWorkload } from "@/api/client";
+import { downloadCsv } from "@/lib/csv";
 import { TestRouter } from "@/test/router";
 import { ImageScanDetailPage } from "./ImageScanDetailPage";
 
 const scope = vi.hoisted(() => ({ ready: true, loading: false }));
 vi.mock("./entity-detail-scope", () => ({ useEntityClusterScope: () => ({ ...scope, clusterId: "cluster", retry: vi.fn() }) }));
 vi.mock("@/api/client", () => ({ imageScanResults: { get: vi.fn(), layers: vi.fn(), packages: vi.fn(), secrets: vi.fn(), fileRisks: vi.fn(), signature: vi.fn(), configChecks: vi.fn() } }));
+vi.mock("@/lib/csv", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/csv")>(), downloadCsv: vi.fn() }));
 const result: ImageScanResult = { image_ref_normalized: "example.com/app:latest", image_repository: "example.com/app", image_signed: false, severity_counts: {}, critical_count: 0, high_count: 0, medium_count: 0, low_count: 0, info_count: 0, impacted_count: 0, first_seen_at: "2026-10-12T00:00:00Z", updated_at: "2026-10-12T00:00:00Z", id: "result", image_ref: "example.com/app:latest", image_digest: "sha256:test", scanner_profile: "default", package_count: 105, layer_count: 0, secret_count: 7, file_risk_count: 7, finding_count: 0, max_risk_score: 0, last_scanned_at: "2026-10-12T00:00:00Z", signature_status: "unsigned", engine_status: { syft: "succeeded", trivy: "succeeded", grype: "failed" } };
 let root: Root; let host: HTMLDivElement; let client: QueryClient; let history: RouterHistory;
 beforeEach(() => {
@@ -106,4 +108,126 @@ it("keeps distinct workload links sharing a deployment and image stable across r
     expect(host.querySelector("tbody a")?.getAttribute("href")).toBe("/clusters/cluster/deployments/deployment");
     expect(warn.mock.calls.flat().map(String).join(" ")).not.toMatch(/same key|unique.*key/i);
   } finally { warn.mockRestore(); }
+});
+
+it.each(["tagged", "reference-with-digest", "digest-only"] as const)("keeps %s detail headings and identity readable until raw identity is requested", async kind => {
+  const digest = `sha256:${"b".repeat(64)}`;
+  const named = "registry.example.test/team/app:v2";
+  const reference = kind === "digest-only" ? digest : `${named}@${digest}`;
+  const record = { ...result, image_digest: digest, image_ref: reference, image_ref_normalized: reference, image_repository: kind === "tagged" ? "registry.example.test/team/app" : kind === "digest-only" ? digest : "", image_tag: kind === "tagged" ? "v2" : "", source_ref: reference };
+  vi.mocked(imageScanResults.get).mockResolvedValue({ image_scan_result: record, findings: [], impacted_workloads: [] });
+  await render("");
+  await settled(() => expect(host.querySelector("h1")?.textContent).toBe(kind === "digest-only" ? "Unnamed image" : named));
+  expect(host.textContent).not.toContain("sha256:");
+  expect(imageScanResults.get).toHaveBeenCalledWith("result");
+  await tab("Identity and exports");
+  const identity = [...host.querySelectorAll("section")].find(item => item.querySelector("h2")?.textContent === "Image identity")!;
+  const shown = identity.cloneNode(true) as HTMLElement;
+  shown.querySelectorAll("details:not([open])").forEach(item => item.remove());
+  expect(shown.textContent).not.toContain("sha256:");
+  const source = [...identity.querySelectorAll<HTMLDetailsElement>("details")].find(item => item.querySelector("summary")?.textContent.includes("Source reference"))!;
+  expect(source.open).toBe(false);
+  expect(source.querySelector("code")?.textContent).toBe(reference);
+  const disclosure = [...identity.querySelectorAll<HTMLDetailsElement>("details")].find(item => item.querySelector("summary")?.textContent === "Show digest")!;
+  expect(disclosure.open).toBe(false);
+  expect(disclosure.querySelector("code")?.textContent).toBe(digest);
+  await act(async () => disclosure.querySelector("summary")!.click());
+  expect(disclosure.open).toBe(true);
+  expect(disclosure.querySelector("code")?.textContent).toBe(digest);
+  const raw = [...identity.querySelectorAll<HTMLDetailsElement>("details")].find(item => item.querySelector("summary")?.textContent.includes("Raw image reference"))!;
+  expect(raw.open).toBe(false);
+  await act(async () => raw.querySelector("summary")!.click());
+  expect(raw.open).toBe(true);
+  expect(raw.querySelector("code")?.textContent).toBe(reference);
+  expect(record.image_ref).toBe(reference);
+  expect(record.image_digest).toBe(digest);
+});
+
+
+async function revealStoredDigests(area: Element, expected: string[]) {
+  const disclosures = [...area.querySelectorAll<HTMLDetailsElement>("details")].filter(item => item.querySelector("summary")?.textContent === "Show digest");
+  expect(disclosures.map(item => item.querySelector("code")?.textContent)).toEqual(expected);
+  expect(disclosures.every(item => !item.open)).toBe(true);
+  const shown = area.cloneNode(true) as HTMLElement;
+  shown.querySelectorAll("details:not([open])").forEach(item => item.remove());
+  expect(shown.textContent).not.toContain("sha256:");
+  for (const [index, disclosure] of disclosures.entries()) {
+    await act(async () => disclosure.querySelector("summary")!.click());
+    expect(disclosure.open).toBe(true);
+    expect(disclosure.querySelector("code")?.textContent).toBe(expected[index]);
+  }
+}
+
+it("keeps provenance bundle hashes collapsed until explicitly opened", async () => {
+  const reported = `sha256:${"c".repeat(64)}`;
+  const fallback = `sha256:${"d".repeat(64)}`;
+  vi.mocked(imageScanResults.get).mockResolvedValue({ image_scan_result: { ...result, vulndb_bundle_hash: reported, bundle_metadata: { payload_hash: fallback } }, findings: [], impacted_workloads: [] });
+  await render("?tab=details");
+  await settled(() => expect(host.textContent).toContain("Scan provenance and exports"));
+  const bundle = () => [...host.querySelectorAll("section")].find(item => item.querySelector("h2")?.textContent === "Scan provenance and exports")!;
+  await revealStoredDigests(bundle(), [reported]);
+  vi.mocked(imageScanResults.get).mockResolvedValue({ image_scan_result: { ...result, bundle_metadata: { payload_hash: fallback } }, findings: [], impacted_workloads: [] });
+  await act(async () => button("Refresh").click());
+  await settled(() => expect(bundle().querySelector("code")?.textContent).toBe(fallback));
+  await revealStoredDigests(bundle(), [fallback]);
+});
+
+it("keeps package, file-risk and image-layer hashes collapsed while preserving layer CSV identity", async () => {
+  const first = `sha256:${"a".repeat(64)}`, second = `sha256:${"b".repeat(64)}`, diff = `sha256:${"c".repeat(64)}`;
+  vi.mocked(imageScanResults.get).mockResolvedValue({ image_scan_result: { ...result, package_count: 3, file_risk_count: 3, layer_count: 2 }, findings: [], impacted_workloads: [] });
+  vi.mocked(imageScanResults.packages).mockResolvedValue({ image_scan_result_id: "result", package_layers: [
+    { layer_index: 0, layer_digest: first, package_count: 1, packages: [{ name: "owned-package-zero" }] },
+    { layer_digest: second, package_count: 1, packages: [{ name: "owned-package-unknown" }] },
+    { layer_index: 7, package_count: 1, packages: [{ name: "owned-package-seven" }] },
+  ], layer_package_count: 3 } as Awaited<ReturnType<typeof imageScanResults.packages>>);
+  vi.mocked(imageScanResults.fileRisks).mockResolvedValue({ image_scan_result_id: "result", file_risk: { findings: [
+    { path: "/owned/zero", layer_index: 0, layer_digest: first },
+    { path: "/owned/unknown", layer_digest: second },
+    { path: "/owned/seven", layer_index: 7 },
+  ] } } as Awaited<ReturnType<typeof imageScanResults.fileRisks>>);
+  vi.mocked(imageScanResults.layers).mockResolvedValue({ image_scan_result_id: "result", layer_metadata: { layers: [
+    { index: 0, digest: first, diff_id: diff, command: "RUN apk add curl" },
+    { index: 7, digest: second, command: "COPY app /app" },
+  ] } } as Awaited<ReturnType<typeof imageScanResults.layers>>);
+  await render("?tab=evidence&evidence=packages");
+  await settled(() => expect(host.textContent).toContain("owned-package-seven"));
+  expect(host.textContent).toContain("Layer 0");
+  expect(host.textContent).toContain("Layer index not reported");
+  expect(host.textContent).toContain("Layer 7");
+  await revealStoredDigests(host.querySelector('[data-testid="image-scan-artifact-evidence"]')!, [first, second]);
+  await act(async () => button("Export CSV").click());
+  expect(vi.mocked(downloadCsv).mock.calls.at(-1)![2].map(row => row[0])).toEqual([first, second, "7"]);
+  await tab("File risks");
+  await settled(() => expect(host.textContent).toContain("/owned/seven"));
+  await revealStoredDigests(host.querySelector('[data-testid="image-scan-artifact-evidence"]')!, [first, second]);
+  await act(async () => button("Export CSV").click());
+  expect(vi.mocked(downloadCsv).mock.calls.at(-1)![2].map(row => row[3])).toEqual([first, second, "7"]);
+  await tab("Layers");
+  await settled(() => expect(host.textContent).toContain("RUN apk add curl"));
+  const layers = host.querySelector('[data-testid="image-scan-artifact-evidence"]')!;
+  expect(layers.textContent).toContain("Layer 0");
+  expect(layers.textContent).toContain("Layer 7");
+  expect(layers.textContent).toContain("COPY app /app");
+  expect([...layers.querySelectorAll("[title]")].some(item => [first, second, diff].includes(item.getAttribute("title")!))).toBe(false);
+  await revealStoredDigests(layers, [first, diff, second]);
+});
+
+it.each(["named", "normalized-name", "digest-only", "reported-repository", "reported-digest"] as const)("keeps %s affected workload image references friendly without changing CSV identity", async kind => {
+  const digest = `sha256:${"e".repeat(64)}`;
+  const named = "registry.example.test/team/app:v2";
+  const reference = kind === "named" ? `${named}@${digest}` : kind === "reported-digest" ? named : digest;
+  const normalized = kind === "digest-only" || kind === "reported-repository" ? digest : kind === "reported-digest" ? named : `${named}@${digest}`;
+  const workload: ImpactedWorkload = { cluster_id: "cluster", deployment_id: "deployment", workload_id: "pod", namespace: "payments", name: "api", kind: "Deployment", image_ref: reference, image_ref_normalized: normalized, image_repository: kind === "reported-repository" ? "registry.example.test/team/app" : undefined, image_tag: kind === "reported-repository" ? "v2" : undefined, image_digest: kind === "reported-repository" || kind === "reported-digest" ? digest : undefined, risk_score: 1, finding_count: 1, critical_count: 0, high_count: 0, last_seen_at: "2026-10-12T00:00:00Z" };
+  vi.mocked(imageScanResults.get).mockResolvedValue({ image_scan_result: { ...result, image_ref: digest, image_ref_normalized: `${named}@${digest}`, image_repository: "" }, findings: [], impacted_workloads: [workload] });
+  await render("?tab=workloads");
+  await settled(() => expect(host.querySelectorAll("tbody tr")).toHaveLength(1));
+  const cell = host.querySelector('td[data-column-id="image"]')!;
+  expect(cell.querySelector("span")?.textContent).toBe(kind === "digest-only" ? "Unnamed image" : named);
+  await revealStoredDigests(cell, [digest]);
+  expect(host.querySelector("tbody a")?.getAttribute("href")).toBe("/clusters/cluster/deployments/deployment");
+  await act(async () => button("Export CSV").click());
+  expect(vi.mocked(downloadCsv).mock.calls.at(-1)![2][0][2]).toBe(reference);
+  await tab("Identity and exports");
+  const referenceField = [...host.querySelectorAll("dt")].find(item => item.textContent === "Reference")!;
+  expect(referenceField.nextElementSibling?.textContent).toBe(named);
 });

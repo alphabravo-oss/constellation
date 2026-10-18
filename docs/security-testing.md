@@ -2576,3 +2576,60 @@ the nine-record execution seal is
 `1abcdb5eaa69d7a2338669601b5762a4156c42c9e2ddece192eaa5b9d3df7ab0`.
 Actual child and separately sealed outer exits are 0, groups are absent and
 the lock is released. The original hosted failure remains retained.
+
+
+### Completed 029958a CI and console consistency follow-up (2026-10-18)
+
+[Run 39176306397](https://github.com/alphabravo-oss/constellation/actions/runs/39176306397)
+completes on exact `029958a747e7a53084abe042f19a22cf58b30398` with eight passing
+and five failing jobs. Frontend passes all 2,374 cases, including all 73 schedule
+workflow and 30 Timeline cases. Unit records 3,469 passes / 750 skips;
+integration records 9,506 passes / 14 skips. All fourteen SMTP nodes pass once
+in unit and twice in integration; both request-handler roots pass twice.
+Lint remains 1,449, gosec 136 and historical-secret identities 11, with zero
+count-aware additions or removals. Quality, gosec, history and required remain
+failed; no gate is waived.
+
+The bounded browser job log records 284 unique single attempts: 283 pass and
+one direct-edit case fails before Save. The retained failed-page snapshot shows
+the correct edit form and populated textbox named Name*, while the test requests
+an exact Name label. Its correction uses the existing wizard-name field ID,
+first requiring the correct heading and initial value, and preserves the
+failed-write, draft, redaction and scoped Cancel assertions and timeouts.
+Structured flaky/skip/error fields were not extracted; zero retry markers were
+observed in the complete text log. The original 4 MiB artifact-cap stop remains
+intact. Separately bounded follow-ups retain the 107,663-byte log, original
+4,625,506-byte ZIP and only the 19,107-byte error-context text. No video, trace,
+screenshot or browser report was extracted. All 175 records independently
+verify under `/root/security-triage-39176306397`, seal
+`5bfd671edd0737e1ea11c0276984c6dce0607e60bb77b645960a5b7383cabecb`.
+Root review is `/root/constellation-029958a-ci-root-review-v1.json`.
+
+The following source extends one reusable useEditorVisit hook across Registry,
+Group, Exemption, schedule creation/edit, Policy and Admission Settings editors.
+Owner/target keys remount the actual mutation observer; editor-local lifetime
+checks also reject completions after same-target inner-editor unmount/reopen.
+Existing mutation payloads, freshness/revision guards, safe cache invalidation
+and draft retention remain. Requests already sent are not canceled; server
+scope, concurrent-write CAS and delivery guarantees are not added by this UI
+change. Images reuse shared naming and DigestDisclosure for inventory, preview,
+identity, workload, layer, Diff ID and bundle hashes. Reported repository/tag and
+normalized references remain readable; optional exact digests remain revealable.
+Raw API values, matching filters and CSV identity remain unchanged; React-node
+cells declare explicit raw export values. Login copy matches the shell branding.
+
+The four reviewed private proposals compose twenty paths over029, plus a
+one-line login branding correction and documentation. The isolated preparation
+binds 438 baseline / 439 candidate frontend files and eight full test files,
+forecasting 291 focused cases and 2,419 global frontend / 285 browser cases.
+These are forecasts, not passes. Preparation seal is
+`58d022c955110f0d5909152b97bd768d5fa17be732ede82f93e3a1059c2936b6`
+under `/root/constellation-editor-images-frontend-qualification-preparation-v1`.
+At admission root/Docker/containerd had 43,566,120,960 bytes free, below the
+43,620,761,600-byte startup reserve; no Node, test, typecheck or build was
+invoked. No floor was lowered, cleanup performed or failed command retried.
+The capacity hold and exact source import receipts remain at
+`/root/constellation-editor-images-local-capacity-hold-v1.json` and
+`/root/constellation-editor-images-root-import-v1.json`. Exact-head hosted
+qualification remains pending. Main stays Helm87/schema180 with the older
+frontend; no worker activation, deployment or parent acceptance closes.

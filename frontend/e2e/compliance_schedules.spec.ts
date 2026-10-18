@@ -179,10 +179,12 @@ test("Direct schedule edit retains failed draft and cancels to the scoped list",
     await route.fallback();
   });
   await page.goto(`${root}/schedules/editable/edit?tab=schedules&filter=retained`);
-  await page.getByLabel("Name", { exact: true }).fill("Retained draft name");
+  await expect(page.getByRole("heading", { name: "Edit compliance schedule", exact: true })).toBeVisible();
+  await expect(page.getByTestId("wizard-name")).toHaveValue(current.name);
+  await page.getByTestId("wizard-name").fill("Retained draft name");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect(page.getByRole("alert").filter({ hasText: "Your draft is preserved" })).toBeVisible();
-  await expect(page.getByLabel("Name", { exact: true })).toHaveValue("Retained draft name");
+  await expect(page.getByTestId("wizard-name")).toHaveValue("Retained draft name");
   await expect(page.getByText("Private fixture diagnostic", { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(page).toHaveURL(`${root}?tab=schedules&filter=retained`);

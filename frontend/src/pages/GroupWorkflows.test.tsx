@@ -8,8 +8,9 @@ import { GroupFormPage } from "./GroupFormPage";
 import { GroupDetailPage } from "./GroupDetailPage";
 import { GroupsPage } from "./GroupsPage";
 import { GroupSettingsPage } from "./GroupSettingsPage";
+import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
 
-const route = vi.hoisted(() => ({ groupId: "group", clusterId: "cluster" as string | undefined, resolvedClusterId: "cluster" as string | undefined, clusterLoading: false, clusterError: null as Error | null, search: "", navigate: vi.fn(), setSearch: vi.fn() }));
+const route = vi.hoisted(() => ({ groupId: "group", orgId: "org", userId: "user", clusterId: "cluster" as string | undefined, resolvedClusterId: "cluster" as string | undefined, clusterLoading: false, clusterError: null as Error | null, search: "", navigate: vi.fn(), setSearch: vi.fn() }));
 vi.mock("@/api/client", () => ({ policies: { serviceModeDefaults: vi.fn(), updateServiceModeDefaults: vi.fn() }, groupsApi: { list: vi.fn(), usage: vi.fn(), update: vi.fn(), create: vi.fn(), delete: vi.fn(), promote: vi.fn(), exportYaml: vi.fn(), importYaml: vi.fn() } }));
 vi.mock("@/hooks/useCluster", () => ({ useCluster: () => ({ clusterId: route.clusterId, isLoading: route.clusterLoading, cluster: route.resolvedClusterId ? { id: route.resolvedClusterId } : undefined, error: route.clusterError }) }));
 vi.mock("@tanstack/react-router", () => ({ useParams: () => ({ groupId: route.groupId || undefined }), useNavigate: () => route.navigate, Link: ({ children, href, to: _to, ...props }: { children: ReactNode; href?: string; to?: string }) => <a href={href} {...props}>{children}</a> }));
@@ -23,7 +24,7 @@ let host: HTMLDivElement;
 let client: QueryClient;
 afterEach(() => {
   act(() => root?.unmount()); client?.clear(); host?.remove(); vi.resetAllMocks(); vi.restoreAllMocks();
-  route.groupId = "group"; route.clusterId = "cluster"; route.resolvedClusterId = "cluster"; route.clusterLoading = false; route.clusterError = null; route.search = "";
+  route.groupId = "group"; route.orgId = "org"; route.userId = "user"; route.clusterId = "cluster"; route.resolvedClusterId = "cluster"; route.clusterLoading = false; route.clusterError = null; route.search = "";
 });
 async function renderPage(page: ReactNode, beforeRender?: (queryClient: QueryClient) => void | Promise<void>) {
   host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
@@ -39,6 +40,44 @@ async function changeInput(selector: string, value: string) {
   const input = host.querySelector<HTMLInputElement>(selector)!;
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); });
 }
+
+function ownedGroupForm() {
+  return <TablePreferencesProvider identity={{ org_id: route.orgId, user_id: route.userId }}><GroupFormPage /></TablePreferencesProvider>;
+}
+
+it.each(["group", "owner"])("preserves a fresh group draft after a pending save leaves and returns to its %s", async context => {
+  vi.mocked(groupsApi.list).mockResolvedValue({ groups: [group, { ...group, id: "another-group", name: "Another group" }] });
+  let complete!: (value: Awaited<ReturnType<typeof groupsApi.update>>) => void;
+  vi.mocked(groupsApi.update).mockImplementation(() => new Promise(resolve => { complete = resolve; }));
+  await renderPage(ownedGroupForm()); await settled(() => expect(host.querySelector<HTMLInputElement>("#group-name")?.value).toBe(group.name));
+  await changeInput("#group-name", "Original pending edit"); await submit();
+  await settled(() => expect(groupsApi.update).toHaveBeenCalledTimes(1));
+  if (context === "group") route.groupId = "another-group"; else route.userId = "another-user";
+  await rerenderPage(ownedGroupForm());
+  await settled(() => expect(host.querySelector<HTMLInputElement>("#group-name")?.value).toBe(context === "group" ? "Another group" : group.name));
+  route.groupId = "group"; route.userId = "user"; await rerenderPage(ownedGroupForm());
+  await settled(() => expect(host.querySelector<HTMLInputElement>("#group-name")?.value).toBe(group.name));
+  await changeInput("#group-name", "A fresh group draft");
+  const invalidate = vi.spyOn(client, "invalidateQueries");
+  await act(async () => complete({ id: group.id })); await settled(() => expect(client.isMutating()).toBe(0));
+  expect(route.navigate).not.toHaveBeenCalled();
+  expect(host.querySelector<HTMLInputElement>("#group-name")!.value).toBe("A fresh group draft");
+  expect(groupsApi.update).toHaveBeenCalledTimes(1);
+  for (const family of ["groups", "group-usage", "dashboard"]) expect(invalidate).toHaveBeenCalledWith({ queryKey: [family, "cluster"] });
+});
+
+it("does not redirect another workspace when a pending group save completes after editor unmount", async () => {
+  vi.mocked(groupsApi.list).mockResolvedValue({ groups: [group] });
+  let complete!: (value: Awaited<ReturnType<typeof groupsApi.update>>) => void;
+  vi.mocked(groupsApi.update).mockImplementation(() => new Promise(resolve => { complete = resolve; }));
+  await renderPage(ownedGroupForm()); await settled(() => expect(host.querySelector("form")).not.toBeNull()); await submit();
+  await settled(() => expect(groupsApi.update).toHaveBeenCalledTimes(1));
+  await rerenderPage(<p>Another workspace</p>);
+  const invalidate = vi.spyOn(client, "invalidateQueries");
+  await act(async () => complete({ id: group.id })); await settled(() => expect(client.isMutating()).toBe(0));
+  expect(route.navigate).not.toHaveBeenCalled(); expect(host.textContent).toBe("Another workspace");
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: ["groups", "cluster"] });
+});
 
 it.each(["failed", "missing", "duplicate"])("blocks an editor when its scoped load is %s", async (scenario) => {
   if (scenario === "failed") vi.mocked(groupsApi.list).mockRejectedValue(new Error("private backend details"));

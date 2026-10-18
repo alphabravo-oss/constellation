@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Locator } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { inventoryAt as at, inventoryCluster as clusterId, inventoryMetadata, mockInventoryEndpoints, fulfillInventoryCSV } from "./fixtures/inventory-contracts";
 async function mockInventory(page: Page, endpoint: string, payload: unknown | ((url: URL) => unknown)) {
@@ -191,4 +191,94 @@ test("finding asset grouping reflects only the current server page and follows s
     await expect(page.getByTestId("findings-group-scope")).toContainText("50 groups from 50 instances");
     await expect(page.locator("main details")).toHaveCount(50);
     await expect(page).toHaveURL(/page=2/);
+});
+
+async function revealImageDigest(area: Locator, digest: string) {
+    const disclosure = area.locator("details").filter({ has: area.page().getByText("Show digest", { exact: true }) }).filter({ has: area.page().locator("code", { hasText: digest }) });
+    await expect(disclosure.locator("code")).toBeHidden();
+    await disclosure.locator("summary").click();
+    await expect(disclosure.locator("code")).toBeVisible();
+    await expect(disclosure.locator("code")).toHaveText(digest);
+}
+
+test("image scan names keep digests hidden across inventory, preview and detail until requested", async ({ page }) => {
+    const digest = `sha256:${"c".repeat(64)}`;
+    const layerDigest = `sha256:${"d".repeat(64)}`, diffID = `sha256:${"e".repeat(64)}`, bundleHash = `sha256:${"f".repeat(64)}`;
+    const named = "registry.example.test/team/app:v2";
+    const inventory = ["tagged", "reference-with-digest", "digest-only"].map((kind, index) => ({
+        id: `identity-${index}`, image_ref: kind === "digest-only" ? digest : `${named}@${digest}`,
+        image_ref_normalized: kind === "digest-only" ? digest : `${named}@${digest}`,
+        image_repository: kind === "tagged" ? "registry.example.test/team/app" : kind === "digest-only" ? digest : "",
+        image_tag: kind === "tagged" ? "v2" : "", image_digest: digest, source_ref: `${named}@${digest}`, vulndb_bundle_hash: bundleHash,
+        scanner_profile: "default", source_type: "registry", engine_status: { syft: "succeeded", trivy: "succeeded", grype: "succeeded" },
+        severity_counts: {}, max_risk_score: 0, critical_count: 0, high_count: 0, medium_count: 0, low_count: 0, info_count: 0,
+        finding_count: 0, impacted_count: 1, package_count: 1, layer_count: 1, secret_count: 0, file_risk_count: 1, image_signed: false,
+        first_seen_at: at, updated_at: at, last_scanned_at: at,
+    }));
+    const requests = await mockInventory(page, "/image-scan-results", (url: URL) => ({ image_scan_results: inventory, ...inventoryMetadata(url, 3, { packages: 3, findings: 0, critical_high: 0, exposed: 3, local: 2, stale: 0, incomplete: 0 }) }));
+    await page.route("**/api/v1/image-scan-results/**", async route => {
+        const path = new URL(route.request().url()).pathname;
+        const record = inventory.find(item => path === `/api/v1/image-scan-results/${item.id}` || path.startsWith(`/api/v1/image-scan-results/${item.id}/`));
+        if (!record) return route.fulfill({ status: 404, json: { error: "Unexpected image fixture request" } });
+        const artifact = path.slice(`/api/v1/image-scan-results/${record.id}`.length);
+        const payloads: Record<string, unknown> = {
+            "": { image_scan_result: record, findings: [], impacted_workloads: [{ cluster_id: clusterId, deployment_id: "deployment", workload_id: "pod", namespace: "apps", name: "api", kind: "Deployment", image_ref: record.image_ref, image_ref_normalized: record.image_ref_normalized, risk_score: 0, finding_count: 0, critical_count: 0, high_count: 0, last_seen_at: at }] },
+            "/packages": { image_scan_result_id: record.id, package_layers: [{ layer_index: 4, layer_digest: layerDigest, package_count: 1, packages: [{ name: "owned-package" }] }], layer_package_count: 1 },
+            "/layers": { image_scan_result_id: record.id, layer_metadata: { layers: [{ index: 4, digest: layerDigest, diff_id: diffID, command: "RUN apk add curl" }] } },
+            "/file-risks": { image_scan_result_id: record.id, file_risk: { findings: [{ path: "/owned/file", layer_index: 4, layer_digest: layerDigest }] } },
+            "/config-checks": { image_scan_result_id: record.id, config_checks: { checks: [] } },
+        };
+        return route.fulfill(artifact in payloads ? { json: payloads[artifact] } : { status: 404, json: { error: "Unexpected image artifact request" } });
+    });
+    for (const [index, record] of inventory.entries()) {
+        const expected = index === 2 ? "Unnamed image" : named;
+        await page.goto(`/clusters/${clusterId}/images?selected=${record.id}&image_digest=${encodeURIComponent(digest)}&q=${encodeURIComponent(digest)}`);
+        const table = page.getByTestId("image-scans-table");
+        await expect(table.locator("tbody tr")).toHaveCount(3);
+        expect(await table.innerText()).not.toContain("sha256:");
+        const row = table.locator("tbody tr").filter({ has: page.locator(`a[href$="/images/${record.id}"]`) });
+        await expect(row.locator(`a[href$="/images/${record.id}"]`)).toHaveText(expected);
+        await revealImageDigest(row, digest);
+        await page.locator("summary").filter({ hasText: /^Selected image summary$/ }).click();
+        const preview = page.getByTestId("image-scan-preview");
+        await expect(preview.getByRole("heading", { level: 2 })).toHaveText(expected);
+        expect(await preview.innerText()).not.toContain("sha256:");
+        await revealImageDigest(preview, digest);
+        await revealImageDigest(preview, bundleHash);
+        await preview.getByRole("link", { name: "Full Details", exact: true }).click();
+        const detail = page.getByTestId("image-scan-detail-page");
+        await expect(detail.getByRole("heading", { level: 1 })).toHaveText(expected);
+        expect(await detail.innerText()).not.toContain("sha256:");
+        await page.getByRole("tab", { name: "Identity and exports", exact: true }).click();
+        expect(await detail.innerText()).not.toContain("sha256:");
+        await revealImageDigest(detail, digest);
+        await revealImageDigest(detail, bundleHash);
+        const raw = detail.locator("details").filter({ has: page.getByText("Raw image reference", { exact: true }) });
+        await expect(raw.locator("code")).toBeHidden();
+        await raw.locator("summary").click();
+        await expect(raw.locator("code")).toBeVisible();
+        await expect(raw.locator("code")).toHaveText(record.image_ref);
+        await page.getByRole("tab", { name: /^Affected workloads/ }).click();
+        const workloads = page.getByTestId("image-scan-workloads");
+        await expect(workloads.locator('td[data-column-id="image"] span').first()).toHaveText(expected);
+        expect(await workloads.innerText()).not.toContain("sha256:");
+        await revealImageDigest(workloads, digest);
+        await page.getByRole("tab", { name: "Scan evidence", exact: true }).click();
+        const evidence = page.getByTestId("image-scan-artifact-evidence");
+        await expect(evidence).toContainText("owned-package");
+        await expect(evidence).toContainText("Layer 4");
+        expect(await evidence.innerText()).not.toContain("sha256:");
+        await revealImageDigest(evidence, layerDigest);
+        await page.getByRole("tab", { name: "File risks", exact: true }).click();
+        await expect(evidence).toContainText("/owned/file");
+        expect(await evidence.innerText()).not.toContain("sha256:");
+        await revealImageDigest(evidence, layerDigest);
+        await page.getByRole("tab", { name: "Layers", exact: true }).click();
+        await expect(evidence).toContainText("RUN apk add curl");
+        await expect(evidence).toContainText("Layer 4");
+        expect(await evidence.innerText()).not.toContain("sha256:");
+        await revealImageDigest(evidence, layerDigest);
+        await revealImageDigest(evidence, diffID);
+    }
+    expect(requests.every(url => url.searchParams.get("q") === digest && url.searchParams.get("image_digest") === digest && url.searchParams.get("cluster_id") === clusterId)).toBe(true);
 });

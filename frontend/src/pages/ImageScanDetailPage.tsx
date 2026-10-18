@@ -22,6 +22,9 @@ import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext"
 import { Button } from "@/components/ui/button";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 import { cn } from "@/lib/cn";
+import { imageReferenceName, imageReferenceDisplayName, imageReferenceDigest, imageScanDisplayName } from "@/lib/asset-identity";
+import { DigestDisclosure } from "@/components/ui/digest-disclosure";
+import { Collapse } from "@/components/ui/collapse";
 import { artifactIssue, scanEngineEvidence } from "@/lib/scan-evidence";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
@@ -66,7 +69,7 @@ export function ImageScanDetailPage() {
             Images
           </a>
         }
-        title={displayImage(result)}
+        title={imageScanDisplayName(result)}
         mono
         badges={
           <>
@@ -198,6 +201,10 @@ function EngineEvidence({ result }: { result: ImageScanResult }) {
   </section>;
 }
 
+function LayerIdentity({ index, digest }: { index?: number; digest?: string }) {
+  return <><span>{index === undefined ? "Layer index not reported" : `Layer ${index}`}</span><DigestDisclosure digest={digest} /></>;
+}
+
 function PackagesEvidenceCard({
   loading,
   packageLayers,
@@ -235,7 +242,7 @@ function PackagesEvidenceCard({
           rowKey={(row) => row.key}
           emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">{unattributedPackageCount > 0 ? "Package inventory is present, but no layer attribution was captured." : "No package inventory recorded."}</div>}
           columns={[
-            { id: "layer", header: "Layer", kind: "id", cell: ({ layer }) => layer.layer_digest || `${layer.layer_index ?? "-"}` },
+            { id: "layer", header: "Layer", kind: "text", wrap: true, exportValue: ({ layer }) => layer.layer_digest || `${layer.layer_index ?? "-"}`, cell: ({ layer }) => <LayerIdentity index={layer.layer_index} digest={layer.layer_digest} /> },
             { id: "package", header: "Package", kind: "name", code: true, cell: ({ pkg }) => <><div>{pkg.name || "-"}</div><div className="mt-1 text-xs text-muted-foreground">{pkg.version || pkg.ecosystem || "-"}</div></> },
             { id: "path", header: "Evidence path", kind: "id", size: 260, maxSize: 360, grow: true, cell: ({ location }) => location?.path || location?.real_path || location?.access_path || "-" },
           ]}
@@ -299,7 +306,7 @@ function LayersEvidenceCard({ loading, layers, totalSize, result }: { loading: b
             const instr = cmd.split(/\s+/)[0]?.toUpperCase();
             return (
               <li key={layer.digest || layer.diff_id || index} className="flex items-start gap-3 px-3 py-2">
-                <span className="mt-0.5 w-6 shrink-0 text-right font-mono text-[10px] text-muted-foreground">{layer.index ?? index}</span>
+                <span className="mt-0.5 w-12 shrink-0 text-right font-mono text-[10px] text-muted-foreground">Layer {layer.index ?? index}</span>
                 <div className="min-w-0 flex-1">
                   <code className="block whitespace-pre-wrap break-words font-mono text-[11px] leading-snug text-foreground">
                     {cmd
@@ -316,7 +323,8 @@ function LayersEvidenceCard({ loading, layers, totalSize, result }: { loading: b
                     )}
                     <span className="font-mono">{formatBytes(layer.size_bytes)}</span>
                     {(layer.package_count ?? 0) > 0 && <span>{layer.package_count} pkg{layer.package_count === 1 ? "" : "s"}</span>}
-                    {layer.digest && <span className="max-w-[160px] truncate font-mono opacity-70" title={layer.digest}>{layer.digest.replace("sha256:", "").slice(0, 12)}</span>}
+                    <DigestDisclosure digest={layer.digest} />
+                    {layer.diff_id && layer.diff_id !== layer.digest && <div><span>Diff ID</span><DigestDisclosure digest={layer.diff_id} /></div>}
                   </div>
                 </div>
               </li>
@@ -414,7 +422,7 @@ function FileRisksEvidenceCard({ loading, findings, count }: { loading: boolean;
             { id: "path", header: "Path", kind: "name", cell: (finding) => <><div className="truncate font-mono" title={finding.path}>{finding.path}</div><div className="mt-1 text-xs text-muted-foreground">{finding.reason || finding.type || "-"}</div></> },
             { id: "risk", header: "Risk", kind: "text", wrap: true, cell: (finding) => <><SeverityPill severity={finding.severity || "info"} /><div className="mt-1 text-xs text-muted-foreground">{(finding.risk_types ?? []).join(", ") || "-"}</div></> },
             { id: "mode", header: "Mode", kind: "id", cell: (finding) => `${finding.mode || "-"} · ${finding.uid ?? "-"}:${finding.gid ?? "-"}` },
-            { id: "layer", header: "Layer", kind: "id", cell: (finding) => finding.layer_digest || `${finding.layer_index ?? "-"}` },
+            { id: "layer", header: "Layer", kind: "text", wrap: true, exportValue: (finding) => finding.layer_digest || `${finding.layer_index ?? "-"}`, cell: (finding) => <LayerIdentity index={finding.layer_index} digest={finding.layer_digest} /> },
           ]}
         />
       )}
@@ -427,14 +435,15 @@ function ScanIdentity({ result }: { result: ImageScanResult }) {
     <section className="rounded-lg border border-border bg-card p-4">
       <h2 className="text-sm font-semibold">Image identity</h2>
       <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
-        <Field label="Reference" value={result.image_ref} wide />
-        <Field label="Repository" value={result.image_repository || "-"} />
+        <Field label="Reference" value={imageReferenceDisplayName(result.image_ref_normalized, result.image_ref)} wide />
+        <Field label="Repository" value={imageReferenceName(result.image_repository) || "-"} />
         <Field label="Tag" value={result.image_tag || "-"} />
         <Field label="Platform" value={result.platform || "-"} />
         <Field label="Scanner Profile" value={result.scanner_profile} />
         <Field label="Source" value={sourceLabel(result)} />
-        <Field label="Source Ref" value={result.source_ref || "-"} />
-        <Field label="Digest" value={result.image_digest} wide />
+        <Field label="Source Ref" value={<Collapse label="Source reference"><code className="break-all text-xs">{result.source_ref || "-"}</code></Collapse>} />
+        <Field label="Digest" value={<DigestDisclosure digest={result.image_digest} />} wide />
+        <Field label="Raw reference" value={<Collapse label="Raw image reference"><code className="break-all text-xs">{result.image_ref}</code></Collapse>} wide />
       </dl>
     </section>
   );
@@ -509,7 +518,7 @@ function WorkloadsPanel({ workloads }: { workloads: ImpactedWorkload[] }) {
   const columns: Column<ImpactedWorkload>[] = [
     { id: "workload", header: "Workload", kind: "name", wrap: true, exportValue: item => `${item.namespace}/${item.name}`, cell: item => <a href={`/clusters/${item.cluster_id}/deployments/${item.deployment_id}`} className="font-medium hover:underline">{item.namespace}/{item.name}</a> },
     { id: "kind", header: "Kind", kind: "status", cell: item => item.kind },
-    { id: "image", header: "Image", kind: "text", wrap: true, cell: item => item.image_ref },
+    { id: "image", header: "Image", kind: "text", wrap: true, exportValue: item => item.image_ref, cell: item => <><span>{imageScanDisplayName({ ...item, image_repository: item.image_repository ?? "" })}</span><DigestDisclosure digest={item.image_digest || imageReferenceDigest(item.image_ref, item.image_ref_normalized)} /></> },
     { id: "findings", header: "Findings", kind: "count", cell: item => item.finding_count },
     { id: "risk", header: "Risk", kind: "count", cell: item => item.risk_score },
   ];
@@ -538,7 +547,7 @@ function BundlePanel({ result }: { result: ImageScanResult }) {
       <h2 className="text-sm font-semibold">Scan provenance and exports</h2>
       {metadata || result.vulndb_bundle_version || result.vulndb_bundle_hash ? <dl className="mt-3 grid gap-2 text-sm">
         <Field label="Version" value={result.vulndb_bundle_version || metadata?.bundle_version || "-"} />
-        <Field label="Hash" value={result.vulndb_bundle_hash || metadata?.payload_hash || "-"} />
+        <Field label="Hash" value={result.vulndb_bundle_hash || metadata?.payload_hash ? <DigestDisclosure digest={result.vulndb_bundle_hash || metadata?.payload_hash} /> : "-"} />
         <Field label="Producer" value={metadata?.producer || "-"} />
         <Field label="Exported" value={metadata?.exported_at ? formatDate(metadata.exported_at) : "-"} />
         <Field label="Records" value={metadata?.record_count != null ? `${metadata.record_count}` : "-"} />
@@ -614,12 +623,6 @@ function ArtifactButton({ icon: Icon, label, disabled, onClick }: { icon: typeof
   );
 }
 
-function displayImage(item: ImageScanResult): string {
-  if (item.image_repository && item.image_tag) return `${item.image_repository}:${item.image_tag}`;
-  if (item.image_repository && item.image_repository !== item.image_digest) return item.image_repository;
-  return item.image_ref || item.image_digest;
-}
-
 function isLocalImage(item: ImageScanResult): boolean {
   return item.image_ref.startsWith("sha256:") || !item.image_repository || item.image_repository === item.image_digest;
 }
@@ -658,7 +661,7 @@ function SeverityPill({ severity }: { severity: string }) {
   return <Pill tone={tone}>{severity}</Pill>;
 }
 
-function Field({ label, value, wide = false }: { label: string; value: string; wide?: boolean }) {
+function Field({ label, value, wide = false }: { label: string; value: ReactNode; wide?: boolean }) {
   return (
     <div className={cn("rounded-md border border-border p-2", wide && "sm:col-span-2")}>
       <dt className="text-xs text-muted-foreground">{label}</dt>

@@ -381,6 +381,85 @@ async function renderEdit(schedule = scheduleForEdit()) {
   return schedule;
 }
 
+describe("editor completion ownership", () => {
+  it.each(["control", "owner"])("preserves a fresh exemption draft after a pending save leaves and returns to its %s", async context => {
+    vi.mocked(compliance.checks).mockImplementation(async () => ({ checks: [{ ...check, control_id: new URLSearchParams(route.search).get("control_id") ?? "1.2" }] }));
+    let complete!: (value: Awaited<ReturnType<typeof compliance.createExemption>>) => void;
+    vi.mocked(compliance.createExemption).mockImplementation(() => new Promise(resolve => { complete = resolve; }));
+    await renderPage(<ComplianceExemptionFormPage />); await settled(() => expect(host.querySelector("textarea")).not.toBeNull());
+    await edit("textarea", "Original pending exemption approval"); await submit();
+    await settled(() => expect(compliance.createExemption).toHaveBeenCalledTimes(1));
+    if (context === "control") route.search = "framework=cis&control_id=2.1&filter=a&filter=b"; else route.userId = "another-user";
+    await rerender(); await settled(() => expect(host.querySelector<HTMLTextAreaElement>("textarea")?.value).toBe(""));
+    route.search = "framework=cis&control_id=1.2&filter=a&filter=b"; route.userId = "user";
+    await rerender(); await settled(() => expect(host.querySelector<HTMLTextAreaElement>("textarea")?.value).toBe(""));
+    await edit("textarea", "A fresh exemption approval draft");
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    await act(async () => complete({ id: "created", exemptions: [] })); await settled(() => expect(client.isMutating()).toBe(0));
+    expect(route.navigate).not.toHaveBeenCalled();
+    expect(host.querySelector<HTMLTextAreaElement>("textarea")!.value).toBe("A fresh exemption approval draft");
+    expect(compliance.createExemption).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ cluster_id: "cluster", control_id: "1.2", reason: "Original pending exemption approval" }));
+    for (const family of ["summary", "checks", "evidence", "exemptions"]) expect(invalidate).toHaveBeenCalledWith({ queryKey: ["compliance", family] });
+  });
+
+  it("does not redirect another workspace when a pending exemption completes after editor unmount", async () => {
+    let complete!: (value: Awaited<ReturnType<typeof compliance.createExemption>>) => void;
+    vi.mocked(compliance.createExemption).mockImplementation(() => new Promise(resolve => { complete = resolve; }));
+    await renderPage(<ComplianceExemptionFormPage />); await settled(() => expect(host.querySelector("textarea")).not.toBeNull());
+    await edit("textarea", "Original pending exemption approval"); await submit();
+    await settled(() => expect(compliance.createExemption).toHaveBeenCalledTimes(1));
+    await act(async () => root.render(<QueryClientProvider client={client}><p>Another workspace</p></QueryClientProvider>));
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    await act(async () => complete({ id: "created", exemptions: [] })); await settled(() => expect(client.isMutating()).toBe(0));
+    expect(route.navigate).not.toHaveBeenCalled(); expect(host.textContent).toBe("Another workspace");
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["compliance", "checks"] });
+  });
+
+  it("preserves a fresh schedule draft after a pending creation leaves and returns to the same owner", async () => {
+    let complete!: (value: ComplianceScheduleDB) => void;
+    vi.mocked(compliance.createSchedule).mockImplementation(() => new Promise(resolve => { complete = resolve; }));
+    await renderPage(<ComplianceScheduleFormPage />); await settled(() => expect(host.querySelector("form")).not.toBeNull());
+    await edit("#schedule-name", "Original pending creation"); await submit();
+    await settled(() => expect(compliance.createSchedule).toHaveBeenCalledTimes(1));
+    route.userId = "another-user"; await rerender();
+    await settled(() => expect(host.querySelector<HTMLInputElement>("#schedule-name")?.value).toBe(""));
+    route.userId = "user"; await rerender();
+    await settled(() => expect(host.querySelector<HTMLInputElement>("#schedule-name")?.value).toBe(""));
+    await edit("#schedule-name", "A fresh schedule draft");
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    await act(async () => complete({ ...inherited, id: "created", cluster_id: "cluster" })); await settled(() => expect(client.isMutating()).toBe(0));
+    expect(route.navigate).not.toHaveBeenCalled();
+    expect(host.querySelector<HTMLInputElement>("#schedule-name")!.value).toBe("A fresh schedule draft");
+    expect(compliance.createSchedule).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ name: "Original pending creation", cluster_id: "cluster" }));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["compliance", "db-schedules", "cluster"] });
+  });
+
+  it("does not redirect another workspace when a pending schedule creation completes after editor unmount", async () => {
+    let complete!: (value: ComplianceScheduleDB) => void;
+    vi.mocked(compliance.createSchedule).mockImplementation(() => new Promise(resolve => { complete = resolve; }));
+    await renderPage(<ComplianceScheduleFormPage />); await settled(() => expect(host.querySelector("form")).not.toBeNull());
+    await edit("#schedule-name", "Original pending creation"); await submit();
+    await settled(() => expect(compliance.createSchedule).toHaveBeenCalledTimes(1));
+    await act(async () => root.render(<QueryClientProvider client={client}><p>Another workspace</p></QueryClientProvider>));
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    await act(async () => complete({ ...inherited, id: "created", cluster_id: "cluster" })); await settled(() => expect(client.isMutating()).toBe(0));
+    expect(route.navigate).not.toHaveBeenCalled(); expect(host.textContent).toBe("Another workspace");
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["compliance", "db-schedules", "cluster"] });
+  });
+
+  it("retains schedule-edit completion isolation after editor unmount", async () => {
+    const schedule = await renderEdit(); let complete!: (value: ComplianceScheduleDB) => void;
+    vi.mocked(compliance.patchSchedule).mockImplementation(() => new Promise(resolve => { complete = resolve; }));
+    await edit("#schedule-name", "Original pending edit"); await submit();
+    await settled(() => expect(compliance.patchSchedule).toHaveBeenCalledTimes(1));
+    await act(async () => root.render(<QueryClientProvider client={client}><p>Another workspace</p></QueryClientProvider>));
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    await act(async () => complete({ ...schedule, name: "Original pending edit" })); await settled(() => expect(client.isMutating()).toBe(0));
+    expect(route.navigate).not.toHaveBeenCalled(); expect(host.textContent).toBe("Another workspace");
+    expect(invalidate).not.toHaveBeenCalled();
+  });
+});
+
 describe("schedule configuration edit", () => {
   it("opens a dedicated scoped Edit URL and retains repeated return filters", async () => {
     route.search = "tab=schedules&filter=a&filter=b";

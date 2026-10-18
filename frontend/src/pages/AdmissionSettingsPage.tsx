@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { policies, type AdmissionState, type AdmissionStateInput } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
+import { useEditorVisit } from "@/hooks/useEditorVisit";
 import { PageHeader } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,6 +12,7 @@ import { ErrorState, LoadingState } from "@/components/ui/states";
 
 export function AdmissionSettingsPage() {
   const { clusterId } = useCluster();
+  const { visit } = useEditorVisit(["admission-settings", clusterId]);
   const backTo = clusterId ? `/clusters/${clusterId}/admission` : "/clusters";
   const q = useQuery({ queryKey: ["admission-settings-editor", clusterId], queryFn: () => policies.admissionState({ cluster_id: clusterId }), enabled: !!clusterId, gcTime: 0 });
   const state = q.data?.cluster_id === clusterId ? q.data : undefined;
@@ -22,18 +24,19 @@ export function AdmissionSettingsPage() {
       : !state ? <ErrorState title="Could not load admission settings for this cluster." action={<Button onClick={() => void q.refetch()}>Retry</Button>} />
       : <>
         {q.isError && <p role="alert" className="text-sm text-status-error">Could not refresh settings. Your draft is preserved.</p>}
-        <AdmissionSettingsEditor key={clusterId} clusterId={clusterId} initial={state} backTo={backTo} />
+        <AdmissionSettingsEditor key={visit.context} editorContext={visit.context} clusterId={clusterId} initial={state} backTo={backTo} />
       </>}
   </div>;
 }
 
-function AdmissionSettingsEditor({ clusterId, initial, backTo }: { clusterId: string; initial: AdmissionState; backTo: string }) {
+function AdmissionSettingsEditor({ editorContext, clusterId, initial, backTo }: { editorContext: string; clusterId: string; initial: AdmissionState; backTo: string }) {
+  const { isCurrent } = useEditorVisit([editorContext]);
   const [draft, setDraft] = useState<AdmissionStateInput>({ enabled: initial.enabled, mode: initial.mode, default_action: initial.default_action, failure_policy: initial.failure_policy });
   const navigate = useNavigate();
   const qc = useQueryClient();
   const save = useMutation({
     mutationFn: () => policies.updateAdmissionState(draft, { cluster_id: clusterId }),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["admission-state", clusterId] }); void navigate({ href: backTo }); },
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["admission-state", clusterId] }); if (isCurrent()) void navigate({ href: backTo }); },
   });
   return <Card title="Admission settings" description="Protect can block deployments. Monitor records decisions without blocking them.">
     <form onSubmit={(event) => { event.preventDefault(); if (!save.isPending) save.mutate(); }}>

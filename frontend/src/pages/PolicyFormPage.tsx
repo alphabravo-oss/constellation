@@ -6,6 +6,7 @@ import { FileJson } from "lucide-react";
 import Editor from "@monaco-editor/react";
 import { policies, type Policy } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
+import { useEditorVisit } from "@/hooks/useEditorVisit";
 import { useRouteSearchParams } from "@/lib/route-search";
 import { PageHeader } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
@@ -17,6 +18,7 @@ import { ErrorState, LoadingState } from "@/components/ui/states";
 export function PolicyFormPage() {
   const { clusterId } = useCluster();
   const { policyId } = useParams({ strict: false });
+  const { visit } = useEditorVisit(["policy", clusterId, policyId]);
   const [params] = useRouteSearchParams();
   const fromAdmission = params.get("from") === "admission";
   const backTo = clusterId ? `/clusters/${clusterId}/${fromAdmission ? "admission" : "policies"}` : "/clusters";
@@ -30,12 +32,13 @@ export function PolicyFormPage() {
       : !active ? <ErrorState title="This policy could not be loaded for the selected cluster." action={<Button onClick={() => void q.refetch()}>Retry</Button>} />
       : <>
         {q.isError && <p role="alert" className="text-sm text-status-error">Could not refresh this policy. Your draft is preserved.</p>}
-        <PolicyEditor key={`${clusterId}:${policyId}`} initial={active} backTo={backTo} />
+        <PolicyEditor key={visit.context} editorContext={visit.context} initial={active} backTo={backTo} />
       </>}
   </div>;
 }
 
-function PolicyEditor({ initial, backTo }: { initial: Policy; backTo: string }) {
+function PolicyEditor({ editorContext, initial, backTo }: { editorContext: string; initial: Policy; backTo: string }) {
+  const { isCurrent } = useEditorVisit([editorContext]);
   const [yaml, setYaml] = useState(initial.spec_yaml);
   const [mode, setMode] = useState(initial.mode);
   const qc = useQueryClient();
@@ -43,7 +46,7 @@ function PolicyEditor({ initial, backTo }: { initial: Policy; backTo: string }) 
   const changed = yaml !== initial.spec_yaml || mode !== initial.mode;
   const save = useMutation({
     mutationFn: () => policies.update(initial.id, { spec_yaml: yaml, mode }),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["policies"] }); void qc.invalidateQueries({ queryKey: ["admission-rules"] }); void navigate({ href: backTo }); },
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["policies"] }); void qc.invalidateQueries({ queryKey: ["admission-rules"] }); if (isCurrent()) void navigate({ href: backTo }); },
   });
   return <Card title="Policy" description="Monitor records policy decisions. Enforce can block matching workloads.">
     <form data-testid="policy-editor" onSubmit={(event) => { event.preventDefault(); if (changed && yaml.trim() && !save.isPending) save.mutate(); }}>

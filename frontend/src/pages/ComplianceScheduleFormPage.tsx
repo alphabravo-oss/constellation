@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 import { compliance, type Framework, type ComplianceScheduleDelivery, type ComplianceScheduleDB, type ComplianceScheduleListDBResponse } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
+import { useEditorVisit } from "@/hooks/useEditorVisit";
 import { useEntityClusterScope } from "./entity-detail-scope";
 import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
 import { useRouteSearchParams } from "@/lib/route-search";
@@ -27,6 +28,7 @@ export function ComplianceScheduleFormPage() {
 
 function NewComplianceScheduleFormPage() {
   const { clusterId, cluster, isLoading: clusterLoading, error: clusterError } = useCluster();
+  const { visit } = useEditorVisit(["compliance-schedule", clusterId, "new"]);
   const resolvedScope = !!clusterId && cluster?.id === clusterId;
   const scopeReady = resolvedScope && !clusterLoading && !clusterError;
   const [search] = useRouteSearchParams();
@@ -62,7 +64,7 @@ function NewComplianceScheduleFormPage() {
         {failed && <p role="alert" className="text-sm text-status-error">Could not refresh schedule options. Your draft is preserved. Retry before saving. <Button variant="outline" onClick={retry}>Retry</Button></p>}
         {!currentOptionsAvailable && <p role="alert" className="text-sm text-status-error">Current frameworks or report formats are unavailable. Your draft is preserved; saving is paused. <Button variant="outline" onClick={retry}>Retry</Button></p>}
         {(frameworks.isFetching || options.isFetching) && <p role="status" className="text-sm text-muted-foreground">Refreshing schedule options before saving…</p>}
-        <ScheduleEditor key={clusterId} clusterId={clusterId} frameworks={editorFrameworks} reportFormats={editorFormats} backTo={backTo} unavailable={failed || !scopeReady || !currentOptionsAvailable || frameworks.isFetching || options.isFetching} />
+        <ScheduleEditor key={visit.context} editorContext={visit.context} clusterId={clusterId} frameworks={editorFrameworks} reportFormats={editorFormats} backTo={backTo} unavailable={failed || !scopeReady || !currentOptionsAvailable || frameworks.isFetching || options.isFetching} />
       </>}
   </div>;
 }
@@ -73,12 +75,8 @@ function EditComplianceScheduleFormPage({ scheduleId }: { scheduleId: string }) 
   const identity = useTablePreferencesIdentity();
   const qc = useQueryClient();
   const [search] = useRouteSearchParams();
-  const context = JSON.stringify([clusterId, scheduleId, identity?.org_id, identity?.user_id]);
-  const visitRef = useRef({ context });
-  if (visitRef.current.context !== context) visitRef.current = { context };
-  const visit = visitRef.current;
-  const mounted = useRef(false);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const { visit, isCurrent } = useEditorVisit(["compliance-schedule", clusterId, scheduleId]);
+  const context = visit.context;
   const backSearch = new URLSearchParams(search); backSearch.set("tab", "schedules");
   const backTo = clusterId ? `/clusters/${encodeURIComponent(clusterId)}/compliance?${backSearch}` : "/clusters";
   const listKey = ["compliance", "db-schedules", identity?.org_id, identity?.user_id, clusterId, "edit"];
@@ -92,7 +90,7 @@ function EditComplianceScheduleFormPage({ scheduleId }: { scheduleId: string }) 
     callback => qc.getQueryCache().subscribe(callback),
     () => Number(!!qc.getQueryState(listKey)?.isInvalidated) + 2 * Number(!!qc.getQueryState(frameworkKey)?.isInvalidated),
   );
-  const current = () => mounted.current && visitRef.current === visit && ready && scope.recheck();
+  const current = () => isCurrent() && ready && scope.recheck();
   const currentRow = () => {
     const state = qc.getQueryState<ComplianceScheduleListDBResponse>(listKey);
     if (state?.status !== "success" || state.fetchStatus !== "idle" || state.isInvalidated) return undefined;
@@ -130,12 +128,13 @@ function EditComplianceScheduleFormPage({ scheduleId }: { scheduleId: string }) 
     {!initial ? scope.loading || list.isPending && ready || list.isFetching ? <LoadingState label="Loading schedule…" /> : <ErrorState title="This schedule is unavailable in the current organization and cluster." action={<Button onClick={retry}>Retry</Button>} /> : <>
       <p className="text-sm text-muted-foreground">{initial.cluster_id ? "Cluster schedule" : "Organization schedule · applies across clusters"} · Configured state: {(row?.enabled ?? initial.enabled) ? "Enabled" : "Disabled"}</p>
       {unavailable && <p role="alert" className="text-sm text-status-error">Current schedule or options are unavailable. Your draft is preserved; retry before saving. <Button variant="outline" onClick={retry}>Retry</Button></p>}
-      <ScheduleEditor key={context} clusterId={clusterId!} frameworks={availableFrameworks} reportFormats={availableFormats} backTo={backTo} unavailable={unavailable} initial={initial} assertFresh={assertFresh} isCurrent={current} />
+      <ScheduleEditor key={context} editorContext={context} clusterId={clusterId!} frameworks={availableFrameworks} reportFormats={availableFormats} backTo={backTo} unavailable={unavailable} initial={initial} assertFresh={assertFresh} isCurrent={current} />
     </>}
   </div>;
 }
 
-function ScheduleEditor({ clusterId, frameworks, reportFormats, backTo, unavailable, initial, assertFresh, isCurrent }: { clusterId: string; frameworks: Framework[]; reportFormats: string[]; backTo: string; unavailable: boolean; initial?: ComplianceScheduleDB; assertFresh?: (patch: SchedulePatch) => void; isCurrent?: () => boolean }) {
+function ScheduleEditor({ editorContext, clusterId, frameworks, reportFormats, backTo, unavailable, initial, assertFresh, isCurrent }: { editorContext: string; clusterId: string; frameworks: Framework[]; reportFormats: string[]; backTo: string; unavailable: boolean; initial?: ComplianceScheduleDB; assertFresh?: (patch: SchedulePatch) => void; isCurrent?: () => boolean }) {
+  const { isCurrent: editorCurrent } = useEditorVisit([editorContext]);
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [name, setName] = useState(initial?.name ?? "");
@@ -174,9 +173,9 @@ function ScheduleEditor({ clusterId, frameworks, reportFormats, backTo, unavaila
       return compliance.createSchedule({ name: name.trim(), description, cluster_id: clusterId, framework, cron_expression: cron.trim(), timezone: timezone.trim(), delivery, report_format: format, report_template: template });
     },
     onSuccess: () => {
-      if (initial && !isCurrent?.()) return;
+      if (initial && (!editorCurrent() || !isCurrent?.())) return;
       void qc.invalidateQueries({ queryKey: initial ? ["compliance", "db-schedules"] : ["compliance", "db-schedules", clusterId] });
-      navigate({ href: backTo });
+      if (editorCurrent()) navigate({ href: backTo });
     },
     onSettled: () => { pending.current = false; },
   });
