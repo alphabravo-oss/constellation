@@ -17,20 +17,22 @@ understand the result, and prove that the control is enforced. Constellation's
 stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
 
-Exact combined source **c5428cc** passes **3,524** fresh-schema-180
-race/shuffle/count-two test executions across eight packages, with four explicit
-native/Flannel opt-in skips. All CLI database cases execute; vet passes for all
-eight packages. Four Go binaries, three thin image assemblies and three private
-single-tag exports are verified; all thirteen image probes are independently
-absent. The images retain the qualified native/BPF/library payloads. Main now
-runs **Helm85/schema180**, API/scanner/runtime-agent source **c5428cc**, after a
-fresh completed backup and successful live payload, storage/lease and API smoke
-checks. Migration/frontend remain on 5b82b12.
-Hosted CI on exact c5428cc has nine passing jobs and four failing gates: quality,
-gosec, gitleaks and required. Lint remains 1,459, gosec 144 and the normalized
-history-secret report eleven findings, with unchanged diagnostic identities
-versus 414887a. These fixes do not close parent acceptance items. See
-`docs/security-testing.md` for exact evidence and qualification boundaries.
+Exact combined source **2b29b63** passes **2,460** fresh-schema-180
+race/shuffle/count-two test executions across four affected packages, with six
+explicit native opt-in skips. Vet passes all four packages; four Go binaries,
+three thin images and three private raw single-tag archives are verified. All
+thirteen image probes are independently absent. Main now runs **Helm 86 / schema
+180**, API/scanner/runtime-agent source **2b29b63**, after a fresh completed backup
+and successful live payload, storage/lease and API smoke checks. Migration and
+frontend remain on 5b82b12. This deploys the notifier, backup, federation and
+current-generation readiness follow-ups as well as the inherited c5428cc fixes.
+
+Hosted CI on exact 2b29b63 has nine passing jobs and four failing gates: quality,
+gosec, gitleaks and required. Lint is 1,456, gosec 143 and historical-secret
+identities remain eleven. Count-aware comparisons against c5428cc remove three
+lint and one gosec findings, adding none. Frontend passes 2,344 tests and browser
+acceptance passes 279 cases without failures, flakes or skips. No parent acceptance
+item is closed. See `docs/security-testing.md` for evidence and boundaries.
 
 ## Plan rules
 
@@ -80,21 +82,22 @@ infrastructure continuation after the selected console scope. Off-host recovery
 and deliberate real-node failure remain deferred. The checklist remains **66
 checked / 87 open**; bounded fixes below do not close their parent acceptance gates.
 
-Current main development deployment: **Helm85/schema180**, API/scanner/runtime-agent
-source **c5428cc**; migration/frontend source **5b82b12**. All seven deployments
-and the runtime DaemonSet are ready. Four live Go payloads and inherited native
-DP/BPF hashes match the reviewed artifacts. Health/readiness, policy protocol and
-queue authorization checks pass. Original retained PCAP storage, mode/ownership,
-Recreate strategy and API leader lease identity are preserved. Runtime remains
-in monitor mode with enforcement and benchmark workers disabled; execution
-dry-run is true. A fresh identity-bound CNPG backup completed before the normal
-three-image Helm update. The owned smoke forward and listener are absent.
-Frontend is unchanged; prior public login checks retain their dated evidence,
-and authenticated browser navigation remains unverified under the user's
-isolated-check selection. Live policy and response queues are empty; positive
-enforcement remains separate fixture evidence. See the completed c5428cc entry in
-`docs/security-testing.md` and
-`/tmp/constellation-rollout-c5428cc-preparation/evidence/deployment-status.json`.
+Current main development deployment: **Helm 86 / schema 180**, API/scanner/runtime-agent
+source **2b29b63**; migration/frontend source **5b82b12**. All seven deployments and
+the runtime DaemonSet are ready; StatefulSets match their desired replicas. Four
+live Go payloads and inherited native DP/BPF hashes match the reviewed artifacts.
+Health/readiness, policy protocol and queue authorization checks pass. Original
+retained PCAP storage, mode/ownership, Recreate strategy, API leader lease and
+runtime-token secret identity are preserved. Runtime remains in monitor mode,
+with enforcement and benchmark workers disabled and execution dry-run enabled.
+The fresh CNPG backup retained original UID
+`879e1770-4d88-4fb1-82de-023d170cb3b2` and completed at `2026-10-18T17:58:45Z`
+before the normal three-image update. All sixteen prior pins and three candidate
+pins are verified. The owned smoke forward, listener and disk observer are absent.
+Authenticated browser navigation remains unverified under the user's isolated-check
+selection. Live policy and response queues are empty; positive enforcement remains
+separate dated fixture evidence. The completed deployment manifest is
+`/root/constellation-rollout-2b29b63-preparation/DEPLOYMENT-EVIDENCE-MANIFEST.json`.
 
 The deployed catalog correction extends categorical registry errors to
 DockerHub, GHCR, Generic V2, Nexus, OpenShift, Quay, Harbor, GitLab and JFrog
@@ -120,21 +123,15 @@ remain disabled; this does not establish benchmark execution or broader CIS
 acceptance.
 
 The eight-file notifier delayed-retry, backup terminal-status and federation
-response/error follow-ups are source-qualified and remain undeployed. Fresh 180
-race/shuffle/count-two qualification passes 1,584 tests with zero skips; vet passes,
-scoped lint removes three findings with none added, and old-behavior controls
-reproduce their intended failures. See the new qualification entry in
-`docs/security-testing.md`; no binary/image or live acceptance is claimed.
-The three-file runtime-health follow-up is also source-qualified and undeployed.
-Readiness now requires the active DP generation to be ready; historical replies
-cannot satisfy it after exit or during replacement startup. Full runtime-agent/DP
-qualification passes 876 test executions with six native opt-in skips, vet for both
-packages, unchanged scoped lint (165 findings) and the intended old-predicate
-failures. The search-only fixture inherits an owned directory descriptor so its
-unprivileged child works beneath private temporary-directory ancestors.
-Fresh tap reconciliation and live readiness/enforcement acceptance remain within
-the existing open parent; no binary/image or combined eleven-file qualification
-is claimed.
+response/error follow-ups and three-file runtime-health follow-up are now deployed
+in 2b29b63. Their separate source qualifications remain recorded in
+`docs/security-testing.md`, followed by the combined 2,460-pass qualification,
+artifact verification and Helm 86 deployment. Readiness requires the active DP
+generation; historical replies cannot satisfy it after exit or during replacement
+startup. The unprivileged search-only fixture uses an inherited directory descriptor
+under private temporary-directory ancestors. Fresh tap reconciliation, notifier
+shutdown/persistence, unavailable-DB bookkeeping, federation credential/state
+atomicity and broader enforcement/recovery acceptance remain open.
 
 Deployed schema180 preserves full unsigned native threat IDs and marks unproven
 historical maxima in compact row details. Its full-chain migration checks exact
@@ -4975,13 +4972,36 @@ top-level regressions passing twice and 1,584 full affected-package race/shuffle
 passes with zero skips. Adapted notifier/backup controls fail 4/5 expected events;
 literal old `fed_join.go` alone fails 16 expected events with two passing database
 controls. Detailed classifications, source inventories and the sealed manifest
-are recorded in `docs/security-testing.md`. This is source qualification only;
-Helm 85/c5428cc remains deployed. Notifier shutdown/persistence, unavailable-DB
+are recorded in `docs/security-testing.md`. This records the earlier source
+qualification checkpoint; the combined 2b29b63 qualification and Helm 86 deployment
+supersede its pending status. Notifier shutdown/persistence, unavailable-DB
 bookkeeping, federation credential/state atomicity and external acceptance remain
-open; the runtime-health follow-up remains separate and pending analysis.
+open; runtime-health qualification is recorded separately in
+`docs/security-testing.md`.
 
 Completed [CI 39143874523](https://github.com/alphabravo-oss/constellation/actions/runs/39143874523)
 on documentation source 8daad55 has nine passing/four failing jobs and unchanged
 lint 1,459/gosec 144/history-secret 11 identities against c5428cc. It predates the
 eight-file follow-up. The checklist remains **66 checked / 87 open**; no parent
 acceptance gate closes.
+
+
+### Completed combined 2b29b63 continuation (2026-10-18)
+
+The eleven-file follow-up is now built, deployed and smoke-checked as Helm 86 /
+schema 180 after its fresh original-UID backup. Combined isolated qualification
+passes 2,460 tests with six explicit native opt-in skips and four-package vet.
+Four Go binaries, three thin images, thirteen owned image probes and three raw
+single-tag archives are verified. Six live payload hashes, all controllers,
+storage/lease/privacy/runtime flags, nineteen image pins and expected API smoke
+statuses pass; all release probe containers, forwards and observer processes
+are absent.
+
+Exact-source hosted run 39148334138 completes with nine passing/four failing
+jobs: unit 3,411 passes/745 skips, integration 9,368 passes/14 skips, frontend
+2,344 passes and browser 279 cases without failures, flakes or skips. Quality
+1,456, gosec 143, historical-secret eleven and the required gate still fail;
+no gate or diagnostic is waived. Detailed source, artifact, CI and deployment
+receipts are in `docs/security-testing.md`. The checklist remains **66 checked /
+87 open**. The new scheduler-delivery and namespace-restoration candidates are
+separate, unqualified preparations and are not included in deployed 2b29b63.

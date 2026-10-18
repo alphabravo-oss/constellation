@@ -1741,17 +1741,17 @@ Quality/security and broader parent acceptance gates remain open.
 ### Follow-up source and runtime readiness finding
 
 The notifier delayed-retry, backup terminal-status and federation response/error
-follow-ups now pass the isolated eight-file qualification recorded below. They
-remain undeployed; no binary/image qualification or live smoke is claimed for
-these files. The federation correction retains trusted private endpoints,
+follow-ups passed the isolated eight-file qualification recorded below. At that
+checkpoint they were undeployed; the later combined qualification and Helm 86
+deployment are recorded below. The federation correction retains trusted private endpoints,
 implicit-token destination binding and redirect refusal. Credential/state
 transaction semantics remain unchanged. This source evidence is separate from
 the deployed c5428cc evidence.
 
 The separate runtime source audit identified cumulative DP counters satisfying
 readiness after process exit or while a replacement awaits its first reply.
-The source correction is qualified below and remains undeployed; this was not
-an observed live outage. Original audit:
+The correction was subsequently qualified and deployed in 2b29b63 as recorded
+below; this audit did not observe a live outage. Original audit:
 `/root/constellation-runtime-readiness-audit-c5428cc/AUDIT.json`
 (SHA256 `cd80025441d7f7e531d166021943046a819c2d5e1dd85c55ee06189814891bfc`).
 Fresh tap reconciliation and live readiness/enforcement acceptance remain open;
@@ -1795,9 +1795,9 @@ resource floors remained unchanged.
 Broader notifier Dispatch/HTTP-shutdown durability, retry when bookkeeping DB is
 unavailable, federation credential/state write atomicity and actual 30-minute
 export-timeout acceptance remain open. Runtime-health source qualification is
-recorded below; its deployment remains pending. These eight files are
-**source-qualified, not deployed**:
-main remains Helm 85/schema 180 with c5428cc API/scanner/runtime-agent images.
+recorded below. These eight files were source-qualified while main still ran
+Helm 85/schema 180 with c5428cc; the later combined 2b29b63 artifact and deployment
+records below supersede that pending state.
 External provider/IdP, authenticated browser, broader enforcement/CNI/HA and
 recovery acceptance remain open. The checklist remains 66 checked / 87 open.
 
@@ -1844,10 +1844,160 @@ sealed stages. Warm initialization 42.75/42.625 GiB and command 42.5 GiB
 admission used the reviewed same-package observations; hard 40 GiB root/Docker and
 2 GiB /tmp floors, early stops and owned process/database cleanup remained.
 
-The import is onto b5e4200, where the three original file hashes still match
+The import was onto b5e4200, where the three original file hashes matched
 the frozen base. The preceding eight notifier/backup/federation files retain their
-separate qualification; no combined eleven-file run, binaries/images, deployment
-or live readiness acceptance is claimed here. Main remains Helm 85/schema 180
-with c5428cc API/scanner/runtime-agent images. Native/Flannel, fresh tap, broader
+separate qualification. This checkpoint preceded combined artifact qualification
+and deployment, when main still ran Helm 85/schema 180 with c5428cc; the completed
+2b29b63 qualification and Helm 86 deployment are recorded below. Native/Flannel, fresh tap, broader
 enforcement/CNI/HA and recovery acceptance remain open. No parent checklist item
 is closed; the plan remains 66 checked / 87 open.
+
+
+### Combined exact 2b29b63 artifact qualification (2026-10-18)
+
+Exact source `2b29b6350c2c43e4b8656e213738e7c67c98b58d` combines the eight
+notifier/backup/federation files and three runtime-readiness files above. The
+complete frozen inventory contains 2,624 paths, checked against Git bytes, types
+and modes. A fresh owned PostgreSQL 16 database was migrated through schema 180
+twice and seeded before the four affected packages ran with race detection,
+shuffle and count two: **2,460 passing test events**, zero failures and exactly
+six native opt-in skips. All new regressions execute twice; all four packages pass
+vet without diagnostics. Hosted full-suite results below are separate evidence.
+The owned database and test/analysis process groups are independently absent.
+
+The combined test result is
+`/root/constellation-next-release-2b29b6350c2c-preparation/build/evidence/FINAL-TEST-RESULT.json`
+(SHA256 `29b15bb03183a05b8f21436cef351091ff266a45bb8c99a2e313824f479b6327`).
+The exact source binding has SHA256
+`11062a470961e50eefd19933e6969adc3764788e40343bbd9631a3d51bb12832`.
+The original 2,662-record input seal remains intact.
+
+All four Go1.26.9 linux/amd64 binaries build with CGO disabled and trimpath.
+The first build completed the API, then stopped before launching the CLI because
+fresh free space missed the unchanged 43 GiB admission requirement. That partial
+attempt remains sealed. After exact unused build-cache recovery, a separately
+reviewed continuation copied the verified API into an independent file and built
+only the remaining CLI, scanner and runtime binaries. Original API bytes, mode
+and inode remain unchanged; all final binary hashes and build metadata are
+verified. No failed stage was blindly rerun and no resource floor was reduced.
+The complete receipt is
+`/root/constellation-next-release-2b29b6350c2c-build-continuation-v1/evidence/binary-build-receipt.json`
+(SHA256 `46b80ac86d809cf4bc0b3fdf9133494a875323dbd9d86f0956f7bb88d7c47ddd`).
+
+Three thin images copy only these Go payloads over qualified c5428cc parents.
+Parent configuration, layers and history are preserved apart from reviewed
+version labels. Packaged hashes, root ownership and executable modes pass;
+API/CLI/scanner supported help checks pass as nonroot. Native DP, BPF and all
+23 runtime libraries and dependency mappings remain unchanged. All thirteen
+owned probe IDs, names and nonces and all build groups are independently absent.
+The assembly receipt is
+`/root/constellation-images-2b29b63-preparation/execution/ASSEMBLY-RECEIPT.json`
+(SHA256 `fffa78f98e8d9f0697fa024b79eb24bcd1e99840a3227359f0a24bbd0066277a`).
+This is a verified thin assembly, not a new native/BPF build or packet acceptance
+run. The earlier Flannel packet evidence remains specific to 314afad.
+
+Three private raw single-tag archives total 906,605,056 bytes. Full hashes,
+regular bounded root `index.json`/`oci-layout`, sole top-level descriptor/reference,
+Docker manifest and nested OCI/config/layer identities are verified before
+publication. Directory mode is 0700 and all files are 0600. Export receipt:
+`/root/constellation-rollout-2b29b63-archives/EXPORT-RECEIPT.json`
+(SHA256 `81dced95c237ea9d6fa7a70adcbe94a12beb742595ea2cedba03e774358aae79`).
+The 27-record archive seal is
+`467e445e477405ef3a58d7df92db6b6d4b0504f2c1f44470c6d5e2e92fb0e63d`.
+The original source preparation, focused evidence and earlier c5428cc artifacts
+remain preserved. Artifact qualification alone does not establish live behavior
+or close a parent acceptance gate.
+
+
+### Completed exact 2b29b63 hosted CI (2026-10-18)
+
+Hosted [run 39148334138](https://github.com/alphabravo-oss/constellation/actions/runs/39148334138)
+completed on exact combined source `2b29b6350c2c43e4b8656e213738e7c67c98b58d`
+with nine passing jobs and four failing gates: quality, gosec, gitleaks and required.
+Frontend passes 2,344 tests; browser passes all 279 cases with zero failures,
+flakes, skips or report errors. Go unit records 3,411 passing test events and
+745 skips; integration records 9,368 passes and fourteen skips. Both Go reports
+have 99 passing package completions, 26 package skips and no failed tests. These
+hosted totals include parent/subtest events and remain separate from isolated
+fresh-database qualification.
+
+Count-aware diagnostic comparisons against documentation-head run 39143874523
+and c5428cc run 39139492997 remove three lint identities (1,459 → 1,456) and one
+standalone gosec identity (144 → 143), with none added. Historical-secret identities
+remain eleven, unchanged. Raw reports are retained; location drift is excluded
+from normalized lint/gosec identity keys, and multiplicity is preserved. No debt,
+suppression or gate is waived. FIPS and dependency checks pass. Govulncheck reports
+zero reachable vulnerabilities while retaining two imported-package and three
+required-module findings that the code does not appear to call.
+
+The fourteen integration skips cover native/Flannel fixtures, privileged BPF/owned
+child fixtures, missing Syft and a directory-ownership case requiring root.
+External acceptance remains open. The superseded b5e4200 run was cancelled and
+its evidence is explicitly partial; it is not counted as a completed test run.
+
+The sealed manifest
+`/root/security-triage-39148334138/COMPLETED-MANIFEST.json`
+has SHA256 `5a2224303a06bee91bdc1375e7f01ef9675a25af9b192ddfc6ff5076a73cf3bf`;
+the 174-record seal is `d151842bb5656907595843f5a9b23584c927c0c4d45c437fca07c22141365d70`.
+Retained evidence totals 7,466,137 bytes, with no videos. Hosted source evidence
+does not close broader enforcement, recovery or release-acceptance gates; the
+canonical checklist remains 66 checked / 87 open.
+
+
+### Completed exact 2b29b63 deployment (2026-10-18, Helm 86 / schema 180)
+
+The reviewed API, scanner and runtime-agent images are deployed through the
+normal Helm 85-to-86 update. The server dry-run and installed manifest differ
+only in the three role images and matching API init image; normal hook revision
+names advance. Frontend and migration remain on 5b82b12. All seven Deployments
+and the runtime DaemonSet are ready; both StatefulSets match desired replicas
+(the retired PostgreSQL StatefulSet remains scaled to zero). All sixteen prior
+pins remain, three new candidate pins are acknowledged by CRI, and all thirteen
+rendered image dependency chains verify.
+
+The new pre-upgrade CNPG backup
+`constellation-pre-security-2b29b63-20261018-cfbd6e20` retained original UID
+`879e1770-4d88-4fb1-82de-023d170cb3b2`, backup ID `20261018T175148`, and completed
+at `2026-10-18T17:58:45Z`. Fresh storage mapping and the reviewed 2 GiB additional
+backup estimate passed before creation. This estimate is not a quota or future
+size guarantee. No prior backup was adopted, replaced or blindly rerun.
+
+Six live Go/native/BPF payload hashes match the qualified artifacts. The retained
+PCAP PVC/PV, directory mode 700 with ownership 10001:10001, API Recreate strategy,
+leader lease, runtime token secret UID and controller identities are preserved.
+Monitor mode and execution dry-run remain enabled, enforcement and benchmark
+workers remain disabled. API pod UID is `88d2825f-6110-4650-8c40-f3abc940f292`;
+scanner and runtime pod UIDs are recorded in the verification receipt. Root
+independently rechecked current controller readiness and smoke-forward absence.
+
+Health/readiness return 200. Policy protocol 2 succeeds with zero policies,
+legacy protocol returns 426 and an unknown cluster returns 404. Response protocol
+2 succeeds with zero pending actions; anonymous, foreign-cluster and duplicate-node
+requests return 401, 403 and 400. Empty queues do not prove positive enforcement.
+The exact owned loopback port-forward was terminated and reaped; both PID and
+listener are independently absent. Live smoke SHA256 is
+`4a708e2641d9460d0b5486fe81ee11495f3cdbff103e2701c51c2f956a4f1211`.
+
+A separate read-only disk observer records 246 samples from 17:42:12 through
+18:02:37 UTC, covering export, import, backup, update and smoke. Minimum available
+root/Docker/containerd space was 48,651,431,936 bytes and /tmp 2,350,751,744 bytes;
+no warning or hard floor was crossed. The exact observer process is absent.
+Observer evidence is `/root/constellation-rollout-2b29b63-disk-observer`, with
+five-record seal `c9e79a0c99eaf984608955de60dba263685ab490dd564076ab84fce3939a2cd4`.
+Host scanner DB restoration remains a separate pending guarded operation.
+
+Root verified all 172 final deployment records. The immutable manifest is
+`/root/constellation-rollout-2b29b63-preparation/DEPLOYMENT-EVIDENCE-MANIFEST.json`
+(SHA256 `7a15369a75d8f7304ce7e7ac9983387524eccc7adf433c075b74d866c09c7267`);
+its 172-record seal is
+`d233b1e144f8bffa3576521f37969b3fd5a0f074c2d05d6158becd22d0469399`.
+Final deployment-status SHA256 is
+`db15a7813b6df44f72dc11ca31c55ed72113730bf551d7a0643ca3f01b12a7b1`.
+
+This deploys the bounded follow-ups; fresh native/BPF compilation, new packet/CNI
+acceptance, authenticated main-browser workflows and broader recovery remain
+unverified here. Historical key use outside test clusters is unknown; external
+revocation/replacement and public-history decisions remain open. Off-host recovery
+and deliberate real-node failure remain deferred. No parent acceptance gate closes;
+the canonical plan remains 66 checked / 87 open. Scheduler delivery and DP namespace
+restoration candidates are separate unqualified preparations, outside this release.
