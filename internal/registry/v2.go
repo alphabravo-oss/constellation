@@ -157,7 +157,7 @@ func selectManifestPlatform(manifests []manifestIndexEntry, requested, digest st
 		selectedPlatform = platformString(manifests[0].Platform.OS, manifests[0].Platform.Architecture, manifests[0].Platform.Variant)
 	}
 	if selectedDigest == "" {
-		return "", "", nil, fmt.Errorf("registry: platform required for multi-platform manifest %s (available: %s)", digest, strings.Join(architectures, ","))
+		return "", "", nil, errors.New("registry: platform required for multi-platform manifest")
 	}
 	return selectedDigest, selectedPlatform, architectures, nil
 }
@@ -167,7 +167,7 @@ func manifestIndexMetadata(ctx context.Context, client *http.Client, v2Host, ref
 		Manifests []manifestIndexEntry `json:"manifests"`
 	}
 	if err := json.Unmarshal(body, &index); err != nil {
-		return nil, fmt.Errorf("registry: decode manifest index: %w", err)
+		return nil, responseFailure("registry manifest index", "response decode failed", 0, err)
 	}
 	selectedDigest, selectedPlatform, architectures, err := selectManifestPlatform(index.Manifests, platform, digest)
 	if err != nil {
@@ -197,7 +197,7 @@ func manifestMetadataFromBody(ctx context.Context, client *http.Client, v2Host, 
 		MediaType     string `json:"mediaType"`
 	}
 	if err := json.Unmarshal(body, &header); err != nil {
-		return nil, fmt.Errorf("registry: decode manifest: %w", err)
+		return nil, responseFailure("registry manifest", "response decode failed", 0, err)
 	}
 	mediaType := firstNonEmpty(header.MediaType, strings.Split(contentType, ";")[0])
 	if isManifestList(mediaType) {
@@ -219,7 +219,7 @@ func manifestMetadataFromBody(ctx context.Context, client *http.Client, v2Host, 
 		} `json:"layers"`
 	}
 	if err := json.Unmarshal(body, &manifest); err != nil {
-		return nil, fmt.Errorf("registry: decode image manifest: %w", err)
+		return nil, responseFailure("registry image manifest", "response decode failed", 0, err)
 	}
 	layers := make([]ManifestDescriptor, 0, len(manifest.Layers))
 	var total int64
@@ -251,7 +251,7 @@ func manifestMetadataFromBody(ctx context.Context, client *http.Client, v2Host, 
 func getManifestBody(ctx context.Context, client *http.Client, url, accept, token string) ([]byte, string, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, "", "", err
+		return nil, "", "", responseFailure("registry manifest", "request creation failed", 0, err)
 	}
 	req.Header.Set("Accept", accept)
 	if token != "" {
@@ -259,17 +259,17 @@ func getManifestBody(ctx context.Context, client *http.Client, url, accept, toke
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, "", "", fmt.Errorf("registry: GET %s: %w", url, err)
+		return nil, "", "", responseFailure("registry manifest", "request failed", 0, err)
 	}
 	body, err := readRegistryPage(resp, manifestResponseLimit)
 	if err != nil {
-		return nil, "", "", err
+		return nil, "", "", responseFailure("registry manifest", "response read failed", resp.StatusCode, err)
 	}
 	if resp.StatusCode == 401 {
 		return nil, "", "", &errUnauthorized{challenge: resp.Header.Get("Www-Authenticate")}
 	}
 	if resp.StatusCode >= 400 {
-		return nil, "", "", fmt.Errorf("registry: GET %s: status %d", url, resp.StatusCode)
+		return nil, "", "", responseFailure("registry manifest", "request rejected", resp.StatusCode, nil)
 	}
 	return body, resp.Header.Get("Docker-Content-Digest"), resp.Header.Get("Content-Type"), nil
 }
@@ -277,12 +277,12 @@ func getManifestBody(ctx context.Context, client *http.Client, url, accept, toke
 // errUnauthorized carries the WWW-Authenticate challenge so the caller can fetch a token.
 type errUnauthorized struct{ challenge string }
 
-func (e *errUnauthorized) Error() string { return "registry: 401 " + e.challenge }
+func (e *errUnauthorized) Error() string { return "registry: unauthorized (HTTP 401)" }
 
 func headManifest(ctx context.Context, client *http.Client, url, accept, token string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, url, nil)
 	if err != nil {
-		return "", err
+		return "", responseFailure("registry manifest HEAD", "request creation failed", 0, err)
 	}
 	req.Header.Set("Accept", accept)
 	if token != "" {
@@ -290,16 +290,16 @@ func headManifest(ctx context.Context, client *http.Client, url, accept, token s
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("registry: HEAD %s: %w", url, err)
+		return "", responseFailure("registry manifest HEAD", "request failed", 0, err)
 	}
 	if err := resp.Body.Close(); err != nil {
-		return "", fmt.Errorf("registry: close HEAD response: %w", err)
+		return "", responseFailure("registry manifest HEAD", "response read failed", resp.StatusCode, err)
 	}
 	if resp.StatusCode == 401 {
 		return "", &errUnauthorized{challenge: resp.Header.Get("Www-Authenticate")}
 	}
 	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("registry: HEAD %s: status %d", url, resp.StatusCode)
+		return "", responseFailure("registry manifest HEAD", "request rejected", resp.StatusCode, nil)
 	}
 	digest := resp.Header.Get("Docker-Content-Digest")
 	if digest == "" {
@@ -314,7 +314,7 @@ func headManifest(ctx context.Context, client *http.Client, url, accept, token s
 func getManifestDigest(ctx context.Context, client *http.Client, url, accept, token string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return "", err
+		return "", responseFailure("registry manifest digest", "request creation failed", 0, err)
 	}
 	req.Header.Set("Accept", accept)
 	if token != "" {
@@ -322,17 +322,17 @@ func getManifestDigest(ctx context.Context, client *http.Client, url, accept, to
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", responseFailure("registry manifest digest", "request failed", 0, err)
 	}
 	_, err = readRegistryPage(resp, manifestResponseLimit)
 	if err != nil {
-		return "", err
+		return "", responseFailure("registry manifest digest", "response read failed", resp.StatusCode, err)
 	}
 	if resp.StatusCode == 401 {
 		return "", &errUnauthorized{challenge: resp.Header.Get("Www-Authenticate")}
 	}
 	if resp.StatusCode >= 400 {
-		return "", fmt.Errorf("registry: GET %s: status %d", url, resp.StatusCode)
+		return "", responseFailure("registry manifest digest", "request rejected", resp.StatusCode, nil)
 	}
 	if digest := resp.Header.Get("Docker-Content-Digest"); digest != "" {
 		return digest, nil
@@ -386,7 +386,7 @@ func firstNonEmpty(values ...string) string {
 // realm for an anonymous token.
 func fetchTokenFromChallenge(ctx context.Context, client *http.Client, challenge string) (string, error) {
 	if !strings.HasPrefix(challenge, "Bearer ") {
-		return "", fmt.Errorf("registry: not a Bearer challenge: %q", challenge)
+		return "", errors.New("registry: not a Bearer challenge")
 	}
 	params := parseChallengeParams(strings.TrimPrefix(challenge, "Bearer "))
 	realm := params["realm"]
@@ -403,25 +403,25 @@ func fetchTokenFromChallenge(ctx context.Context, client *http.Client, challenge
 	url = strings.TrimSuffix(url, "&")
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return "", err
+		return "", responseFailure("registry token", "request creation failed", 0, err)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", responseFailure("registry token", "request failed", 0, err)
 	}
 	body, err := readRegistryPage(resp, tokenResponseLimit)
 	if err != nil {
-		return "", err
+		return "", responseFailure("registry token", "response read failed", resp.StatusCode, err)
 	}
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("registry: token endpoint status %d", resp.StatusCode)
+		return "", responseFailure("registry token", "request rejected", resp.StatusCode, nil)
 	}
 	var tok struct {
 		Token       string `json:"token"`
 		AccessToken string `json:"access_token"`
 	}
 	if err := json.Unmarshal(body, &tok); err != nil {
-		return "", err
+		return "", responseFailure("registry token", "response decode failed", resp.StatusCode, err)
 	}
 	if tok.Token != "" {
 		return tok.Token, nil
@@ -512,7 +512,7 @@ func listTagsViaV2(ctx context.Context, client *http.Client, repoRef, token stri
 	}
 	host, repo := splitHostRepo(repoRef)
 	if host == "" || repo == "" {
-		return nil, fmt.Errorf("registry: tags/list requires a host-qualified repository, got %q", repoRef)
+		return nil, errors.New("registry: tags/list requires a host-qualified repository")
 	}
 	v2Host := host
 	if host == "docker.io" {
@@ -547,7 +547,7 @@ func listTagsViaV2(ctx context.Context, client *http.Client, repoRef, token stri
 func getTagsPage(ctx context.Context, client *http.Client, url, token string) ([]string, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, "", err
+		return nil, "", responseFailure("registry tags", "request creation failed", 0, err)
 	}
 	req.Header.Set("Accept", "application/json")
 	if token != "" {
@@ -555,29 +555,30 @@ func getTagsPage(ctx context.Context, client *http.Client, url, token string) ([
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, "", fmt.Errorf("registry: GET %s: %w", url, err)
+		return nil, "", responseFailure("registry tags", "request failed", 0, err)
 	}
 	body, err := readRegistryPage(resp, tagsResponseLimit)
 	if err != nil {
-		return nil, "", err
+		return nil, "", responseFailure("registry tags", "response read failed", resp.StatusCode, err)
 	}
 	if resp.StatusCode == 401 {
 		return nil, "", &errUnauthorized{challenge: resp.Header.Get("Www-Authenticate")}
 	}
 	if resp.StatusCode >= 400 {
-		return nil, "", fmt.Errorf("registry: GET %s: status %d", url, resp.StatusCode)
+		return nil, "", responseFailure("registry tags", "request rejected", resp.StatusCode, nil)
 	}
 	var doc struct {
 		Tags []string `json:"tags"`
 	}
 	if err := json.Unmarshal(body, &doc); err != nil {
-		return nil, "", fmt.Errorf("registry: decode tags: %w", err)
+		return nil, "", responseFailure("registry tags", "response decode failed", resp.StatusCode, err)
 	}
 	return doc.Tags, nextLinkURL(resp.Header.Get("Link"), url), nil
 }
 
 // nextLinkURL extracts the rel="next" target from a v2 Link header and resolves
 // it against the current page URL. Returns "" when there is no next page.
+
 func nextLinkURL(link, current string) string {
 	link = strings.TrimSpace(link)
 	if link == "" || !strings.Contains(link, `rel="next"`) {

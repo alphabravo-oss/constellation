@@ -1510,3 +1510,87 @@ with sixteen verified handoff records. Minimum free space during final stages wa
 46,774,669,312 bytes on root and 3,059,589,120 bytes on /tmp. Combined database
 qualification, binaries, images and deployment remain pending. Main remains on
 877a1c2 / Helm revision 84; no parent acceptance item closes here.
+
+
+### Combined source 414887a qualification and continuation (2026-10-18)
+
+The exact combined catalog/CIS/CLI source passes 3,384 fresh-schema-180
+race/shuffle/count-two test executions across eight packages. The database
+migrated twice, seeded and was removed; all previously skipped CLI database
+cases executed. Only four explicit native/Flannel opt-in fixture events skip.
+No new binaries or deployment are claimed for this source. Vet and the final
+combined build follow the remaining bounded CLI/registry changes.
+Evidence: `/tmp/constellation-integrated-security-followup-preparation/evidence/combined-qualification-summary.json`.
+
+Hosted CI run 39042839041 completed on exact 414887a: nine jobs pass and four
+fail (quality, gosec, gitleaks and the aggregate required gate). Unit, integration,
+browser, frontend, dependency, govulncheck and FIPS jobs pass. Configured lint
+findings decrease from 1,469 to 1,459; raw diagnostic identities include the
+previously disclosed complexity-52 rename and CRD complexity 70 to 60. Gosec
+findings decrease from 153 to 144 with zero added identities. The gitleaks report
+is byte-identical to the previous completed report. These gates remain open.
+Completed metadata and the three inspected reports are recorded in
+`/tmp/security-triage-39042839041/COMPLETED-REPORT-MANIFEST.json`.
+
+The user selected continued isolated checks; authenticated live browser workflow
+acceptance remains unverified. The user reports that use of the historical
+admission TLS key outside disposable test clusters is unknown. The prior local
+certificate inventory does not establish external non-use. Public history and
+external trust remain unchanged, and replacement/revocation scope remains open.
+
+
+The resumed tooling pass first recovered capacity without clearing the warm Go
+cache: 1,188 regenerable module ZIP downloads were removed only where matching
+extracted module directories existed; module metadata, hashes and extracted code
+remain. Fifteen inactive tool releases were removed after complete hash/identity
+verification and a fresh process-reference scan with zero matches. Current and
+fallback tool versions remain. These steps reclaim approximately 8.7 GB; no
+backup, cluster volume, evidence archive or image was removed. Private receipts
+are retained under `/root/constellation-cache-recovery-20261018`.
+
+
+### Remaining CLI export publication (2026-10-18, source qualified)
+
+The two cluster registration YAML outputs and compliance export now also use
+`securefiles.WritePath` with the current command context. Mint/rotate requests
+still occur once before file publication; failures do not retry or roll back
+those server mutations. Explicit stdout output remains available. Tests prove
+private replacement without changing linked originals or parent modes, symlink
+rejection, source-failure preservation, cancellation before publication and
+completed-file retention when confirmation output fails.
+
+Both affected packages pass 360 race/shuffle/count-two executions and vet. Eight
+isolated database skips remain explicit and must execute in final database
+qualification. Literal original 414887a production files compile and fail exactly
+three intended top-level controls and nine subtests. Scoped lint remains ten
+existing findings; its report is byte-identical to the approved baseline.
+Root verified all six stage seals and the three imported source hashes.
+Evidence: `/root/constellation-cli-residual-publication-414887a-qualification/FINAL-RESULTS.json`
+(SHA256 `9ccbd2db6cc07275a3fc0907c473169a5fadf30e55818804252b29e3bb1af6db`).
+Final combined qualification, binaries and deployment remain pending.
+
+
+### ECR and shared V2 diagnostic boundaries (2026-10-18, source qualified)
+
+ECR repository, image and authorization SDK failures now expose constant
+operation/category text while preserving typed underlying causes. Missing digest
+errors omit supplied references. Shared V2 request, transport, read/close, status
+and decode errors omit remote diagnostic values, URLs and authentication headers.
+The internal unauthorized error retains its challenge for the existing token
+retry; its public message is constant. Unsupported challenge, repository and
+platform-selection errors also omit untrusted values. Successful metadata,
+authentication, pagination, partial results, complete bounded reads and response
+closure behavior are preserved. This does not add SDK body bounds or claim
+complete provider acceptance.
+
+The complete registry package passes 768 race/shuffle/count-two executions with
+zero failures or skips, and vet. Configured lint remains eleven existing findings
+with zero additions/removals. Literal original 414887a production files compile
+and fail eight intended top-level tests and 38 subtests (41 leaf assertions):
+37 untrusted-value assertions and four missing categorical-context assertions.
+Those four are not claimed as demonstrated numeric-value disclosures.
+Root verified 75 evidence/input/source records and the four imported hashes.
+Handoff: `/root/constellation-ecr-errors-414887a-qualification/handoff/QUALIFIED-RESULTS.json`
+(SHA256 `e6483b70cef56c86e5a5578b2a8b15fe21062d1808dc6252a77a0433c498c254`),
+seal SHA256 `9250d285431b077f63fe8771a5774c892a9317530b41499f7e07b45fc22c1d67`.
+Final combined database qualification, artifacts and deployment remain pending.

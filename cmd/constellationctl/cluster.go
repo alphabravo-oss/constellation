@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/alphabravocompany/constellation/internal/securefiles"
 )
 
 // clusterCmd builds the parent `cluster` command + its subcommands.
@@ -84,7 +86,7 @@ func clusterCreateCmd(serverFlag *string) *cobra.Command {
 				return err
 			}
 			if output != "" {
-				if err := os.WriteFile(output, []byte(resp.YAML), 0o600); err != nil {
+				if err := securefiles.WritePath(cmd.Context(), output, []byte(resp.YAML)); err != nil {
 					return fmt.Errorf("write %s: %w", output, err)
 				}
 				outputWriter.printf("Wrote %s (cluster_id=%s, expires_at=%s)\n",
@@ -160,7 +162,7 @@ func clusterRotateCmd(serverFlag *string) *cobra.Command {
 				return err
 			}
 			if output != "" {
-				if err := os.WriteFile(output, []byte(resp.YAML), 0o600); err != nil {
+				if err := securefiles.WritePath(cmd.Context(), output, []byte(resp.YAML)); err != nil {
 					return err
 				}
 				outputWriter.printf("Rotated. New bundle id=%s; wrote %s\n", resp.ID, output)

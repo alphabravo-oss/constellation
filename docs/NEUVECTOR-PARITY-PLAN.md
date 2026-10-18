@@ -1,7 +1,7 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-17** (selected console scope complete; security and
+Last reconciled: **2026-10-18** (selected console scope complete; security and
 release-readiness continuation active, qualification evidence remains dated)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
@@ -19,8 +19,14 @@ first-class.
 
 The CLI publication follow-up qualifies seven selected outputs through the shared
 atomic private-file writer (312 test passes, eight database-dependent skips,
-vet passed). Combined database tests and deployment are pending; registration
-YAML and compliance exports remain separate work. See `docs/security-testing.md`.
+vet passed). Exact combined source 414887a now passes 3,384 fresh-database
+executions across eight packages with four explicit opt-in skips; the prior CLI
+database skips execute successfully. Final artifacts and deployment are pending;
+the remaining registration YAML/compliance outputs are source-qualified (360
+passes, vet, unchanged scoped lint). ECR/shared V2 error boundaries are also
+source-qualified (768 passes, vet, unchanged scoped lint). Hosted CI has nine
+passing jobs and four failing quality/security gates (lint 1,459, gosec 144,
+history-secret report unchanged). See `docs/security-testing.md`.
 
 ## Plan rules
 
@@ -4924,3 +4930,13 @@ Root verified 210 deployment evidence files. Evidence:
 The prepared inputs, failed bytecode-only seal attempt and subsequent reviewed
 seal are retained; no cluster mutation occurred during that failed seal attempt.
 No quality/security gate or broader acceptance row is closed by this deployment.
+
+
+### Continuation evidence (2026-10-18)
+
+The user selected continued isolated checks. Authenticated browser acceptance
+remains unverified. Use of the historical admission TLS key outside disposable
+test clusters is unknown; local non-matches do not establish external non-use.
+Replacement/revocation scope and the public-history decision remain open.
+The exact 414887a combined database qualification and completed hosted run are
+recorded in `docs/security-testing.md`; neither closes a broader acceptance row.

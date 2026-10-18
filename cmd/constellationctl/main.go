@@ -662,7 +662,7 @@ The list of valid frameworks + control IDs comes from the server:
 				return err
 			}
 			if outPath != "" {
-				if err := os.WriteFile(outPath, b, 0o600); err != nil {
+				if err := securefiles.WritePath(ctx, outPath, b); err != nil {
 					return err
 				}
 				output.printf("wrote %s\n", outPath)

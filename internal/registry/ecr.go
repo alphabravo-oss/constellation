@@ -79,7 +79,7 @@ func (e *ECR) ListImages(ctx context.Context) ([]Image, error) {
 	for {
 		resp, err := e.client.DescribeRepositories(ctx, &ecr.DescribeRepositoriesInput{NextToken: next})
 		if err != nil {
-			return out, fmt.Errorf("ecr: describe-repositories: %w", err)
+			return out, responseFailure("ecr repositories", "SDK request failed", 0, err)
 		}
 		for _, r := range resp.Repositories {
 			pushed := ""
@@ -153,14 +153,14 @@ func (e *ECR) ResolveDigest(ctx context.Context, ref string) (string, error) {
 		},
 	})
 	if err != nil {
-		return "", fmt.Errorf("ecr: batch-get-image: %w", err)
+		return "", responseFailure("ecr image", "SDK request failed", 0, err)
 	}
 	for _, img := range resp.Images {
 		if img.ImageId != nil && img.ImageId.ImageDigest != nil {
 			return fmt.Sprintf("%s/%s@%s", host, repo, awssdk.ToString(img.ImageId.ImageDigest)), nil
 		}
 	}
-	return "", fmt.Errorf("ecr: no digest for %s", ref)
+	return "", errors.New("ecr: image response missing digest")
 }
 
 // AuthToken returns docker-login credentials for this ECR registry, obtained via
@@ -184,7 +184,7 @@ func (e *ECR) AuthToken(ctx context.Context) (username, password, proxyEndpoint 
 	}
 	resp, err := e.client.GetAuthorizationToken(ctx, &ecr.GetAuthorizationTokenInput{}, mintOptions...)
 	if err != nil {
-		return "", "", "", fmt.Errorf("ecr: get-authorization-token: %w", err)
+		return "", "", "", responseFailure("ecr authorization", "SDK request failed", 0, err)
 	}
 	if len(resp.AuthorizationData) == 0 || resp.AuthorizationData[0].AuthorizationToken == nil {
 		return "", "", "", errors.New("ecr: empty authorization data")
