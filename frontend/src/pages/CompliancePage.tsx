@@ -296,7 +296,11 @@ function SchedulesManager({ clusterId, listPath, scopeReady }: { clusterId: stri
   const [activeRunsFor, setActiveRunsFor] = useState<string | null>(null);
   const list = useQuery({ queryKey: ["compliance", "db-schedules", clusterId], queryFn: () => compliance.listDBSchedules(clusterId), enabled: scopeReady });
   const invalidate = () => qc.invalidateQueries({ queryKey: ["compliance", "db-schedules", clusterId] });
-  const runNow = useMutation({ mutationFn: (id: string) => compliance.runScheduleNow(id), onSuccess: () => { void invalidate(); void qc.invalidateQueries({ queryKey: ["compliance", "schedule-runs"] }); } });
+  const runNow = useMutation({ mutationFn: (id: string) => compliance.runScheduleNow(id), onSuccess: (response) => {
+    if (response.queued) toast.info(response.message || "Run requested. Processing is pending. Review History for the result.");
+    else toast.warning(response.message || "No run was requested. Review History before retrying.");
+    void invalidate(); void qc.invalidateQueries({ queryKey: ["compliance", "schedule-runs"] });
+  } });
   const remove = useMutation({ mutationFn: (id: string) => compliance.deleteSchedule(id), onSuccess: () => void invalidate() });
   const rows = (list.data?.schedules ?? []).filter((schedule) => !schedule.cluster_id || schedule.cluster_id === clusterId);
   const busy = !scopeReady || list.isError || list.isFetching || runNow.isPending || remove.isPending;
@@ -305,7 +309,6 @@ function SchedulesManager({ clusterId, listPath, scopeReady }: { clusterId: stri
     {list.isPending && <LoadingState label="Loading schedules…" />}
     {list.isError && <ErrorState title={list.data ? "Could not refresh schedules. Showing the last loaded configuration." : "Schedules could not be loaded."} action={<Button onClick={() => void list.refetch()}>Retry</Button>} />}
     {(runNow.isError || remove.isError) && <p role="alert" className="text-sm text-status-error">Could not update the schedule. Refresh and try again.</p>}
-    {runNow.data && <p role="status" className="text-sm">{runNow.data.queued ? "Compliance run queued. Review History for its result." : "The service did not queue a new run. Review History before retrying."}</p>}
     <div className="space-y-3" data-testid="schedule-list">{list.data && rows.length === 0 && <EmptyState title="No compliance schedules" hint="Create a schedule to configure recurring evidence reports." />}{rows.map((schedule) => <ScheduleRow key={schedule.id} schedule={schedule} running={runNow.isPending && runNow.variables === schedule.id} unavailable={busy} onRunNow={() => { runNow.reset(); remove.reset(); runNow.mutate(schedule.id); }} onDelete={() => { runNow.reset(); remove.reset(); remove.mutate(schedule.id); }} onToggleRuns={() => setActiveRunsFor(activeRunsFor === schedule.id ? null : schedule.id)} runsOpen={activeRunsFor === schedule.id} />)}</div>
   </section>;
 }
@@ -375,7 +378,7 @@ function ScheduleRow({
           >
             <span className="inline-flex items-center gap-1.5">
               <PlayCircle className="h-3.5 w-3.5" aria-hidden />
-              Run now
+              {schedule.enabled ? "Request run" : "Enable and request run"}
             </span>
           </button>
           <button

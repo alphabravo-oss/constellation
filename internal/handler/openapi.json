@@ -16908,7 +16908,8 @@
     },
     "/api/v1/compliance/schedules/{id}/run-now": {
       "post": {
-        "summary": "Enqueue an immediate compliance schedule run"
+        "summary": "Enable a compliance schedule and request processing",
+        "description": "Marks the schedule due and enables it. HTTP 202 records the request; a running report scheduler is required to create and deliver a report. Review History for execution and delivery results."
       }
     },
     "/api/v1/compliance/schedules/{id}/runs": {

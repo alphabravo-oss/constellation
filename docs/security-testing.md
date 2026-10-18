@@ -2146,8 +2146,9 @@ Control seals, respectively, are
 `f56da79833aea8ef78084342cb62b0eb49ce7238977e1c24a39fb66dddb8d757` and
 `605819119c1d8beaba3e4196d6acd6a303dc483d1c953d4182e031c3262fa3fd`.
 The API control's separately owned database is also absent. All ten stage seals
-independently verify. Final artifact/deployment checks remain pending; these
-source results do not qualify a new deployed release.
+independently verify. The later exact ef0ca39 artifact, hosted-CI and Helm 87
+deployment evidence is recorded below; these isolated source results alone do
+not establish deployed acceptance.
 
 After image retirement, a separately guarded official BuildKit prune removes
 exactly 79 unused, now-unshared cache records (314 to 235), preserving every
@@ -2163,3 +2164,87 @@ The scheduler remains a source/binary role without a deployed worker. Durable
 shared report storage, signing keys outside the API report mount, real signing,
 SMTP bounds, queue/crash recovery and live delivery remain open. Full parity
 remains 66 checked / 87 open; no parent acceptance item closes.
+
+
+### Exact ef0ca39 artifacts and completed hosted CI (2026-10-18)
+
+Exact committed source `ef0ca39020514d57be2b6ece0e64d995ef17e039` captures
+2,629 files and the nine qualified Go paths. Five fresh Go 1.26.9 binaries
+(API, CLI, scanner, runtime agent and standalone compliance scheduler) total
+225,002,282 bytes. The build receipt is
+`/root/constellation-final-five-build-evidence-ef0ca3902051-v1/five-binary-build-receipt.json`,
+SHA256 `5e9394c5ed281afe986edfce728eac6cdeccd1fcd0c0e6e02b255930065c870b`.
+Three thin images package four payloads; inherited native DP/BPF and all 23
+linked libraries match their reviewed parents. All thirteen owned image probes
+are independently absent. Three fully verified raw single-tag archives total
+960,199,168 bytes. The scheduler binary does not establish a deployed worker.
+
+[Hosted CI run 39162714386](https://github.com/alphabravo-oss/constellation/actions/runs/39162714386)
+completed on that exact source with nine passing jobs and four failing gates:
+quality, gosec, historical-secret scanning and required. Unit records 3,455
+passes / 748 skips, integration 9,474 passes / fourteen skips, and neither has
+failed tests. Frontend passes all 2,344 tests; browser acceptance passes all 279
+cases with no failures, flakes or skips. Count-aware lint falls from 1,456 to
+1,449 and gosec from 143 to 136, each with zero additions and seven removals.
+The eleven historical-secret identities remain unchanged. FIPS runtime and
+dependency checks pass; zero reachable govulncheck findings leaves the two
+imported and three required-module findings recorded. These are existing failed
+release gates, not a green required check.
+
+The completed evidence bundle is `/root/security-triage-39162714386`; all 197
+checksum records independently verify. Its seal SHA256 is
+`7be27bc7110241c5916bde2e66c7b3cd2d1a114a1bd2a857f18888e75df968df`.
+
+### Compliance schedule request wording continuation (2026-10-18)
+
+The next source change labels schedule actions “Request run” and discloses
+“Enable and request run” for a disabled schedule. The existing notification
+shows the API response instead of leaving a persistent queued banner. The API
+and embedded OpenAPI describe enabling and marking a schedule due, requiring a
+running report scheduler and reviewing History for execution and delivery.
+They preserve HTTP 202 and the compatibility envelope without promising a
+30-second execution deadline. The endpoint does not insert a run record.
+
+A private frontend qualification passes all 45 ComplianceWorkflows tests,
+TypeScript and a production build on pinned Node 24.21.0. All 800 evidence
+records independently verify at
+`/root/constellation-request-contract-frontend-qualification-v1`, seal SHA256
+`0dc965e7433a781565116846aabb464c6ea8a9294e57c0beff9a393ca716d079`.
+The backend tests check same-organization due/enabled state without execution
+rows and foreign-organization rejection without changing either schedule.
+Backend execution and the new browser case remain pending. This source change
+is not deployed and does not close scheduler delivery acceptance.
+
+
+### Completed exact ef0ca39 deployment (2026-10-18, Helm 87 / schema 180)
+
+The normal three-image upgrade completes after fresh backup
+`constellation-pre-security-ef0ca39-20261018-597efdaf`, original UID
+`d57b5be3-f614-44e7-9f3e-96a263c17583`, backup ID `20261018T204324`,
+stopped at `2026-10-18T20:54:02Z`. The completed backup receipt and all nine
+phase checksum records independently verify; no replacement or retry occurred.
+
+Helm 87/schema 180 verifies all seven deployments, the runtime DaemonSet and
+StatefulSet readiness. The API, CLI, scanner and runtime-agent live hashes match
+exact ef0ca39 artifacts; native DP/BPF and their inherited libraries remain
+unchanged. PCAP storage identity, ownership/mode, Recreate strategy, leader lease,
+runtime-token identity and configuration remain intact. All nineteen prior pins
+and three new image pins remain complete. Frontend and migration retain source
+5b82b12; the scheduler remains a standalone binary, without worker activation.
+
+Live API checks pass health/readiness 200, legacy policy 426, unknown cluster
+404, empty authorized policy/response queues 200, anonymous response 401,
+foreign-cluster response 403 and duplicate-node response 400. The exact owned
+loopback forward, PID 3066527/start ticks 526160328, was terminated and reaped;
+root independently confirms PID absence and port 19387 unbound. This is API
+smoke under the isolated-check selection, not authenticated browser or positive
+main enforcement evidence. Monitor mode, disabled enforcement and benchmark
+workers, and execution dry-run remain preserved.
+
+Evidence is `/root/constellation-rollout-ef0ca3902051-bound-preparation-v1`.
+The seven-record upgrade seal is
+`31c47aa675389407314dba2126f9c0863ba6f8a293d22b1f791d5cf4d12e4b9f`;
+the eight-record smoke seal is
+`05958c1c9a6c74246173587255ba3ad83b9ccecdd3eda2b729652c14f47b2480`.
+All root-approved 108 inputs independently remain unchanged. The checklist stays
+66 checked / 87 open; this deployment does not close a parent acceptance gate.

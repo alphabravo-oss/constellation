@@ -12,7 +12,7 @@
 //	GET    /api/v1/compliance/schedules/{id}             get
 //	PATCH  /api/v1/compliance/schedules/{id}             update
 //	DELETE /api/v1/compliance/schedules/{id}             delete
-//	POST   /api/v1/compliance/schedules/{id}/run-now     enqueue an immediate run
+//	POST   /api/v1/compliance/schedules/{id}/run-now     request a due run
 //	GET    /api/v1/compliance/schedules/{id}/runs        run history
 //	GET    /api/v1/compliance/runs/{id}/artifact         stream the PDF/JSON
 package compliance
@@ -403,8 +403,8 @@ func (h *ComplianceSchedulesDB) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// RunNow forces the schedule's next_run_at to NOW() so the daemon picks it up immediately.
-// Returns the schedule envelope; the actual run row is inserted by the worker.
+// RunNow enables the schedule and marks it due for a running scheduler.
+// The accepted response records the request; only the worker inserts a run row.
 func (h *ComplianceSchedulesDB) RunNow(w http.ResponseWriter, r *http.Request) {
 	subj, _ := authctx.SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
@@ -436,7 +436,7 @@ UPDATE compliance_schedules
 	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{
 		"schedule": row,
 		"queued":   true,
-		"message":  "schedule queued for immediate run; the constellation-compliance-scheduler daemon will pick it up within 30s",
+		"message":  "Run requested; processing is pending. A running report scheduler is required. Review History for execution and delivery.",
 	})
 }
 

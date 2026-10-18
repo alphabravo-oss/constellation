@@ -17,45 +17,32 @@ understand the result, and prove that the control is enforced. Constellation's
 stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
 
-Exact combined source **2b29b63** passes **2,460** fresh-schema-180
-race/shuffle/count-two test executions across four affected packages, with six
-explicit native opt-in skips. Vet passes all four packages; four Go binaries,
-three thin images and three private raw single-tag archives are verified. All
-thirteen image probes are independently absent. Main now runs **Helm 86 / schema
-180**, API/scanner/runtime-agent source **2b29b63**, after a fresh completed backup
-and successful live payload, storage/lease and API smoke checks. Migration and
-frontend remain on 5b82b12. This deploys the notifier, backup, federation and
-current-generation readiness follow-ups as well as the inherited c5428cc fixes.
+Exact source **ef0ca39** completes isolated qualification with **598** passing
+race/shuffle/count-two executions across three affected packages, two explicit
+native opt-in skips, zero-diagnostic vet and scoped lint with zero additions and
+seven removals. Original-code controls reproduce all four intended failure
+classes. Five fresh Go binaries, three thin images and three private raw
+single-tag archives are verified; all thirteen owned image probes are absent.
 
-Hosted CI on exact 2b29b63 has nine passing jobs and four failing gates: quality,
-gosec, gitleaks and required. Lint is 1,456, gosec 143 and historical-secret
-identities remain eleven. Count-aware comparisons against c5428cc remove three
-lint and one gosec findings, adding none. Frontend passes 2,344 tests and browser
-acceptance passes 279 cases without failures, flakes or skips. No parent acceptance
-item is closed. See `docs/security-testing.md` for evidence and boundaries.
+Main now runs **Helm 87 / schema 180**, API/scanner/runtime-agent source
+**ef0ca39**, after a fresh completed backup and successful live payload,
+storage/lease and API smoke checks. Migration and frontend remain on 5b82b12.
+This deploys confined report downloads and namespace worker restoration, while
+the qualified scheduler delivery fixes remain a standalone binary without a
+deployed worker.
 
-The later documentation-only `702b939` hosted run completed with eight passing
-jobs and five failing gates, including one saved-view frontend timing assertion.
-Browser acceptance still passes all 279 cases and integration records 9,368
-passes; lint, gosec and historical-secret identities are unchanged. The test-only
-correction waits for React Query's scheduled UI notification while separately
-checking that submission is blocked as soon as the cache starts fetching. Pinned
-Node 24 qualification passes both full-file runs, twenty normal repetitions and
-three delayed-notification cases. This does not erase the hosted failure or close
-a broader acceptance item.
+[Hosted CI on exact ef0ca39](https://github.com/alphabravo-oss/constellation/actions/runs/39162714386)
+completes with nine passing jobs and four failing gates: quality, gosec,
+historical-secret scanning and required. Lint falls to 1,449 and gosec to 136,
+each with zero count-aware additions and seven removals; eleven historical-secret
+identities remain. Frontend passes 2,344 tests and browser acceptance passes 279
+cases without failures, flakes or skips. No parent acceptance item closes. See
+`docs/security-testing.md` for retained historical runs and evidence boundaries.
 
-Exact correction head `c7d97b5` subsequently completes hosted CI with nine passing
-jobs and four existing failing gates. All 2,344 frontend tests and 279 browser
-cases pass; the saved-view regression passes. Lint, gosec and historical-secret
-identities remain unchanged. This closes the observed test timing regression,
-without closing any parent parity or release gate.
-
-The next nine-file Go follow-up has completed isolated source qualification:
-598 passing executions, two native opt-in skips, zero-diagnostic vet, and scoped
-lint with zero additions and seven removals. Original-code controls reproduce
-all four intended failure classes. It fixes scheduler webhook/S3 failure handling,
-namespace worker restoration and confined report downloads. Fresh artifacts and
-deployment are pending; main remains on 2b29b63 and no parent gate closes.
+The next compliance request wording change discloses enabling disabled schedules,
+uses a transient notification and removes the unsupported 30-second execution
+promise. All 45 focused frontend tests, TypeScript and a production build pass;
+backend execution and the new browser case remain pending. It is not deployed.
 
 ## Plan rules
 
@@ -105,8 +92,8 @@ infrastructure continuation after the selected console scope. Off-host recovery
 and deliberate real-node failure remain deferred. The checklist remains **66
 checked / 87 open**; bounded fixes below do not close their parent acceptance gates.
 
-Current main development deployment: **Helm 86 / schema 180**, API/scanner/runtime-agent
-source **2b29b63**; migration/frontend source **5b82b12**. All seven deployments and
+Current main development deployment: **Helm 87 / schema 180**, API/scanner/runtime-agent
+source **ef0ca39**; migration/frontend source **5b82b12**. All seven deployments and
 the runtime DaemonSet are ready; StatefulSets match their desired replicas. Four
 live Go payloads and inherited native DP/BPF hashes match the reviewed artifacts.
 Health/readiness, policy protocol and queue authorization checks pass. Original
@@ -114,13 +101,13 @@ retained PCAP storage, mode/ownership, Recreate strategy, API leader lease and
 runtime-token secret identity are preserved. Runtime remains in monitor mode,
 with enforcement and benchmark workers disabled and execution dry-run enabled.
 The fresh CNPG backup retained original UID
-`879e1770-4d88-4fb1-82de-023d170cb3b2` and completed at `2026-10-18T17:58:45Z`
-before the normal three-image update. All sixteen prior pins and three candidate
-pins are verified. The owned smoke forward, listener and disk observer are absent.
+`d57b5be3-f614-44e7-9f3e-96a263c17583` and completed at `2026-10-18T20:54:02Z`
+before the normal three-image update. All nineteen prior pins and three candidate
+pins are verified. The owned smoke forward and listener are independently absent.
 Authenticated browser navigation remains unverified under the user's isolated-check
 selection. Live policy and response queues are empty; positive enforcement remains
-separate dated fixture evidence. The completed deployment manifest is
-`/root/constellation-rollout-2b29b63-preparation/DEPLOYMENT-EVIDENCE-MANIFEST.json`.
+separate dated fixture evidence. Deployment evidence is
+`/root/constellation-rollout-ef0ca3902051-bound-preparation-v1`.
 
 The deployed catalog correction extends categorical registry errors to
 DockerHub, GHCR, Generic V2, Nexus, OpenShift, Quay, Harbor, GitLab and JFrog
@@ -5031,6 +5018,9 @@ report-download confinement follow-up now passes 598 fresh-schema-180
 race/shuffle/count-two executions, two explicit native opt-in skips, vet and
 scoped lint (92 to 85 findings, zero added). All four original-code controls
 reproduce their exact intended failures, including authenticated HTTP responses.
-Artifacts and deployment remain pending; these changes are not in deployed
-2b29b63. Scheduler launch, shared report storage, signing and live delivery remain
-open. Evidence and narrower acceptance boundaries are in `docs/security-testing.md`.
+The later ef0ca39 continuation now verifies five binaries, three thin images and
+three raw archives, then completes Helm 87 deployment and API smoke after a new
+original-UID backup. The scheduler fixes remain a standalone binary; scheduler
+launch, shared report storage, signing and live delivery remain open. Exact-source
+CI completes nine passing/four failing jobs with zero added lint or gosec findings.
+Evidence and narrower acceptance boundaries are in `docs/security-testing.md`.

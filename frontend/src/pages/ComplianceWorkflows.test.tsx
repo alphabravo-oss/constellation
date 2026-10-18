@@ -1,6 +1,7 @@
 import { act, cloneElement, type ReactElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { compliance, type ComplianceCheck, type ComplianceChecksParams, type ComplianceChecksResponse, type ComplianceScheduleDB } from "@/api/client";
 import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
@@ -9,6 +10,7 @@ import { ComplianceExemptionFormPage } from "./ComplianceExemptionFormPage";
 import { ComplianceScheduleFormPage } from "./ComplianceScheduleFormPage";
 
 const route = vi.hoisted(() => ({ clusterId: "cluster" as string | undefined, cluster: { id: "cluster" } as { id: string } | undefined, loading: false, error: null as Error | null, search: "framework=cis&control_id=1.2&filter=a&filter=b", navigate: vi.fn(), setSearch: vi.fn() }));
+vi.mock("sonner", () => ({ toast: { info: vi.fn(), warning: vi.fn(), error: vi.fn(), success: vi.fn() } }));
 vi.mock("@/api/client", () => ({ compliance: { frameworks: vi.fn(), checks: vi.fn(), summary: vi.fn(), listExemptions: vi.fn(), createExemption: vi.fn(), revokeExemption: vi.fn(), evidence: vi.fn(), listDBSchedules: vi.fn(), createSchedule: vi.fn(), runScheduleNow: vi.fn(), deleteSchedule: vi.fn(), scheduleRuns: vi.fn(), downloadRunArtifact: vi.fn(), exportChecksCSV: vi.fn() } }));
 vi.mock("@/hooks/useCluster", () => ({ useCluster: () => ({ clusterId: route.clusterId, cluster: route.cluster, isLoading: route.loading, error: route.error }) }));
 vi.mock("@/lib/route-search", () => ({ useRouteSearchParams: () => [new URLSearchParams(route.search), route.setSearch] }));
@@ -169,12 +171,12 @@ describe("compliance workspaces", () => {
   it("keeps inherited schedule scope, run/history/download actions, and standalone creation", async () => {
     route.search = "tab=schedules&filter=a&filter=b";
     vi.mocked(compliance.listDBSchedules).mockResolvedValue({ ...options, schedules: [inherited, { ...inherited, id: "local", name: "Local schedule", cluster_id: "cluster" }, { ...inherited, id: "foreign", name: "Foreign schedule", cluster_id: "other" }] });
-    vi.mocked(compliance.runScheduleNow).mockResolvedValue({ schedule: inherited, queued: true, message: "queued" });
+    vi.mocked(compliance.runScheduleNow).mockResolvedValue({ schedule: inherited, queued: true, message: "Report request recorded; processing is pending. Review History for the result." });
     vi.mocked(compliance.scheduleRuns).mockResolvedValue({ runs: [{ id: "run", org_id: "org", framework: "cis", started_at: "2026-10-12T00:00:00Z", status: "succeeded", summary: { pass: 1, fail: 0, manual: 0 }, artifact_signature: "signature", artifact_uri: "artifact", artifact_metadata_known: true, artifact_format: "html", artifact_filename: "evidence.html", triggered_by: "manual" }] });
     vi.mocked(compliance.downloadRunArtifact).mockResolvedValue(undefined);
     await renderPage(<CompliancePage />); await settled(() => expect(host.textContent).toContain("Shared schedule"));
     expect(host.textContent).toContain("Organization schedule · applies across clusters"); expect(host.textContent).toContain("Cluster schedule"); expect(host.textContent).not.toContain("Foreign schedule"); expect(host.querySelector("form")).toBeNull();
-    await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="schedule-run-organization"]')!.click()); await settled(() => expect(host.textContent).toContain("Compliance run queued")); expect(compliance.runScheduleNow).toHaveBeenCalledWith("organization");
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="schedule-run-organization"]')!.click()); await settled(() => expect(toast.info).toHaveBeenCalledWith("Report request recorded; processing is pending. Review History for the result.")); expect(compliance.runScheduleNow).toHaveBeenCalledWith("organization"); expect(host.textContent).not.toContain("Compliance run queued");
     await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="schedule-runs-toggle-organization"]')!.click()); await settled(() => expect(host.textContent).toContain("Signature recorded"));
     expect(host.querySelector('[data-testid="schedule-runs-organization"]')?.textContent).toContain("HTML"); expect(host.querySelector('[data-testid="run-download-run"]')?.getAttribute("title")).toBe("evidence.html");
     await click("Download"); expect(compliance.downloadRunArtifact).toHaveBeenCalledWith("run", expect.any(Function));
@@ -269,3 +271,24 @@ it("renders repeated control evidence as distinct table rows without duplicate R
   expect(host.textContent).toContain("501 evidence rows · 1 unexempted failures"); expect(host.textContent).not.toContain("no longer eligible");
   await edit("textarea", "A whole control approval rationale"); await submit(); await settled(() => expect(compliance.createExemption).toHaveBeenCalledOnce());
  });
+
+describe("schedule run requests", () => {
+  it("discloses enabling a disabled schedule before requesting a run", async () => {
+    route.search = "tab=schedules";
+    const disabled = { ...inherited, enabled: false };
+    vi.mocked(compliance.listDBSchedules).mockResolvedValue({ ...options, schedules: [disabled] });
+    vi.mocked(compliance.runScheduleNow).mockResolvedValue({ schedule: inherited, queued: true, message: "Run requested. A running report scheduler is required. Review History for the result." });
+    await renderPage(<CompliancePage />); await settled(() => expect(host.textContent).toContain("Enable and request run"));
+    await click("Enable and request run");
+    await settled(() => expect(toast.info).toHaveBeenCalledWith("Run requested. A running report scheduler is required. Review History for the result."));
+    expect(compliance.runScheduleNow).toHaveBeenCalledWith("organization"); expect(compliance.scheduleRuns).not.toHaveBeenCalled();
+  });
+  it("does not announce an accepted request when the service declines it", async () => {
+    route.search = "tab=schedules";
+    vi.mocked(compliance.runScheduleNow).mockResolvedValue({ schedule: inherited, queued: false, message: "No run was requested. Review History before retrying." });
+    await renderPage(<CompliancePage />); await settled(() => expect(host.textContent).toContain("Request run"));
+    await click("Request run");
+    await settled(() => expect(toast.warning).toHaveBeenCalledWith("No run was requested. Review History before retrying."));
+    expect(toast.info).not.toHaveBeenCalled();
+  });
+});
