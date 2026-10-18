@@ -49,11 +49,28 @@ and wrap on narrow screens. All 45 focused tests, TypeScript and a production
 build pass on that later frontend snapshot. A subsequent Enable/Disable control
 preserves schedule configuration and uses the existing scoped PATCH API without
 requesting a run. Its 50 focused tests, TypeScript and production build pass;
-the combined 282-case browser run is pending. These frontend changes are not
+the exact f519517 browser run passes all 282 cases without flakes or skips.
+Its complete CI run records eight passing and five failing jobs: the full
+frontend suite has 2,350 passes and one unchanged Timeline synchronization
+failure, alongside existing quality, gosec, history and required failures.
+All 50 schedule workflow tests pass; lint 1,449, gosec 136 and historical-secret
+identities 11 are unchanged. These frontend changes are not
 deployed. SMTP timeout/cancellation qualification passes 28 race/shuffle test
 executions, zero-diagnostic vet and scoped lint with zero additions. Four
 original-code failure assertions reproduce twice each. No scheduler worker is
 activated and no parent acceptance gate closes.
+
+Schedule configuration now has a dedicated Edit route using the shared form.
+It retains custom values, complete delivery targets and unsaved drafts, and
+sends only changed fields without requesting a run. All 73 focused workflow
+tests, TypeScript and production build pass. A separate Timeline test now waits
+for its refetched result to render; all 30 cases pass with production Timeline
+unchanged. The new combined 284-case browser snapshot remains pending. Existing
+server PATCH concurrency and scheduler delivery acceptance remain open; these
+changes are not deployed and the checklist remains 66 checked / 87 open.
+Visit-specific ownership prevents an older save from redirecting after leaving
+and returning to the same context. Observed conflicts retain the draft and
+explain how to copy edits before canceling and reopening the schedule.
 
 Both original host scanner-cache trees are restored: five files totaling
 4,701,282,746 bytes match their original hashes and restorable metadata. Recovery

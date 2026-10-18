@@ -123,3 +123,69 @@ test("Schedule enabled state changes through PATCH without requesting a run", as
   await expect(page.getByTestId("schedule-enabled-local")).toHaveText("Disabled");
   expect(patches).toEqual([true, false]); expect(runRequests).toEqual([]);
 });
+
+
+test("Inherited schedule edit uses dirty PATCH and retains delivery details without enabling or requesting a run", async ({ page }) => {
+  const target = { kind: "s3", bucket: "evidence", prefix: "original/", endpoint: "https://objects.example.test", receiver_id: "receiver", opaque: { retained: true } };
+  let current = { ...schedule, id: "editable", org_id: "org", enabled: false, description: "Original description", cron_expression: "13 5 * * 2", timezone: "America/New_York", report_format: "json", report_template: "legacy-template", delivery: [target] };
+  const patches: unknown[] = []; const unexpectedWrites: string[] = [];
+  page.on("request", request => {
+    const path = new URL(request.url()).pathname;
+    if (path.startsWith("/api/v1/compliance/schedules") && ["POST", "DELETE"].includes(request.method())) unexpectedWrites.push(`${request.method()} ${path}`);
+  });
+  await page.route("**/api/v1/compliance/schedules**", async route => {
+    const request = route.request(); const path = new URL(request.url()).pathname;
+    if (path === "/api/v1/compliance/schedules" && request.method() === "GET") {
+      await route.fulfill({ json: { schedules: [current], summary: { total: 1, enabled: 0, disabled: 1 }, frameworks: [current.framework], report_formats: ["html", "json", "csv", "sarif", "pdf"] } }); return;
+    }
+    if (path === "/api/v1/compliance/schedules/editable" && request.method() === "PATCH") {
+      const body = request.postDataJSON(); patches.push(body); current = { ...current, ...body };
+      await route.fulfill({ json: current }); return;
+    }
+    await route.fallback();
+  });
+  await page.goto(`${root}?tab=schedules&filter=auditors`);
+  await page.getByRole("button", { name: "Edit organization schedule", exact: true }).click();
+  await expect(page).toHaveURL(`${root}/schedules/editable/edit?tab=schedules&filter=auditors`);
+  await expect(page.getByRole("heading", { name: "Edit compliance schedule" })).toBeVisible();
+  await expect(page.getByText("Organization schedule · applies across clusters · Configured state: Disabled", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Cron expression")).toHaveValue("13 5 * * 2");
+  await expect(page.getByLabel("Timezone", { exact: true })).toHaveValue("America/New_York");
+  await expect(page.getByLabel("Report template")).toHaveValue("legacy-template");
+  await page.getByLabel("Cron expression").fill("17 6 * * 3");
+  await page.getByLabel("Prefix", { exact: true }).fill("updated/");
+  await page.getByLabel("Report template").selectOption("compliance-detailed");
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(page).toHaveURL(`${root}?tab=schedules&filter=auditors`);
+  await expect(page.getByTestId("schedule-editable")).toContainText("17 6 * * 3");
+  await expect(page.getByTestId("schedule-enabled-editable")).toHaveText("Disabled");
+  expect(patches).toEqual([{ cron_expression: "17 6 * * 3", delivery: [{ ...target, prefix: "updated/" }], report_template: "compliance-detailed" }]);
+  expect(unexpectedWrites).toEqual([]);
+});
+
+
+test("Direct schedule edit retains failed draft and cancels to the scoped list", async ({ page }) => {
+  const current = { ...schedule, id: "editable", org_id: "org", cluster_id: clusterId, description: "Original description", enabled: false };
+  const patches: unknown[] = []; const runRequests: string[] = [];
+  page.on("request", request => { if (new URL(request.url()).pathname.endsWith("/run-now")) runRequests.push(request.url()); });
+  await page.route("**/api/v1/compliance/schedules**", async route => {
+    const request = route.request(); const path = new URL(request.url()).pathname;
+    if (path === "/api/v1/compliance/schedules" && request.method() === "GET") {
+      await route.fulfill({ json: { schedules: [current], summary: { total: 1, enabled: 0, disabled: 1 }, frameworks: [current.framework], report_formats: ["html", "json", "csv", "sarif", "pdf"] } }); return;
+    }
+    if (path === "/api/v1/compliance/schedules/editable" && request.method() === "PATCH") {
+      patches.push(request.postDataJSON()); await route.fulfill({ status: 503, json: { error: "Private fixture diagnostic" } }); return;
+    }
+    await route.fallback();
+  });
+  await page.goto(`${root}/schedules/editable/edit?tab=schedules&filter=retained`);
+  await page.getByLabel("Name", { exact: true }).fill("Retained draft name");
+  await page.getByRole("button", { name: "Save changes", exact: true }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "Your draft is preserved" })).toBeVisible();
+  await expect(page.getByLabel("Name", { exact: true })).toHaveValue("Retained draft name");
+  await expect(page.getByText("Private fixture diagnostic", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(page).toHaveURL(`${root}?tab=schedules&filter=retained`);
+  await expect(page.getByTestId("schedule-editable")).toContainText(current.name);
+  expect(patches).toEqual([{ name: "Retained draft name" }]); expect(runRequests).toEqual([]);
+});

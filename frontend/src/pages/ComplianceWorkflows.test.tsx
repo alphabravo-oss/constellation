@@ -9,12 +9,12 @@ import { CompliancePage } from "./CompliancePage";
 import { ComplianceExemptionFormPage } from "./ComplianceExemptionFormPage";
 import { ComplianceScheduleFormPage } from "./ComplianceScheduleFormPage";
 
-const route = vi.hoisted(() => ({ clusterId: "cluster" as string | undefined, cluster: { id: "cluster" } as { id: string } | undefined, loading: false, error: null as Error | null, search: "framework=cis&control_id=1.2&filter=a&filter=b", navigate: vi.fn(), setSearch: vi.fn() }));
+const route = vi.hoisted(() => ({ scheduleId: undefined as string | undefined, orgId: "org", userId: "user", clusterId: "cluster" as string | undefined, cluster: { id: "cluster" } as { id: string } | undefined, loading: false, error: null as Error | null, search: "framework=cis&control_id=1.2&filter=a&filter=b", navigate: vi.fn(), setSearch: vi.fn() }));
 vi.mock("sonner", () => ({ toast: { info: vi.fn(), warning: vi.fn(), error: vi.fn(), success: vi.fn() } }));
 vi.mock("@/api/client", () => ({ compliance: { frameworks: vi.fn(), checks: vi.fn(), summary: vi.fn(), listExemptions: vi.fn(), createExemption: vi.fn(), revokeExemption: vi.fn(), evidence: vi.fn(), listDBSchedules: vi.fn(), createSchedule: vi.fn(), patchSchedule: vi.fn(), runScheduleNow: vi.fn(), deleteSchedule: vi.fn(), scheduleRuns: vi.fn(), downloadRunArtifact: vi.fn(), exportChecksCSV: vi.fn() } }));
 vi.mock("@/hooks/useCluster", () => ({ useCluster: () => ({ clusterId: route.clusterId, cluster: route.cluster, isLoading: route.loading, error: route.error }) }));
 vi.mock("@/lib/route-search", () => ({ useRouteSearchParams: () => [new URLSearchParams(route.search), route.setSearch] }));
-vi.mock("@tanstack/react-router", () => ({ useNavigate: () => route.navigate, Link: ({ children, href }: { children: ReactNode; href?: string }) => <a href={href}>{children}</a> }));
+vi.mock("@tanstack/react-router", () => ({ useNavigate: () => route.navigate, useParams: () => ({ scheduleId: route.scheduleId }), Link: ({ children, href }: { children: ReactNode; href?: string }) => <a href={href}>{children}</a> }));
 let root: Root; let host: HTMLDivElement; let client: QueryClient;
 let mounted: ReactNode;
 const check = { framework: "cis", control_id: "1.2", title: "Control title", status: "fail", effective_status: "fail", severity: "high", evidence: "Collected evidence", remediation: "Fix this control" } as ComplianceCheck;
@@ -26,7 +26,7 @@ function listResponse(params: ComplianceChecksParams, rows: ComplianceCheck[]): 
  return { checks: rows.map((row, index) => ({ ...row, id: `evidence-${index}`, cluster_id: params.cluster_id })), cluster_id: params.cluster_id, framework: params.framework === "all" ? "" : params.framework || "", profile: params.profile || "", control_id: params.control_id || "", status: params.status || "", q: params.q || "", sort: params.sort, order: params.order, limit: 100, offset: params.offset || 0, total: rows.length, has_more: false, summary };
 }
 beforeEach(() => {
-  route.clusterId = "cluster"; route.cluster = { id: "cluster" }; route.loading = false; route.error = null; route.search = "framework=cis&control_id=1.2&filter=a&filter=b";
+  route.scheduleId = undefined; route.orgId = "org"; route.userId = "user"; route.clusterId = "cluster"; route.cluster = { id: "cluster" }; route.loading = false; route.error = null; route.search = "framework=cis&control_id=1.2&filter=a&filter=b";
   route.setSearch.mockImplementation((next: URLSearchParams | ((current: URLSearchParams) => URLSearchParams)) => { route.search = (typeof next === "function" ? next(new URLSearchParams(route.search)) : next).toString(); });
   vi.mocked(compliance.frameworks).mockResolvedValue({ frameworks: [{ id: "cis", name: "CIS", category: "Security" }, { id: "pci", name: "PCI", category: "Regulatory" }] });
   vi.mocked(compliance.checks).mockImplementation(async params => typeof params === "object" ? listResponse(params, [check]) : { checks: [check] });
@@ -39,9 +39,9 @@ afterEach(() => { act(() => root?.unmount()); client?.clear(); host?.remove(); v
 async function renderPage(node: ReactNode) {
   mounted = node; host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
   client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{org_id:"org",user_id:"user"}}>{node}</TablePreferencesProvider></QueryClientProvider>));
+  await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{org_id:route.orgId,user_id:route.userId}}>{node}</TablePreferencesProvider></QueryClientProvider>));
 }
-async function rerender() { await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{org_id:"org",user_id:"user"}}>{cloneElement(mounted as ReactElement)}</TablePreferencesProvider></QueryClientProvider>)); }
+async function rerender() { await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{org_id:route.orgId,user_id:route.userId}}>{cloneElement(mounted as ReactElement)}</TablePreferencesProvider></QueryClientProvider>)); }
 async function settled(checkResult: () => void) { await vi.waitFor(async () => { await act(async () => {}); checkResult(); }); }
 async function edit(selector: string, value: string) {
   const field = host.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector)!;
@@ -359,4 +359,230 @@ describe("schedule enabled state", () => {
       expect(compliance.patchSchedule).not.toHaveBeenCalled(); expect(compliance.runScheduleNow).not.toHaveBeenCalled();
     } finally { await act(async () => { complete({ clusters: [{ id: "cluster" }] }); await refresh; }); }
   });
+});
+
+const editListKey = ["compliance", "db-schedules", "org", "user", "cluster", "edit"];
+const editFrameworkKey = ["compliance", "frameworks", "org", "user", "schedule-edit"];
+function scheduleForEdit(overrides: Partial<ComplianceScheduleDB> = {}): ComplianceScheduleDB {
+  return { ...inherited, id: "editable", org_id: "org", cluster_id: "cluster", description: "Keep this description", enabled: false,
+    cron_expression: "13 5 * * 2", timezone: "America/New_York", report_format: "legacy-format", report_template: "legacy-template",
+    delivery: [
+      { kind: "s3", bucket: "evidence", prefix: "original/", endpoint: "https://objects.example.test", receiver_id: "retained-receiver", opaque: { retained: true } },
+      { kind: "webhook", url: "https://hooks.example.test/original", receiver_id: "hook-receiver" },
+      { kind: "email", target: "reviewer@example.test" },
+      { kind: "file", target: "file:///reports/" },
+    ], ...overrides } as ComplianceScheduleDB;
+}
+async function renderEdit(schedule = scheduleForEdit()) {
+  route.scheduleId = schedule.id;
+  vi.mocked(compliance.listDBSchedules).mockResolvedValue({ ...options, schedules: [schedule] });
+  await renderPage(<ComplianceScheduleFormPage />);
+  await settled(() => expect(host.querySelector("form")).not.toBeNull());
+  return schedule;
+}
+
+describe("schedule configuration edit", () => {
+  it("opens a dedicated scoped Edit URL and retains repeated return filters", async () => {
+    route.search = "tab=schedules&filter=a&filter=b";
+    vi.mocked(compliance.listDBSchedules).mockResolvedValue({ ...options, schedules: [{ ...inherited, org_id: "org" }] });
+    await renderPage(<CompliancePage />); await settled(() => expect(host.textContent).toContain("Edit organization schedule"));
+    await click("Edit organization schedule");
+    expect(route.navigate).toHaveBeenCalledWith({ href: "/clusters/cluster/compliance/schedules/organization/edit?tab=schedules&filter=a&filter=b" });
+    expect(compliance.patchSchedule).not.toHaveBeenCalled(); expect(compliance.runScheduleNow).not.toHaveBeenCalled();
+  });
+
+  it("prefills custom values and sends only a changed cron without enabled or DTO metadata", async () => {
+    const schedule = await renderEdit(scheduleForEdit({ framework: "legacy-framework" }));
+    expect(host.querySelector<HTMLInputElement>("#schedule-name")!.value).toBe(schedule.name);
+    expect(host.querySelector<HTMLSelectElement>("#schedule-framework")!.value).toBe("legacy-framework");
+    expect(host.querySelector<HTMLSelectElement>("#schedule-cadence")!.value).toBe("custom");
+    expect(host.querySelector<HTMLInputElement>("#schedule-cron")!.value).toBe(schedule.cron_expression);
+    expect(host.querySelector<HTMLInputElement>("#schedule-timezone")!.value).toBe(schedule.timezone);
+    expect(host.querySelector<HTMLSelectElement>("#schedule-format")!.value).toBe("legacy-format");
+    expect(host.querySelector<HTMLSelectElement>("#schedule-template")!.value).toBe("legacy-template");
+    expect(host.textContent).toContain("Configured state: Disabled");
+    expect(host.querySelector<HTMLButtonElement>('[data-testid="wizard-submit"]')!.disabled).toBe(true);
+    vi.mocked(compliance.patchSchedule).mockResolvedValue({ ...schedule, cron_expression: "17 6 * * 3" });
+    await edit("#schedule-cron", "17 6 * * 3"); await submit();
+    await settled(() => expect(route.navigate).toHaveBeenCalled());
+    expect(compliance.patchSchedule).toHaveBeenCalledExactlyOnceWith("editable", { cron_expression: "17 6 * * 3" });
+    expect(compliance.createSchedule).not.toHaveBeenCalled(); expect(compliance.runScheduleNow).not.toHaveBeenCalled(); expect(compliance.deleteSchedule).not.toHaveBeenCalled();
+    expect(route.navigate).toHaveBeenCalledWith({ href: "/clusters/cluster/compliance?framework=cis&control_id=1.2&filter=a&filter=b&tab=schedules" });
+  });
+
+  it("retains all target properties and multiple kinds when explicitly editing delivery", async () => {
+    const schedule = await renderEdit();
+    vi.mocked(compliance.patchSchedule).mockResolvedValue(schedule);
+    await edit("#delivery-prefix-0", "updated/"); await edit("#delivery-url-1", "https://hooks.example.test/updated");
+    await submit(); await settled(() => expect(compliance.patchSchedule).toHaveBeenCalled());
+    expect(compliance.patchSchedule).toHaveBeenCalledExactlyOnceWith("editable", { delivery: [
+      { ...schedule.delivery[0], prefix: "updated/" }, { ...schedule.delivery[1], url: "https://hooks.example.test/updated" }, schedule.delivery[2], schedule.delivery[3],
+    ] });
+    expect(compliance.runScheduleNow).not.toHaveBeenCalled();
+  });
+
+  it("keeps a configured legacy template and offers only the existing replacement", async () => {
+    const schedule = await renderEdit();
+    const templates = host.querySelector<HTMLSelectElement>("#schedule-template")!;
+    expect([...templates.options].map(option => option.value)).toEqual(["legacy-template", "compliance-detailed"]);
+    vi.mocked(compliance.patchSchedule).mockResolvedValue({ ...schedule, report_template: "compliance-detailed" });
+    await edit("#schedule-template", "compliance-detailed"); await submit();
+    await settled(() => expect(compliance.patchSchedule).toHaveBeenCalledExactlyOnceWith("editable", { report_template: "compliance-detailed" }));
+  });
+
+  it.each(["missing", "foreign organization", "foreign cluster", "duplicate", "invalid delivery"])("withholds the editor for %s data", async scenario => {
+    route.scheduleId = "editable";
+    let schedules = [scheduleForEdit()];
+    if (scenario === "missing") schedules = [];
+    else if (scenario === "foreign organization") schedules[0].org_id = "another-org";
+    else if (scenario === "foreign cluster") schedules[0].cluster_id = "another-cluster";
+    else if (scenario === "duplicate") schedules.push(scheduleForEdit());
+    else schedules[0] = { ...schedules[0], delivery: null } as unknown as ComplianceScheduleDB;
+    vi.mocked(compliance.listDBSchedules).mockResolvedValue({ ...options, schedules });
+    await renderPage(<ComplianceScheduleFormPage />); await settled(() => expect(host.textContent).toContain("This schedule is unavailable"));
+    expect(host.querySelector("form")).toBeNull(); expect(compliance.patchSchedule).not.toHaveBeenCalled();
+  });
+
+  it("labels inherited scope, preserves drafts on same-row refresh and blocks an observed dirty-field conflict", async () => {
+    const schedule = await renderEdit(scheduleForEdit({ cluster_id: undefined }));
+    expect(host.textContent).toContain("Organization schedule · applies across clusters");
+    await edit("#schedule-name", "My unsaved name");
+    await act(async () => client.setQueryData(editListKey, { ...options, schedules: [{ ...schedule, name: "Changed elsewhere" }] }));
+    expect(host.querySelector<HTMLInputElement>("#schedule-name")!.value).toBe("My unsaved name");
+    await submit(); await settled(() => expect(host.textContent).toContain("Your draft is preserved"));
+    expect(host.textContent).toContain("This schedule changed.");
+    expect(host.textContent).toContain("Copy your edits, then cancel and reopen it.");
+    expect(compliance.patchSchedule).not.toHaveBeenCalled(); expect(route.navigate).not.toHaveBeenCalled();
+  });
+
+  it("retains failed drafts and pauses save after refresh failure", async () => {
+    await renderEdit(); await edit("#schedule-name", "A retained name");
+    vi.mocked(compliance.patchSchedule).mockRejectedValue(new Error("private transport detail"));
+    await submit(); await settled(() => expect(host.textContent).toContain("Your draft is preserved"));
+    expect(host.querySelector<HTMLInputElement>("#schedule-name")!.value).toBe("A retained name");
+    vi.mocked(compliance.listDBSchedules).mockRejectedValue(new Error("private refresh detail"));
+    await act(async () => { await client.invalidateQueries({ queryKey: editListKey, exact: true }); });
+    await settled(() => expect(host.textContent).toContain("Current schedule or options are unavailable"));
+    await submit(); expect(compliance.patchSchedule).toHaveBeenCalledTimes(1);
+    expect(host.querySelector<HTMLInputElement>("#schedule-name")!.value).toBe("A retained name");
+    expect(host.textContent).not.toContain("private transport detail"); expect(host.textContent).not.toContain("private refresh detail");
+  });
+
+  it("checks freshly replaced choices before a retained submit and keeps unavailable draft selections visible", async () => {
+    const schedule = await renderEdit(scheduleForEdit({ report_format: "json" }));
+    await edit("#schedule-framework", "pci"); await edit("#schedule-format", "sarif");
+    const form = host.querySelector("form")!;
+    await act(async () => {
+      client.setQueryData(editFrameworkKey, { frameworks: [{ id: "cis", name: "CIS", category: "Security" }] });
+      client.setQueryData(editListKey, { ...options, schedules: [schedule], report_formats: ["json"] });
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    expect(compliance.patchSchedule).not.toHaveBeenCalled();
+    await settled(() => expect(host.textContent).toContain("Your draft selection is retained"));
+    expect(host.querySelector<HTMLSelectElement>("#schedule-framework")!.value).toBe("pci");
+    expect(host.querySelector<HTMLSelectElement>("#schedule-format")!.value).toBe("sarif");
+  });
+
+  it.each(["schedule", "frameworks"])("blocks an invalidated %s cache before a retained submit", async kind => {
+    await renderEdit(); await edit("#schedule-name", "Retained name"); const form = host.querySelector("form")!;
+    await act(async () => {
+      client.getQueryCache().find({ queryKey: kind === "schedule" ? editListKey : editFrameworkKey, exact: true })!.invalidate();
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    expect(compliance.patchSchedule).not.toHaveBeenCalled();
+    await settled(() => expect(host.querySelector<HTMLButtonElement>('[data-testid="wizard-submit"]')!.disabled).toBe(true));
+  });
+
+  it("rejects repeated retained submits while pending and never navigates an old owner after completion", async () => {
+    const schedule = await renderEdit(); await edit("#schedule-name", "Pending name");
+    let complete!: (value: ComplianceScheduleDB) => void;
+    vi.mocked(compliance.patchSchedule).mockImplementation(() => new Promise(resolve => { complete = resolve; }));
+    const form = host.querySelector("form")!;
+    await act(async () => { form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
+    await settled(() => expect(compliance.patchSchedule).toHaveBeenCalledTimes(1));
+    await settled(() => expect(host.querySelector<HTMLButtonElement>('[data-testid="wizard-submit"]')!.disabled).toBe(true));
+    route.userId = "another-user"; await rerender();
+    await act(async () => complete({ ...schedule, name: "Pending name" }));
+    await settled(() => expect(client.isMutating()).toBe(0));
+    expect(route.navigate).not.toHaveBeenCalled();
+    expect(client.getQueryState(editListKey)).toBeDefined();
+    expect(client.getQueryState(["compliance", "db-schedules", "org", "another-user", "cluster", "edit"])).toBeDefined();
+  });
+
+  it("cancels to the exact scoped list without PATCH or run requests", async () => {
+    await renderEdit(); await edit("#schedule-name", "Discarded draft"); await click("Cancel");
+    expect(route.navigate).toHaveBeenCalledWith({ href: "/clusters/cluster/compliance?framework=cis&control_id=1.2&filter=a&filter=b&tab=schedules" });
+    expect(compliance.patchSchedule).not.toHaveBeenCalled(); expect(compliance.runScheduleNow).not.toHaveBeenCalled();
+  });
+
+  it("does not let an old save discard a new draft after leaving and returning to the same owner", async () => {
+    const schedule = await renderEdit(); await edit("#schedule-name", "Original pending edit");
+    let complete!: (value: ComplianceScheduleDB) => void;
+    vi.mocked(compliance.patchSchedule).mockImplementation(() => new Promise(resolve => { complete = resolve; }));
+    await submit(); await settled(() => expect(compliance.patchSchedule).toHaveBeenCalledTimes(1));
+    route.userId = "another-user"; await rerender();
+    await settled(() => expect(host.querySelector<HTMLInputElement>("#schedule-name")?.value).toBe(schedule.name));
+    route.userId = "user"; await rerender();
+    await settled(() => expect(host.querySelector<HTMLInputElement>("#schedule-name")?.value).toBe(schedule.name));
+    await edit("#schedule-name", "A new draft after returning");
+    await settled(() => expect(host.querySelector<HTMLButtonElement>('[data-testid="wizard-submit"]')!.disabled).toBe(false));
+    await act(async () => complete({ ...schedule, name: "Original pending edit" }));
+    await settled(() => expect(client.isMutating()).toBe(0));
+    expect(route.navigate).not.toHaveBeenCalled();
+    expect(host.querySelector<HTMLInputElement>("#schedule-name")!.value).toBe("A new draft after returning");
+    expect(compliance.patchSchedule).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves an unrecognized delivery kind without flattening it during another edit", async () => {
+    const delivery = [{ kind: "legacy-channel", endpoint: "https://legacy.example.test", receiver_id: "legacy", opaque: ["kept"] }] as unknown as ComplianceScheduleDB["delivery"];
+    const schedule = await renderEdit(scheduleForEdit({ delivery }));
+    expect(host.querySelector<HTMLSelectElement>("#delivery-kind-0")!.value).toBe("legacy-channel");
+    vi.mocked(compliance.patchSchedule).mockResolvedValue(schedule);
+    await edit("#schedule-description", "Changed description"); await submit();
+    await settled(() => expect(compliance.patchSchedule).toHaveBeenCalledExactlyOnceWith("editable", { description: "Changed description" }));
+    expect(host.querySelector<HTMLSelectElement>("#delivery-kind-0")!.value).toBe("legacy-channel");
+  });
+
+  it("does not send an enabled-state change when a fresh row changes an unrelated field", async () => {
+    const schedule = await renderEdit(); await edit("#schedule-name", "New name");
+    await act(async () => client.setQueryData(editListKey, { ...options, schedules: [{ ...schedule, enabled: true }] }));
+    await settled(() => expect(host.textContent).toContain("Configured state: Enabled"));
+    vi.mocked(compliance.patchSchedule).mockResolvedValue({ ...schedule, enabled: true, name: "New name" });
+    await submit(); await settled(() => expect(compliance.patchSchedule).toHaveBeenCalledExactlyOnceWith("editable", { name: "New name" }));
+    expect(compliance.runScheduleNow).not.toHaveBeenCalled();
+  });
+
+  it("blocks a retained submit during registry refresh", async () => {
+    await renderEdit(); await edit("#schedule-name", "Retained name"); const form = host.querySelector("form")!;
+    let complete!: (value: { clusters: Array<{ id: string }> }) => void;
+    let refresh!: Promise<{ clusters: Array<{ id: string }> }>;
+    try {
+      await act(async () => {
+        refresh = client.fetchQuery({ queryKey: ["clusters"], queryFn: () => new Promise<{ clusters: Array<{ id: string }> }>(resolve => { complete = resolve; }) });
+        form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); await Promise.resolve();
+      });
+      expect(compliance.patchSchedule).not.toHaveBeenCalled();
+      expect(host.querySelector<HTMLInputElement>("#schedule-name")!.value).toBe("Retained name");
+    } finally { await act(async () => { complete({ clusters: [{ id: "cluster" }] }); await refresh; }); }
+  });
+
+
+  it.each(["schedules", "frameworks", "formats"])("blocks malformed %s metadata without coercing a draft", async kind => {
+    route.scheduleId = "editable";
+    const schedule = scheduleForEdit();
+    vi.mocked(compliance.listDBSchedules).mockResolvedValue({ ...options, schedules: kind === "schedules" ? null : [schedule], report_formats: kind === "formats" ? null : options.report_formats } as unknown as Awaited<ReturnType<typeof compliance.listDBSchedules>>);
+    if (kind === "frameworks") vi.mocked(compliance.frameworks).mockResolvedValue({ frameworks: null } as unknown as Awaited<ReturnType<typeof compliance.frameworks>>);
+    await renderPage(<ComplianceScheduleFormPage />);
+    if (kind === "schedules") {
+      await settled(() => expect(host.textContent).toContain("This schedule is unavailable"));
+      expect(host.querySelector("form")).toBeNull();
+    } else {
+      await settled(() => expect(host.querySelector("form")).not.toBeNull());
+      await edit("#schedule-name", "Kept draft");
+      expect(host.querySelector<HTMLButtonElement>('[data-testid="wizard-submit"]')!.disabled).toBe(true);
+      await submit(); expect(host.querySelector<HTMLInputElement>("#schedule-name")!.value).toBe("Kept draft");
+    }
+    expect(compliance.patchSchedule).not.toHaveBeenCalled(); expect(compliance.createSchedule).not.toHaveBeenCalled();
+  });
+
 });

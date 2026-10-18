@@ -324,7 +324,7 @@ function SchedulesManager({ clusterId, listPath, scopeReady, recheckScope }: { c
     {list.isPending && <LoadingState label="Loading schedules…" />}
     {list.isError && <ErrorState title={list.data ? "Could not refresh schedules. Showing the last loaded configuration." : "Schedules could not be loaded."} action={<Button onClick={() => void list.refetch()}>Retry</Button>} />}
     {(runNow.isError || remove.isError || setEnabled.isError) && <p role="alert" className="text-sm text-status-error">Could not update the schedule. Refresh and try again.</p>}
-    <div className="space-y-3" data-testid="schedule-list">{list.data && rows.length === 0 && <EmptyState title="No compliance schedules" hint="Create a schedule to configure recurring evidence reports." />}{rows.map((schedule) => <ScheduleRow key={schedule.id} schedule={schedule} running={runNow.isPending && runNow.variables === schedule.id} unavailable={busy} onRunNow={() => { setEnabled.reset(); runNow.reset(); remove.reset(); runNow.mutate(schedule.id); }} onDelete={() => { setEnabled.reset(); runNow.reset(); remove.reset(); remove.mutate(schedule.id); }} onSetEnabled={() => { runNow.reset(); remove.reset(); setEnabled.reset(); setEnabled.mutate({ id: schedule.id, enabled: !schedule.enabled, previousEnabled: schedule.enabled, requestContext: context }); }} onToggleRuns={() => setActiveRunsFor(activeRunsFor === schedule.id ? null : schedule.id)} runsOpen={activeRunsFor === schedule.id} />)}</div>
+    <div className="space-y-3" data-testid="schedule-list">{list.data && rows.length === 0 && <EmptyState title="No compliance schedules" hint="Create a schedule to configure recurring evidence reports." />}{rows.map((schedule) => <ScheduleRow key={schedule.id} schedule={schedule} running={runNow.isPending && runNow.variables === schedule.id} unavailable={busy} onRunNow={() => { setEnabled.reset(); runNow.reset(); remove.reset(); runNow.mutate(schedule.id); }} onDelete={() => { setEnabled.reset(); runNow.reset(); remove.reset(); remove.mutate(schedule.id); }} onSetEnabled={() => { runNow.reset(); remove.reset(); setEnabled.reset(); setEnabled.mutate({ id: schedule.id, enabled: !schedule.enabled, previousEnabled: schedule.enabled, requestContext: context }); }} onEdit={() => { const next = new URLSearchParams(search); next.set("tab", "schedules"); navigate({ href: `${listPath}/schedules/${encodeURIComponent(schedule.id)}/edit?${next}` }); }} onToggleRuns={() => setActiveRunsFor(activeRunsFor === schedule.id ? null : schedule.id)} runsOpen={activeRunsFor === schedule.id} />)}</div>
   </section>;
 }
 
@@ -335,6 +335,7 @@ function ScheduleRow({
   onRunNow,
   onDelete,
   onSetEnabled,
+  onEdit,
   onToggleRuns,
   runsOpen,
 }: {
@@ -344,6 +345,7 @@ function ScheduleRow({
   onRunNow: () => void;
   onDelete: () => void;
   onSetEnabled: () => void;
+  onEdit: () => void;
   onToggleRuns: () => void;
   runsOpen: boolean;
 }) {
@@ -389,6 +391,9 @@ function ScheduleRow({
           <span className="rounded-md bg-muted px-2 py-0.5 text-xs" data-testid={`schedule-enabled-${schedule.id}`}>
             {schedule.enabled ? "Enabled" : "Disabled"}
           </span>
+          <Button type="button" variant="outline" size="sm" onClick={onEdit} disabled={running || unavailable} data-testid={`schedule-edit-${schedule.id}`}>
+            Edit {schedule.cluster_id ? "schedule" : "organization schedule"}
+          </Button>
           <Button
             type="button"
             variant="outline"

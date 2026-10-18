@@ -2489,3 +2489,90 @@ Their separately sealed actual outer invocations and independent five-file
 verification remain under `/root/constellation-host-db-*`. This completes the
 temporary host-cache parking operation; it does not establish fresh vulnerability
 database updates, off-host recovery or a parent parity acceptance gate.
+
+### Completed f519517 hosted qualification (2026-10-18)
+
+[Run 39173527687](https://github.com/alphabravo-oss/constellation/actions/runs/39173527687)
+completes on exact `f51951750f27ebb981dcea7548f857e4d01c3da4` with eight passing
+jobs and five failures. Browser acceptance passes all 282 cases without
+failures, flakes, skips, errors or retries. All five schedule cases pass once,
+including both corrected notification assertions, 360px action bounds and
+enabled-state PATCH. Unit records 3,469 passes / 750 skips; integration records
+9,506 passes / 14 skips. All fourteen SMTP nodes pass once in unit and twice in
+integration; both request-handler roots pass twice in integration without skips.
+
+The frontend job records 2,350 passes and one failure in the unchanged Timeline
+strict-boundary render assertion; all 50 schedule workflow cases pass. The next
+source corrects that wait as documented below. Lint remains 1,449, gosec 136 and
+normalized historical-secret identities 11, each with count-aware zero additions
+and removals. Quality, gosec, history, frontend and required remain failed; no
+gate is waived. Retained evidence is `/root/security-triage-39173527687`;
+all 193 checksum records independently verify, seal SHA256
+`fcda4384ebf3f9bb6c61906e2b3855d3bc05cf81fb3cea1fe641d3b026a14b67`.
+This run accepts its exact source's browser behavior, not the later schedule
+editing snapshot, a deployed frontend or scheduler execution/delivery.
+
+### Scoped schedule editing and Timeline render synchronization (2026-10-18)
+
+Schedule cards now expose a dedicated Edit route using the existing form and
+PATCH API. The editor freezes the first matching organization/cluster record,
+retains drafts across refresh failures, and rechecks current identity, resolved
+scope, noninvalidated data and available replacement choices before saving.
+Custom values and complete delivery objects remain intact, including multiple
+targets, endpoints, receiver references and additional properties. Requests
+contain only changed configuration fields; they omit enabled state and never
+request a run. Inherited schedules retain their organization-wide scope label.
+Already-observed changes to a dirty field block saving and explain how to copy
+edits, cancel and reopen. Visit-specific ownership rejects an older save after
+leaving and returning to the same context, protecting the new visit's draft.
+The existing server
+PATCH still lacks transaction/CAS protection; this is not a guarantee against
+concurrent updates. No scheduler or provider acceptance closes.
+
+The private five-path proposal and root import receipt are retained at
+`/root/constellation-schedule-edit-f519517-preparation-v2` and
+`/root/constellation-schedule-edit-root-import-v1.json`. Fresh isolated
+qualification passes all 73 exact workflow cases (50 retained plus 23 added),
+TypeScript and Vite build with actual exit 0. All 199 output files, totaling
+3,531,651 bytes, and all 437 source bindings independently verify. RESULT is
+`/root/constellation-schedule-edit-frontend-qualification-v3/evidence/RESULT.json`,
+SHA256 `da5974f0f4c2a024aa83621ba8fb0bf0995785e0705ef07aa241037bcf6697dc`.
+The fifteen-record execution seal is
+`aea2c09b66c835e1c144e0b95fc9fb8a702ad1ef6dae209c2bdb76fc071588d4`;
+the separately sealed outer command also exits 0. Owned process groups are
+absent and the lock is released. The two added browser fixtures and existing
+narrow-screen action check await a later exact-head 284-case run. This frontend
+is not deployed; the canonical checklist remains 66 checked / 87 open.
+
+The earlier 72-case v1 pass remains preserved. Follow-up v2 records 72 passes
+and one failed synchronous enabled-label assertion; the new stale-save case
+passes, but TypeScript/build do not run. Its nine-record seal is
+`66767ab9ab86a85536f3fc3532eb540e8064c40bd5e662db60a5b652f16f73b8`.
+V3 awaits rendered feedback for cache changes and completed mutations before
+checking old-save navigation, retaining immediate no-write guards. The failed
+work, source and lock remain intact; no in-place retry occurs.
+
+The separate v3 original-code control uses the literal earlier form with the
+new test. Its sole selected stale-save case fails at the owned navigation
+assertion: the old completion redirects once after leaving and returning.
+Actual child exit is 1; the expected-failure wrapper and sealed outer exit 0.
+The other 72 cases are filtered without acceptance. All ten control/outer
+records independently verify, groups are absent and the lock is released.
+RESULT SHA256 is
+`3f67241843076c66066b28a89ef36f15a2f2d4617625ea9ebeff62679aa0fcad`
+under `/root/constellation-schedule-edit-aba-old-control-v3/evidence`; its
+six-record seal is
+`d5be22d590fa4633e54ee9f1f04196ab2dc0be2ed7576689fe3e9c87b71dee1c`.
+
+The f519517 full frontend run also exposes an unchanged Timeline test that waits
+for a refetch API invocation but immediately asserts the rendered result. The
+fixture now waits for the same "Strictly after" assertion to render. Strict
+14-day, exact timestamp, replace-history and pagination assertions remain.
+Fresh isolated qualification passes all 30 exact Timeline cases without skips;
+production Timeline bytes are unchanged. RESULT SHA256 is
+`be5f240e5f08e1d827b7764bd92e4221c5df451374c0786cc4908bb639163583`
+under `/root/constellation-timeline-settled-frontend-qualification-v1/evidence`;
+the nine-record execution seal is
+`1abcdb5eaa69d7a2338669601b5762a4156c42c9e2ddece192eaa5b9d3df7ab0`.
+Actual child and separately sealed outer exits are 0, groups are absent and
+the lock is released. The original hosted failure remains retained.

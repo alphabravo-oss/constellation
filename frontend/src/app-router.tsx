@@ -285,6 +285,7 @@ const cluster_compliance_benchmark_newRoute = createRoute({ getParentRoute: () =
 const cluster_compliance_benchmark_retryRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "compliance/benchmarks/$requestId/retry", component: () => (<SuspenseRoute><BenchmarkExecutionFormPage action="retry" /></SuspenseRoute>) });
 const cluster_compliance_exemption_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "compliance/exemptions/new", component: () => (<SuspenseRoute><ComplianceExemptionFormPage /></SuspenseRoute>) });
 const cluster_compliance_schedule_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "compliance/schedules/new", component: () => (<SuspenseRoute><ComplianceScheduleFormPage /></SuspenseRoute>) });
+const cluster_compliance_schedule_editRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "compliance/schedules/$scheduleId/edit", component: () => (<SuspenseRoute><ComplianceScheduleFormPage /></SuspenseRoute>) });
 const cluster_groupsRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "groups", component: () => (<SuspenseRoute><GroupsPage /></SuspenseRoute>) });
 const cluster_groups_settingsRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "groups/settings", component: () => (<SuspenseRoute><GroupSettingsPage /></SuspenseRoute>) });
 const cluster_groups_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "groups/new", component: () => (<SuspenseRoute><GroupFormPage /></SuspenseRoute>) });
@@ -529,6 +530,7 @@ authenticatedRoute.addChildren([
   cluster_compliance_benchmark_retryRoute,
   cluster_compliance_exemption_newRoute,
   cluster_compliance_schedule_newRoute,
+  cluster_compliance_schedule_editRoute,
   cluster_groupsRoute,
   cluster_groups_settingsRoute,
   cluster_groups_newRoute,

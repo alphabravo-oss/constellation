@@ -151,7 +151,7 @@ it("pins a rolling fallback with replace history and preserves strict 14-day sem
  await settled(()=>expect(new URLSearchParams(history.location.search).get("after")).toBe(boundary));
  expect(history.location.search).not.toContain("hours=");
  await settled(()=>expect(securityTimeline.list).toHaveBeenLastCalledWith(expect.objectContaining({after:boundary,severity:"critical,high",after_exclusive:true})));
- expect(host.textContent).toContain("Strictly after");
+ await settled(()=>expect(host.textContent).toContain("Strictly after"));
  click("Next");await settled(()=>expect(new URLSearchParams(history.location.search).get("page")).toBe("2"));
  await act(async()=>history.back());await settled(()=>expect(new URLSearchParams(history.location.search).has("page")).toBe(false));expect(history.location.search).not.toContain("hours=");
 });
