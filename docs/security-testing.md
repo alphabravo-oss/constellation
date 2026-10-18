@@ -1748,16 +1748,14 @@ implicit-token destination binding and redirect refusal. Credential/state
 transaction semantics remain unchanged. This source evidence is separate from
 the deployed c5428cc evidence.
 
-A separate read-only source audit found runtime readiness uses cumulative DP
-start/keepalive counters rather than the active supervisor generation. Historical
-replies can satisfy the handler after a DP exit or while a replacement awaits its
-first reply; tap-reconciliation readiness is also not established by those
-counters. This remains an unexecuted source finding, not an observed live outage
-or qualified fix. Audit:
+The separate runtime source audit identified cumulative DP counters satisfying
+readiness after process exit or while a replacement awaits its first reply.
+The source correction is qualified below and remains undeployed; this was not
+an observed live outage. Original audit:
 `/root/constellation-runtime-readiness-audit-c5428cc/AUDIT.json`
 (SHA256 `cd80025441d7f7e531d166021943046a819c2d5e1dd85c55ee06189814891bfc`).
-Current-generation and tap acceptance remain within the existing open readiness/
-enforcement parent; no new checklist row or completion is recorded.
+Fresh tap reconciliation and live readiness/enforcement acceptance remain open;
+no new checklist row or completion is recorded.
 
 
 ### Qualified notifier, backup and federation follow-ups (2026-10-18)
@@ -1796,8 +1794,9 @@ resource floors remained unchanged.
 
 Broader notifier Dispatch/HTTP-shutdown durability, retry when bookkeeping DB is
 unavailable, federation credential/state write atomicity and actual 30-minute
-export-timeout acceptance remain open. Runtime-health qualification is separate
-and pending analysis. These eight files are **source-qualified, not deployed**:
+export-timeout acceptance remain open. Runtime-health source qualification is
+recorded below; its deployment remains pending. These eight files are
+**source-qualified, not deployed**:
 main remains Helm 85/schema 180 with c5428cc API/scanner/runtime-agent images.
 External provider/IdP, authenticated browser, broader enforcement/CNI/HA and
 recovery acceptance remain open. The checklist remains 66 checked / 87 open.
@@ -1809,3 +1808,46 @@ gosec, gitleaks and required remain failed. This hosted run predates these eight
 files. Root verified 38 hashes in
 `/root/security-triage-39143874523/SHA256SUMS`; completed manifest SHA256 is
 `adf35dcc90f29f680f41a37a7191846a467a9a6b2cd18be4b8a59a446cc111ac`.
+
+
+### Qualified current-generation runtime readiness (2026-10-18)
+
+Three source files over frozen c5428cc pass isolated qualification. The readiness
+handler requires the active supervisor generation to be ready and keeps cumulative
+start, keepalive and tap counters as diagnostics. Nil/disabled DP remains ready;
+process exit and replacement startup cannot borrow historical replies. Fresh tap
+reconciliation remains a separate acceptance signal. The existing search-only
+Flannel fixture passes its owned directory as inherited fd4 to the unprivileged
+child; UID/GID 65534, directory-read denial and literal-readlink assertions remain.
+
+Fresh owned PostgreSQL 16 migrations through 180 twice and seed precede the full
+runtime-agent/DP race/shuffle/count-two suite: **876 passing test events**, zero
+failures, two passing packages and exactly six native opt-in skip events. The
+HTTP regressions, active supervisor epochs, database replay and corrected fixture
+each pass twice. Vet passes both packages. Configured count-aware lint remains
+165 to 165 with no added or removed findings and no typecheck errors; these
+existing diagnostics remain debt. The adapted original cumulative-predicate
+control produces four HTTP 200-versus-503 leaf failures and two parent failures
+at count-two, with no compilation failures or skipped/passing extras. Raw
+assertions remain retained. All owned test/analysis groups, PG containers and
+active v3 locks are absent. The earlier v2 attempt failed before its fixture
+assertions because UID 65534 could not traverse private TMPDIR ancestors; this
+was a test setup issue, not a demonstrated readiness regression. V3 fixes that
+path with the inherited descriptor and passes the complete suite. The failed v2
+attempt, original source and active lock remain preserved as history.
+
+Qualification manifest:
+`/root/constellation-runtime-health-c5428cc-final-handoff/QUALIFICATION-MANIFEST.json`
+(SHA256 `381e344b8a4215b307c22f1c23d8c54f9a2e0ca9efaa95bc681b93214efd495f`).
+It links the exact three source hashes, full 2,619-path inventories and all seven
+sealed stages. Warm initialization 42.75/42.625 GiB and command 42.5 GiB
+admission used the reviewed same-package observations; hard 40 GiB root/Docker and
+2 GiB /tmp floors, early stops and owned process/database cleanup remained.
+
+The import is onto b5e4200, where the three original file hashes still match
+the frozen base. The preceding eight notifier/backup/federation files retain their
+separate qualification; no combined eleven-file run, binaries/images, deployment
+or live readiness acceptance is claimed here. Main remains Helm 85/schema 180
+with c5428cc API/scanner/runtime-agent images. Native/Flannel, fresh tap, broader
+enforcement/CNI/HA and recovery acceptance remain open. No parent checklist item
+is closed; the plan remains 66 checked / 87 open.

@@ -330,9 +330,20 @@ func TestFlannelFixtureReadlinkSearchOnly(t *testing.T) {
 			t.Error(err)
 		}
 	})
+	// Inherit the owned directory so the unprivileged child need not traverse
+	// private ancestors of TMPDIR to reach the search-only fixture.
+	fixtureDirectory, err := os.Open(directory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := fixtureDirectory.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	command := exec.CommandContext(t.Context(), "/proc/self/fd/3", "-test.run=^TestFlannelFixtureReadlinkSearchOnly$")
-	command.ExtraFiles = []*os.File{executable}
-	command.Env = append(os.Environ(), "CONSTELLATION_FLANNEL_SEARCH_ONLY_TEST="+directory)
+	command.ExtraFiles = []*os.File{executable, fixtureDirectory}
+	command.Env = append(os.Environ(), "CONSTELLATION_FLANNEL_SEARCH_ONLY_TEST=/proc/self/fd/4")
 	if os.Geteuid() == 0 {
 		// The owned child has no capabilities and cannot borrow root's DAC bypass.
 		command.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: 65534, Gid: 65534}}

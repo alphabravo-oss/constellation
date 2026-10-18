@@ -125,10 +125,16 @@ race/shuffle/count-two qualification passes 1,584 tests with zero skips; vet pas
 scoped lint removes three findings with none added, and old-behavior controls
 reproduce their intended failures. See the new qualification entry in
 `docs/security-testing.md`; no binary/image or live acceptance is claimed.
-A separate runtime source audit found cumulative DP
-start/keepalive counts can satisfy readiness without the active generation being
-ready. Current-generation and tap-reconciliation proof remain within the existing
-open readiness/enforcement acceptance; deployment health does not close it.
+The three-file runtime-health follow-up is also source-qualified and undeployed.
+Readiness now requires the active DP generation to be ready; historical replies
+cannot satisfy it after exit or during replacement startup. Full runtime-agent/DP
+qualification passes 876 test executions with six native opt-in skips, vet for both
+packages, unchanged scoped lint (165 findings) and the intended old-predicate
+failures. The search-only fixture inherits an owned directory descriptor so its
+unprivileged child works beneath private temporary-directory ancestors.
+Fresh tap reconciliation and live readiness/enforcement acceptance remain within
+the existing open parent; no binary/image or combined eleven-file qualification
+is claimed.
 
 Deployed schema180 preserves full unsigned native threat IDs and marks unproven
 historical maxima in compact row details. Its full-chain migration checks exact
