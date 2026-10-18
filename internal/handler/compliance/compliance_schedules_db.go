@@ -25,7 +25,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -486,8 +485,7 @@ SELECT id, org_id, cluster_id, schedule_id, framework, started_at, completed_at,
 }
 
 // Artifact streams the PDF/JSON artifact bytes for one run. file:// URIs are read from
-// disk; s3:// URIs are returned as a 302 redirect (S3 presigning is out of scope for v1
-// — callers with S3 creds can fetch directly).
+// the configured REPORT_OUT_DIR; s3:// URIs return download metadata, not bytes.
 func (h *ComplianceSchedulesDB) Artifact(w http.ResponseWriter, r *http.Request) {
 	subj, _ := authctx.SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
@@ -518,7 +516,7 @@ SELECT COALESCE(artifact_uri,''), COALESCE(artifact_signature,''),
 	}
 	if strings.HasPrefix(uri, "file://") {
 		path := strings.TrimPrefix(uri, "file://")
-		f, err := os.Open(path)
+		f, err := openComplianceArtifact(path)
 		if err != nil {
 			httpx.WriteJSON(w, http.StatusGone, map[string]string{"error": "artifact file missing"})
 			return

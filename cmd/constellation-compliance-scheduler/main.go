@@ -622,13 +622,23 @@ func (d *daemon) deliverEmail(t compliancehandler.DeliveryTarget, s dueSchedule,
 	return nil
 }
 
+// deliveryFailure keeps endpoint/parser/provider diagnostics available to local
+// error inspection without publishing them in schedule status or worker logs.
+type deliveryFailure struct {
+	operation string
+	cause     error
+}
+
+func (e *deliveryFailure) Error() string { return e.operation + " failed" }
+func (e *deliveryFailure) Unwrap() error { return e.cause }
+
 func (d *daemon) deliverS3(ctx context.Context, t compliancehandler.DeliveryTarget, body []byte, sig, filename string) error {
 	if t.Bucket == "" {
 		return errors.New("s3 delivery: bucket required")
 	}
 	cfg, err := awsconfig.LoadDefaultConfig(ctx)
 	if err != nil {
-		return fmt.Errorf("aws config: %w", err)
+		return &deliveryFailure{operation: "s3 configuration", cause: err}
 	}
 	var client *s3.Client
 	if t.Endpoint != "" {
@@ -647,14 +657,16 @@ func (d *daemon) deliverS3(ctx context.Context, t compliancehandler.DeliveryTarg
 		ContentType: awssdk.String("application/octet-stream"),
 		Metadata:    map[string]string{"cosign-signature": sig},
 	}); err != nil {
-		return fmt.Errorf("s3 put: %w", err)
+		return &deliveryFailure{operation: "s3 artifact upload", cause: err}
 	}
 	if sig != "" {
-		_, _ = client.PutObject(ctx, &s3.PutObjectInput{
+		if _, err := client.PutObject(ctx, &s3.PutObjectInput{
 			Bucket: awssdk.String(t.Bucket),
 			Key:    awssdk.String(key + ".sig"),
 			Body:   strings.NewReader(sig),
-		})
+		}); err != nil {
+			return &deliveryFailure{operation: "s3 signature upload", cause: err}
+		}
 	}
 	d.logger.Info("delivered: s3", "bucket", t.Bucket, "key", key)
 	return nil
@@ -675,19 +687,22 @@ func (d *daemon) deliverWebhook(ctx context.Context, t compliancehandler.Deliver
 		"signature":    sig,
 		"generated_at": time.Now().UTC().Format(time.RFC3339),
 	})
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return &deliveryFailure{operation: "webhook request construction", cause: err}
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Constellation-Cosign-Signature", sig)
 	resp, err := d.http.Do(req)
 	if err != nil {
-		return err
+		return &deliveryFailure{operation: "webhook transport", cause: err}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return fmt.Errorf("webhook %s: %d %s", url, resp.StatusCode, strings.TrimSpace(string(body)))
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
+		return fmt.Errorf("webhook response HTTP %d", resp.StatusCode)
 	}
-	d.logger.Info("delivered: webhook", "url", url, "status", resp.StatusCode)
+	d.logger.Info("delivered: webhook", "schedule", s.ID, "status", resp.StatusCode)
 	return nil
 }
 

@@ -44,6 +44,19 @@ Node 24 qualification passes both full-file runs, twenty normal repetitions and
 three delayed-notification cases. This does not erase the hosted failure or close
 a broader acceptance item.
 
+Exact correction head `c7d97b5` subsequently completes hosted CI with nine passing
+jobs and four existing failing gates. All 2,344 frontend tests and 279 browser
+cases pass; the saved-view regression passes. Lint, gosec and historical-secret
+identities remain unchanged. This closes the observed test timing regression,
+without closing any parent parity or release gate.
+
+The next nine-file Go follow-up has completed isolated source qualification:
+598 passing executions, two native opt-in skips, zero-diagnostic vet, and scoped
+lint with zero additions and seven removals. Original-code controls reproduce
+all four intended failure classes. It fixes scheduler webhook/S3 failure handling,
+namespace worker restoration and confined report downloads. Fresh artifacts and
+deployment are pending; main remains on 2b29b63 and no parent gate closes.
+
 ## Plan rules
 
 - This file owns status. Audits and assessments are evidence, not task trackers.
@@ -5013,5 +5026,11 @@ jobs: unit 3,411 passes/745 skips, integration 9,368 passes/14 skips, frontend
 1,456, gosec 143, historical-secret eleven and the required gate still fail;
 no gate or diagnostic is waived. Detailed source, artifact, CI and deployment
 receipts are in `docs/security-testing.md`. The checklist remains **66 checked /
-87 open**. The new scheduler-delivery and namespace-restoration candidates are
-separate, unqualified preparations and are not included in deployed 2b29b63.
+87 open**. The separate nine-file scheduler-delivery, namespace-restoration and
+report-download confinement follow-up now passes 598 fresh-schema-180
+race/shuffle/count-two executions, two explicit native opt-in skips, vet and
+scoped lint (92 to 85 findings, zero added). All four original-code controls
+reproduce their exact intended failures, including authenticated HTTP responses.
+Artifacts and deployment remain pending; these changes are not in deployed
+2b29b63. Scheduler launch, shared report storage, signing and live delivery remain
+open. Evidence and narrower acceptance boundaries are in `docs/security-testing.md`.

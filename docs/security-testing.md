@@ -2039,3 +2039,127 @@ The 223-record seal is
 `4b72dc595cdb215e1fd059da984af0003cfcd5491ca5a475fc57da59f75730be`;
 the imported test SHA256 is
 `f232e348d26be69ef38f77ca6e08a8a5cb35211c608acdc86ec83501075f4c68`.
+
+### Saved-view correction hosted result and bounded capacity recovery (2026-10-18)
+
+Exact correction head `c7d97b5c4bf15f70ebf62e1453b0a40974d8531f` completes
+[hosted run 39157926527](https://github.com/alphabravo-oss/constellation/actions/runs/39157926527)
+with nine passing jobs and four failing gates: quality, gosec, gitleaks and
+required. Frontend passes all 2,344 tests, including the corrected saved-view
+case; browser passes all 279 cases with zero unexpected, flaky, skipped or report
+errors. Unit records 3,411 passes / 745 skips and integration 9,368 passes /
+fourteen skips, with no failed Go tests. Both Go reports contain 99 passing
+packages and 26 packages without tests. Lint 1,456, gosec 143 and eleven
+historical-secret identities have zero count-aware additions or removals versus
+702b939. FIPS and dependency checks pass; zero reachable govulncheck findings
+does not erase the retained two imported and three required-module findings.
+All 155 evidence records independently verify at
+`/root/security-triage-39157926527`; seal SHA256 is
+`f55be96491a116e117772c8830da2f006b801c3403bb3159bc083742e71b2d95`.
+
+To admit the next isolated Go qualification, 104 unused historical role images
+were first preserved in one complete 1,663,987,200-byte recovery archive, SHA256
+`3b2df65661422e5a085381dc1488b11946dab2a4f748bb11a4e0378a83ae0604`.
+Independent full-byte, graph and layer-DiffID verification passed. The initial
+import failed its strict descriptor comparison because Docker applied the
+archive's name annotations; its failed result and lock remain preserved. A
+separately reviewed import allows only the exact observed annotation replacements and passes with
+the complete raw image map unchanged. This proves importer idempotence in the
+existing store, not restoration into an empty store.
+
+One nonforce `image rm --no-prune` then exits zero and removes exactly the 104
+selected images. Its strict post-check remains failed because 79 retained cache
+records changed only their derived `Shared` flag from true to false. Separate
+read-only reconciliation confirms two identical settled maps: all 79 other
+images, 314 cache identity/dependency records, eight containers and external
+references remain intact; only the 145 permitted snapshot chains disappeared,
+and all 614 protected parent/kind rows remain exact. The archive, source,
+preparations, original failed checks and locks remain preserved. Reconciliation
+is `/root/constellation-role-image-recovery-104-retirement-reconciliation-v1`,
+RESULT SHA256 `edc0f6e24cec90e71d029973d061412fe750cf5a0e54822a68955da00118d3eb`.
+Observed net filesystem gain after retaining the archive is 2,787,889,152 bytes;
+this includes background/evidence changes and is below the logical estimate.
+Main remains Helm 86 / source 2b29b63; host scanner database restoration and the
+new Go source qualification are separate pending work.
+
+
+### Scheduler delivery, namespace restoration and report confinement qualification (2026-10-18)
+
+Nine Go paths add bounded corrections in three packages. A malformed webhook
+returns a categorical error before request headers are accessed; transport and
+provider diagnostics remain inspectable through error unwrapping without
+entering persisted status or worker logs. A requested S3 signature-sidecar upload
+must succeed for delivery to succeed. Fresh-database tests exercise an actual
+scheduler tick across two organizations and a real AWS SDK loopback upload
+rejection, retaining subsequent deliveries and local report artifacts.
+
+Container interface discovery runs on a dedicated locked worker. Restoration
+failure joins the original error, discards interface results and exits without
+unlocking; the caller never enters the target namespace. The fallback saves the
+locked worker's own task namespace. Tests use fake namespace syscalls with actual
+thread locks, TIDs and bounded complete goroutine evidence. Ordinary failed
+workers terminate; Go's initial main thread may remain parked after its worker
+goroutine exits. This is not a real Setns or fresh-tap acceptance claim.
+
+Authenticated report downloads open only regular, singly linked files beneath
+REPORT_OUT_DIR (default /tmp/compliance-out). Pinned directory descriptors,
+no-follow/nonblocking opens and inode checks reject traversal, symlinks,
+hardlinks, FIFOs and replaced entries without creating or changing the API's
+report directory. Relative root configuration remains supported. Read-only main
+inventory found zero compliance runs, so there is no existing file-URI
+compatibility blocker; it does not establish a positive main artifact download.
+The compatibility inventory's eight-record seal is
+`79d606d1bf39a45aec356081bfc72ae271b3f5e2d2762c44858f9ebaecac28f9`.
+
+V6 combined qualification passes 598 race/shuffle/count-two test executions
+across all three packages on a fresh schema-180 database, with exactly two
+explicit native opt-in skips and no failures. All 54 required named test nodes
+run and pass twice. Vet has zero diagnostics. Configured scoped lint records
+92 baseline and 85 candidate findings, with zero count-aware additions and seven
+removals. Native and live-provider acceptance remain separate. The owned
+PostgreSQL container is absent, source inventories are unchanged, and owned
+process groups and successful-stage locks are released.
+
+Qualification preparation is
+`/root/constellation-scheduler-dp-compliance-next-preparation-v6`, with
+46-record seal
+`0581d2c7f3429fbb11325c4784c2b828cd3dec6ef502763ef225b9985266d6ae`.
+Evidence is `/root/constellation-scheduler-dp-compliance-next-qualification-v6/evidence`.
+Tests have fourteen-record seal
+`5b26eb275c8979bc59f7d3de67a44fe896c676db1a9d7dcce1202c67ed06207b`;
+vet has nine-record seal
+`06ffa96cc9cef2752ae51bb099f54f2c8f150cbf7777d7d689a7dfef022085e2`.
+The five-record lint comparison seal is
+`257e876004ade0f9f5906029bb36b04da3026eae96e291510a91a82a685f6115`,
+RESULT SHA256
+`ab02f738708b4fe3efb699d9976cd42ec23e824c4c1fb525fece360a9ccda3e7`.
+All four original-code controls reproduce the required failures: namespace
+restoration has six expected failed test events; malformed webhook construction
+panics once; ignored S3 signature failure has four expected failed events while
+four healthy-case executions pass; and report confinement has ten expected
+failed events. The latter verifies all four negative HTTP cases twice, each
+returning the exact private fixture bytes with HTTP 200 under the old handler.
+These are intended regression failures, with no compile, race or skip credit.
+Control seals, respectively, are
+`537376d14d66738cb9de6938722d1e731b7c661a557dd8808f14c13235742e0c`,
+`30c65053154af217fb1ea94716c9db66cb3123ef848e6f1c1010c9564dfd9573`,
+`f56da79833aea8ef78084342cb62b0eb49ce7238977e1c24a39fb66dddb8d757` and
+`605819119c1d8beaba3e4196d6acd6a303dc483d1c953d4182e031c3262fa3fd`.
+The API control's separately owned database is also absent. All ten stage seals
+independently verify. Final artifact/deployment checks remain pending; these
+source results do not qualify a new deployed release.
+
+After image retirement, a separately guarded official BuildKit prune removes
+exactly 79 unused, now-unshared cache records (314 to 235), preserving every
+remaining cache record, all 79 images/80 references and eight containers. Its
+command exits zero; the owned process group is absent. Observed filesystem gain
+is 1,225,666,560 bytes, distinct from nominal cache sizes. Ten-record execution
+seal is `a69454f3ac6d6ae05a9b0a1541a6ea4b93f3c08c337e663b245d4460a0c1089c`
+at `/root/constellation-build-cache79-preparation-20261018-v2/execution`.
+Source, recovery archives, module downloads and host scanner database archives
+remain retained. Scanner database restoration is still pending.
+
+The scheduler remains a source/binary role without a deployed worker. Durable
+shared report storage, signing keys outside the API report mount, real signing,
+SMTP bounds, queue/crash recovery and live delivery remain open. Full parity
+remains 66 checked / 87 open; no parent acceptance item closes.

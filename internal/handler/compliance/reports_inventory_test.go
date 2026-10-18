@@ -156,7 +156,9 @@ func TestComplianceArtifactActualMetadataIsImmutableAndLegacyUnknown(t *testing.
 	if _, err := p.Exec(ctx, `INSERT INTO compliance_schedules(id,org_id,cluster_id,name,framework,cron_expression,report_format) VALUES($1,$2,$3,'artifact schedule','cis-k8s-1.9','0 0 * * *','pdf')`, schedule, org, cluster); err != nil {
 		t.Fatal(err)
 	}
-	filename := filepath.Join(t.TempDir(), "actual-fallback.html")
+	reportDir := t.TempDir()
+	t.Setenv("REPORT_OUT_DIR", reportDir)
+	filename := filepath.Join(reportDir, "actual-fallback.html")
 	if err := os.WriteFile(filename, []byte("<html>actual fallback</html>"), 0600); err != nil {
 		t.Fatal(err)
 	}

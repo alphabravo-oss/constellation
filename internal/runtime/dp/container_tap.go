@@ -2,6 +2,7 @@ package dp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -324,67 +325,92 @@ func (p *ContainerTapProvider) ifacesFor(netnsPath string) ([]netIface, error) {
 	return []netIface{{name: name, mac: mac, ips: ips}}, nil
 }
 
-// interfacesInNetns enters the network namespace at netnsPath and returns ALL
-// UP, non-loopback interfaces (name + MAC + IPv4s), primary (eth0) first — so a
-// pod with multiple CNI attachments (Multus) is tapped on every NIC, not just
-// the first. It mirrors NeuVector's CallNetNamespaceFuncWithoutLock
-// (share/system/system_linux.go:132-165): lock the OS thread, save the caller's
-// netns, setns into the target, run the work, then ALWAYS setns back.
-//
-// Restore is guaranteed by defer even on panic. We deliberately do NOT
-// UnlockOSThread if the restore fails — a thread left in a foreign netns must
-// die with the goroutine rather than be reused for unrelated work.
-func interfacesInNetns(netnsPath string) (ifaces []netIface, err error) {
-	// Pin this goroutine to its OS thread for the whole setns window.
-	runtime.LockOSThread()
+// interfacesInNetns enters the network namespace at netnsPath and returns all
+// up, non-loopback interfaces, primary first. Namespace changes run on a
+// dedicated locked worker. If restoration fails, it exits without unlocking,
+// preventing thread reuse: the runtime terminates ordinary threads and parks
+// its initial main thread (m0). The caller never enters the pod namespace and
+// can safely continue its long-lived reconciliation loop.
+func interfacesInNetns(netnsPath string) ([]netIface, error) {
+	return interfacesInNetnsWithOps(netnsPath, containerNetnsOps{
+		lock: runtime.LockOSThread, unlock: runtime.UnlockOSThread,
+		open: unix.Open, close: unix.Close, setns: unix.Setns, read: allInterfaces,
+	})
+}
 
-	// Save the thread's current netns so we can return to it. Use thread-self
-	// (the per-thread netns) since we're operating at thread granularity.
-	savedPath := "/proc/thread-self/ns/net"
-	savedFD, err := unix.Open(savedPath, unix.O_RDONLY|unix.O_CLOEXEC, 0)
+// Per-call operations keep deterministic tests independent of privileges and
+// avoid mutable global syscall hooks.
+type containerNetnsOps struct {
+	lock   func()
+	unlock func()
+	open   func(string, int, uint32) (int, error)
+	close  func(int) error
+	setns  func(int, int) error
+	read   func() ([]netIface, error)
+}
+
+func interfacesInNetnsWithOps(netnsPath string, ops containerNetnsOps) ([]netIface, error) {
+	var result struct {
+		ifaces     []netIface
+		err        error
+		panicValue any
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		// Preserve the synchronous caller's ability to recover a reader panic,
+		// after the worker has attempted restoration and finished its cleanup.
+		defer func() { result.panicValue = recover() }()
+		result.ifaces, result.err = interfacesInNetnsOnThread(netnsPath, ops)
+	}()
+	<-done
+	if result.panicValue != nil {
+		panic(result.panicValue)
+	}
+	return result.ifaces, result.err
+}
+
+func interfacesInNetnsOnThread(netnsPath string, ops containerNetnsOps) (ifaces []netIface, err error) {
+	ops.lock()
+
+	// Save this worker thread's current namespace. On kernels lacking
+	// /proc/thread-self, use the locked worker's TID, not /proc/self: the
+	// thread-group leader may have a different (or parked) network namespace.
+	savedFD, err := ops.open("/proc/thread-self/ns/net", unix.O_RDONLY|unix.O_CLOEXEC, 0)
 	if err != nil {
-		// Older kernels lack /proc/thread-self; fall back to /proc/self.
-		savedPath = "/proc/self/ns/net"
-		savedFD, err = unix.Open(savedPath, unix.O_RDONLY|unix.O_CLOEXEC, 0)
+		savedFD, err = ops.open("/proc/self/task/"+strconv.Itoa(unix.Gettid())+"/ns/net", unix.O_RDONLY|unix.O_CLOEXEC, 0)
 		if err != nil {
-			runtime.UnlockOSThread()
+			ops.unlock()
 			return nil, fmt.Errorf("open current netns: %w", err)
 		}
 	}
 
-	targetFD, err := unix.Open(netnsPath, unix.O_RDONLY|unix.O_CLOEXEC, 0)
+	targetFD, err := ops.open(netnsPath, unix.O_RDONLY|unix.O_CLOEXEC, 0)
 	if err != nil {
-		unix.Close(savedFD)
-		runtime.UnlockOSThread()
+		_ = ops.close(savedFD)
+		ops.unlock()
 		return nil, fmt.Errorf("open target netns %s: %w", netnsPath, err)
 	}
-
-	// Enter the container's netns.
-	if err := unix.Setns(targetFD, unix.CLONE_NEWNET); err != nil {
-		unix.Close(targetFD)
-		unix.Close(savedFD)
-		runtime.UnlockOSThread()
+	if err := ops.setns(targetFD, unix.CLONE_NEWNET); err != nil {
+		_ = ops.close(targetFD)
+		_ = ops.close(savedFD)
+		ops.unlock()
 		return nil, fmt.Errorf("setns into %s: %w", netnsPath, err)
 	}
-	unix.Close(targetFD)
+	_ = ops.close(targetFD)
 
-	// From here on, restore is mandatory. If it fails we keep the thread
-	// locked (and never unlock) so the runtime retires it instead of handing
-	// a netns-polluted thread to another goroutine.
 	defer func() {
-		if rerr := unix.Setns(savedFD, unix.CLONE_NEWNET); rerr != nil {
-			// Could not get back to our own netns. Leave the thread locked.
-			if err == nil {
-				err = fmt.Errorf("restore netns (thread retired): %w", rerr)
-			}
-			unix.Close(savedFD)
+		if rerr := ops.setns(savedFD, unix.CLONE_NEWNET); rerr != nil {
+			err = errors.Join(err, fmt.Errorf("restore netns: %w", rerr))
+			ifaces = nil
+			_ = ops.close(savedFD)
+			// No unlock: this worker exits, preventing its OS thread from being reused.
 			return
 		}
-		unix.Close(savedFD)
-		runtime.UnlockOSThread()
+		_ = ops.close(savedFD)
+		ops.unlock()
 	}()
-
-	return allInterfaces()
+	return ops.read()
 }
 
 // allInterfaces returns EVERY UP, non-loopback interface (name, MAC and IPv4
