@@ -2633,3 +2633,9 @@ The capacity hold and exact source import receipts remain at
 `/root/constellation-editor-images-root-import-v1.json`. Exact-head hosted
 qualification remains pending. Main stays Helm87/schema180 with the older
 frontend; no worker activation, deployment or parent acceptance closes.
+
+A subsequent test-only correction explicitly sets image_digest on the three
+new inventory records to match their reference and disclosure/CSV assertions.
+The inherited fixture otherwise supplied sha256:0. No product behavior, case
+identity, timeout or expected suite total changes; the sealed private proposal
+remains unchanged and does not qualify the corrected source.

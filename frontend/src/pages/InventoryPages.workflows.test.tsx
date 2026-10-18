@@ -130,7 +130,7 @@ it("connector scan jobs opens the canonical empty ledger with verified counts ra
 it.each(["tagged", "reference-with-digest", "digest-only"] as const)("keeps %s image names readable and digests disclosed in inventory and preview", async kind => {
  const digest = `sha256:${"a".repeat(64)}`;
  const named = "registry.example.test/team/app:v2";
- const record = { ...image(0), image_ref: kind === "digest-only" ? digest : `${named}@${digest}`, image_ref_normalized: kind === "digest-only" ? digest : `${named}@${digest}`, image_repository: kind === "tagged" ? "registry.example.test/team/app" : kind === "digest-only" ? digest : "", image_tag: kind === "tagged" ? "v2" : "", source_ref: `${named}@${digest}`, vulndb_bundle_hash: `sha256:${"f".repeat(64)}` };
+ const record = { ...image(0), image_digest: digest, image_ref: kind === "digest-only" ? digest : `${named}@${digest}`, image_ref_normalized: kind === "digest-only" ? digest : `${named}@${digest}`, image_repository: kind === "tagged" ? "registry.example.test/team/app" : kind === "digest-only" ? digest : "", image_tag: kind === "tagged" ? "v2" : "", source_ref: `${named}@${digest}`, vulndb_bundle_hash: `sha256:${"f".repeat(64)}` };
  vi.mocked(imageScanResults.list).mockImplementation(async params => ({ image_scan_results: [record], ...metadata(params), total: 1, has_more: false, summary: { ...inventorySummary, total: 1 } }));
  await render("image", `?selected=record-0&q=${encodeURIComponent(digest)}&image_digest=${encodeURIComponent(digest)}&context=keep`);
  await settle(() => expect(host.querySelectorAll('[data-testid="image-scans-table"] tbody tr')).toHaveLength(1));
