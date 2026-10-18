@@ -1738,16 +1738,15 @@ live-smoke SHA256 is
 `2bc05da7294f48fdf9c3be33aa967cc0900a2ca6470b761ac1cb2cb233a84051`.
 Quality/security and broader parent acceptance gates remain open.
 
-### Prepared follow-ups and unexecuted runtime readiness finding
+### Follow-up source and runtime readiness finding
 
-Three private preparations address notifier cancellation/retry and persistence
-errors, owner/terminal-guarded backup-status finalization after export context
-cancellation, and complete bounded federation join responses with categorical
-errors before credential writes. They are undergoing isolated qualification and
-remain unqualified, unimported and undeployed. The federation correction retains
-trusted private endpoints, implicit-token destination binding and redirect refusal;
-it does not expand credential/state transaction semantics. No draft-source or
-future test result is part of the deployed c5428cc evidence.
+The notifier delayed-retry, backup terminal-status and federation response/error
+follow-ups now pass the isolated eight-file qualification recorded below. They
+remain undeployed; no binary/image qualification or live smoke is claimed for
+these files. The federation correction retains trusted private endpoints,
+implicit-token destination binding and redirect refusal. Credential/state
+transaction semantics remain unchanged. This source evidence is separate from
+the deployed c5428cc evidence.
 
 A separate read-only source audit found runtime readiness uses cumulative DP
 start/keepalive counters rather than the active supervisor generation. Historical
@@ -1759,3 +1758,54 @@ or qualified fix. Audit:
 (SHA256 `cd80025441d7f7e531d166021943046a819c2d5e1dd85c55ee06189814891bfc`).
 Current-generation and tap acceptance remain within the existing open readiness/
 enforcement parent; no new checklist row or completion is recorded.
+
+
+### Qualified notifier, backup and federation follow-ups (2026-10-18)
+
+Eight source files over exact c5428cc passed qualification. Delayed notifier
+retries observe parent/dispatcher cancellation, preserve the original enqueue
+watermark and report bounded bookkeeping errors. Backup failure finalization uses
+an independent bounded context and exact org/id/running-state guards. Federation
+join requires a complete bounded read and successful close before credential
+writes, with categorical API errors that preserve internal causes.
+
+A fresh owned PostgreSQL 16 database passed migrations through 180 twice and seed.
+The full notify/handler suite passes **1,584** race/shuffle/count-two test
+executions, **zero failures/skips**, and all fifteen new top-level regressions
+twice. Vet passes for those packages and their API embedding. Count-aware scoped
+lint changes 347 to 344: zero added, three removed (unchecked response close,
+detached retry context and process statement count). These scoped counts are
+separate from hosted whole-repository debt.
+
+Adapted old-behavior controls reproduce four notifier and five backup failed
+test events. The federation control overlays only literal old c5428cc
+`fed_join.go`, retaining new helpers/tests: sixteen expected failures comprise
+four actual diagnostic disclosures, five missing categorical boundaries, four
+incomplete-response database mutations and three parents. Exact-bound acceptance
+and ordinary read-error rejection both still pass. These are expected regression
+failures, not sixteen diagnostic leaks or a whole-old-package run. All owned
+process groups and separate PostgreSQL containers are verified absent.
+
+Qualification manifest:
+`/root/constellation-next-security-c5428cc-final-handoff/QUALIFICATION-MANIFEST.json`
+(SHA256 `3ef59e28a05f6427415d9b398a9b29df8584ebcb30c54f7d603969cc3c1129f8`).
+It links the preparation, adaptation, stage and hosted evidence, plus the complete
+baseline/candidate source inventories and reviewed results. Controls used a
+reviewed 42.5 GiB warm admission estimate; continuous early stops and hard
+resource floors remained unchanged.
+
+Broader notifier Dispatch/HTTP-shutdown durability, retry when bookkeeping DB is
+unavailable, federation credential/state write atomicity and actual 30-minute
+export-timeout acceptance remain open. Runtime-health qualification is separate
+and pending analysis. These eight files are **source-qualified, not deployed**:
+main remains Helm 85/schema 180 with c5428cc API/scanner/runtime-agent images.
+External provider/IdP, authenticated browser, broader enforcement/CNI/HA and
+recovery acceptance remain open. The checklist remains 66 checked / 87 open.
+
+Completed documentation-head [CI 39143874523](https://github.com/alphabravo-oss/constellation/actions/runs/39143874523)
+on exact 8daad55 has nine passing/four failing jobs. Lint 1,459, gosec 144 and
+history-secret 11 diagnostic identities are unchanged against c5428cc; quality,
+gosec, gitleaks and required remain failed. This hosted run predates these eight
+files. Root verified 38 hashes in
+`/root/security-triage-39143874523/SHA256SUMS`; completed manifest SHA256 is
+`adf35dcc90f29f680f41a37a7191846a467a9a6b2cd18be4b8a59a446cc111ac`.

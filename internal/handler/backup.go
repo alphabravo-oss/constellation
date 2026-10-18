@@ -23,6 +23,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"os"
@@ -146,12 +147,12 @@ func (h *Backups) runBackupJob(id uuid.UUID, orgID, userID, signMode string) {
 
 	mode, err := backup.ResolveSignMode(signMode, backup.SignModeNone)
 	if err != nil {
-		h.markFailed(ctx, id, err.Error())
+		h.markFailed(ctx, id, orgID, err.Error())
 		return
 	}
 	var orgName string
 	if err := h.db.Pool().QueryRow(ctx, `SELECT name FROM orgs WHERE id=$1`, orgID).Scan(&orgName); err != nil {
-		h.markFailed(ctx, id, "org lookup: "+err.Error())
+		h.markFailed(ctx, id, orgID, "org lookup: "+err.Error())
 		return
 	}
 
@@ -171,7 +172,7 @@ func (h *Backups) runBackupJob(id uuid.UUID, orgID, userID, signMode string) {
 
 	res, err := backup.ExportManaged(ctx, h.db.Pool(), h.dir, fname, opts)
 	if err != nil {
-		h.markFailed(ctx, id, "export: "+err.Error())
+		h.markFailed(ctx, id, orgID, "export: "+err.Error())
 		return
 	}
 
@@ -186,7 +187,7 @@ UPDATE backups
        tables_included=$5, local_path=$6, format_version=$7
  WHERE id=$1`, id, res.Bytes, res.SignerIdentity, res.SignMode != backup.SignModeNone && res.SignMode != "",
 		tables, path, backup.FormatVersion); err != nil {
-		h.markFailed(ctx, id, "update: "+err.Error())
+		h.markFailed(ctx, id, orgID, "update: "+err.Error())
 		return
 	}
 	orgUUID, _ := uuid.Parse(orgID)
@@ -201,8 +202,22 @@ UPDATE backups
 	})
 }
 
-func (h *Backups) markFailed(ctx context.Context, id uuid.UUID, msg string) {
-	_, _ = h.db.Pool().Exec(ctx, `UPDATE backups SET status='failed', error=$2, finished_at=NOW() WHERE id=$1`, id, msg)
+func (h *Backups) markFailed(exportCtx context.Context, id uuid.UUID, orgID, msg string) {
+	// Export timeout/cancellation must not prevent its terminal status from being
+	// recorded. Bookkeeping gets an independent, short deadline; the original
+	// export context stays canceled and is never reused for more export work.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(exportCtx), 5*time.Second)
+	defer cancel()
+	tag, err := h.db.Pool().Exec(ctx, `
+UPDATE backups
+   SET status='failed', error=$3, finished_at=NOW()
+ WHERE id=$1 AND org_id=$2 AND status='running'`, id, orgID, msg)
+	if err != nil || tag.RowsAffected() != 1 {
+		// A failed or unconfirmed update is not a completed backup. Keep raw
+		// database diagnostics and export failure content out of this log.
+		slog.Error("backup: failed to record terminal status",
+			slog.String("backup", id.String()), slog.String("org", orgID))
+	}
 }
 
 // List returns the most recent 50 backups for the caller's org.

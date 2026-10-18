@@ -119,9 +119,13 @@ is included in the combined c5428cc artifacts and deployment. Benchmark workers
 remain disabled; this does not establish benchmark execution or broader CIS
 acceptance.
 
-Private preparations for notifier lifecycle, backup-status finalization and
-federation join response/error boundaries remain unqualified, unimported and
-undeployed. A separate unexecuted runtime source audit found cumulative DP
+The eight-file notifier delayed-retry, backup terminal-status and federation
+response/error follow-ups are source-qualified and remain undeployed. Fresh 180
+race/shuffle/count-two qualification passes 1,584 tests with zero skips; vet passes,
+scoped lint removes three findings with none added, and old-behavior controls
+reproduce their intended failures. See the new qualification entry in
+`docs/security-testing.md`; no binary/image or live acceptance is claimed.
+A separate runtime source audit found cumulative DP
 start/keepalive counts can satisfy readiness without the active generation being
 ready. Current-generation and tap-reconciliation proof remain within the existing
 open readiness/enforcement acceptance; deployment health does not close it.
@@ -4956,3 +4960,22 @@ test clusters is unknown; local non-matches do not establish external non-use.
 Replacement/revocation scope and the public-history decision remain open.
 The exact 414887a combined database qualification and completed hosted run are
 recorded in `docs/security-testing.md`; neither closes a broader acceptance row.
+
+
+### Qualified follow-up source and documentation-head CI (2026-10-18)
+
+The notifier/backup/federation eight-file qualification records fifteen new
+top-level regressions passing twice and 1,584 full affected-package race/shuffle
+passes with zero skips. Adapted notifier/backup controls fail 4/5 expected events;
+literal old `fed_join.go` alone fails 16 expected events with two passing database
+controls. Detailed classifications, source inventories and the sealed manifest
+are recorded in `docs/security-testing.md`. This is source qualification only;
+Helm 85/c5428cc remains deployed. Notifier shutdown/persistence, unavailable-DB
+bookkeeping, federation credential/state atomicity and external acceptance remain
+open; the runtime-health follow-up remains separate and pending analysis.
+
+Completed [CI 39143874523](https://github.com/alphabravo-oss/constellation/actions/runs/39143874523)
+on documentation source 8daad55 has nine passing/four failing jobs and unchanged
+lint 1,459/gosec 144/history-secret 11 identities against c5428cc. It predates the
+eight-file follow-up. The checklist remains **66 checked / 87 open**; no parent
+acceptance gate closes.

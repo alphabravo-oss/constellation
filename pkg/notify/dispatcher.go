@@ -89,9 +89,17 @@ type Dispatcher struct {
 	pool *pgxpool.Pool
 	cfg  DispatcherConfig
 
-	queue chan *job
-	wg    sync.WaitGroup
-	stop  chan struct{}
+	queue      chan *job
+	wg         sync.WaitGroup
+	stop       context.Context
+	cancelStop context.CancelFunc
+	done       chan struct{}
+
+	// Registration and the transition to stopping share this lock. Once Stop
+	// starts waiting, no worker or delayed retry may add to wg.
+	lifecycleMu sync.Mutex
+	started     bool
+	stopping    bool
 
 	bucketsMu sync.Mutex
 	buckets   map[uuid.UUID]*tokenBucket // keyed by receiver id
@@ -126,33 +134,47 @@ func NewDispatcher(pool *pgxpool.Pool, cfg DispatcherConfig) *Dispatcher {
 	if cfg.Now == nil {
 		cfg.Now = func() time.Time { return time.Now().UTC() }
 	}
+	stop, cancelStop := context.WithCancel(context.Background())
 	return &Dispatcher{
-		pool:    pool,
-		cfg:     cfg,
-		queue:   make(chan *job, cfg.Buffer),
-		stop:    make(chan struct{}),
-		buckets: make(map[uuid.UUID]*tokenBucket),
+		pool:       pool,
+		cfg:        cfg,
+		queue:      make(chan *job, cfg.Buffer),
+		stop:       stop,
+		cancelStop: cancelStop,
+		done:       make(chan struct{}),
+		buckets:    make(map[uuid.UUID]*tokenBucket),
 	}
 }
 
 // Start launches the worker pool + retry sweeper. Idempotent.
 func (d *Dispatcher) Start(ctx context.Context) {
+	d.lifecycleMu.Lock()
+	defer d.lifecycleMu.Unlock()
+	if d.started || d.stopping {
+		return
+	}
+	d.started = true
+	d.wg.Add(d.cfg.Workers + 1)
 	for i := 0; i < d.cfg.Workers; i++ {
-		d.wg.Add(1)
 		go d.worker(ctx, i)
 	}
-	d.wg.Add(1)
 	go d.sweeper(ctx)
 }
 
-// Stop signals workers to exit and waits up to 5s for drain.
+// Stop signals workers and delayed retries to exit and waits up to 5s for
+// in-flight work. Repeated calls share the same completion waiter.
 func (d *Dispatcher) Stop() {
-	close(d.stop)
-	done := make(chan struct{})
-	go func() {
-		d.wg.Wait()
-		close(done)
-	}()
+	d.lifecycleMu.Lock()
+	if !d.stopping {
+		d.stopping = true
+		d.cancelStop()
+		go func() {
+			d.wg.Wait()
+			close(d.done)
+		}()
+	}
+	done := d.done
+	d.lifecycleMu.Unlock()
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
@@ -369,7 +391,7 @@ func (d *Dispatcher) worker(ctx context.Context, idx int) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-d.stop:
+		case <-d.stop.Done():
 			return
 		case j, ok := <-d.queue:
 			if !ok {
@@ -407,15 +429,10 @@ SELECT r.paused
 			d.markRateLimited(ctx, j.deliveryID)
 			return
 		}
-		// Re-queue (best-effort) after a short sleep.
-		go func() {
-			time.Sleep(2 * time.Second)
-			select {
-			case d.queue <- j:
-			default:
-				d.markRateLimited(context.Background(), j.deliveryID)
-			}
-		}()
+		// Keep the same job and original enqueue time across rate-limit waits.
+		// The delayed retry belongs to the dispatcher lifecycle, just like a worker.
+		timer := time.NewTimer(2 * time.Second)
+		d.requeueRateLimitedAfter(ctx, j, timer.C, timer.Stop)
 		return
 	}
 
@@ -464,6 +481,48 @@ SELECT r.paused
 
 	// Success.
 	d.markDelivered(ctx, j, latency, signedAt)
+}
+
+// requeueRateLimitedAfter registers a delayed retry before Stop can begin waiting.
+// The channel and stop function belong to one timer; taking them separately keeps
+// timer delivery deterministic in lifecycle tests without changing retry policy.
+func (d *Dispatcher) requeueRateLimitedAfter(ctx context.Context, j *job, ready <-chan time.Time, stopTimer func() bool) bool {
+	d.lifecycleMu.Lock()
+	if d.stopping || ctx.Err() != nil {
+		d.lifecycleMu.Unlock()
+		stopTimer()
+		return false
+	}
+	d.wg.Add(1)
+	d.lifecycleMu.Unlock()
+	go func() {
+		defer d.wg.Done()
+		defer stopTimer()
+		select {
+		case <-ctx.Done():
+			return
+		case <-d.stop.Done():
+			return
+		case <-ready:
+		}
+
+		// Serialize enqueue with Stop so a ready timer cannot requeue after the
+		// stop transition. Never hold the lifecycle lock during database work.
+		d.lifecycleMu.Lock()
+		if d.stopping || ctx.Err() != nil {
+			d.lifecycleMu.Unlock()
+			return
+		}
+		select {
+		case d.queue <- j:
+			d.lifecycleMu.Unlock()
+			return
+		default:
+			d.lifecycleMu.Unlock()
+		}
+		d.markRateLimited(ctx, j.deliveryID)
+	}()
+	return true
 }
 
 // markDelivered records a successful delivery + flips the receiver healthy. Shared
@@ -618,13 +677,31 @@ UPDATE receiver_deliveries
 }
 
 func (d *Dispatcher) markRateLimited(ctx context.Context, id uuid.UUID) {
-	_, _ = d.pool.Exec(ctx, `
+	ctx, cancel := d.rateLimitUpdateContext(ctx)
+	defer cancel()
+	if _, err := d.pool.Exec(ctx, `
 UPDATE receiver_deliveries
    SET status      = 'rate_limited',
        final_state = 'rate_limited',
        next_retry_at = NULL,
        error       = 'dropped: rate-limit watermark exceeded'
- WHERE id = $1`, id)
+ WHERE id = $1`, id); err != nil {
+		// The delivery identifier is safe to log; database diagnostics can include
+		// connection details and do not belong in this operational message.
+		d.cfg.Logger.Warn("notify: rate-limit status update failed", slog.String("delivery", id.String()))
+	}
+}
+
+func (d *Dispatcher) rateLimitUpdateContext(parent context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+	stopCancel := context.AfterFunc(d.stop, cancel)
+	if d.stop.Err() != nil {
+		cancel()
+	}
+	return ctx, func() {
+		stopCancel()
+		cancel()
+	}
 }
 
 // sweeper polls for retry-due deliveries and re-enqueues them.
@@ -636,7 +713,7 @@ func (d *Dispatcher) sweeper(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-d.stop:
+		case <-d.stop.Done():
 			return
 		case <-t.C:
 			d.sweepOnce(ctx)

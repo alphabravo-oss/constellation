@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -162,7 +161,7 @@ func performRemoteJoin(ctx context.Context, pool *pgxpool.Pool, sealer auth.Seal
 	url := masterURL + "/api/v1/federation/join"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(string(body)))
 	if err != nil {
-		return fedJoinRemoteResult{}, err
+		return fedJoinRemoteResult{}, remoteJoinFailure("request", "creation failed", 0, err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	// Only the TLS terminator can attest forwarding headers. Never fabricate
@@ -171,22 +170,21 @@ func performRemoteJoin(ctx context.Context, pool *pgxpool.Pool, sealer auth.Seal
 	joinClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	resp, err := joinClient.Do(httpReq)
 	if err != nil {
-		return fedJoinRemoteResult{}, fmt.Errorf("call master /federation/join: %w", err)
+		return fedJoinRemoteResult{}, remoteJoinFailure("request", "transport failed", 0, err)
 	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	raw, err := readRemoteJoinResponse(resp)
 	if err != nil {
-		return fedJoinRemoteResult{}, fmt.Errorf("read master join response: %w", err)
+		return fedJoinRemoteResult{}, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return fedJoinRemoteResult{}, fmt.Errorf("master /federation/join status %d", resp.StatusCode)
+		return fedJoinRemoteResult{}, remoteJoinFailure("response", "unexpected status", resp.StatusCode, nil)
 	}
 	var jr fedMasterJoinResponse
 	if err := json.Unmarshal(raw, &jr); err != nil {
-		return fedJoinRemoteResult{}, fmt.Errorf("decode master join response: %w", err)
+		return fedJoinRemoteResult{}, remoteJoinFailure("response", "decode failed", resp.StatusCode, err)
 	}
 	if strings.TrimSpace(jr.Secret) == "" {
-		return fedJoinRemoteResult{}, fmt.Errorf("master join response carried no secret")
+		return fedJoinRemoteResult{}, remoteJoinFailure("response", "missing secret", resp.StatusCode, nil)
 	}
 	if jr.ClusterID != "" {
 		clusterID = jr.ClusterID
@@ -195,7 +193,7 @@ func performRemoteJoin(ctx context.Context, pool *pgxpool.Pool, sealer auth.Seal
 	// Persist the per-cluster secret (+ per-joint client cert/key/CA when the master runs
 	// mTLS). The private key is sealed at rest inside PersistJointJoin.
 	if err := PersistJointJoin(ctx, pool, sealer, orgID, clusterID, jr.Secret, jr.ClientCert, jr.ClientKey, jr.CACert); err != nil {
-		return fedJoinRemoteResult{}, fmt.Errorf("persist joint join: %w", err)
+		return fedJoinRemoteResult{}, remoteJoinFailure("credentials", "persistence failed", 0, err)
 	}
 
 	// Flip local federation state to joint so the background poller (ReconcileFedSyncLoop)
@@ -210,7 +208,7 @@ ON CONFLICT (org_id) DO UPDATE SET
     state=EXCLUDED.state, master_id=EXCLUDED.master_id,
     cluster_name=EXCLUDED.cluster_name, updated_at=NOW()`,
 		orgID, string(federation.StateJoint), masterURL, clusterID); err != nil {
-		return fedJoinRemoteResult{}, fmt.Errorf("update federation_state: %w", err)
+		return fedJoinRemoteResult{}, remoteJoinFailure("state", "persistence failed", 0, err)
 	}
 
 	return fedJoinRemoteResult{
