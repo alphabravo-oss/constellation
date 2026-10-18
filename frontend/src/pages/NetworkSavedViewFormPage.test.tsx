@@ -42,6 +42,30 @@ it("previews valid and rejected imports, preserves existing views and regenerate
 it.each(["{broken", "{}", JSON.stringify([{ id: "bad", name: "Broken", filters: {} }])])("keeps an invalid import editable without saving: %s", async raw => { await render("import"); await field("#network-view-json", raw); expect(button("Save").disabled).toBe(true); await submit(); expect(localStorage.length).toBe(0); expect(host.querySelector<HTMLTextAreaElement>("#network-view-json")!.value).toBe(raw); });
 it("does not let a delayed file read replace a newer pasted draft", async () => { await render("import"); let resolve!: (text: string) => void; const file = { size: 100, text: () => new Promise<string>(done => { resolve = done; }) }; const input = host.querySelector<HTMLInputElement>("#network-view-file")!; Object.defineProperty(input, "files", { value: [file] }); await act(async () => input.dispatchEvent(new Event("change", { bubbles: true }))); await field("#network-view-json", JSON.stringify([view("newer")])); await act(async () => resolve(JSON.stringify([view("older")]))); expect(host.querySelector<HTMLTextAreaElement>("#network-view-json")!.value).toContain("newer"); expect(host.querySelector<HTMLTextAreaElement>("#network-view-json")!.value).not.toContain("older"); });
 it("rejects a delayed file read after authenticated owner changes", async () => { await render("import"); let resolve!: (text: string) => void; const input = host.querySelector<HTMLInputElement>("#network-view-file")!; Object.defineProperty(input, "files", { value: [{ size: 100, text: () => new Promise<string>(done => { resolve = done; }) }] }); await act(async () => input.dispatchEvent(new Event("change", { bubbles: true }))); identity = { org_id: "another", user_id: "another" }; await rerender("import"); await act(async () => resolve(JSON.stringify([view()]))); expect(host.querySelector<HTMLTextAreaElement>("#network-view-json")!.value).toBe(""); expect(localStorage.length).toBe(0); });
-it("keeps a name draft while cluster refresh is pending and rechecks before Save", async () => { await render("new"); await draft("new"); let resolve!: (value: { clusters: Array<{ id: string }> }) => void; let refresh!: Promise<unknown>; await act(async () => { refresh = client.fetchQuery({ queryKey: ["clusters"], queryFn: () => new Promise(done => { resolve = done; }) }); }); expect(button("Save").disabled).toBe(true); expect(host.querySelector<HTMLInputElement>("#network-view-name")!.value).toBe("Exact network view"); await submit(); expect(localStorage.length).toBe(0); await act(async () => { resolve({ clusters: [{ id: "cluster" }] }); await refresh; }); await settle(() => expect(button("Save").disabled).toBe(false)); await submit(); expect(JSON.parse(localStorage.getItem(key())!)).toHaveLength(1); });
+it("keeps a name draft while cluster refresh is pending and rechecks before Save", async () => {
+  await render("new");
+  await draft("new");
+  let resolve!: (value: { clusters: Array<{ id: string }> }) => void;
+  let refresh!: Promise<unknown>;
+  await act(async () => {
+    refresh = client.fetchQuery({ queryKey: ["clusters"], queryFn: () => new Promise(done => { resolve = done; }) });
+  });
+  // Cache state changes before React Query's scheduled UI notification. Saving
+  // must already recheck that state, even before the button reflects it.
+  expect(client.getQueryState(["clusters"])?.fetchStatus).toBe("fetching");
+  await submit();
+  expect(localStorage.length).toBe(0);
+  await settle(() => expect(button("Save").disabled).toBe(true));
+  expect(host.querySelector<HTMLInputElement>("#network-view-name")!.value).toBe("Exact network view");
+  await submit();
+  expect(localStorage.length).toBe(0);
+  await act(async () => {
+    resolve({ clusters: [{ id: "cluster" }] });
+    await refresh;
+  });
+  await settle(() => expect(button("Save").disabled).toBe(false));
+  await submit();
+  expect(JSON.parse(localStorage.getItem(key())!)).toHaveLength(1);
+});
 it("does not import an old valid preview after a newly chosen file fails to read", async () => { await render("import"); await draft("import"); const input = host.querySelector<HTMLInputElement>("#network-view-file")!; Object.defineProperty(input, "files", { value: [{ size: 100, text: () => Promise.reject(new Error("private file details")) }] }); await act(async () => input.dispatchEvent(new Event("change", { bubbles: true }))); expect(host.textContent).toContain("file could not be read"); expect(host.textContent).not.toContain("private file"); expect(button("Save").disabled).toBe(true); await submit(); expect(localStorage.length).toBe(0); });
 it.each(["new", "import"] as const)("prevents a duplicate %s write before return navigation commits", async mode => { await render(mode); await draft(mode); await act(async () => { const form = host.querySelector("form")!; form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); }); expect(JSON.parse(localStorage.getItem(key())!)).toHaveLength(1); });

@@ -34,6 +34,16 @@ lint and one gosec findings, adding none. Frontend passes 2,344 tests and browse
 acceptance passes 279 cases without failures, flakes or skips. No parent acceptance
 item is closed. See `docs/security-testing.md` for evidence and boundaries.
 
+The later documentation-only `702b939` hosted run completed with eight passing
+jobs and five failing gates, including one saved-view frontend timing assertion.
+Browser acceptance still passes all 279 cases and integration records 9,368
+passes; lint, gosec and historical-secret identities are unchanged. The test-only
+correction waits for React Query's scheduled UI notification while separately
+checking that submission is blocked as soon as the cache starts fetching. Pinned
+Node 24 qualification passes both full-file runs, twenty normal repetitions and
+three delayed-notification cases. This does not erase the hosted failure or close
+a broader acceptance item.
+
 ## Plan rules
 
 - This file owns status. Audits and assessments are evidence, not task trackers.

@@ -1979,7 +1979,8 @@ listener are independently absent. Live smoke SHA256 is
 `4a708e2641d9460d0b5486fe81ee11495f3cdbff103e2701c51c2f956a4f1211`.
 
 A separate read-only disk observer records 246 samples from 17:42:12 through
-18:02:37 UTC, covering export, import, backup, update and smoke. Minimum available
+18:02:37 UTC. It began during export and covers subsequent import, backup, update
+and smoke; the exporter retains its own full-phase samples. Minimum available
 root/Docker/containerd space was 48,651,431,936 bytes and /tmp 2,350,751,744 bytes;
 no warning or hard floor was crossed. The exact observer process is absent.
 Observer evidence is `/root/constellation-rollout-2b29b63-disk-observer`, with
@@ -2001,3 +2002,40 @@ revocation/replacement and public-history decisions remain open. Off-host recove
 and deliberate real-node failure remain deferred. No parent acceptance gate closes;
 the canonical plan remains 66 checked / 87 open. Scheduler delivery and DP namespace
 restoration candidates are separate unqualified preparations, outside this release.
+
+### Documentation-head CI and saved-view test correction (2026-10-18)
+
+Hosted [run 39152669250](https://github.com/alphabravo-oss/constellation/actions/runs/39152669250)
+completed on exact `702b9396c043765cf602fd3468c88e0a9b1646a4`, whose only changes
+from 2b29b63 are two documentation files. Eight jobs pass and five gates fail:
+quality, gosec, gitleaks, frontend and required. Browser passes all 279 cases with
+zero unexpected, flaky, skipped or report-error cases. Integration records 9,368
+passes and fourteen skips; unit records 3,411 passes and 745 skips, with no failed
+Go tests. Frontend records 2,343 passes and one saved-view timing failure. Lint
+1,456, gosec 143 and eleven historical-secret identities are unchanged, with zero
+added or removed normalized identities. FIPS and dependency checks pass; the
+previously recorded uncalled govulncheck findings remain retained.
+
+The complete manifest is
+`/root/security-triage-39152669250/COMPLETED-MANIFEST.json`, SHA256
+`3009b77b2c5b4c6445587220113844504aeb540b3c909ea4d0557a3cc38be9e2`.
+All 122 records independently verify; the seal is
+`d2d3bbbe03b3996040efce533c539aa0395c0ecacadc3a83df582822f69906e6`.
+
+The unchanged test reproduces the identical immediate Save-disabled failure once
+in twenty natural repetitions under Node 24.21.0, and three times in three
+controlled runs delaying the existing query-notification scheduler by 50 ms.
+React Query updates fetching state synchronously but notifies the UI later.
+The correction changes only the test: it checks fetching state and blocked
+submission before waiting for the button to become disabled, then retains draft,
+pending-submit and successful-save assertions. It adds no arbitrary sleep.
+Both full-file executions pass all 34 cases (68 total); twenty normal focused
+repetitions and all three delayed-notification cases pass. Product code is
+unchanged. This focused evidence does not convert the failed hosted run to green.
+
+Private reproduction, original failed reports and candidate qualification are
+retained at `/root/constellation-network-saved-view-702b939-reproduction`.
+The 223-record seal is
+`4b72dc595cdb215e1fd059da984af0003cfcd5491ca5a475fc57da59f75730be`;
+the imported test SHA256 is
+`f232e348d26be69ef38f77ca6e08a8a5cb35211c608acdc86ec83501075f4c68`.
