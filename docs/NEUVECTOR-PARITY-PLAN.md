@@ -17,16 +17,20 @@ understand the result, and prove that the control is enforced. Constellation's
 stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
 
-The CLI publication follow-up qualifies seven selected outputs through the shared
-atomic private-file writer (312 test passes, eight database-dependent skips,
-vet passed). Exact combined source 414887a now passes 3,384 fresh-database
-executions across eight packages with four explicit opt-in skips; the prior CLI
-database skips execute successfully. Final artifacts and deployment are pending;
-the remaining registration YAML/compliance outputs are source-qualified (360
-passes, vet, unchanged scoped lint). ECR/shared V2 error boundaries are also
-source-qualified (768 passes, vet, unchanged scoped lint). Hosted CI has nine
-passing jobs and four failing quality/security gates (lint 1,459, gosec 144,
-history-secret report unchanged). See `docs/security-testing.md`.
+Exact combined source **c5428cc** passes **3,524** fresh-schema-180
+race/shuffle/count-two test executions across eight packages, with four explicit
+native/Flannel opt-in skips. All CLI database cases execute; vet passes for all
+eight packages. Four Go binaries, three thin image assemblies and three private
+single-tag exports are verified; all thirteen image probes are independently
+absent. The images retain the qualified native/BPF/library payloads. Main now
+runs **Helm85/schema180**, API/scanner/runtime-agent source **c5428cc**, after a
+fresh completed backup and successful live payload, storage/lease and API smoke
+checks. Migration/frontend remain on 5b82b12.
+Hosted CI on exact c5428cc has nine passing jobs and four failing gates: quality,
+gosec, gitleaks and required. Lint remains 1,459, gosec 144 and the normalized
+history-secret report eleven findings, with unchanged diagnostic identities
+versus 414887a. These fixes do not close parent acceptance items. See
+`docs/security-testing.md` for exact evidence and qualification boundaries.
 
 ## Plan rules
 
@@ -76,39 +80,51 @@ infrastructure continuation after the selected console scope. Off-host recovery
 and deliberate real-node failure remain deferred. The checklist remains **66
 checked / 87 open**; bounded fixes below do not close their parent acceptance gates.
 
-Current main development deployment: **Helm84/schema180**, API/scanner/runtime-agent
-source **877a1c2**; migration/frontend source **5b82b12**. All seven deployments
-and the runtime DaemonSet are ready. Exact live payload hashes, health/readiness,
-policy protocol and queue authorization checks pass. Original retained PCAP
-storage, privacy, Recreate and current API leader ownership are preserved.
-Enforcement and benchmark workers remain disabled; execution dry-run is true.
-A fresh CNPG backup completed before the three-image update. Public login branding
-and configured-provider visibility pass; authenticated browser navigation remains
-unverified without a user session. The live bundle and response queue are empty;
-positive enforcement remains separate isolated fixture evidence. See the completed
-877a1c2 deployment entry below and
-`/tmp/constellation-rollout-877a1c2-preparation/evidence/deployment-status.json`.
+Current main development deployment: **Helm85/schema180**, API/scanner/runtime-agent
+source **c5428cc**; migration/frontend source **5b82b12**. All seven deployments
+and the runtime DaemonSet are ready. Four live Go payloads and inherited native
+DP/BPF hashes match the reviewed artifacts. Health/readiness, policy protocol and
+queue authorization checks pass. Original retained PCAP storage, mode/ownership,
+Recreate strategy and API leader lease identity are preserved. Runtime remains
+in monitor mode with enforcement and benchmark workers disabled; execution
+dry-run is true. A fresh identity-bound CNPG backup completed before the normal
+three-image Helm update. The owned smoke forward and listener are absent.
+Frontend is unchanged; prior public login checks retain their dated evidence,
+and authenticated browser navigation remains unverified under the user's
+isolated-check selection. Live policy and response queues are empty; positive
+enforcement remains separate fixture evidence. See the completed c5428cc entry in
+`docs/security-testing.md` and
+`/tmp/constellation-rollout-c5428cc-preparation/evidence/deployment-status.json`.
 
-The next qualified source correction extends categorical registry errors to
+The deployed catalog correction extends categorical registry errors to
 DockerHub, GHCR, Generic V2, Nexus, OpenShift, Quay, Harbor, GitLab and JFrog
 catalog requests. Upstream bodies, URLs and parser diagnostics do not enter the
 tested API, persisted-status or audit errors; causes remain inspectable through
-error unwrapping. It passes 676 registry and 46 fresh-schema-180 handler test
-executions, vet, and unchanged scoped lint (332 findings, zero additions).
-Original-code controls fail 128 intended leaf assertions. This correction is
-source-qualified only; main remains on 877a1c2 until combined artifact validation
-and deployment. ECR SDK and shared V2 scanner-error follow-ups remain separate.
-See the catalog-error entry in `docs/security-testing.md`; no parent gate closes.
+error unwrapping. Component qualification passes 676 registry and 46 fresh-schema-180
+handler executions, vet, and unchanged scoped lint (332 findings, zero additions).
+Original-code controls fail 128 intended leaf assertions. ECR SDK and shared V2
+diagnostic boundaries are also included in deployed c5428cc, with 768 component
+test passes, vet and unchanged scoped lint. These corrections passed combined
+artifact validation and deployment; live provider-credential and broader registry
+acceptance remain open. See `docs/security-testing.md`; no parent gate closes.
 
-The qualified CIS follow-up requires complete bounded evidence before reporting
+The deployed CIS follow-up requires complete bounded evidence before reporting
 module absence or a passing plain SSH setting. Loaded or built-in modules fail;
 incomplete inventories skip, available unloaded modules warn, and conditional or
 unsupported SSH configuration requires review. Static blacklist text alone does
 not establish effective disabling. Final fresh-schema tests pass 876 executions
 across hostscan/runtime-agent, with four explicit native/Flannel opt-in skips;
-vet passes and scoped lint removes four findings with none added. This is also
-source qualification pending combined artifacts and deployment, not a benchmark
-execution or broader CIS acceptance claim.
+vet passes and scoped lint removes four findings with none added. This correction
+is included in the combined c5428cc artifacts and deployment. Benchmark workers
+remain disabled; this does not establish benchmark execution or broader CIS
+acceptance.
+
+Private preparations for notifier lifecycle, backup-status finalization and
+federation join response/error boundaries remain unqualified, unimported and
+undeployed. A separate unexecuted runtime source audit found cumulative DP
+start/keepalive counts can satisfy readiness without the active generation being
+ready. Current-generation and tap-reconciliation proof remain within the existing
+open readiness/enforcement acceptance; deployment health does not close it.
 
 Deployed schema180 preserves full unsigned native threat IDs and marks unproven
 historical maxima in compact row details. Its full-chain migration checks exact

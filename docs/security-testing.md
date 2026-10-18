@@ -1594,3 +1594,168 @@ Handoff: `/root/constellation-ecr-errors-414887a-qualification/handoff/QUALIFIED
 (SHA256 `e6483b70cef56c86e5a5578b2a8b15fe21062d1808dc6252a77a0433c498c254`),
 seal SHA256 `9250d285431b077f63fe8771a5774c892a9317530b41499f7e07b45fc22c1d67`.
 Final combined database qualification, artifacts and deployment remain pending.
+
+
+### Final combined c5428cc qualification and artifacts (2026-10-18)
+
+Exact source `c5428cc7d8d5928b06f8fcc58c4852a366d88943` combines the
+catalog/ECR/shared-V2 diagnostic boundaries, complete bounded CIS evidence and
+ten selected CLI private-file outputs. Complete source binding covers 2,619
+files; protected module, dependency, native/BPF, migration and chart inputs remain
+unchanged from the reviewed baseline.
+
+The final fresh-schema-180 race/shuffle/count-two run passes 3,524 test events
+across eight packages, with no failures. Only four explicit native/Flannel opt-in
+events skip (two fixture identities repeated twice). All earlier CLI database
+skips execute. The owned PostgreSQL fixture migrated twice, seeded and was
+independently confirmed absent. All eight packages pass vet. Four CGO-disabled
+Linux-amd64 binaries build with mode 0755 and version `security-c5428cc7d8d5`:
+API, CLI, scanner and runtime agent. The unchanged standalone backup tool is not
+rebuilt or packaged in this batch.
+
+Final qualification evidence:
+`/tmp/constellation-integrated-security-final-preparation/FINAL-QUALIFICATION-MANIFEST.json`
+(SHA256 `0980f57aac323d64d0cf26fba95be4feb014d51edcdab5dadabffc48f1af8782`,
+56 records). Complete source binding SHA256 is
+`17eaed187d76ca6355e07d010e8355d987fe125ae2e568a434ca2f31642d47f5`;
+the four-binary receipt is
+`/tmp/constellation-integrated-security-final-preparation/evidence/binary-build-receipt.json`
+(SHA256 `300a1aec3ac7ad608c9b6fbadf62ff0dd1302e0b4b3c280fe7876457cb96e266`).
+
+Three local thin COPY assemblies retain the exact qualified 877a1c2 parent OCI
+chains, runtime configuration, layers and inherited history. Four fresh Go
+payloads are verified in the images as root-owned mode-0755 executables
+readable by uid/gid 10001. API, CLI and scanner help checks pass as that nonroot
+user; runtime help is unsupported and was not invoked. Native DP, BPF, all 23
+linked-library hashes and their SONAME paths remain unchanged. All thirteen
+owned probes pass, and a separate pass of 26 exact-CID/name inspections confirms
+their absence. This is thin local assembly proof; the prior isolated packet
+acceptance remains its own evidence and no new native/BPF rebuild is claimed.
+
+Assembly evidence:
+`/tmp/constellation-images-c5428cc-preparation/ASSEMBLY-EVIDENCE-MANIFEST.json`
+(SHA256 `ecc8fec59152c5e253454d3a5aa47e7432792624c4365cf2b6006b7959d67028`,
+405 records). Assembly receipt SHA256 is
+`c7e7bb256c38e3f9563150ca7b22894de060507326f84a925ac4d14b2a63e442`.
+Tags are `constellation/{api,scanner,runtime-agent}:security-20261018-c5428cc`;
+OCI version labels match binary version `security-c5428cc7d8d5`.
+
+Three exclusive private Docker-save exports pass exact tag/index/amd64-manifest/
+config checks, bounded single-tag tar validation, whole-file hashes and stability
+checks. Archives total 853,020,672 bytes under
+`/root/constellation-rollout-c5428cc-archives` (directory 0700, files 0600).
+All continuous 40-GiB root/Docker and independent 2-GiB /tmp floors held during
+assembly and export. The export-end capacity observation satisfies the separate
+42-GiB-plus-archive-bytes import threshold; capacity must be freshly rechecked
+before import or backup. This observation does not approve deployment.
+
+Export evidence:
+`/root/constellation-rollout-c5428cc-archives/EXPORT-EVIDENCE-MANIFEST.json`
+(SHA256 `968b9cbee7d11d83d2442a348a7cd090467ac6a5c7d61e1cd7fa6a8b99e6a9ea`,
+26 records); export receipt SHA256 is
+`a12fd4504261b93258fe50628573fd705fb58d910a6e18f4050c875e9dc6e8a1`.
+These artifacts are now deployed as Helm85/schema180 with sourcec5428cc, after
+the separately reviewed rollout and live smoke below. No parent parity,
+enforcement or infrastructure acceptance item closes here.
+
+### Completed exact c5428cc hosted CI (2026-10-18)
+
+Hosted [run 39139492997](https://github.com/alphabravo-oss/constellation/actions/runs/39139492997)
+completed on exact c5428cc with nine successful jobs and four failures: quality,
+gosec, gitleaks and the aggregate required gate. Frontend passes 2,344 tests;
+browser acceptance passes all 279 cases with zero unexpected, flaky or skipped
+cases and no report errors. Go unit records 3,365 passing and 740 skipped test
+events; integration records 9,254 passing and fourteen skipped events. These
+counts include parent/subtest events; each mode has 99 passing package completions
+and 26 empty/skipped package completions. Dependency, govulncheck and FIPS jobs
+also pass.
+
+Lint remains 1,459 findings and its report is byte-identical to exact414887a.
+Gosec remains 144 findings; complete issue records are identical after ordering
+normalization, while report metadata differs. Gitleaks retains eleven identical
+result identities after excluding only commit metadata from partial fingerprints;
+rule, location, message and properties remain included. No diagnostic occurrence
+was added or removed in those comparisons. Existing findings and required CI
+remain failing; no finding or threshold was suppressed or waived.
+
+Final run/job metadata, structured test artifacts and comparison evidence are in
+`/tmp/security-triage-39139492997/COMPLETED-MANIFEST.json`
+(SHA256 `5942d8a0f132848766048c2e86fb7a17bf4b8f86dd87de8ce2a62693960a9639`,
+33 records). Original initial metadata/reports remain preserved. Authenticated
+main-browser acceptance, historical TLS use outside disposable test clusters and
+broader acceptance deferrals remain as recorded above.
+
+
+### Completed c5428cc deployment (2026-10-18, Helm85/schema180)
+
+The reviewed c5428cc API/scanner/runtime-agent images are deployed through a
+normal Helm84-to85 upgrade with unchanged hooks, reuse-values and schema180.
+Migration/frontend remain source5b82b12. All seven deployments and the runtime
+DaemonSet are ready with the expected specifications. Four live Go binaries
+(API/CLI/scanner/runtime), native DP and BPF match their six exact reviewed
+payload hashes. API Recreate, original PCAP PVC/PV and Retain policy, evidence
+mode0700/uid10001/gid10001, leader lease identity and runtime token ownership are
+preserved. Runtime remains monitor-only, process/file/exec/DP/DLP enforcement is
+off, execution dry-run is true and benchmark workers remain disabled.
+
+Three exact private archives were imported and their three candidate pins
+confirmed while all thirteen existing pins were preserved. A newly created CNPG
+backup completed with original UID `7110dd38-e01d-48e4-b26e-4811c53c53a9`:
+`constellation-pre-security-c5428cc-20261018-dade0378`, backup ID
+`20261018T154438`, stopped `2026-10-18T15:56:17Z`. It completed within one hour
+before upgrade. The exact prefix measures 900,423,680 allocated filesystem bytes
+and 900,096,430 apparent bytes; these are filesystem aggregates, not S3 object
+Content-Length or a maximum future backup-size guarantee.
+
+Owned loopback smoke passes health/readiness200; legacy policy protocol426,
+empty v2 policy200 and unknown-cluster404; empty response-v2 queue200,
+anonymous401, foreign-cluster403 and duplicate-node400. The positive authorization
+checks use the resolved current cluster; empty live queues do not establish
+positive live enforcement. The API pod UID is
+`13b95346-3a5f-4732-8ac1-9dc1a873294b`. Smoke exits0, and the exact owned forward
+PID2456267 is terminated with the port19385 listener independently absent at
+`2026-10-18T15:59:12Z`. Frontend is unchanged; no fresh authenticated browser
+acceptance is claimed.
+
+The resource monitor retains 99 ten-second samples plus the final observation;
+its initial cache-phase samples are partial, so it does not establish continuous
+coverage before monitoring began. Observed backup minima are 47,685,992,448 root
+bytes and 2,352,189,440 /tmp bytes; upgrade/smoke minima are 47,685,623,808 and
+2,352,136,192 bytes. All observed phase-specific42/40-GiB root and2-GiB /tmp
+floors hold. Final available bytes are 48,688,906,240 on root and 2,352,136,192 on
+/tmp. Owned process/container cleanup and regenerable-cache maintenance retain
+separate receipts; no off-host recovery, deliberate node failure or new packet
+qualification is claimed.
+
+Root sealed 259 deployment records in
+`/tmp/constellation-rollout-c5428cc-preparation/DEPLOYMENT-EVIDENCE-MANIFEST.json`
+(SHA256 `55a20f5d7075ffe7208b7d3fac311f5c946ed12c2a29660360016a73931dde62`),
+with 260-record `DEPLOYMENT-SHA256SUMS`
+(SHA256 `af19f52685a1a352319d631441b80d8fd3b557068cf24c257118a55314d43631`).
+Deployment-status SHA256 is
+`f4e52622195840c599854123909a8154307a932bdda2afbe1d4d85b4c2324150`;
+live-smoke SHA256 is
+`2bc05da7294f48fdf9c3be33aa967cc0900a2ca6470b761ac1cb2cb233a84051`.
+Quality/security and broader parent acceptance gates remain open.
+
+### Prepared follow-ups and unexecuted runtime readiness finding
+
+Three private preparations address notifier cancellation/retry and persistence
+errors, owner/terminal-guarded backup-status finalization after export context
+cancellation, and complete bounded federation join responses with categorical
+errors before credential writes. They are undergoing isolated qualification and
+remain unqualified, unimported and undeployed. The federation correction retains
+trusted private endpoints, implicit-token destination binding and redirect refusal;
+it does not expand credential/state transaction semantics. No draft-source or
+future test result is part of the deployed c5428cc evidence.
+
+A separate read-only source audit found runtime readiness uses cumulative DP
+start/keepalive counters rather than the active supervisor generation. Historical
+replies can satisfy the handler after a DP exit or while a replacement awaits its
+first reply; tap-reconciliation readiness is also not established by those
+counters. This remains an unexecuted source finding, not an observed live outage
+or qualified fix. Audit:
+`/root/constellation-runtime-readiness-audit-c5428cc/AUDIT.json`
+(SHA256 `cd80025441d7f7e531d166021943046a819c2d5e1dd85c55ee06189814891bfc`).
+Current-generation and tap acceptance remain within the existing open readiness/
+enforcement parent; no new checklist row or completion is recorded.
