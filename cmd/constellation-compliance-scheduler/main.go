@@ -537,7 +537,7 @@ func (d *daemon) deliver(ctx context.Context, t compliancehandler.DeliveryTarget
 	case "file":
 		return d.deliverFile(t.Target, localPath, body, sig)
 	case "email":
-		return d.deliverEmail(t, s, body, sig, filepath.Base(localPath))
+		return d.deliverEmail(ctx, t, s, body, sig, filepath.Base(localPath))
 	case "s3":
 		return d.deliverS3(ctx, t, body, sig, filepath.Base(localPath))
 	case "webhook":
@@ -588,7 +588,9 @@ func (d *daemon) deliverFile(target, localPath string, body []byte, sig string) 
 	return nil
 }
 
-func (d *daemon) deliverEmail(t compliancehandler.DeliveryTarget, s dueSchedule, body []byte, sig, filename string) error {
+func (d *daemon) deliverEmail(ctx context.Context, t compliancehandler.DeliveryTarget, s dueSchedule, body []byte, sig, filename string) error {
+	ctx, cancel := context.WithTimeout(ctx, smtpDeliveryTimeout)
+	defer cancel()
 	if strings.TrimSpace(t.Target) == "" {
 		return errors.New("email delivery: target email required")
 	}
@@ -615,8 +617,8 @@ func (d *daemon) deliverEmail(t compliancehandler.DeliveryTarget, s dueSchedule,
 	if user == "" {
 		auth = nil
 	}
-	if err := smtp.SendMail(addr, auth, message.from, []string{message.to}, message.body); err != nil {
-		return fmt.Errorf("smtp: %w", err)
+	if err := sendReportSMTP(ctx, addr, auth, message, smtpDeliveryTimeout); err != nil {
+		return err
 	}
 	d.logger.Info("delivered: email", "to", t.Target)
 	return nil

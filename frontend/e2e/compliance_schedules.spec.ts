@@ -37,7 +37,7 @@ test("Schedules workspace preserves inherited scope, run history and artifact do
   await expect(page.locator("form")).toHaveCount(0);
   await expect(page.getByTestId("schedule-run-schedule")).toHaveText("Request run");
   await page.getByTestId("schedule-run-schedule").click();
-  await expect(page.locator('section[aria-live="polite"]').filter({ hasText: requestMessage })).toBeVisible();
+  await expect(page.locator('section[aria-live="polite"]').getByText(requestMessage, { exact: true })).toBeVisible();
   await page.getByTestId("schedule-runs-toggle-schedule").click();
   await expect(page.getByTestId("schedule-runs-schedule")).toContainText("Signature recorded");
   const artifact = page.waitForEvent("download");
@@ -69,6 +69,57 @@ test("Disabled schedules disclose enabling before a pending run request", async 
   const requested = page.waitForRequest(request => request.method() === "POST" && new URL(request.url()).pathname === "/api/v1/compliance/schedules/local/run-now");
   await action.click();
   await requested;
-  await expect(page.locator('section[aria-live="polite"]').filter({ hasText: requestMessage })).toBeVisible();
+  await expect(page.locator('section[aria-live="polite"]').getByText(requestMessage, { exact: true })).toBeVisible();
   await expect(action).toHaveText("Request run");
+});
+
+test("Schedule actions and long metadata fit narrow screens", async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 900 });
+  const name = "production".repeat(18);
+  const template = "compliance".repeat(18);
+  await page.route("**/api/v1/**", async route => {
+    if (new URL(route.request().url()).pathname !== "/api/v1/compliance/schedules") return route.fallback();
+    await route.fulfill({ json: { schedules: [{ ...schedule, id: "local", name, report_template: template, cluster_id: clusterId, enabled: false }], summary: { total: 1, enabled: 0, disabled: 1 }, frameworks: ["cis-k8s-1.9"], report_formats: ["html", "json", "csv", "sarif", "pdf"] } });
+  });
+  await page.goto(`${root}?tab=schedules`);
+  const card = page.getByTestId("schedule-local");
+  await expect(card).toContainText(name);
+  await expect(card).toContainText(template);
+  await expect(card.getByRole("button", { name: "Enable and request run" })).toBeVisible();
+  await expect.poll(() => card.evaluate(element => {
+    const bounds = element.getBoundingClientRect();
+    return bounds.left >= -1 && bounds.right <= document.documentElement.clientWidth + 1 && element.scrollWidth <= element.clientWidth + 1 && Array.from(element.querySelectorAll("button")).every(button => {
+      const action = button.getBoundingClientRect();
+      return action.left >= bounds.left && action.right <= bounds.right;
+    });
+  })).toBe(true);
+});
+
+
+test("Schedule enabled state changes through PATCH without requesting a run", async ({ page }) => {
+  let enabled = false;
+  const patches: boolean[] = [];
+  const runRequests: string[] = [];
+  page.on("request", request => { if (new URL(request.url()).pathname.endsWith("/run-now")) runRequests.push(request.url()); });
+  await page.route("**/api/v1/compliance/schedules**", async route => {
+    const request = route.request(); const path = new URL(request.url()).pathname;
+    if (path === "/api/v1/compliance/schedules" && request.method() === "GET") {
+      await route.fulfill({ json: { schedules: [{ ...schedule, id: "local", org_id: "org", cluster_id: clusterId, enabled }], summary: { total: 1, enabled: enabled ? 1 : 0, disabled: enabled ? 0 : 1 }, frameworks: [schedule.framework], report_formats: ["html", "json", "csv", "sarif", "pdf"] } }); return;
+    }
+    if (path === "/api/v1/compliance/schedules/local" && request.method() === "PATCH") {
+      const body = request.postDataJSON(); expect(body).toEqual({ enabled: !enabled });
+      enabled = body.enabled; patches.push(enabled);
+      await route.fulfill({ json: { ...schedule, id: "local", org_id: "org", cluster_id: clusterId, enabled } }); return;
+    }
+    await route.fallback();
+  });
+  await page.goto(`${root}?tab=schedules`);
+  const card = page.getByTestId("schedule-local");
+  await expect(page.getByTestId("schedule-enabled-local")).toHaveText("Disabled");
+  await card.getByRole("button", { name: "Enable schedule", exact: true }).click();
+  await expect(page.getByTestId("schedule-enabled-local")).toHaveText("Enabled");
+  await expect(page.getByText("1 configured · 1 enabled · 0 disabled", { exact: true })).toBeVisible();
+  await card.getByRole("button", { name: "Disable schedule", exact: true }).click();
+  await expect(page.getByTestId("schedule-enabled-local")).toHaveText("Disabled");
+  expect(patches).toEqual([true, false]); expect(runRequests).toEqual([]);
 });

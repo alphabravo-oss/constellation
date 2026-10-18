@@ -230,7 +230,7 @@ export function CompliancePage() {
         </div> },
         { value: "evidence", label: "Source evidence", content: <ComplianceEvidenceInventory clusterId={clusterId!} ready={scopeReady} active={tab === "evidence"} /> },
         { value: "benchmarks", label: "Benchmarks", content: <BenchmarksWorkspace active={tab === "benchmarks"} /> },
-        { value: "schedules", label: "Schedules", content: <SchedulesManager clusterId={clusterId!} listPath={listPath} scopeReady={scopeReady} /> },
+        { value: "schedules", label: "Schedules", content: <SchedulesManager clusterId={clusterId!} listPath={listPath} scopeReady={scopeReady} recheckScope={() => currentReady.current && scope.recheck()} /> },
       ]} />
     </>}
   </div>;
@@ -289,12 +289,16 @@ function ComplianceExemptionsList({
 }
 
 
-function SchedulesManager({ clusterId, listPath, scopeReady }: { clusterId: string; listPath: string; scopeReady: boolean }) {
+function SchedulesManager({ clusterId, listPath, scopeReady, recheckScope }: { clusterId: string; listPath: string; scopeReady: boolean; recheckScope: () => boolean }) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [search] = useRouteSearchParams();
   const [activeRunsFor, setActiveRunsFor] = useState<string | null>(null);
-  const list = useQuery({ queryKey: ["compliance", "db-schedules", clusterId], queryFn: () => compliance.listDBSchedules(clusterId), enabled: scopeReady });
+  const identity = useTablePreferencesIdentity();
+  const context = JSON.stringify([clusterId, identity?.org_id, identity?.user_id]);
+  const currentContext = useRef(context); currentContext.current = context;
+  const listKey = ["compliance", "db-schedules", clusterId];
+  const list = useQuery({ queryKey: listKey, queryFn: () => compliance.listDBSchedules(clusterId), enabled: scopeReady });
   const invalidate = () => qc.invalidateQueries({ queryKey: ["compliance", "db-schedules", clusterId] });
   const runNow = useMutation({ mutationFn: (id: string) => compliance.runScheduleNow(id), onSuccess: (response) => {
     if (response.queued) toast.info(response.message || "Run requested. Processing is pending. Review History for the result.");
@@ -302,14 +306,25 @@ function SchedulesManager({ clusterId, listPath, scopeReady }: { clusterId: stri
     void invalidate(); void qc.invalidateQueries({ queryKey: ["compliance", "schedule-runs"] });
   } });
   const remove = useMutation({ mutationFn: (id: string) => compliance.deleteSchedule(id), onSuccess: () => void invalidate() });
+  const setEnabled = useMutation({
+    mutationFn: ({ id, enabled, previousEnabled, requestContext }: { id: string; enabled: boolean; previousEnabled: boolean; requestContext: string }) => {
+      const state = qc.getQueryState<typeof list.data>(listKey);
+      const schedule = state?.data?.schedules.find(item => item.id === id);
+      if (!scopeReady || currentContext.current !== requestContext || !identity?.org_id || !identity.user_id || !recheckScope() || state?.status !== "success" || state.fetchStatus !== "idle" || state.isInvalidated || !schedule || schedule.org_id !== identity.org_id || schedule.cluster_id && schedule.cluster_id !== clusterId || schedule.enabled !== previousEnabled) {
+        throw new Error("Refresh this exact schedule before changing its enabled state.");
+      }
+      return compliance.patchSchedule(id, { enabled });
+    },
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["compliance", "db-schedules"] }); },
+  });
   const rows = (list.data?.schedules ?? []).filter((schedule) => !schedule.cluster_id || schedule.cluster_id === clusterId);
-  const busy = !scopeReady || list.isError || list.isFetching || runNow.isPending || remove.isPending;
+  const busy = !scopeReady || list.isError || list.isFetching || runNow.isPending || remove.isPending || setEnabled.isPending;
   return <section className="space-y-4" data-testid="compliance-schedules-manager">
     <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-semibold">Scheduled compliance runs</h2><p className="text-sm text-muted-foreground">Includes schedules configured for this cluster and inherited organization schedules. Review run history to confirm execution, signatures, and artifact delivery.</p><p className="mt-1 text-xs text-muted-foreground">{list.data ? `${rows.length} configured · ${rows.filter((schedule) => schedule.enabled).length} enabled · ${rows.filter((schedule) => !schedule.enabled).length} disabled` : "Schedule counts unavailable"}</p></div><div className="flex gap-2"><Button variant="outline" onClick={() => void list.refetch()} disabled={!scopeReady || list.isFetching}>Refresh</Button><Button disabled={!scopeReady} data-testid="schedule-create-open" onClick={() => { const next = new URLSearchParams(search); next.set("tab", "schedules"); navigate({ href: `${listPath}/schedules/new?${next}` }); }}><Plus className="mr-1 h-4 w-4" /> New schedule</Button></div></div>
     {list.isPending && <LoadingState label="Loading schedules…" />}
     {list.isError && <ErrorState title={list.data ? "Could not refresh schedules. Showing the last loaded configuration." : "Schedules could not be loaded."} action={<Button onClick={() => void list.refetch()}>Retry</Button>} />}
-    {(runNow.isError || remove.isError) && <p role="alert" className="text-sm text-status-error">Could not update the schedule. Refresh and try again.</p>}
-    <div className="space-y-3" data-testid="schedule-list">{list.data && rows.length === 0 && <EmptyState title="No compliance schedules" hint="Create a schedule to configure recurring evidence reports." />}{rows.map((schedule) => <ScheduleRow key={schedule.id} schedule={schedule} running={runNow.isPending && runNow.variables === schedule.id} unavailable={busy} onRunNow={() => { runNow.reset(); remove.reset(); runNow.mutate(schedule.id); }} onDelete={() => { runNow.reset(); remove.reset(); remove.mutate(schedule.id); }} onToggleRuns={() => setActiveRunsFor(activeRunsFor === schedule.id ? null : schedule.id)} runsOpen={activeRunsFor === schedule.id} />)}</div>
+    {(runNow.isError || remove.isError || setEnabled.isError) && <p role="alert" className="text-sm text-status-error">Could not update the schedule. Refresh and try again.</p>}
+    <div className="space-y-3" data-testid="schedule-list">{list.data && rows.length === 0 && <EmptyState title="No compliance schedules" hint="Create a schedule to configure recurring evidence reports." />}{rows.map((schedule) => <ScheduleRow key={schedule.id} schedule={schedule} running={runNow.isPending && runNow.variables === schedule.id} unavailable={busy} onRunNow={() => { setEnabled.reset(); runNow.reset(); remove.reset(); runNow.mutate(schedule.id); }} onDelete={() => { setEnabled.reset(); runNow.reset(); remove.reset(); remove.mutate(schedule.id); }} onSetEnabled={() => { runNow.reset(); remove.reset(); setEnabled.reset(); setEnabled.mutate({ id: schedule.id, enabled: !schedule.enabled, previousEnabled: schedule.enabled, requestContext: context }); }} onToggleRuns={() => setActiveRunsFor(activeRunsFor === schedule.id ? null : schedule.id)} runsOpen={activeRunsFor === schedule.id} />)}</div>
   </section>;
 }
 
@@ -319,6 +334,7 @@ function ScheduleRow({
   unavailable,
   onRunNow,
   onDelete,
+  onSetEnabled,
   onToggleRuns,
   runsOpen,
 }: {
@@ -327,6 +343,7 @@ function ScheduleRow({
   unavailable: boolean;
   onRunNow: () => void;
   onDelete: () => void;
+  onSetEnabled: () => void;
   onToggleRuns: () => void;
   runsOpen: boolean;
 }) {
@@ -345,8 +362,8 @@ function ScheduleRow({
   const captureDownload = useExportGuard(JSON.stringify(runKey), !current(), current);
   return (
     <article className="rounded-lg border border-border bg-card p-3" data-testid={`schedule-${schedule.id}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="space-y-0.5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 grow basis-56 space-y-0.5 [overflow-wrap:anywhere]">
           <h3 className="text-sm font-semibold">{schedule.name}</h3>
           <p className="text-xs text-muted-foreground">
             {schedule.framework} · <code>{schedule.cron_expression}</code> {schedule.timezone} ·{" "}
@@ -357,7 +374,7 @@ function ScheduleRow({
             <p className="text-xs text-muted-foreground">{schedule.description}</p>
           )}
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex max-w-full flex-wrap items-center gap-1.5">
           <span
             className={`rounded-md px-2 py-0.5 text-xs ${
               schedule.last_status === "succeeded"
@@ -369,39 +386,55 @@ function ScheduleRow({
           >
             {schedule.last_status || "No runs yet"}
           </span>
-          <button
+          <span className="rounded-md bg-muted px-2 py-0.5 text-xs" data-testid={`schedule-enabled-${schedule.id}`}>
+            {schedule.enabled ? "Enabled" : "Disabled"}
+          </span>
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
+            onClick={onSetEnabled}
+            disabled={running || unavailable}
+            data-testid={`schedule-enabled-toggle-${schedule.id}`}
+          >
+            {schedule.enabled ? "Disable" : "Enable"} {schedule.cluster_id ? "schedule" : "organization schedule"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
             onClick={onRunNow}
             disabled={running || unavailable}
             data-testid={`schedule-run-${schedule.id}`}
-            className="rounded-md border border-border px-2.5 py-1 text-xs hover:bg-accent disabled:opacity-50"
           >
             <span className="inline-flex items-center gap-1.5">
               <PlayCircle className="h-3.5 w-3.5" aria-hidden />
               {schedule.enabled ? "Request run" : "Enable and request run"}
             </span>
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             onClick={onToggleRuns}
             disabled={unavailable}
             data-testid={`schedule-runs-toggle-${schedule.id}`}
-            className="rounded-md border border-border px-2.5 py-1 text-xs hover:bg-accent"
           >
             History
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
+            variant="outline"
+            size="icon"
             disabled={running || unavailable}
             onClick={() => {
               if (window.confirm(`Delete schedule "${schedule.name}"?`)) onDelete();
             }}
             data-testid={`schedule-delete-${schedule.id}`}
-            className="rounded-md border border-border px-2 py-1 text-xs hover:bg-accent"
             aria-label="Delete schedule"
           >
             <Trash2 className="h-3.5 w-3.5" aria-hidden />
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -447,9 +480,9 @@ function ScheduleRow({
 
 function Info({ label, value }: { label: string; value: string }) {
   return (
-    <div>
+    <div className="min-w-0">
       <div className="text-[10px] uppercase text-muted-foreground">{label}</div>
-      <div className="mt-1">{value}</div>
+      <div className="mt-1 break-words">{value}</div>
     </div>
   );
 }

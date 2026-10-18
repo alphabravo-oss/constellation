@@ -39,10 +39,25 @@ identities remain. Frontend passes 2,344 tests and browser acceptance passes 279
 cases without failures, flakes or skips. No parent acceptance item closes. See
 `docs/security-testing.md` for retained historical runs and evidence boundaries.
 
-The next compliance request wording change discloses enabling disabled schedules,
+Compliance request wording source 861d88a discloses enabling disabled schedules,
 uses a transient notification and removes the unsupported 30-second execution
-promise. All 45 focused frontend tests, TypeScript and a production build pass;
-backend execution and the new browser case remain pending. It is not deployed.
+promise. Both new backend roots pass twice, and all 2,346 frontend tests pass.
+Its hosted browser run records 278 passes and two failures at notification
+visibility assertions; this is not browser acceptance. A subsequent correction
+targets the actual notification text, and schedule actions use shared Buttons
+and wrap on narrow screens. All 45 focused tests, TypeScript and a production
+build pass on that later frontend snapshot. A subsequent Enable/Disable control
+preserves schedule configuration and uses the existing scoped PATCH API without
+requesting a run. Its 50 focused tests, TypeScript and production build pass;
+the combined 282-case browser run is pending. These frontend changes are not
+deployed. SMTP timeout/cancellation qualification passes 28 race/shuffle test
+executions, zero-diagnostic vet and scoped lint with zero additions. Four
+original-code failure assertions reproduce twice each. No scheduler worker is
+activated and no parent acceptance gate closes.
+
+Both original host scanner-cache trees are restored: five files totaling
+4,701,282,746 bytes match their original hashes and restorable metadata. Recovery
+archives remain private and intact; no scanner or scanner-PVC action occurred.
 
 ## Plan rules
 

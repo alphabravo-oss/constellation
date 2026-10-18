@@ -2212,8 +2212,9 @@ records independently verify at
 `0dc965e7433a781565116846aabb464c6ea8a9294e57c0beff9a393ca716d079`.
 The backend tests check same-organization due/enabled state without execution
 rows and foreign-organization rejection without changing either schedule.
-Backend execution and the new browser case remain pending. This source change
-is not deployed and does not close scheduler delivery acceptance.
+The later exact 861d88a hosted run passes both backend roots twice but fails two
+browser notification assertions, as recorded below. This source change is not
+deployed and does not close scheduler delivery acceptance.
 
 
 ### Completed exact ef0ca39 deployment (2026-10-18, Helm 87 / schema 180)
@@ -2248,3 +2249,243 @@ the eight-record smoke seal is
 `05958c1c9a6c74246173587255ba3ad83b9ccecdd3eda2b729652c14f47b2480`.
 All root-approved 108 inputs independently remain unchanged. The checklist stays
 66 checked / 87 open; this deployment does not close a parent acceptance gate.
+
+
+Completed deployment manifest:
+`/root/constellation-rollout-ef0ca3902051-bound-preparation-v1/DEPLOYMENT-EVIDENCE-MANIFEST.json`,
+SHA256 `fb4d02f3a748f613c5179d37b6d9247c3e10525fb7dc689cc1366d2934f70ef2`.
+All 151 final checksum records independently verify, seal SHA256
+`4bf89c6ae23573552f73e4bc8faa5d10e92ee9894432a0417cbc9c2a9b79d1aa`.
+The stopped observer records 285 complete samples after exports, spanning image
+imports/pins, backup, upgrade/verification and API smoke. Minimum available bytes
+are 47,342,280,704 on root/Docker/containerd and 2,350,710,784 on tmp; no early or
+hard floor crosses. Observer PID/group absence and all seven completion records
+verify. This observer does not cover the earlier export phase, whose own samples
+remain in the export receipt.
+
+### Lossless closed-journal capacity recovery (2026-10-18)
+
+A separately reviewed finite selection preserves the oldest 24 archived-state
+system journals in one private, deterministic gzip/PAX archive before retiring
+only those originals. Active system/user journals and all unselected files stay
+outside the selection; no vacuum or rotation is used. The archive is
+`/root/constellation-closed-journal-oldest24-recovery-v1/journals.tar.gz`,
+261,082,525 bytes, SHA256
+`457263a69d764a06aaaab376b6aeee58557dc5081f610e5a97710899abc7d296`.
+Root independently verifies all 24 full payload hashes, exact 25 members,
+canonical metadata/padding/trailer and a complete single gzip stream through
+CRC/ISIZE and physical EOF. Original UID/GID/mode, xattrs and nanosecond times
+remain recorded with concrete no-replace restoration instructions; inode and
+ctime cannot be recreated.
+
+Archive-only completes first, retaining all originals, with RESULT SHA256
+`613b7bbb9fdb617bf5cc866cdd54a583392b4a46ea02812ee24359b8cafc50c8`.
+Only after independent full recovery and source/FD/metadata checks does a separate
+granted retirement complete all 24 exact dirfd-relative removals with durable
+progress. Its RESULT SHA256 is
+`7cded293ab395638c1bc94805b50024f0c3bd69a04d0add2cb23a23bd1bbcf22`;
+all seven sealed evidence records and the separately bound result independently
+verify, all selected originals are
+absent and the full retained archive hash remains exact. The selected exclusive
+source allocation was 1,137,127,424 bytes; recovery archive/evidence consume part
+of that gain. Observed filesystem recovery during retirement is 1,095,626,752 bytes; net
+since the archive phase began is 821,895,168 bytes. Both include background
+writes and are distinct from nominal selected allocation. Prior executor versions and the long-path synthetic negative remain
+preserved; the real operation uses the reviewed v3 with explicit PAX paths.
+Scanner database restoration remains a separate pending operation.
+
+
+### Completed 861d88a CI and notification assertion correction (2026-10-18)
+
+[Run 39166039262](https://github.com/alphabravo-oss/constellation/actions/runs/39166039262)
+completes on exact `861d88a9b02fdf34232c2d07a8d5fd6a9f5d60d8` with eight
+passing and five failing jobs. Integration records 9,478 passes / fourteen skips
+and zero failures. Both request-contract test roots actually run and pass twice;
+their two unit-mode skips do not count toward that acceptance. Unit records
+3,455 passes / 750 skips / zero failures; frontend passes all 2,346 tests. Lint
+1,449, gosec 136 and eleven historical-secret identities retain exactly the same
+normalized multiplicities as ef0ca39, with zero added or removed occurrences.
+FIPS and dependency checks retain the previously stated boundaries.
+
+Browser records 278 passing and two failing cases out of 280, with no browser
+acceptance. Both failures assert visibility of Sonner's `section[aria-live]`.
+The completed job log shows that section repeatedly resolves with the exact
+notification message but returns hidden before the message expires. Sonner's
+children use fixed positioning; its live-region section has no intrinsic height.
+A small synthetic DOM geometry probe confirms that layout property (zero-height
+region with a nonzero-height text child), not application visibility. The source
+correction requires the exact notification text within the live region to be
+visible. The historical failed run remains failed.
+
+All 202 retained records independently verify at
+`/root/security-triage-39166039262`, seal SHA256
+`9ad2fdf4f84830bf91a5074282ddabf5e058674d70b71394b1439224efc23a2b`.
+The bounded completed-job text log is 113,461 bytes. The 11,528,408-byte browser
+artifact was not downloaded because it exceeds collector caps; no videos or
+structural browser report were collected or credited.
+
+The subsequent frontend snapshot additionally wraps schedule actions and long
+metadata and uses the shared Button variants. Its mobile browser fixture checks
+card/action bounds at 360 pixels with long unbroken names and templates. All 45
+focused tests, TypeScript and the production build pass on pinned Node 24.21.0;
+199 output files total 3,523,446 bytes. All 437 source hashes and tools remain
+unchanged. The private qualification's 1,240 final checksum records independently
+verify at `/root/constellation-request-contract-frontend-qualification-v3`, seal
+`2af03ea89689e328dddc14732809b5687cb3032d1403826f66852e1594df39b6`.
+That 281-case snapshot was not run in browser CI; the later enabled-state
+follow-up below supersedes it with a combined 282-case snapshot pending. No
+deployed frontend or positive main browser acceptance is claimed.
+
+A separately reviewed official `golangci-lint cache clean` removes only the
+inventoried regenerable analysis cache. Its explicit absolute cache override,
+pinned v2.11.4 executable and upstream implementation are verified. All 2,823
+protected files and ten directory identities remain unchanged; the exact owned
+PID/group is absent. Six execution records independently verify, seal
+`9ff4972aebe8c49de7d815f7b4f2c658d953f65285ee5447876c474dbfc0e996`.
+Observed pre/post filesystem gain is 321,445,888 bytes, not continuous minima.
+Only final preparation v2 is accepted: an in-flight pre-execution amendment
+invalidated the earlier draft seal and lost its original resource snapshot;
+that limitation remains recorded rather than reconstructed. No source, cache or
+deployment execution data was changed by the draft amendment. Parked scanner
+database restoration remains pending after isolated SMTP qualification and
+separate compiler-cache recovery.
+
+### SMTP cancellation and total-deadline continuation (2026-10-18)
+
+The proposed scheduler SMTP transport carries the caller context through dialing
+and protocol I/O, applies one total delivery deadline, closes blocked connections
+on cancellation, and returns categorical delivery errors while preserving causes
+for inspection. Configured authentication fails when AUTH is unavailable;
+unauthenticated legacy HELO remains supported. Opportunistic STARTTLS keeps normal
+certificate/hostname verification and an explicit TLS 1.2 minimum. No scheduler
+workload, external mailbox delivery or positive TLS exchange is established here.
+
+The first isolated iteration passes all fourteen SMTP test nodes twice (28 pass
+events, zero failures/skips) and race-aware vet without diagnostics. Its complete
+scoped lint finds seven baseline and eight candidate issues: the added G304 is
+the test's variable-path read. No zero-added comparison or original-code controls
+have passed for this iteration. The test now reads the literal report member
+through its owned temporary directory's filesystem; assertions and production
+bytes remain unchanged. A fresh source-bound qualification is required. Original
+analysis, source and process receipts remain preserved at
+`/root/constellation-scheduler-smtp-861d88a-qualification-v2`; that candidate is
+not represented as lint-clean or fully qualified.
+
+Fresh v4 qualification of the corrected source passes all fourteen SMTP nodes
+twice: 28 passes, zero failures or skips. Race-aware vet has zero diagnostics;
+complete scoped lint records seven baseline and seven candidate occurrences,
+with zero count-aware additions or removals. Four original-code controls fail
+their exact test-owned cancellation, shorter-deadline, diagnostic-redaction and
+configured-AUTH-after-HELO assertions twice each. The expected child exit 1 is
+retained; compilation, races, panics and unrelated failures do not count. All
+owned process groups are absent and qualification locks are released.
+
+Root independently verifies all 69 actual initialization, six-stage and outer
+invocation evidence records, revalidates exact positive/control events, and
+matches all 2,632 frozen candidate files to shared source before the separate
+frontend import. Root acceptance is
+`/root/constellation-smtp-v4-root-acceptance-v1.json`, SHA256
+`a895bb70070841b5db9a9fa2f800eea33a7e38659d7e6e50505c2178ec9a06f1`.
+The scoped lint uses the same pinned CGO/race profile for baseline and candidate;
+the reviewed loader inherits GOFLAGS and disables external package drivers.
+Cache hits are not measured, and default hosted lint remains a separate gate.
+The original seven-to-eight first iteration and the official compiler-cache-only
+checkpoint used before fresh cold qualification remain preserved. No external
+mailbox, successful TLS exchange or deployed scheduler worker is established.
+
+### Schedule enabled-state console follow-up (2026-10-18)
+
+The console now exposes Enable/Disable separately from request-run and delete,
+and displays configured enabled state independently from last-run status. It
+uses the existing organization-scoped PATCH API without requesting execution.
+Inherited organization actions retain their across-cluster scope label. Mutation
+guards recheck identity, resolved cluster scope, idle/noninvalidated list data,
+row scope and the reviewed enabled value. Failed updates retain configuration
+and show a categorical error; counts refresh after successful PATCH. Disabling
+does not cancel claimed work or establish scheduler execution/delivery.
+
+The first private frontend attempt records 49 passing tests and one failing
+pending-button assertion; TypeScript and build did not run. All 896 failed-attempt
+records remain unchanged and independently verify. The fixture now awaits the
+button's disabled render before resolving its pending API promise, retaining
+the original state/count assertions. Fresh v2 qualification passes all 50
+focused tests, zero failures/skips/todos, TypeScript and production build. All
+four actual command exits are 0 with empty owned process groups; all 199 build
+outputs (3,524,675 bytes), source/tool invariants and three SMTP Go files verify.
+RESULT SHA256 is
+`3fe625b06e0e089b62e0c6d765bf3abd5a8f921cf5a5ea175015d6e11133cdaf`
+at `/root/constellation-schedule-enabled-frontend-qualification-preparation-v2`.
+All 1,241 final checksum records independently verify, seal SHA256
+`60d5eca61f98a4355fe037637fd00a2a574e87e3bb5206d7b2b7faac67a0e4fb`.
+The combined 282-case browser snapshot remains pending, and this frontend is
+not deployed. The canonical checklist remains 66 checked / 87 open.
+
+### Additional closed-journal recovery before scanner-cache restoration (2026-10-18)
+
+A second, disjoint selection preserves the next 24 oldest unreferenced archived
+system journals. Active/user journals and all unselected files remain outside
+the operation. The executor is byte-identical to the reviewed corrected-PAX
+version; only the new selection, output bindings and exact raw cap change.
+The private recovery archive is
+`/root/constellation-closed-journal-next24-recovery-v1/journals.tar.gz`,
+260,069,245 bytes, SHA256
+`7f00d49aa5450ea9cab0980d612e35163ef455831ba89598311ee246ae41cf2c`.
+Root independently reads the complete single gzip stream through CRC/ISIZE and
+physical EOF, checks all 25 canonical members and 24 payload hashes, then
+rechecks all original hashes, metadata/xattrs, archived state and zero FD
+references. Archive-only completes before a separately granted retirement.
+
+Retirement exits 0, records 24 durable exact-path removals and leaves all 24
+selected names absent. The archive remains exact; owned worker PID/group and
+lock are absent. All seven retirement evidence records independently verify,
+seal SHA256
+`199221a160b946b46fa2496a22788033397cf49b48a5e39eb3988a08a8f4ef2b`;
+separately bound RESULT SHA256 is
+`28d1df66cc396be4eb9e3955fdbff38d3f23ce9829e492228404422376509b7e`.
+Observed combined archive/retirement available-space gain is 840,859,648 bytes,
+including background activity and evidence costs. All resource floors remain
+clear. Both recovery archives and concrete metadata restoration instructions
+are retained. This does not establish off-host recovery; scanner database
+restoration still requires the separate compiler checkpoint and fresh admission.
+
+### Completed compiler checkpoint and original host scanner-cache restoration (2026-10-18)
+
+After root accepts all six actual SMTP stages and the separately qualified
+frontend, a new bound checkpoint executes only pinned Go 1.26.9 `clean -cache`.
+Actual exit is 0, compiler outputs are zero, and all 6,554 protected source,
+artifact, qualification and recovery records remain unchanged. All eight
+execution records independently verify, seal SHA256
+`de5314301a1ebbff9853fce0f65ce91bcf9928acd76563ab61ae30795b9eeff1`;
+RESULT SHA256 is
+`7f3451fa94cf7173b1e2ad3da04d166fde9c36318a571c114996aa6d4919a99d`.
+Observed available-space gain is 1,089,814,528 bytes. No other cleanup is used.
+
+Fresh preflight verifies both twelve-record original/durable preparations, both
+complete compressed archive hashes, empty retained directories, no conflicting
+files or prior restore attempts, no active FD/maps users, and combined capacity
+for both trees plus per-tree allowances and a 128 MiB background reserve. A small
+owned-process adapter imports the unchanged original restorer and raises only
+its two runtime reserve constants to 40.5 GiB root and ceil(2.05 GiB) tmp. The
+original restoration, metadata verification and partial-preservation behavior
+remain intact; each tree requires a separate grant and actual first-tree proof.
+
+Trivy then Grype each restore once with actual worker and outer exit 0. Root
+independently verifies all five complete original files, totaling 4,701,282,746
+bytes, exact directory inventories, UID/GID/modes, nanosecond atime/mtime, empty
+xattrs and directory times. New inode/ctime values are expected. Both original
+compressed archives remain exact, original receipts report RESTORED with no
+errors, process groups are absent and locks are released. No scanner is launched,
+database regenerated or scanner PVC changed. Sampled wrapper minima are
+43,969,372,160 bytes on root/Docker/containerd and 2,350,706,688 bytes on tmp;
+all configured floors remain clear.
+
+Root acceptance is `/root/constellation-host-db-root-final-acceptance-v1.json`,
+SHA256 `e0ae9fbf25e9a44db585124d7b63b395f15c7434ef7d37b454941641e037d319`.
+Trivy's six-record seal is
+`98c9a2eb8def3495d7901870c3469c1227a5610169f6c60b2c89c84d3e6b7f85`;
+Grype's is
+`4d2cca6d58ab6aaca99026e544bf2ce9a5e5bbd30493645294899168f15a2544`.
+Their separately sealed actual outer invocations and independent five-file
+verification remain under `/root/constellation-host-db-*`. This completes the
+temporary host-cache parking operation; it does not establish fresh vulnerability
+database updates, off-host recovery or a parent parity acceptance gate.

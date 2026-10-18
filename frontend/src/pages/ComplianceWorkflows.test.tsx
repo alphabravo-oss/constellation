@@ -11,7 +11,7 @@ import { ComplianceScheduleFormPage } from "./ComplianceScheduleFormPage";
 
 const route = vi.hoisted(() => ({ clusterId: "cluster" as string | undefined, cluster: { id: "cluster" } as { id: string } | undefined, loading: false, error: null as Error | null, search: "framework=cis&control_id=1.2&filter=a&filter=b", navigate: vi.fn(), setSearch: vi.fn() }));
 vi.mock("sonner", () => ({ toast: { info: vi.fn(), warning: vi.fn(), error: vi.fn(), success: vi.fn() } }));
-vi.mock("@/api/client", () => ({ compliance: { frameworks: vi.fn(), checks: vi.fn(), summary: vi.fn(), listExemptions: vi.fn(), createExemption: vi.fn(), revokeExemption: vi.fn(), evidence: vi.fn(), listDBSchedules: vi.fn(), createSchedule: vi.fn(), runScheduleNow: vi.fn(), deleteSchedule: vi.fn(), scheduleRuns: vi.fn(), downloadRunArtifact: vi.fn(), exportChecksCSV: vi.fn() } }));
+vi.mock("@/api/client", () => ({ compliance: { frameworks: vi.fn(), checks: vi.fn(), summary: vi.fn(), listExemptions: vi.fn(), createExemption: vi.fn(), revokeExemption: vi.fn(), evidence: vi.fn(), listDBSchedules: vi.fn(), createSchedule: vi.fn(), patchSchedule: vi.fn(), runScheduleNow: vi.fn(), deleteSchedule: vi.fn(), scheduleRuns: vi.fn(), downloadRunArtifact: vi.fn(), exportChecksCSV: vi.fn() } }));
 vi.mock("@/hooks/useCluster", () => ({ useCluster: () => ({ clusterId: route.clusterId, cluster: route.cluster, isLoading: route.loading, error: route.error }) }));
 vi.mock("@/lib/route-search", () => ({ useRouteSearchParams: () => [new URLSearchParams(route.search), route.setSearch] }));
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => route.navigate, Link: ({ children, href }: { children: ReactNode; href?: string }) => <a href={href}>{children}</a> }));
@@ -290,5 +290,73 @@ describe("schedule run requests", () => {
     await click("Request run");
     await settled(() => expect(toast.warning).toHaveBeenCalledWith("No run was requested. Review History before retrying."));
     expect(toast.info).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("schedule enabled state", () => {
+  it.each([true, false])("changes enabled=%s through PATCH without requesting a run", async enabled => {
+    route.search = "tab=schedules";
+    let schedule = { ...inherited, org_id: "org", enabled };
+    vi.mocked(compliance.listDBSchedules).mockImplementation(async () => ({ ...options, schedules: [schedule] }));
+    let complete!: (value: ComplianceScheduleDB) => void;
+    vi.mocked(compliance.patchSchedule).mockImplementation(() => new Promise(resolve => { complete = resolve; }));
+    await renderPage(<CompliancePage />);
+    const action = enabled ? "Disable organization schedule" : "Enable organization schedule";
+    await settled(() => expect(host.textContent).toContain(action));
+    expect(host.textContent).toContain("Organization schedule · applies across clusters");
+    await click(action);
+    await settled(() => expect(compliance.patchSchedule).toHaveBeenCalledExactlyOnceWith("organization", { enabled: !enabled }));
+    await settled(() => expect(host.querySelector<HTMLButtonElement>('[data-testid="schedule-enabled-toggle-organization"]')?.disabled).toBe(true));
+    expect(host.querySelector('[data-testid="schedule-enabled-organization"]')?.textContent).toBe(enabled ? "Enabled" : "Disabled");
+    expect(host.textContent).toContain(enabled ? "1 enabled · 0 disabled" : "0 enabled · 1 disabled");
+    schedule = { ...schedule, enabled: !enabled };
+    await act(async () => complete(schedule));
+    await settled(() => expect(host.querySelector('[data-testid="schedule-enabled-organization"]')?.textContent).toBe(enabled ? "Disabled" : "Enabled"));
+    expect(host.textContent).toContain(enabled ? "0 enabled · 1 disabled" : "1 enabled · 0 disabled");
+    expect(compliance.listDBSchedules).toHaveBeenCalledTimes(2);
+    expect(compliance.runScheduleNow).not.toHaveBeenCalled(); expect(compliance.deleteSchedule).not.toHaveBeenCalled();
+  });
+
+  it("retains configuration on a failed toggle and permits an explicit retry", async () => {
+    route.search = "tab=schedules";
+    let schedule = { ...inherited, org_id: "org", cluster_id: "cluster" };
+    vi.mocked(compliance.listDBSchedules).mockImplementation(async () => ({ ...options, schedules: [schedule] }));
+    vi.mocked(compliance.patchSchedule).mockRejectedValueOnce(new Error("private transport detail")).mockImplementationOnce(async () => { schedule = { ...schedule, enabled: false }; return schedule; });
+    await renderPage(<CompliancePage />); await settled(() => expect(host.textContent).toContain("Disable schedule"));
+    await click("Disable schedule"); await settled(() => expect(host.textContent).toContain("Could not update the schedule"));
+    expect(host.querySelector('[data-testid="schedule-enabled-organization"]')?.textContent).toBe("Enabled");
+    expect(host.textContent).not.toContain("private transport detail"); expect(compliance.listDBSchedules).toHaveBeenCalledTimes(1);
+    await click("Disable schedule");
+    await settled(() => expect(host.querySelector('[data-testid="schedule-enabled-organization"]')?.textContent).toBe("Disabled"));
+    expect(host.textContent).not.toContain("Could not update the schedule");
+    expect(vi.mocked(compliance.patchSchedule).mock.calls).toEqual([["organization", { enabled: false }], ["organization", { enabled: false }]]);
+    expect(compliance.runScheduleNow).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalidated schedule data before a retained action can PATCH", async () => {
+    route.search = "tab=schedules";
+    vi.mocked(compliance.listDBSchedules).mockResolvedValue({ ...options, schedules: [{ ...inherited, org_id: "org" }] });
+    await renderPage(<CompliancePage />); await settled(() => expect(host.textContent).toContain("Disable organization schedule"));
+    const action = host.querySelector<HTMLButtonElement>('[data-testid="schedule-enabled-toggle-organization"]')!;
+    await act(async () => { client.getQueryCache().find({ queryKey: ["compliance", "db-schedules", "cluster"], exact: true })!.invalidate(); action.click(); });
+    await settled(() => expect(host.textContent).toContain("Could not update the schedule"));
+    expect(compliance.patchSchedule).not.toHaveBeenCalled(); expect(compliance.runScheduleNow).not.toHaveBeenCalled();
+  });
+
+  it("blocks a retained action during a cluster registry refresh before its next render", async () => {
+    route.search = "tab=schedules";
+    vi.mocked(compliance.listDBSchedules).mockResolvedValue({ ...options, schedules: [{ ...inherited, org_id: "org" }] });
+    await renderPage(<CompliancePage />); await settled(() => expect(host.textContent).toContain("Disable organization schedule"));
+    const action = host.querySelector<HTMLButtonElement>('[data-testid="schedule-enabled-toggle-organization"]')!;
+    let complete!: (value: { clusters: Array<{ id: string }> }) => void;
+    let refresh!: Promise<{ clusters: Array<{ id: string }> }>;
+    try {
+      await act(async () => {
+        refresh = client.fetchQuery({ queryKey: ["clusters"], queryFn: () => new Promise<{ clusters: Array<{ id: string }> }>(resolve => { complete = resolve; }) });
+        action.click(); await Promise.resolve();
+      });
+      expect(compliance.patchSchedule).not.toHaveBeenCalled(); expect(compliance.runScheduleNow).not.toHaveBeenCalled();
+    } finally { await act(async () => { complete({ clusters: [{ id: "cluster" }] }); await refresh; }); }
   });
 });
