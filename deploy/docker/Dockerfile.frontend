@@ -35,7 +35,8 @@ FROM ${NGINX_IMAGE} AS runtime
 # Refresh fixes released after the base image was published. Keep distribution
 # repositories and signature verification; restore the runtime's nonroot UID.
 USER 0
-RUN apk add --upgrade --no-cache 'libexpat>=2.9.0-r0' 'zlib>=1.3.2-r1'
+RUN apk add --upgrade --no-cache 'libexpat>=2.9.0-r0' 'zlib>=1.3.2-r1' \
+    'libx11>=1.8.14-r0' 'libxpm>=3.5.20-r0'
 USER 101
 
 COPY --from=build /src/dist /usr/share/nginx/html
