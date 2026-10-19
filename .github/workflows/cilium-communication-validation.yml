@@ -1,0 +1,73 @@
+name: Cilium communication validation
+on:
+  workflow_dispatch:
+  push:
+    branches: ['implement/**']
+    paths:
+      - .github/workflows/cilium-communication-validation.yml
+      - scripts/test-system-communication.py
+      - internal/netpolicyapply/communication_live_test.go
+permissions:
+  contents: read
+concurrency:
+  group: cilium-communication-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  dataplane:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      GOMAXPROCS: '2'
+      KUBECONFIG: /tmp/constellation-cilium-proof.kubeconfig
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: go.mod
+      - uses: azure/setup-helm@bf6a7d304bc2fdb57e0331155b7ebf2c504acf0a
+        with:
+          version: v3.21.0
+      - name: Build actual apply-path helper on hosted runner
+        run: |
+          mkdir -p artifacts
+          CGO_ENABLED=0 go test -c -o artifacts/netpolicyapply.test ./internal/netpolicyapply
+      - name: Create disposable Cilium cluster
+        run: |
+          curl --fail --silent --show-error --location https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-amd64 -o /tmp/kind-linux-amd64
+          echo 'aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d  /tmp/kind-linux-amd64' | sha256sum --check
+          sudo install /tmp/kind-linux-amd64 /usr/local/bin/kind
+          cat > artifacts/kind.yaml <<'CONFIG'
+          kind: Cluster
+          apiVersion: kind.x-k8s.io/v1alpha4
+          nodes:
+            - role: control-plane
+          networking:
+            disableDefaultCNI: true
+          CONFIG
+          kind create cluster --name constellation-cilium-proof --config artifacts/kind.yaml --image kindest/node:v1.35.8@sha256:07b2536e30b803ed61d1677a79df6115f798ce64c80f9e22f6ed45afd09323c0
+          helm repo add cilium https://helm.cilium.io/
+          helm install cilium cilium/cilium --version 1.20.3 --namespace kube-system --set ipam.mode=kubernetes --set operator.replicas=1 --set kubeProxyReplacement=false --wait --timeout 5m
+          kubectl wait nodes --all --for=condition=Ready --timeout=120s
+          kubectl -n kube-system rollout status deployment/coredns --timeout=120s
+          # Expose the existing CoreDNS metrics listener for the positive control.
+          kubectl -n kube-system patch service kube-dns --type=json -p='[{"op":"add","path":"/spec/ports/-","value":{"name":"metrics","port":9153,"protocol":"TCP","targetPort":9153}}]'
+          helm get values cilium -n kube-system --all -o json > artifacts/cilium-values.json
+          kubectl get pods -A -o json > artifacts/cluster-pods.json
+          kubectl version -o json > artifacts/kubernetes-version.json
+      - name: Exercise protected peers and application isolation
+        run: |
+          python3 scripts/test-system-communication.py --live --flavor cilium --helper artifacts/netpolicyapply.test --image ghcr.io/alphabravo-oss/constellation/migrate@sha256:604a275f6c7c11bfc8d80825ebe389a71e9a7a561b9a3aeba25f8fb66877fe56 --output artifacts/proof
+      - name: Capture CNI state and remove disposable cluster
+        if: always()
+        run: |
+          kubectl -n kube-system logs -l k8s-app=cilium --tail=300 > artifacts/cilium.log 2>&1 || true
+          kubectl get events -A -o json > artifacts/events.json 2>&1 || true
+          kind delete cluster --name constellation-cilium-proof
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: cilium-communication-${{ github.sha }}
+          path: artifacts/
+          retention-days: 14

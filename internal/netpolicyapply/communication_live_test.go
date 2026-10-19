@@ -49,8 +49,25 @@ func TestApplyNativeCommunicationLive(t *testing.T) {
 		t.Fatal(err)
 	}
 	obj := map[string]any{"apiVersion": "networking.k8s.io/v1", "kind": "NetworkPolicy", "metadata": map[string]any{"name": "communication-proof", "namespace": ns}, "spec": map[string]any{"podSelector": map[string]any{"matchLabels": map[string]any{"proof-role": "client"}}, "policyTypes": []any{"Ingress", "Egress"}, "ingress": []any{}, "egress": []any{}}}
+	flavor, err := ParseFlavor(os.Getenv("CONSTELLATION_POLICY_PROOF_FLAVOR"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	switch flavor {
+	case FlavorCilium:
+		obj["apiVersion"] = "cilium.io/v2"
+		obj["kind"] = "CiliumNetworkPolicy"
+		obj["spec"] = map[string]any{
+			"endpointSelector":  map[string]any{"matchLabels": map[string]any{"proof-role": "client"}},
+			"enableDefaultDeny": map[string]any{"ingress": true, "egress": true},
+			"ingress":           []any{}, "egress": []any{},
+		}
+	case FlavorNative:
+	default:
+		t.Fatal("live fixture flavor not implemented")
+	}
 	raw, _ := json.Marshal(obj)
-	resource, data, err := ParseManifest(FlavorNative, string(raw))
+	resource, data, err := ParseManifest(flavor, string(raw))
 	if err != nil {
 		t.Fatal(err)
 	}

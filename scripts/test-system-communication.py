@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Opt-in disposable native-CNI proof of protected communication and app isolation.
+"""Opt-in disposable network-policy proof of protected communication and app isolation.
 
 Requires a hosted-built internal/netpolicyapply test binary, kubectl, and a pinned
 migration image containing BusyBox. Never applies policies to existing namespaces.
@@ -32,6 +32,7 @@ def create(obj):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--flavor', choices=['native', 'cilium'], default='native')
     parser.add_argument('--live', action='store_true', required=True)
     parser.add_argument('--helper', type=Path, required=True)
     parser.add_argument('--image', required=True)
@@ -45,7 +46,8 @@ def main():
     system = 'constellation-policy-proof-system-' + nonce
     label = 'constellation.alphabravo.io/protection-proof'
     owned = {}
-    evidence = {'nonce': nonce, 'namespaces': [app, system], 'image': args.image, 'probes': []}
+    policy_kind = 'ciliumnetworkpolicy' if args.flavor == 'cilium' else 'networkpolicy'
+    evidence = {'nonce': nonce, 'namespaces': [app, system], 'image': args.image, 'flavor': args.flavor, 'probes': []}
 
     def probe(namespace, pod, target, expected, tag):
         result = kubectl('exec', '-n', namespace, pod, '--', '/bin/busybox', 'wget', '-T', '3', '-qO-',
@@ -112,14 +114,14 @@ def main():
         metrics = kubectl('exec', '-n', app, 'client', '--', 'wget', '-T', '3', '-qO', '/dev/null', metrics_url, check=False, timeout=10)
         if metrics.returncode:
             raise AssertionError('DNS metrics baseline is not reachable; this fixture requires its explicit positive control')
-        env = dict(os.environ, CONSTELLATION_POLICY_PROOF_NAMESPACE=app,
+        env = dict(os.environ, CONSTELLATION_POLICY_PROOF_NAMESPACE=app, CONSTELLATION_POLICY_PROOF_FLAVOR=args.flavor,
                    CONSTELLATION_POLICY_PROOF_PROTECTED_NAMESPACE=system, CONSTELLATION_POLICY_PROOF_NONCE=nonce)
         result = subprocess.run([str(args.helper.resolve()), '-test.run', '^TestApplyNativeCommunicationLive$', '-test.v'],
                                 env=env, text=True, capture_output=True, timeout=45)
         (args.output/'helper.log').write_text(result.stdout + result.stderr)
         if result.returncode:
             raise RuntimeError('guarded apply failed; see helper.log')
-        evidence['effectivePolicy'] = get('networkpolicy', 'communication-proof', app)
+        evidence['effectivePolicy'] = get(policy_kind, 'communication-proof', app)
         time.sleep(5)  # Bounded dataplane convergence before fresh TCP probes.
         for repeat in range(3):
             for tag, target in targets.items():
@@ -139,7 +141,7 @@ def main():
         if not re.search(r'HTTP/\S+ (200|401|403)', api.stderr):
             raise AssertionError('Kubernetes API transport unavailable: ' + api.stderr)
         evidence['apiTransportSucceeded'] = True
-        kubectl('delete', 'networkpolicy', 'communication-proof', '-n', app)
+        kubectl('delete', policy_kind, 'communication-proof', '-n', app)
         time.sleep(5)
         probe(app, 'client', targets['ordinaryPod'], True, 'recovery-ordinary-egress')
         probe(app, 'ordinary', f'http://{client_ip}:18080/', True, 'recovery-ordinary-ingress')
