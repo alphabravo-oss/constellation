@@ -287,15 +287,16 @@ RETURNING id`,
 }
 
 type patchScheduleReq struct {
-	Name           *string           `json:"name"`
-	Description    *string           `json:"description"`
-	Enabled        *bool             `json:"enabled"`
-	CronExpression *string           `json:"cron_expression"`
-	Timezone       *string           `json:"timezone"`
-	Delivery       *[]DeliveryTarget `json:"delivery"`
-	ReportFormat   *string           `json:"report_format"`
-	ReportTemplate *string           `json:"report_template"`
-	Framework      *string           `json:"framework"`
+	ExpectedUpdatedAt *time.Time        `json:"expected_updated_at"`
+	Name              *string           `json:"name"`
+	Description       *string           `json:"description"`
+	Enabled           *bool             `json:"enabled"`
+	CronExpression    *string           `json:"cron_expression"`
+	Timezone          *string           `json:"timezone"`
+	Delivery          *[]DeliveryTarget `json:"delivery"`
+	ReportFormat      *string           `json:"report_format"`
+	ReportTemplate    *string           `json:"report_template"`
+	Framework         *string           `json:"framework"`
 }
 
 // Patch updates a subset of the schedule fields.
@@ -314,6 +315,10 @@ func (h *ComplianceSchedulesDB) Patch(w http.ResponseWriter, r *http.Request) {
 	var req patchScheduleReq
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
 		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad body"})
+		return
+	}
+	if req.ExpectedUpdatedAt != nil && !req.ExpectedUpdatedAt.Equal(existing.UpdatedAt) {
+		httpx.WriteJSON(w, http.StatusConflict, map[string]string{"error": "schedule changed; reload before saving"})
 		return
 	}
 	if req.Name != nil {
@@ -349,17 +354,21 @@ func (h *ComplianceSchedulesDB) Patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	deliveryRaw, _ := json.Marshal(existing.Delivery)
-	_, err = h.db.Pool().Exec(r.Context(), `
+	ct, err := h.db.Pool().Exec(r.Context(), `
 UPDATE compliance_schedules
    SET name=$1, description=$2, enabled=$3, cron_expression=$4, timezone=$5,
        delivery=$6::jsonb, report_format=$7, report_template=$8, framework=$9,
        next_run_at=$10, updated_at=NOW()
- WHERE id=$11 AND org_id=$12`,
+ WHERE id=$11 AND org_id=$12 AND updated_at=$13`,
 		existing.Name, existing.Description, existing.Enabled, existing.CronExpression,
 		existing.Timezone, deliveryRaw, existing.ReportFormat, existing.ReportTemplate,
-		existing.Framework, next, id, subj.OrgID)
+		existing.Framework, next, id, subj.OrgID, existing.UpdatedAt)
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if ct.RowsAffected() == 0 {
+		httpx.WriteJSON(w, http.StatusConflict, map[string]string{"error": "schedule changed; reload before saving"})
 		return
 	}
 	uid := subj.UserID

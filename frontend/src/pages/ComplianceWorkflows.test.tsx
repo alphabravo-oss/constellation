@@ -364,7 +364,7 @@ describe("schedule enabled state", () => {
 const editListKey = ["compliance", "db-schedules", "org", "user", "cluster", "edit"];
 const editFrameworkKey = ["compliance", "frameworks", "org", "user", "schedule-edit"];
 function scheduleForEdit(overrides: Partial<ComplianceScheduleDB> = {}): ComplianceScheduleDB {
-  return { ...inherited, id: "editable", org_id: "org", cluster_id: "cluster", description: "Keep this description", enabled: false,
+  return { ...inherited, id: "editable", updated_at: "2026-10-19T00:00:00.123456Z", org_id: "org", cluster_id: "cluster", description: "Keep this description", enabled: false,
     cron_expression: "13 5 * * 2", timezone: "America/New_York", report_format: "legacy-format", report_template: "legacy-template",
     delivery: [
       { kind: "s3", bucket: "evidence", prefix: "original/", endpoint: "https://objects.example.test", receiver_id: "retained-receiver", opaque: { retained: true } },
@@ -484,9 +484,19 @@ describe("schedule configuration edit", () => {
     vi.mocked(compliance.patchSchedule).mockResolvedValue({ ...schedule, cron_expression: "17 6 * * 3" });
     await edit("#schedule-cron", "17 6 * * 3"); await submit();
     await settled(() => expect(route.navigate).toHaveBeenCalled());
-    expect(compliance.patchSchedule).toHaveBeenCalledExactlyOnceWith("editable", { cron_expression: "17 6 * * 3" });
+    expect(compliance.patchSchedule).toHaveBeenCalledExactlyOnceWith("editable", { expected_updated_at: schedule.updated_at, cron_expression: "17 6 * * 3" });
     expect(compliance.createSchedule).not.toHaveBeenCalled(); expect(compliance.runScheduleNow).not.toHaveBeenCalled(); expect(compliance.deleteSchedule).not.toHaveBeenCalled();
     expect(route.navigate).toHaveBeenCalledWith({ href: "/clusters/cluster/compliance?framework=cis&control_id=1.2&filter=a&filter=b&tab=schedules" });
+  });
+
+  it("preserves the draft and explains a server-side schedule conflict", async () => {
+    const schedule = await renderEdit();
+    vi.mocked(compliance.patchSchedule).mockRejectedValue({ isAxiosError: true, response: { status: 409 } });
+    await edit("#schedule-name", "My unsaved name"); await submit();
+    await settled(() => expect(host.textContent).toContain("This schedule changed. Your draft is preserved."));
+    expect(host.querySelector<HTMLInputElement>("#schedule-name")!.value).toBe("My unsaved name");
+    expect(route.navigate).not.toHaveBeenCalled();
+    expect(compliance.patchSchedule).toHaveBeenCalledExactlyOnceWith("editable", { name: "My unsaved name", expected_updated_at: schedule.updated_at });
   });
 
   it("retains all target properties and multiple kinds when explicitly editing delivery", async () => {
@@ -494,7 +504,7 @@ describe("schedule configuration edit", () => {
     vi.mocked(compliance.patchSchedule).mockResolvedValue(schedule);
     await edit("#delivery-prefix-0", "updated/"); await edit("#delivery-url-1", "https://hooks.example.test/updated");
     await submit(); await settled(() => expect(compliance.patchSchedule).toHaveBeenCalled());
-    expect(compliance.patchSchedule).toHaveBeenCalledExactlyOnceWith("editable", { delivery: [
+    expect(compliance.patchSchedule).toHaveBeenCalledExactlyOnceWith("editable", { expected_updated_at: schedule.updated_at, delivery: [
       { ...schedule.delivery[0], prefix: "updated/" }, { ...schedule.delivery[1], url: "https://hooks.example.test/updated" }, schedule.delivery[2], schedule.delivery[3],
     ] });
     expect(compliance.runScheduleNow).not.toHaveBeenCalled();
@@ -506,7 +516,7 @@ describe("schedule configuration edit", () => {
     expect([...templates.options].map(option => option.value)).toEqual(["legacy-template", "compliance-detailed"]);
     vi.mocked(compliance.patchSchedule).mockResolvedValue({ ...schedule, report_template: "compliance-detailed" });
     await edit("#schedule-template", "compliance-detailed"); await submit();
-    await settled(() => expect(compliance.patchSchedule).toHaveBeenCalledExactlyOnceWith("editable", { report_template: "compliance-detailed" }));
+    await settled(() => expect(compliance.patchSchedule).toHaveBeenCalledExactlyOnceWith("editable", { expected_updated_at: schedule.updated_at, report_template: "compliance-detailed" }));
   });
 
   it.each(["missing", "foreign organization", "foreign cluster", "duplicate", "invalid delivery"])("withholds the editor for %s data", async scenario => {
@@ -618,7 +628,7 @@ describe("schedule configuration edit", () => {
     expect(host.querySelector<HTMLSelectElement>("#delivery-kind-0")!.value).toBe("legacy-channel");
     vi.mocked(compliance.patchSchedule).mockResolvedValue(schedule);
     await edit("#schedule-description", "Changed description"); await submit();
-    await settled(() => expect(compliance.patchSchedule).toHaveBeenCalledExactlyOnceWith("editable", { description: "Changed description" }));
+    await settled(() => expect(compliance.patchSchedule).toHaveBeenCalledExactlyOnceWith("editable", { expected_updated_at: schedule.updated_at, description: "Changed description" }));
     expect(host.querySelector<HTMLSelectElement>("#delivery-kind-0")!.value).toBe("legacy-channel");
   });
 
@@ -627,7 +637,7 @@ describe("schedule configuration edit", () => {
     await act(async () => client.setQueryData(editListKey, { ...options, schedules: [{ ...schedule, enabled: true }] }));
     await settled(() => expect(host.textContent).toContain("Configured state: Enabled"));
     vi.mocked(compliance.patchSchedule).mockResolvedValue({ ...schedule, enabled: true, name: "New name" });
-    await submit(); await settled(() => expect(compliance.patchSchedule).toHaveBeenCalledExactlyOnceWith("editable", { name: "New name" }));
+    await submit(); await settled(() => expect(compliance.patchSchedule).toHaveBeenCalledExactlyOnceWith("editable", { expected_updated_at: schedule.updated_at, name: "New name" }));
     expect(compliance.runScheduleNow).not.toHaveBeenCalled();
   });
 

@@ -16895,7 +16895,9 @@
         "summary": "Get schedules"
       },
       "patch": {
+        "description": "Pass expected_updated_at from the loaded schedule to reject stale edits. Concurrent writes detected during a patch also return 409; reload before retrying.",
         "responses": {
+          "409": { "description": "Schedule changed; reload before saving" },
           "200": {
             "description": "ok"
           },

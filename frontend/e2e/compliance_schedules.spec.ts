@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 
 const clusterId = "11111111-1111-4111-8111-111111111111";
 const root = `/clusters/${clusterId}/compliance`;
-const schedule = { id: "schedule", name: "CIS production weekly", framework: "cis-k8s-1.9", cron_expression: "0 2 * * 1", timezone: "UTC", enabled: true, delivery: [{ kind: "file", target: "file:///reports/" }], report_format: "pdf", report_template: "compliance-detailed", last_status: "succeeded" };
+const schedule = { updated_at: "2026-10-19T00:00:00.123456Z", id: "schedule", name: "CIS production weekly", framework: "cis-k8s-1.9", cron_expression: "0 2 * * 1", timezone: "UTC", enabled: true, delivery: [{ kind: "file", target: "file:///reports/" }], report_format: "pdf", report_template: "compliance-detailed", last_status: "succeeded" };
 
 const requestMessage = "Run requested; processing is pending. A running report scheduler is required. Review History for execution and delivery.";
 
@@ -159,12 +159,12 @@ test("Inherited schedule edit uses dirty PATCH and retains delivery details with
   await expect(page).toHaveURL(`${root}?tab=schedules&filter=auditors`);
   await expect(page.getByTestId("schedule-editable")).toContainText("17 6 * * 3");
   await expect(page.getByTestId("schedule-enabled-editable")).toHaveText("Disabled");
-  expect(patches).toEqual([{ cron_expression: "17 6 * * 3", delivery: [{ ...target, prefix: "updated/" }], report_template: "compliance-detailed" }]);
+  expect(patches).toEqual([{ expected_updated_at: schedule.updated_at, cron_expression: "17 6 * * 3", delivery: [{ ...target, prefix: "updated/" }], report_template: "compliance-detailed" }]);
   expect(unexpectedWrites).toEqual([]);
 });
 
 
-test("Direct schedule edit retains failed draft and cancels to the scoped list", async ({ page }) => {
+for (const failureStatus of [503, 409]) test(`Direct schedule edit retains ${failureStatus} draft and cancels to the scoped list`, async ({ page }) => {
   const current = { ...schedule, id: "editable", org_id: "org", cluster_id: clusterId, description: "Original description", enabled: false };
   const patches: unknown[] = []; const runRequests: string[] = [];
   page.on("request", request => { if (new URL(request.url()).pathname.endsWith("/run-now")) runRequests.push(request.url()); });
@@ -174,7 +174,7 @@ test("Direct schedule edit retains failed draft and cancels to the scoped list",
       await route.fulfill({ json: { schedules: [current], summary: { total: 1, enabled: 0, disabled: 1 }, frameworks: [current.framework], report_formats: ["html", "json", "csv", "sarif", "pdf"] } }); return;
     }
     if (path === "/api/v1/compliance/schedules/editable" && request.method() === "PATCH") {
-      patches.push(request.postDataJSON()); await route.fulfill({ status: 503, json: { error: "Private fixture diagnostic" } }); return;
+      patches.push(request.postDataJSON()); await route.fulfill({ status: failureStatus, json: { error: "Private fixture diagnostic" } }); return;
     }
     await route.fallback();
   });
@@ -185,9 +185,10 @@ test("Direct schedule edit retains failed draft and cancels to the scoped list",
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect(page.getByRole("alert").filter({ hasText: "Your draft is preserved" })).toBeVisible();
   await expect(page.getByTestId("wizard-name")).toHaveValue("Retained draft name");
+  if (failureStatus === 409) await expect(page.getByRole("alert")).toContainText("This schedule changed.");
   await expect(page.getByText("Private fixture diagnostic", { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(page).toHaveURL(`${root}?tab=schedules&filter=retained`);
   await expect(page.getByTestId("schedule-editable")).toContainText(current.name);
-  expect(patches).toEqual([{ name: "Retained draft name" }]); expect(runRequests).toEqual([]);
+  expect(patches).toEqual([{ name: "Retained draft name", expected_updated_at: schedule.updated_at }]); expect(runRequests).toEqual([]);
 });

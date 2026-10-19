@@ -1,3 +1,4 @@
+import { isAxiosError } from "axios";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
@@ -168,7 +169,10 @@ function ScheduleEditor({ editorContext, clusterId, frameworks, reportFormats, b
       if (initial) {
         if (!isCurrent?.()) throw new Error("Schedule context changed");
         assertFresh?.(patch);
-        return compliance.patchSchedule(initial.id, patch);
+        return compliance.patchSchedule(initial.id, { ...patch, expected_updated_at: initial.updated_at }).catch((error: unknown) => {
+          if (isAxiosError(error) && error.response?.status === 409) throw new ScheduleEditConflictError("The saved configuration changed.");
+          throw error;
+        });
       }
       return compliance.createSchedule({ name: name.trim(), description, cluster_id: clusterId, framework, cron_expression: cron.trim(), timezone: timezone.trim(), delivery, report_format: format, report_template: template });
     },

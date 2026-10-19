@@ -870,7 +870,7 @@ export const compliance = {
     report_format?: string;
     report_template?: string;
   }) => api.post<ComplianceScheduleDB>("/compliance/schedules", body).then((r) => r.data),
-  patchSchedule: (id: string, body: Partial<ComplianceScheduleDB>) =>
+  patchSchedule: (id: string, body: Partial<ComplianceScheduleDB> & { expected_updated_at?: string }) =>
     api.patch<ComplianceScheduleDB>(`/compliance/schedules/${id}`, body).then((r) => r.data),
   deleteSchedule: (id: string) => api.delete(`/compliance/schedules/${id}`),
   runScheduleNow: (id: string) =>
