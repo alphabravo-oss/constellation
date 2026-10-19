@@ -41,5 +41,10 @@ fresh migrated database on a hosted runner. `Scanner lease candidates` builds OC
 artifacts for scanner, API and the development migration overlay. Building these
 artifacts does not authorize promotion: inspect the regression result, verify
 artifact/source identities, run the published-image gates, and follow the upgrade
-order above. The overlay copies migrations onto the current pinned migration
-runtime; it does not silently rebuild or replace that runtime's tools.
+order above. The overlay preserves the pinned runtime packages and rebuilds Goose
+v3.27.1 from its verified module archive using `deploy/docker/goose` dependency
+locks. Only its PostgreSQL driver is included; Constellation does not use the
+other database drivers. The hosted candidate must migrate a fresh database,
+repeat the upgrade, and roll migration 184 back and forward under UID 10001 with
+a read-only root filesystem. The tagged release migration recipe remains a
+separate hardening follow-up.

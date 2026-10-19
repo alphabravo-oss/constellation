@@ -12,6 +12,7 @@ on:
     branches: [main, 'implement/**']
     paths:
       - deploy/dev/lease-validation/Dockerfile.migrate
+      - deploy/docker/goose/**
 
 permissions:
   contents: read
@@ -27,7 +28,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        role: ${{ inputs.role == 'api' && fromJSON('["api"]') || inputs.role == 'scanner' && fromJSON('["scanner"]') || inputs.role == 'migrate' && fromJSON('["migrate"]') || fromJSON('["api","scanner","migrate"]') }}
+        role: ${{ github.event_name == 'push' && fromJSON('["migrate"]') || inputs.role == 'api' && fromJSON('["api"]') || inputs.role == 'scanner' && fromJSON('["scanner"]') || inputs.role == 'migrate' && fromJSON('["migrate"]') || fromJSON('["api","scanner","migrate"]') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -51,6 +52,42 @@ jobs:
             BUILD_TIME=${{ steps.time.outputs.value }}
           provenance: mode=max
           sbom: true
+      - name: Validate migration runtime against a disposable database
+        if: matrix.role == 'migrate'
+        env:
+          CANDIDATE: constellation/migrate:candidate-${{ github.sha }}
+        run: |
+          set -euo pipefail
+          docker load -i "$RUNNER_TEMP/image.tar"
+          docker network create migration-validation
+          trap 'docker rm -f migration-validation-db >/dev/null; docker network rm migration-validation >/dev/null' EXIT
+          docker run -d --name migration-validation-db --network migration-validation \
+            -e POSTGRES_USER=test -e POSTGRES_PASSWORD=test -e POSTGRES_DB=constellation_test \
+            pgvector/pgvector:pg16
+          ready=false
+          for attempt in {1..60}; do
+            if docker exec migration-validation-db pg_isready -U test -d constellation_test; then ready=true; break; fi
+            sleep 1
+          done
+          "$ready"
+          database_url='postgres://test:test@migration-validation-db:5432/constellation_test?sslmode=disable'
+          for attempt in 1 2; do
+            echo "Validating migration pass $attempt"
+            docker run --rm --network migration-validation --read-only --cap-drop ALL \
+              --user 10001:10001 -e DATABASE_URL="$database_url" "$CANDIDATE"
+          done
+          test "$(docker exec migration-validation-db psql -U test -d constellation_test -Atc \
+            "SELECT max(version_id) FROM goose_db_version WHERE is_applied")" = 184
+          docker run --rm --network migration-validation --read-only --cap-drop ALL \
+            --user 10001:10001 --entrypoint /usr/local/bin/goose \
+            -e GOOSE_DRIVER=postgres -e GOOSE_DBSTRING="$database_url" -e GOOSE_MIGRATION_DIR=/migrations \
+            "$CANDIDATE" down
+          test "$(docker exec migration-validation-db psql -U test -d constellation_test -Atc \
+            "SELECT count(*) FROM information_schema.columns WHERE table_name='scan_jobs' AND column_name='lease_id'")" = 0
+          docker run --rm --network migration-validation --read-only --cap-drop ALL \
+            --user 10001:10001 -e DATABASE_URL="$database_url" "$CANDIDATE"
+          test "$(docker exec migration-validation-db psql -U test -d constellation_test -Atc \
+            "SELECT count(*) FROM information_schema.columns WHERE table_name='scan_jobs' AND column_name='lease_id' AND data_type='uuid'")" = 1
       - name: Record build identity
         env:
           SOURCE_COMMIT: ${{ github.sha }}
