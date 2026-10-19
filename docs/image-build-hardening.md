@@ -147,3 +147,19 @@ Validate every executable and the affected Kubernetes workflows before rollout.
 The native runtime-agent needs networking tools and libraries and is not covered
 by this static-runtime conversion. Removing OS packages does not remove findings
 in embedded Go modules; retain those findings and rebuild with reviewed fixes.
+
+### Builds on the development Kubernetes node
+
+This development workspace shares a filesystem with Kubernetes. Check available
+space and the kubelet's eviction settings before large builds or scans. Reserve
+the eviction threshold **plus minimum reclaim**, then add the expected build and
+scan scratch-space budget; the recovery requirement can be much higher than the
+threshold that first triggers eviction. On the current node these settings are
+5% eviction and 10% minimum reclaim, with a five-minute pressure transition.
+A successful image build is not evidence that the node has adequate capacity.
+
+Prefer a separate builder. On the shared node, stop builds if disk pressure is
+reported. Reclaim regenerable compiler/module and unused Docker build caches;
+preserve application volumes, backup data, image rollback artifacts and scan
+evidence. Verify node pressure clears and database, storage, controllers, API,
+scanner and runtime agents recover before starting another rollout.

@@ -1,0 +1,211 @@
+{
+  "sourceCommit": "727c603",
+  "deployed": false,
+  "candidateValidation": {
+    "discoverer": {
+      "image": "constellation/discoverer:static-20261019",
+      "digest": "sha256:11546e231820e9948da39e5e3b4e106955142553f1f3102fb2ad0b4eb722aafd",
+      "configuration": "sha256:11546e231820e9948da39e5e3b4e106955142553f1f3102fb2ad0b4eb722aafd",
+      "sizeBytes": 11278175,
+      "probe": {
+        "account": "constellation",
+        "ca_tls_dns": true,
+        "gid": 10001,
+        "temporary_storage": true,
+        "timezones": true,
+        "uid": 10001
+      },
+      "staticBinaries": [
+        "discoverer"
+      ],
+      "shellAndPackageManagersAbsent": true,
+      "packagesByType": {
+        "deb": 6,
+        "go-module": 57
+      }
+    },
+    "admission": {
+      "image": "constellation/admission:static-20261019",
+      "digest": "sha256:39c25d5ae9af353e9001ed6e8e5d878461c291dff78249a160c08a51574ed9f8",
+      "configuration": "sha256:39c25d5ae9af353e9001ed6e8e5d878461c291dff78249a160c08a51574ed9f8",
+      "sizeBytes": 22549885,
+      "probe": {
+        "account": "constellation",
+        "ca_tls_dns": true,
+        "gid": 10001,
+        "temporary_storage": true,
+        "timezones": true,
+        "uid": 10001
+      },
+      "staticBinaries": [
+        "admission"
+      ],
+      "shellAndPackageManagersAbsent": true,
+      "packagesByType": {
+        "deb": 6,
+        "go-module": 105
+      }
+    },
+    "operator": {
+      "image": "constellation/operator:static-20261019",
+      "digest": "sha256:7b8fafbc20c4ab31b0475ae5ffdbaca1aa37606bcf134b2f196b40b04078f4ed",
+      "configuration": "sha256:7b8fafbc20c4ab31b0475ae5ffdbaca1aa37606bcf134b2f196b40b04078f4ed",
+      "sizeBytes": 29716387,
+      "probe": {
+        "account": "constellation",
+        "ca_tls_dns": true,
+        "gid": 10001,
+        "temporary_storage": true,
+        "timezones": true,
+        "uid": 10001
+      },
+      "staticBinaries": [
+        "operator",
+        "netpolicy-applier",
+        "k8s-compliance-collector"
+      ],
+      "shellAndPackageManagersAbsent": true,
+      "packagesByType": {
+        "deb": 6,
+        "go-module": 163
+      }
+    }
+  },
+  "scanComparison": {
+    "discoverer": {
+      "baseline": {
+        "counts": {
+          "Negligible": 67,
+          "High": 77,
+          "Critical": 7,
+          "Medium": 81,
+          "Low": 17
+        },
+        "total": 249,
+        "database": {
+          "schemaVersion": "v6.1.10",
+          "from": "https://grype.anchore.io/databases/v6/vulnerability-db_v6.1.10_2026-10-17T00:31:44Z_1792304837.tar.zst?checksum=sha256%3Ae3d1010ec6e5dee9d3e84b2d5723c534d799e104e6573160e05b22c5292f091e",
+          "built": "2026-10-18T06:27:17Z",
+          "path": "/root/constellation-scanner-hardening-20261019/grype-db/6/vulnerability.db",
+          "valid": true
+        },
+        "scanner": "0.120.1-constellation.1",
+        "image": "ghcr.io/alphabravo-oss/constellation/discoverer@sha256:9fc2f286b56ea7e028da288938c71c3fc11e7a796729116292e271eff61661a2",
+        "configuration": "sha256:33598f9f26607e02da190ceb0c8288b4f2b56eeecb46e1d88d2019dc6c8809dc",
+        "reportSha256": "ee89cc2d04a77eca7587d429a2a79374050dc6745b6a8b99e7fa69a30b6dee9f"
+      },
+      "candidate": {
+        "counts": {},
+        "total": 0,
+        "database": {
+          "schemaVersion": "v6.1.10",
+          "from": "https://grype.anchore.io/databases/v6/vulnerability-db_v6.1.10_2026-10-17T00:31:44Z_1792304837.tar.zst?checksum=sha256%3Ae3d1010ec6e5dee9d3e84b2d5723c534d799e104e6573160e05b22c5292f091e",
+          "built": "2026-10-18T06:27:17Z",
+          "path": "/root/constellation-scanner-hardening-20261019/grype-db/6/vulnerability.db",
+          "valid": true
+        },
+        "scanner": "0.120.1-constellation.1",
+        "image": "constellation/discoverer:static-20261019",
+        "configuration": "sha256:5672dfeaed863f889b2ef4259d3323c930263c0539b17218caa1f9e3f13f4316",
+        "reportSha256": "2444034ab60af706f8f3bf5e788027a1a571509772019ed8f0e3ea099532e884"
+      }
+    },
+    "admission": {
+      "baseline": {
+        "counts": {
+          "Negligible": 67,
+          "High": 77,
+          "Critical": 7,
+          "Medium": 81,
+          "Low": 17
+        },
+        "total": 249,
+        "database": {
+          "schemaVersion": "v6.1.10",
+          "from": "https://grype.anchore.io/databases/v6/vulnerability-db_v6.1.10_2026-10-17T00:31:44Z_1792304837.tar.zst?checksum=sha256%3Ae3d1010ec6e5dee9d3e84b2d5723c534d799e104e6573160e05b22c5292f091e",
+          "built": "2026-10-18T06:27:17Z",
+          "path": "/root/constellation-scanner-hardening-20261019/grype-db/6/vulnerability.db",
+          "valid": true
+        },
+        "scanner": "0.120.1-constellation.1",
+        "image": "ghcr.io/alphabravo-oss/constellation/admission@sha256:730ace2dbb89124410926a0174d96d05d31e3ab2ad3d0db3e5435f217010b24c",
+        "configuration": "sha256:d7387291aa0c60ad16c519124839ba07629e2d77df19638fde26f60250a4b7e4",
+        "reportSha256": "8e7ae4b2f35b3e0e47f243d21cef4dfb5a9c7b2384fbd64697b57929406725ec"
+      },
+      "candidate": {
+        "counts": {},
+        "total": 0,
+        "database": {
+          "schemaVersion": "v6.1.10",
+          "from": "https://grype.anchore.io/databases/v6/vulnerability-db_v6.1.10_2026-10-17T00:31:44Z_1792304837.tar.zst?checksum=sha256%3Ae3d1010ec6e5dee9d3e84b2d5723c534d799e104e6573160e05b22c5292f091e",
+          "built": "2026-10-18T06:27:17Z",
+          "path": "/root/constellation-scanner-hardening-20261019/grype-db/6/vulnerability.db",
+          "valid": true
+        },
+        "scanner": "0.120.1-constellation.1",
+        "image": "constellation/admission:static-20261019",
+        "configuration": "sha256:90ae0ebdce9c56b380c005276fb7095d53c4d65a1b763b041369a8b70019b760",
+        "reportSha256": "95e71df56e3693f3a76b679427838fc38160bb9dee4c07668f70513172f29586"
+      }
+    },
+    "operator": {
+      "baseline": {
+        "counts": {
+          "Negligible": 67,
+          "High": 77,
+          "Critical": 7,
+          "Medium": 81,
+          "Low": 17
+        },
+        "total": 249,
+        "database": {
+          "schemaVersion": "v6.1.10",
+          "from": "https://grype.anchore.io/databases/v6/vulnerability-db_v6.1.10_2026-10-17T00:31:44Z_1792304837.tar.zst?checksum=sha256%3Ae3d1010ec6e5dee9d3e84b2d5723c534d799e104e6573160e05b22c5292f091e",
+          "built": "2026-10-18T06:27:17Z",
+          "path": "/root/constellation-scanner-hardening-20261019/grype-db/6/vulnerability.db",
+          "valid": true
+        },
+        "scanner": "0.120.1-constellation.1",
+        "image": "ghcr.io/alphabravo-oss/constellation/operator@sha256:1e4e345666f9b1f6aa4bfbeb97925c7f378552b1d54d7717121684e2636aa47d",
+        "configuration": "sha256:711fbd59f2159588e72a70584f49d2575630a7436beb5f46d3325996e420d6ec",
+        "reportSha256": "8438c0341d03340084f2a5a87c322638c75057596b610f8311b6651fa562a62c"
+      },
+      "candidate": {
+        "counts": {},
+        "total": 0,
+        "database": {
+          "schemaVersion": "v6.1.10",
+          "from": "https://grype.anchore.io/databases/v6/vulnerability-db_v6.1.10_2026-10-17T00:31:44Z_1792304837.tar.zst?checksum=sha256%3Ae3d1010ec6e5dee9d3e84b2d5723c534d799e104e6573160e05b22c5292f091e",
+          "built": "2026-10-18T06:27:17Z",
+          "path": "/root/constellation-scanner-hardening-20261019/grype-db/6/vulnerability.db",
+          "valid": true
+        },
+        "scanner": "0.120.1-constellation.1",
+        "image": "constellation/operator:static-20261019",
+        "configuration": "sha256:b27d175fb65dd6af3b372f26697d4005d6950ceb1fe75f492b2c6b12e9406ca7",
+        "reportSha256": "fc7c53e95ec9562c40ea3b9365bd961d966728f16ec8948cf960f7ff2dc9363e"
+      }
+    }
+  },
+  "admission": {
+    "tls": true,
+    "ready": true,
+    "admissionReview": {
+      "kind": "AdmissionReview",
+      "apiVersion": "admission.k8s.io/v1",
+      "response": {
+        "uid": "runtime-test",
+        "allowed": true,
+        "warnings": [
+          "policy \"require-image-signature\" (monitor): missing constellation image-signed annotation",
+          "policy \"require-read-only-rootfs\" (monitor): container \"app\" has writable root filesystem"
+        ]
+      }
+    }
+  },
+  "limitations": [
+    "Candidate executables identify the pre-commit working tree; final source-stamped admission and operator builds were stopped before completion.",
+    "No new runtime image deployed. Live multi-engine scan and Kubernetes workflow validation remain pending.",
+    "Full Docker builds on the shared development node triggered disk pressure and pod eviction; cache reclamation completed, service recovery still being checked."
+  ]
+}
