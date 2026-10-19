@@ -73,7 +73,7 @@
   "api": {
     "image": {
       "repository": "ghcr.io/alphabravo-oss/constellation/api",
-      "digest": "sha256:e77c7c4d9b42d1d66a4a78bfcf1017df5cdd071aece6b937dabd83423227142b"
+      "digest": "sha256:892e7060016d06b7a609494fcfa6109eb28c7927b274814edcbde699674c25c2"
     }
   },
   "discoverer": {
