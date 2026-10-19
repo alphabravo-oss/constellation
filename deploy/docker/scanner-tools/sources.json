@@ -14,7 +14,32 @@
       "module": "github.com/anchore/grype",
       "version": "v0.120.1",
       "sum": "h1:kaO5Vudd1jmjFNYJoOro7AIg10cjrKAy71ZaOFdX0js=",
-      "commit": "6f8d854af29d3a3086b11a84afa51554a2a245fe"
+      "commit": "6f8d854af29d3a3086b11a84afa51554a2a245fe",
+      "patchRevision": "constellation.2",
+      "patches": [
+        {
+          "path": "cmd/grype/cli/commands/completion.go",
+          "sha256": "7c15b4b4db66c060af498f277bd6a09877e3d1f4036245114b1ae7680c3e0a8c",
+          "replacements": {
+            "\t\"github.com/docker/docker/api/types/filters\"\n\t\"github.com/docker/docker/api/types/image\"\n\t\"github.com/docker/docker/client\"": "\t\"github.com/moby/moby/client\"",
+            "client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())": "client.New(client.FromEnv)",
+            "\n\t// Only want to return tagged images": "\n\tdefer cli.Close()\n\n\t// Only want to return tagged images",
+            "filters.NewArgs()": "make(client.Filters)",
+            "image.ListOptions{": "client.ImageListOptions{",
+            "for _, image := range images {": "for _, image := range images.Items {"
+          }
+        },
+        {
+          "path": "internal/format/writer_test.go",
+          "sha256": "2b3e8cec8c7fcea7f2bf6e00c56a394beb0249c33d86b6a28690ada2cc3d7acf",
+          "replacements": {
+            "\t\"io\"": "\t\"io\"\n\t\"os\"",
+            "\t\"github.com/docker/docker/pkg/homedir\"\n": "",
+            "func Test_newSBOMWriterDescription(t *testing.T) {": "func Test_newSBOMWriterDescription(t *testing.T) {\n\thome, err := os.UserHomeDir()\n\tif err != nil { t.Fatal(err) }",
+            "homedir.Get()": "home"
+          }
+        }
+      ]
     },
     {
       "name": "cosign",

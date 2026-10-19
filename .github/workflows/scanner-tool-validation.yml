@@ -1,0 +1,49 @@
+name: Scanner tool validation
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, 'implement/**']
+    paths:
+      - .github/workflows/scanner-tool-validation.yml
+      - deploy/docker/scanner-tools/grype/**
+      - deploy/docker/scanner-tools/sources.json
+      - scripts/build-scanner-tools.py
+permissions:
+  contents: read
+concurrency:
+  group: scanner-tool-validation-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      GOMAXPROCS: '2'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - name: Prepare checksum-verified patched Grype source
+        run: |
+          python3 scripts/build-scanner-tools.py --tool grype --prepare-only --work "$RUNNER_TEMP/grype-source" --output "$RUNNER_TEMP/tool-output"
+          cp deploy/docker/scanner-tools/grype/completion_security_test.go "$RUNNER_TEMP/grype-source/grype/cmd/grype/cli/commands/constellation_completion_test.go"
+      - name: Validate runtime dependency graph and completion behavior
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/artifacts"
+          cd "$RUNNER_TEMP/grype-source/grype"
+          GOWORK=off go list -mod=readonly -tags containers_image_openpgp,exclude_graphdriver_btrfs -deps ./cmd/grype > "$GITHUB_WORKSPACE/artifacts/grype-dependencies.txt"
+          if grep -q '^github.com/docker/docker/' "$GITHUB_WORKSPACE/artifacts/grype-dependencies.txt"; then
+            echo 'Retired Docker module remains in the runtime graph'
+            exit 1
+          fi
+          grep -qx 'github.com/moby/moby/client' "$GITHUB_WORKSPACE/artifacts/grype-dependencies.txt"
+          GOWORK=off go test -mod=readonly -race -shuffle=on -count=2 -json ./cmd/grype/cli/commands ./internal/format | tee "$GITHUB_WORKSPACE/artifacts/grype-tests.json"
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: scanner-tool-regression-${{ github.sha }}
+          path: artifacts/
+          retention-days: 7
