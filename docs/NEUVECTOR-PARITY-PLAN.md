@@ -1,7 +1,7 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-19** (Helm 94 compact exposure card deployed and authenticated browser validation passed; broader parity remains active)
+Last reconciled: **2026-10-19** (Helm 95 application registry rollout verified; infrastructure migration in progress; broader parity remains active)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -17,9 +17,33 @@ stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
 
 
+## Registry recovery rollout (Helm 95)
+
+All application roles now use GHCR digest references from
+`deploy/dev/registry-release/release-20261019.json`. Eight running containers
+(seven Deployments plus the runtime DaemonSet) are ready and their image IDs
+match the reviewed release digests. The migration and bootstrap jobs completed;
+Goose reports no migrations to run, schema 181. Authenticated cluster-page checks
+still pass with occurrence reconciliation and no JavaScript errors. Node Ready
+is true and DiskPressure false.
+
+Independent fresh OCI downloads verified all twelve application/infrastructure
+image graphs: 268 blobs, 1.14 GiB, every SHA-256 checked. A restricted Kubernetes
+Job pulled and ran the private CNPG image using the installed pull secret and
+Always policy. That proves authentication without claiming node layers were
+uncached. The proof Job was removed after evidence capture. Constellation's new
+manual-cadence GHCR connection passes its test with 47 visible packages; actual
+private-image queue scans remain to be proved. CNPG pull-secret propagation now
+has a Helm regression test; all nine publisher/chart tests and Helm lint pass.
+
+The infrastructure migration is waiting for completed backup
+`constellation-pre-registry-20261019`. PostgreSQL, CNPG and Barman still use their
+previous local references until that rollout is verified. The registry release
+README documents secret scope, digest identity and recovery limitations.
+
 ## Compact cluster exposure card (Helm 94)
 
-Latest deployment: **Helm 94 / schema 181**, frontend source **d0c5c50**,
+Previous deployment: **Helm 94 / schema 181**, frontend source **d0c5c50**,
 pinned to `ghcr.io/alphabravo-oss/constellation/frontend@sha256:44397711093b2c8c184e97a62248f6575602bbe82f43d1ade7a8cf94c4131dab`.
 The card shows current critical/high counts and a short coverage status. The
 count definition, inventory timestamp and historical/unverified occurrence totals
