@@ -32,7 +32,7 @@ def create(obj):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--flavor', choices=['native', 'cilium'], default='native')
+    parser.add_argument('--flavor', choices=['native', 'cilium', 'calico'], default='native')
     parser.add_argument('--live', action='store_true', required=True)
     parser.add_argument('--helper', type=Path, required=True)
     parser.add_argument('--image', required=True)
@@ -50,7 +50,10 @@ def main():
     system = 'constellation-policy-proof-system-' + nonce
     label = 'constellation.alphabravo.io/protection-proof'
     owned = {}
-    policy_kind = 'ciliumnetworkpolicy' if args.flavor == 'cilium' else 'networkpolicy'
+    policy_kind = {'cilium': 'ciliumnetworkpolicy', 'calico': 'globalnetworkpolicies.projectcalico.org', 'native': 'networkpolicy'}[args.flavor]
+    policy_name = 'communication-proof-' + nonce if args.flavor == 'calico' else 'communication-proof'
+    policy_namespace = None if args.flavor == 'calico' else app
+    policy_scope = [] if args.flavor == 'calico' else ['-n', app]
     evidence = {'nonce': nonce, 'namespaces': [app, system], 'image': args.image, 'flavor': args.flavor, 'probes': []}
 
     def probe(namespace, pod, target, expected, tag):
@@ -126,6 +129,8 @@ def main():
         for tag, target in targets.items():
             probe(app, 'client', target, True, 'baseline-' + tag)
         probe(app, 'ordinary', f'http://{client_ip}:18080/', True, 'baseline-ordinary-ingress')
+        if args.flavor == 'calico':
+            probe(system, 'protected', targets['ordinaryPod'], True, 'baseline-system-egress')
         # DNS transport is required, but its colocated metrics port must not
         # inherit a blanket kube-system communication exception.
         dns_service = get('service', 'kube-dns', 'kube-system')
@@ -170,13 +175,15 @@ def main():
         (args.output/'helper.log').write_text(result.stdout + result.stderr)
         if result.returncode:
             raise RuntimeError('guarded apply failed; see helper.log')
-        evidence['effectivePolicy'] = get(policy_kind, 'communication-proof', app)
+        evidence['effectivePolicy'] = get(policy_kind, policy_name, policy_namespace)
         time.sleep(5)  # Bounded dataplane convergence before fresh TCP probes.
         for repeat in range(3):
             for tag, target in targets.items():
                 probe(app, 'client', target, not tag.startswith('ordinary'), f'protected-{repeat}-{tag}')
             probe(system, 'protected', f'http://{client_ip}:18080/', True, f'protected-{repeat}-system-ingress')
             probe(app, 'ordinary', f'http://{client_ip}:18080/', False, f'protected-{repeat}-ordinary-ingress')
+            if args.flavor == 'calico':
+                probe(system, 'protected', targets['ordinaryPod'], True, f'protected-{repeat}-excluded-system-egress')
         dns = kubectl('exec', '-n', app, 'client', '--', 'nslookup', 'kubernetes.default.svc.cluster.local', check=False, timeout=10)
         if dns.returncode:
             raise AssertionError('DNS unavailable under isolation: ' + dns.stderr)
@@ -190,13 +197,24 @@ def main():
         if not re.search(r'HTTP/\S+ (200|401|403)', api.stderr):
             raise AssertionError('Kubernetes API transport unavailable: ' + api.stderr)
         evidence['apiTransportSucceeded'] = True
-        kubectl('delete', policy_kind, 'communication-proof', '-n', app)
+        kubectl('delete', policy_kind, policy_name, *policy_scope)
         time.sleep(5)
         probe(app, 'client', targets['ordinaryPod'], True, 'recovery-ordinary-egress')
         probe(app, 'ordinary', f'http://{client_ip}:18080/', True, 'recovery-ordinary-ingress')
         evidence['passed'] = True
     finally:
         cleanup_errors = []
+        if args.flavor == 'calico':
+            try:
+                found = kubectl('get', policy_kind, policy_name, '--ignore-not-found', '-o', 'json')
+                if found.stdout.strip():
+                    obj = json.loads(found.stdout)
+                    if obj['metadata'].get('labels', {}).get(label) != nonce:
+                        raise RuntimeError('global fixture policy ownership changed; refusing deletion')
+                    kubectl('delete', policy_kind, policy_name, '--wait=true', '--timeout=30s')
+                evidence['globalPolicyCleanupComplete'] = True
+            except Exception as exc:
+                cleanup_errors.append(str(exc))
         for namespace, uid in owned.items():
             try:
                 current = get('namespace', namespace)

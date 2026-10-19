@@ -1,0 +1,116 @@
+name: Calico communication validation
+on:
+  workflow_dispatch:
+  push:
+    branches: ['implement/**']
+    paths:
+      - .github/workflows/calico-communication-validation.yml
+      - scripts/test-system-communication.py
+      - internal/netpolicyapply/**
+permissions:
+  contents: read
+concurrency:
+  group: calico-communication-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  dataplane:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [single, cross-node]
+    env:
+      GOMAXPROCS: '2'
+      CALICO_PROFILE: ${{ matrix.profile }}
+      KUBECONFIG: /tmp/constellation-calico-proof.kubeconfig
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: go.mod
+      - name: Build actual apply-path helper on hosted runner
+        run: |
+          mkdir -p artifacts
+          CGO_ENABLED=0 go test -c -o artifacts/netpolicyapply.test ./internal/netpolicyapply
+      - name: Create disposable Calico cluster
+        run: |
+          curl --fail --silent --show-error --location https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-amd64 -o /tmp/kind-linux-amd64
+          echo 'aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d  /tmp/kind-linux-amd64' | sha256sum --check
+          sudo install /tmp/kind-linux-amd64 /usr/local/bin/kind
+          python3 - <<'PYCONFIG'
+          import json, os
+          config = {'kind': 'Cluster', 'apiVersion': 'kind.x-k8s.io/v1alpha4',
+                    'nodes': [{'role': 'control-plane'}],
+                    'featureGates': {'MutatingAdmissionPolicy': True},
+                    'networking': {'disableDefaultCNI': True, 'podSubnet': '192.168.0.0/16'}}
+          if os.environ['CALICO_PROFILE'] == 'cross-node':
+              config['nodes'] += [{'role': 'worker'}, {'role': 'worker'}]
+          with open('artifacts/kind.yaml', 'w') as stream:
+              json.dump(config, stream, indent=2)
+          PYCONFIG
+          kind create cluster --name constellation-calico-proof --config artifacts/kind.yaml --image kindest/node:v1.35.8@sha256:07b2536e30b803ed61d1677a79df6115f798ce64c80f9e22f6ed45afd09323c0
+          curl --fail --silent --show-error --location https://raw.githubusercontent.com/projectcalico/calico/v3.33.0/manifests/v3_projectcalico_org-v1beta1.yaml -o artifacts/v3-crds.yaml
+          curl --fail --silent --show-error --location https://raw.githubusercontent.com/projectcalico/calico/v3.33.0/manifests/tigera-operator.yaml -o artifacts/tigera-operator.yaml
+          echo 'd04319fd4cc918107ebe3fdbe1b34d81904499a4e3726938f8334ab56ffa7e28  artifacts/v3-crds.yaml' | sha256sum --check
+          echo 'aef423b36aef8cf86567f92bbe5eea4b4ca105a6fc7dbf43de599c6fa70388ba  artifacts/tigera-operator.yaml' | sha256sum --check
+          kubectl create -f artifacts/v3-crds.yaml
+          kubectl create -f artifacts/tigera-operator.yaml
+          kubectl wait --for=condition=Established crd/installations.operator.tigera.io --timeout=60s
+          cat > artifacts/calico-install.yaml <<'INSTALL'
+          apiVersion: operator.tigera.io/v1
+          kind: Installation
+          metadata:
+            name: default
+          spec:
+            calicoNetwork:
+              bgp: Disabled
+              ipPools:
+                - name: default-ipv4-ippool
+                  blockSize: 26
+                  cidr: 192.168.0.0/16
+                  encapsulation: VXLAN
+                  natOutgoing: Enabled
+                  nodeSelector: all()
+          ---
+          apiVersion: operator.tigera.io/v1
+          kind: APIServer
+          metadata:
+            name: default
+          spec: {}
+          INSTALL
+          kubectl create -f artifacts/calico-install.yaml
+          kubectl wait --for=create tigerastatus/calico --timeout=120s
+          kubectl wait --for=condition=Available tigerastatus/calico --timeout=300s
+          kubectl wait --for=create tigerastatus/apiserver --timeout=120s
+          kubectl wait --for=condition=Available tigerastatus/apiserver --timeout=300s
+          kubectl wait nodes --all --for=condition=Ready --timeout=120s
+          kubectl -n kube-system rollout status deployment/coredns --timeout=120s
+          kubectl get nodes -o json > artifacts/nodes.json
+          kubectl get tigerastatus -o json > artifacts/calico-status.json
+          kubectl get installation default -o json > artifacts/installation.json
+          kubectl get ippools.projectcalico.org -o json > artifacts/ip-pools.json
+          kubectl get pods -A -o json > artifacts/cluster-pods.json
+          kubectl get crd/globalnetworkpolicies.projectcalico.org -o json > artifacts/global-policy-crd.json
+      - name: Exercise protected peers and application isolation
+        run: |
+          placement=()
+          if [[ "$CALICO_PROFILE" == cross-node ]]; then
+            placement=(--client-node constellation-calico-proof-worker --peer-node constellation-calico-proof-worker2)
+          fi
+          python3 scripts/test-system-communication.py --live --flavor calico --helper artifacts/netpolicyapply.test --image ghcr.io/alphabravo-oss/constellation/migrate@sha256:604a275f6c7c11bfc8d80825ebe389a71e9a7a561b9a3aeba25f8fb66877fe56 --output artifacts/proof "${placement[@]}"
+      - name: Capture CNI state and remove disposable cluster
+        if: always()
+        run: |
+          kubectl -n calico-system logs -l k8s-app=calico-node --all-containers=true --tail=100 > artifacts/calico.log 2>&1 || true
+          kubectl -n tigera-operator logs deployment/tigera-operator --tail=100 > artifacts/operator.log 2>&1 || true
+          kubectl get events -A -o json > artifacts/events.json 2>&1 || true
+          kind delete cluster --name constellation-calico-proof
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: calico-communication-${{ github.sha }}-${{ matrix.profile }}
+          path: artifacts/
+          retention-days: 14

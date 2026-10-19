@@ -3,6 +3,8 @@ package netpolicyapply
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"os"
 	"strings"
 	"testing"
@@ -35,10 +37,14 @@ func TestApplyNativeCommunicationLive(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	fixtureNSUID := ""
 	for _, name := range []string{ns, own} {
 		obj, err := client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "namespaces"}).Get(ctx, name, metav1.GetOptions{})
 		if err != nil {
 			t.Fatal(err)
+		}
+		if name == ns {
+			fixtureNSUID = string(obj.GetUID())
 		}
 		if obj.GetLabels()["constellation.alphabravo.io/protection-proof"] != nonce {
 			t.Fatal("fixture ownership mismatch")
@@ -62,6 +68,19 @@ func TestApplyNativeCommunicationLive(t *testing.T) {
 			"enableDefaultDeny": map[string]any{"ingress": true, "egress": true},
 			"ingress":           []any{}, "egress": []any{},
 		}
+	case FlavorCalico:
+		obj["apiVersion"] = "projectcalico.org/v3"
+		obj["kind"] = "GlobalNetworkPolicy"
+		obj["metadata"] = map[string]any{"name": "communication-proof-" + nonce,
+			"labels":          map[string]any{"constellation.alphabravo.io/protection-proof": nonce},
+			"ownerReferences": []any{map[string]any{"apiVersion": "v1", "kind": "Namespace", "name": ns, "uid": fixtureNSUID}}}
+		obj["spec"] = map[string]any{
+			"namespaceSelector": fmt.Sprintf("kubernetes.io/metadata.name in {%q,%q}", ns, own),
+			"selector":          "proof-role in {'client','protected'}", "order": float64(100),
+			"types":   []any{"Ingress", "Egress"},
+			"ingress": []any{map[string]any{"action": "Deny"}},
+			"egress":  []any{map[string]any{"action": "Deny"}},
+		}
 	case FlavorNative:
 	default:
 		t.Fatal("live fixture flavor not implemented")
@@ -71,10 +90,16 @@ func TestApplyNativeCommunicationLive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if flavor == FlavorCalico {
+		_, err := resourceInterface(client, resource).Get(ctx, resource.Name, metav1.GetOptions{})
+		if !apierrors.IsNotFound(err) {
+			t.Fatalf("global fixture policy name is not unused: %v", err)
+		}
+	}
 	if err := (KubernetesResourceClient{Client: client, Protection: p}).Apply(ctx, resource, data); err != nil {
 		t.Fatal(err)
 	}
-	effective, err := client.Resource(resource.GVR).Namespace(ns).Get(ctx, resource.Name, metav1.GetOptions{})
+	effective, err := resourceInterface(client, resource).Get(ctx, resource.Name, metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
