@@ -358,3 +358,10 @@ constellation.apiURL is the API base URL used by in-cluster components.
 {{- printf "http://%s-api:%v" (include "constellation.fullname" .) .Values.api.service.port -}}
 {{- end -}}
 {{- end -}}
+
+{{/* Trusted installation configuration only; workload labels never grant protection. */}}
+{{- define "constellation.protectedNamespaces" -}}
+{{- $shared := dig "systemProtection" "protectedNamespaces" (list) .ctx.Values.AsMap -}}
+{{- $names := concat (list .ctx.Release.Namespace "kube-system" "kube-public" "kube-node-lease") $shared (default (list) .extra) | uniq | sortAlpha -}}
+{{- toJson $names -}}
+{{- end -}}

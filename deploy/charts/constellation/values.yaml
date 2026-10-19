@@ -26,6 +26,12 @@ image:
   pullSecrets: []
   # - name: ghcr-pull-secret
 
+# Add trusted dependency namespaces to admission, runtime, and network-policy
+# protection together. Own/core namespaces are mandatory. Namespace-wide scope
+# also exempts unrelated workloads there; use dedicated dependency namespaces.
+systemProtection:
+  protectedNamespaces: []
+
 # Keep rollout history short so repeated local/edge upgrades do not leave
 # zero-replica ReplicaSets pinned to stale role image tags.
 revisionHistoryLimit: 3

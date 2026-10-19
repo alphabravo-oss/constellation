@@ -39,7 +39,7 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
-            {{- with .Values.networkPolicyApplier.protectedNamespaces }}
+            {{- with (include "constellation.protectedNamespaces" (dict "ctx" . "extra" .Values.networkPolicyApplier.protectedNamespaces)) | fromJsonArray }}
             - name: CONSTELLATION_ENFORCEMENT_PROTECTED_NAMESPACES
               value: {{ join "," . | quote }}
             {{- end }}

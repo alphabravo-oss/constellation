@@ -726,3 +726,15 @@ filesystem with all capabilities dropped. Refresh the runtime digest deliberatel
 verify its upstream signature, and compare exact-image scans using the same dated
 vulnerability database. Scanner and native runtime-agent images have separate
 runtime dependencies and are not converted by this change.
+
+### Shared enforcement protection
+
+Set `systemProtection.protectedNamespaces` (default `[]`) to dedicated dependency
+namespaces, for example `[cnpg-system]`. The chart adds these to admission namespace
+exclusions and runtime/network-policy enforcement protection. The release namespace,
+`kube-system`, `kube-public`, and `kube-node-lease` cannot be removed. Existing
+`runtimeAgent.enforcement.protectedNamespaces` and
+`networkPolicyApplier.protectedNamespaces` remain additive for their components.
+This excludes all workloads in those namespaces from these enforcement paths;
+scanning and finding visibility are independent. It does not prevent an application
+policy from disconnecting that application from a protected service.

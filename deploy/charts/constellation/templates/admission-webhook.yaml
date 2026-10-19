@@ -33,17 +33,13 @@ webhooks:
     sideEffects: {{ .Values.admission.webhook.sideEffects }}
     failurePolicy: {{ .Values.admission.webhook.failurePolicy }}
     timeoutSeconds: {{ .Values.admission.webhook.timeoutSeconds }}
-    # namespaceSelector: ALWAYS exclude our own release namespace from
-    # admission validation. Without this the runtime-agent DaemonSet
-    # (privileged: true for BPF + NFQUEUE) gets denied by the chart's
-    # default block-privileged rule, deadlocking the install. Operators
-    # who provide their own namespaceSelector get it merged AFTER the
-    # self-exclusion clause so they can't accidentally turn it off.
+    # Mandatory own/core namespace exclusions plus trusted dependency additions.
+    # User selectors are ANDed with this exclusion and cannot remove it.
     namespaceSelector:
       matchExpressions:
         - key: kubernetes.io/metadata.name
           operator: NotIn
-          values: [{{ .Release.Namespace | quote }}]
+          values: {{ include "constellation.protectedNamespaces" (dict "ctx" .) }}
         {{- with .Values.admission.webhook.namespaceSelector.matchExpressions }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

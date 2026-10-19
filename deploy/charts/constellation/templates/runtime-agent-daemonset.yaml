@@ -212,7 +212,7 @@ spec:
             # Additive-only: extra namespaces that enforcement must never touch. The
             # core protected set (constellation-system + kube-system family + host)
             # is baked into the agent and cannot be removed here.
-            {{- with .Values.runtimeAgent.enforcement.protectedNamespaces }}
+            {{- with (include "constellation.protectedNamespaces" (dict "ctx" . "extra" .Values.runtimeAgent.enforcement.protectedNamespaces)) | fromJsonArray }}
             - name: CONSTELLATION_ENFORCEMENT_PROTECTED_NAMESPACES
               value: {{ join "," . | quote }}
             {{- end }}

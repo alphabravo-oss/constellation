@@ -10,6 +10,17 @@ hardening, policy coverage, and operational signals retain their full-cluster sc
 which is stated beside the toggle. Executive downloads are labeled as reports for
 the entire cluster. Ownership of separately managed dependencies remains open work.
 
+## Shared dependency configuration
+
+`systemProtection.protectedNamespaces` adds trusted dependency namespaces to
+admission exclusions, runtime enforcement protection, and network-policy applier
+protection together. The installation namespace and kube-system, kube-public,
+and kube-node-lease are mandatory in all three rendered configurations. Existing
+runtime and network-policy component-specific additions remain additive. Custom
+admission selectors are ANDed with the mandatory exclusion. Namespace values are
+validated as Kubernetes namespace names; workload labels never feed this setting.
+This is namespace-wide protection, including unrelated workloads in those namespaces.
+
 ## Network policy write boundary
 
 The network-policy applier protects its own namespace, obtained from the downward
@@ -37,13 +48,12 @@ Reference: https://docs.tigera.io/calico/latest/reference/resources/globalnetwor
 
 ## Remaining protection review
 
-Admission excludes the installation namespace. Runtime process/file protections and
+Admission excludes the installation and core namespaces plus shared dependencies. Runtime process/file protections and
 session endpoint safeguards are implemented. The existing namespace-wide exclusions
 also protect unrelated workloads installed in those namespaces. Finer component
 identity protection remains open; UI classification labels are not sufficient proof.
 
-Remaining work includes quarantine API feedback, separately managed dependency
-configuration across admission/runtime/network enforcement, and a complete audit of
+Remaining work includes quarantine API feedback, verification of every separately managed dependency assignment, and a complete audit of
 all disruptive response paths. Calico selector transformation is tested at the client
 write boundary; live Calico/Cilium data-plane enforcement still requires their own
 cluster fixtures. The development cluster's native rollout does not prove those CNIs.

@@ -4,6 +4,16 @@
   "type": "object",
   "additionalProperties": true,
   "properties": {
+    "systemProtection": {
+      "type": "object",
+      "properties": {
+        "protectedNamespaces": {
+          "type": "array",
+          "items": { "type": "string", "maxLength": 63, "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" },
+          "uniqueItems": true
+        }
+      }
+    },
     "highAvailability": {
       "title": "High availability",
       "description": "Spread replicated control-plane workloads across nodes and protect them with disruption budgets.",
