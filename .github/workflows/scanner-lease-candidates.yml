@@ -2,10 +2,15 @@ name: Scanner lease candidates
 
 on:
   workflow_dispatch:
+    inputs:
+      role:
+        description: Image role to build
+        type: choice
+        default: all
+        options: [all, api, scanner, migrate]
   push:
     branches: [main, 'implement/**']
     paths:
-      - .github/workflows/scanner-lease-candidates.yml
       - deploy/dev/lease-validation/Dockerfile.migrate
 
 permissions:
@@ -22,10 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - {role: api, dockerfile: deploy/docker/Dockerfile.api}
-          - {role: scanner, dockerfile: deploy/docker/Dockerfile.scanner}
-          - {role: migrate, dockerfile: deploy/dev/lease-validation/Dockerfile.migrate}
+        role: ${{ inputs.role == 'api' && fromJSON('["api"]') || inputs.role == 'scanner' && fromJSON('["scanner"]') || inputs.role == 'migrate' && fromJSON('["migrate"]') || fromJSON('["api","scanner","migrate"]') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -39,7 +41,7 @@ jobs:
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
-          file: ${{ matrix.dockerfile }}
+          file: ${{ matrix.role == 'migrate' && 'deploy/dev/lease-validation/Dockerfile.migrate' || format('deploy/docker/Dockerfile.{0}', matrix.role) }}
           platforms: linux/amd64
           outputs: type=oci,dest=${{ runner.temp }}/image.tar
           tags: constellation/${{ matrix.role }}:candidate-${{ github.sha }}

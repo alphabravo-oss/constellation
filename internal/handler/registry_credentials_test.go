@@ -132,6 +132,10 @@ VALUES ($1, $2, 'privreg', 'ghcr', 'ghcr.io', 'static', $3)`,
 	if rec := call(h, orgA, regID.String()); rec.Code != http.StatusOK {
 		t.Fatalf("current lease credential status %d", rec.Code)
 	}
+	var fencedReceipts int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id=$1 AND action='registry.credentials-issued' AND after->>'lease_id'=$2`, orgA, leaseID).Scan(&fencedReceipts); err != nil || fencedReceipts != 1 {
+		t.Fatalf("fenced receipts %d %v", fencedReceipts, err)
+	}
 	leaseHeader = ""
 	if _, err := pool.Exec(ctx, `UPDATE scan_jobs SET lease_id=NULL WHERE id=$1`, jobID); err != nil {
 		t.Fatal(err)
@@ -194,7 +198,7 @@ VALUES ($1, $2, 'privreg', 'ghcr', 'ghcr.io', 'static', $3)`,
 		if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM audit_events WHERE org_id = $1 AND action = 'registry.credentials-issued' AND target_id = $2`, orgA, regID.String()).Scan(&issuedCount); err != nil {
 			t.Fatal(err)
 		}
-		if issuedCount != 1 {
+		if issuedCount != 2 {
 			t.Fatalf("failed audit changed issued count to %d", issuedCount)
 		}
 	}

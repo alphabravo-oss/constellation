@@ -115,6 +115,7 @@ SELECT reg.kind, reg.endpoint, reg.auth_kind, reg.auth_secret
 			"scanner":          tok.Name,
 			"scanner_token_id": tok.ID.String(),
 			"job_id":           jobID.String(),
+			"lease_id":         leaseID,
 			"worker_id":        workerID,
 			"auth_kind":        authKind,
 			"has_credentials":  creds["username"] != "" || creds["password"] != "" || creds["token"] != "",
