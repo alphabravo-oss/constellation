@@ -48,6 +48,7 @@ jobs:
           config = {'kind': 'Cluster', 'apiVersion': 'kind.x-k8s.io/v1alpha4',
                     'nodes': [{'role': 'control-plane'}],
                     'featureGates': {'MutatingAdmissionPolicy': True},
+                    'runtimeConfig': {'admissionregistration.k8s.io/v1beta1': 'true'},
                     'networking': {'disableDefaultCNI': True, 'podSubnet': '192.168.0.0/16'}}
           if os.environ['CALICO_PROFILE'] == 'cross-node':
               config['nodes'] += [{'role': 'worker'}, {'role': 'worker'}]
