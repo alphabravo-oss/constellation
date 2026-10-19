@@ -1,7 +1,7 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-19** (Helm 134 scheduled signed reports deployed and verified; broader parity remains active)
+Last reconciled: **2026-10-19** (Helm 135 signing dependency remediation deployed; scan reporting and registry binding gaps verified; broader parity remains active)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -16,6 +16,42 @@ understand the result, and prove that the control is enforced. Constellation's
 stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
 
+
+## Signing dependency remediation (Helm 135)
+
+Scanner and compliance scheduler now use Cosign 3.1.3 with checksum-guarded source
+patching, the maintained Azure credential helper v0.9.2, and Rekor v1.5.4 with
+ProtonMail OpenPGP. The actual hosted dependency graph excludes the retired Azure
+helper and `golang.org/x/crypto/openpgp`. This addresses
+[GO-2026-6225](https://pkg.go.dev/vuln/GO-2026-6225) and
+[GO-2026-5932](https://pkg.go.dev/vuln/GO-2026-5932) without removing signing features.
+
+[Hosted validation](https://github.com/alphabravo-oss/constellation/actions/runs/39260061082)
+passed the Azure hostname rejection, maintained helper, and Rekor PGP suites,
+plus 172 scheduler regression executions with four documented skips. Both newly
+built candidate images separately passed the actual Cosign signing test with
+networking disabled, independent ECDSA verification, and tamper rejection.
+The scheduler image gate reports zero findings. The scanner gate retains one
+High and one Medium finding in the older Docker module, with no listed fixes;
+no finding suppression was introduced. No live Azure, cloud KMS, or full HA
+qualification is claimed. Broader parity remains open.
+
+Live report signing, independent verification, tamper rejection, and artifact
+persistence after scheduler restart passed. All 15 registry container identities
+and controllers verified healthy. The full scanner pipeline completed with all
+three engines, but retained 3 High, 2 Medium and 2 Info findings. In particular,
+module-level matching still reports GO-2026-5932 for x/crypto even though the
+rebuilt Cosign dependency graph excludes its affected OpenPGP package. Investigate
+metadata loss through synthetic CycloneDX matching before changing those results;
+the direct gate's smaller count is not the live UI count.
+
+The private scheduler image's live scan failed: manual enqueue records registry
+`source_ref` but does not bind `scan_targets.registry_id`, so it attempts an
+anonymous pull (confirmed HTTP 401). The owned validation job was canceled after
+its failed attempt to stop redundant retries. Fix org-scoped registry binding and
+repeat authenticated live validation; deployment/signing success does not prove
+that scan path. Machine-readable evidence:
+`deploy/dev/registry-release/validation-cosign-remediation-20261019.json`.
 
 ## Scheduled signed reports deployed (Helm 134)
 

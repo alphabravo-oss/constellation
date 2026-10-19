@@ -35,8 +35,10 @@ verification. Only the scheduler receives this Secret; the API never mounts the
 private key. Back up the report volume and signing Secret using the deployment's
 recovery process. Database backup alone does not preserve either.
 
-The packaged worker uses the reviewed Cosign 3 binary from the pinned scanner
-image. It requests a modern bundle with an explicit signing configuration that
+The packaged worker builds Cosign 3 from the same reviewed source patches and
+locked dependencies as the scanner. Its runtime contains only the worker and
+Cosign. The dependency patch uses the maintained Azure credential helper and
+Rekor 1.5.4 with maintained ProtonMail OpenPGP support. It requests a modern bundle with an explicit signing configuration that
 has no external services. Signing therefore needs no public transparency log,
 certificate authority or timestamp service. It checks the bundle format,
 SHA-256 report digest and signature encoding, then retains the detached base64

@@ -98,7 +98,7 @@
   "scanner": {
     "image": {
       "repository": "ghcr.io/alphabravo-oss/constellation/scanner",
-      "digest": "sha256:716b0300f3d1992a1e7d142a306f2255af7b09171989bf67c87a2e961e2a5823"
+      "digest": "sha256:95be6270804d6ebffbd09e354d6ffd29630b8a350ee037c8db93f6f23f1d4fc1"
     }
   },
   "migrate": {
@@ -121,7 +121,7 @@
     "enabled": true,
     "image": {
       "repository": "ghcr.io/alphabravo-oss/constellation/compliance-scheduler",
-      "digest": "sha256:f795c2bccccdfa55df19eefa0a9370fd4ef74593c7d8fc3a085a7080b741f2ad"
+      "digest": "sha256:77acf4d7625d14a0c385c8edd3ac870ec2887803f47dba7bd432a6f354ef0f2a"
     },
     "interval": "30s",
     "storage": {

@@ -20,10 +20,10 @@
     {
       "name": "scanner",
       "role": "scanner",
-      "source": "constellation/scanner:candidate-6046aa9c5bac973572e90f00e03cd859115e43ae",
-      "digest": "sha256:716b0300f3d1992a1e7d142a306f2255af7b09171989bf67c87a2e961e2a5823",
+      "source": "constellation/scanner:candidate-08fa88625674d7be9a9543cc6152767819568320",
+      "digest": "sha256:95be6270804d6ebffbd09e354d6ffd29630b8a350ee037c8db93f6f23f1d4fc1",
       "repository": "ghcr.io/alphabravo-oss/constellation/scanner",
-      "tag": "dev-716b0300f3d1992a1e7d142a306f2255af7b09171989bf67c87a2e961e2a5823"
+      "tag": "dev-95be6270804d6ebffbd09e354d6ffd29630b8a350ee037c8db93f6f23f1d4fc1"
     },
     {
       "name": "postgres",
@@ -101,10 +101,10 @@
     {
       "name": "compliance-scheduler",
       "role": "complianceScheduler",
-      "source": "constellation/compliance-scheduler:candidate-d2082dc7c63c7f003075bd2a583850300ba5c14f",
-      "digest": "sha256:f795c2bccccdfa55df19eefa0a9370fd4ef74593c7d8fc3a085a7080b741f2ad",
+      "source": "constellation/compliance-scheduler:candidate-a3f60abbad1175b2169580e6373dd867aa051630",
+      "digest": "sha256:77acf4d7625d14a0c385c8edd3ac870ec2887803f47dba7bd432a6f354ef0f2a",
       "repository": "ghcr.io/alphabravo-oss/constellation/compliance-scheduler",
-      "tag": "dev-f795c2bccccdfa55df19eefa0a9370fd4ef74593c7d8fc3a085a7080b741f2ad"
+      "tag": "dev-77acf4d7625d14a0c385c8edd3ac870ec2887803f47dba7bd432a6f354ef0f2a"
     }
   ],
   "helm_values": {
@@ -207,7 +207,7 @@
     "scanner": {
       "image": {
         "repository": "ghcr.io/alphabravo-oss/constellation/scanner",
-        "digest": "sha256:16dcaa6e161a88635643171af046dda104ee62b1f1e347cb459ca8a678e305e0"
+        "digest": "sha256:95be6270804d6ebffbd09e354d6ffd29630b8a350ee037c8db93f6f23f1d4fc1"
       }
     },
     "migrate": {
@@ -224,7 +224,7 @@
     "complianceScheduler": {
       "image": {
         "repository": "ghcr.io/alphabravo-oss/constellation/compliance-scheduler",
-        "digest": "sha256:f795c2bccccdfa55df19eefa0a9370fd4ef74593c7d8fc3a085a7080b741f2ad"
+        "digest": "sha256:77acf4d7625d14a0c385c8edd3ac870ec2887803f47dba7bd432a6f354ef0f2a"
       }
     }
   }
