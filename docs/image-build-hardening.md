@@ -44,3 +44,25 @@ rollback artifacts.
 
 Current measurements and deployment limits are recorded in the
 [canonical parity plan](NEUVECTOR-PARITY-PLAN.md).
+
+## Scanner acceptance
+
+The scanner runtime bundles static Syft, Trivy, Grype, Cosign and ORAS binaries;
+Git and the Debian package-management stack are absent. Cosign 3 verification is
+checked against a legacy Cosign 2 signature and SLSA v1 attestation, plus a keyless
+Distroless signature. Negative checks reject a different key, identity and
+predicate. The attestation parser accepts verified in-toto v0.1/v1 statements and
+multiple JSON envelopes, while rejecting malformed output and unknown versions.
+
+Run `scripts/test-scanner-runtime.py --help` for required fixture and cache paths.
+It compiles integration probes, runs them against the actual bundled binaries as
+the image's normal user with a read-only root and dropped capabilities, and tests
+both image scans and inventory-based matching. The fixture must contain known
+vulnerabilities so an empty/broken result cannot pass. Use a disposable local
+registry containing an image signed and attested with a test key; provide a
+second public key for rejection checks. Cache paths must contain current DBs,
+with the Grype cache writable by UID 10001. No Docker socket is mounted.
+
+`BAKE_VULN_DB=1` now prepares optional air-gap databases in a build stage. A failed
+DB download fails that build instead of silently producing an unusable offline
+image. The default remains runtime DB refresh or operator-preloaded caches.

@@ -107,6 +107,9 @@ func TestVerifyAttestationUsesPublicKeyMode(t *testing.T) {
 	if !strings.Contains(args, "verify-attestation\n") || !strings.Contains(args, "--key\n") {
 		t.Fatalf("cosign args did not use public-key mode:\n%s", args)
 	}
+	if !strings.Contains(args, "--type\nhttps://slsa.dev/provenance/v1\n") {
+		t.Fatalf("SLSA v1 must not select the v0.2 alias:\n%s", args)
+	}
 	if strings.Contains(args, "--certificate-identity-regexp") || strings.Contains(args, "--certificate-oidc-issuer-regexp") {
 		t.Fatalf("public-key mode should not include keyless certificate flags:\n%s", args)
 	}
@@ -150,5 +153,29 @@ func TestVerifyAttestationKeylessRequiresExplicitTrustPolicy(t *testing.T) {
 	}
 	if result == nil || result.Trusted {
 		t.Fatalf("empty keyless trust policy must not trust result: %+v", result)
+	}
+}
+
+func TestExtractAttestationStatementVersionsAndStream(t *testing.T) {
+	legacy := `{"_type":"https://in-toto.io/Statement/v0.1","predicateType":"https://slsa.dev/provenance/v1","subject":[],"predicate":{}}`
+	current := strings.Replace(legacy, "Statement/v0.1", "Statement/v1", 1)
+	envelope := func(statement string) string {
+		return `{"payload":"` + base64.StdEncoding.EncodeToString([]byte(statement)) + `"}`
+	}
+	for _, tc := range []struct {
+		name, raw string
+		want      int
+	}{
+		{"legacy", envelope(legacy), 1},
+		{"current", envelope(current), 1},
+		{"stream", envelope(legacy) + "\n" + envelope(current), 2},
+		{"unknown", envelope(strings.Replace(current, "Statement/v1", "Statement/v9", 1)), 0},
+		{"malformed trailing output", envelope(current) + "\ninvalid", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := len(extractAttestationStatements([]byte(tc.raw))); got != tc.want {
+				t.Fatalf("statements=%d want=%d", got, tc.want)
+			}
+		})
 	}
 }

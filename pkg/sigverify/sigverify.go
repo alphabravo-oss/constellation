@@ -8,7 +8,7 @@
 //	require_rekor: true
 //	require_attestations: ["slsa.dev/provenance/v1"]
 //
-// Verification is shelled out to cosign 2.x which is already pinned in the scanner image.
+// Verification is shelled out to cosign 3.x which is already pinned in the scanner image.
 // We do NOT vendor cosign's Go API at v1 (it's still pre-1.0 + frequently breaks).
 package sigverify
 
@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -431,7 +432,10 @@ func cosignAttestationType(predicateTypes []string) string {
 		return ""
 	}
 	switch strings.TrimSpace(predicateTypes[0]) {
-	case "https://slsa.dev/provenance/v1", "slsa.dev/provenance/v1", "slsaprovenance":
+	case "https://slsa.dev/provenance/v1", "slsa.dev/provenance/v1":
+		// The slsaprovenance alias selects v0.2, not v1. Preserve the URI.
+		return "https://slsa.dev/provenance/v1"
+	case "slsaprovenance":
 		return "slsaprovenance"
 	case "spdx", "https://spdx.dev/Document":
 		return "spdx"
@@ -443,15 +447,20 @@ func cosignAttestationType(predicateTypes []string) string {
 }
 
 func extractAttestationStatements(raw []byte) []map[string]any {
-	var decoded any
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
-	if err := dec.Decode(&decoded); err != nil {
-		return nil
-	}
 	out := []map[string]any{}
-	walkAttestationJSON(decoded, &out)
-	return out
+	// Cosign may emit one JSON envelope per line when several attestations verify.
+	for {
+		var decoded any
+		if err := dec.Decode(&decoded); err != nil {
+			if errors.Is(err, io.EOF) {
+				return out
+			}
+			return nil
+		}
+		walkAttestationJSON(decoded, &out)
+	}
 }
 
 func walkAttestationJSON(value any, out *[]map[string]any) {
@@ -478,7 +487,8 @@ func walkAttestationJSON(value any, out *[]map[string]any) {
 }
 
 func isInTotoStatement(value map[string]any) bool {
-	if strings.TrimSpace(fmt.Sprint(value["_type"])) != "https://in-toto.io/Statement/v1" {
+	typ := strings.TrimSpace(fmt.Sprint(value["_type"]))
+	if typ != "https://in-toto.io/Statement/v1" && typ != "https://in-toto.io/Statement/v0.1" {
 		return false
 	}
 	return strings.TrimSpace(fmt.Sprint(value["predicateType"])) != ""
