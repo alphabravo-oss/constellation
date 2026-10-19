@@ -1,0 +1,245 @@
+{
+  "date": "2026-10-19",
+  "helmRevision": 133,
+  "schemaVersion": 184,
+  "sourceCommit": "73654a4ffcf5f1090ec6ec8a4ba1cc0f4c00ea68",
+  "hostedRun": "https://github.com/alphabravo-oss/constellation/actions/runs/39254329683",
+  "conclusion": "success",
+  "changes": [
+    "Cluster-card inventory warnings use existing semantic status-warning theme token.",
+    "Node-detail history test waits for filtered table rendering before sorting; assertions preserved.",
+    "Dedicated hosted frontend candidate workflow gates image build on full frontend suite and emits OCI identity/provenance."
+  ],
+  "tests": {
+    "numTotalTests": 2444,
+    "numPassedTests": 2444,
+    "numFailedTests": 0,
+    "success": true
+  },
+  "testReportSha256": "8f97eea0afa7a463f45ecdc25d95ebe574c9248feb309d936f1a1282378d1d22",
+  "imageGate": {
+    "image": "ghcr.io/alphabravo-oss/constellation/frontend@sha256:ba43ada1e1182ab1ff0bb8cde358f9aec70486543a0ffade5ec7ce29c418c8da",
+    "runtime_manifest": "sha256:40b4046a7ebbfb400dac3c421b6c230a6ba040119d02bfba1111ba0a26b1d0cd",
+    "configuration": "sha256:bfb84390915dad6a7e1d23c0b84c0bdfee3b5a52687961bda428fd4256f88ee5",
+    "passed": true,
+    "policy": "no-fixable-critical-or-high",
+    "scanner_version": "0.120.1-constellation.1",
+    "database": {
+      "schemaVersion": "v6.1.10",
+      "from": "https://grype.anchore.io/databases/v6/vulnerability-db_v6.1.10_2026-10-19T00:32:50Z_1792391955.tar.zst?checksum=sha256%3A13a192236b248579678bbf06cefb2a07a5dcbd00da110cfb5c3e26eb68a7ce58",
+      "built": "2026-10-19T06:39:15Z",
+      "path": "/root/.cache/grype/db/6/vulnerability.db",
+      "valid": true
+    },
+    "counts": {
+      "medium": 3
+    },
+    "blockers": [],
+    "evaluated_at": "2026-10-19T12:48:53.472967+00:00",
+    "report_sha256": "dd59a1c5ee34a712c751495d923ccce7a4500830d157ae92c3748b144423f4ec"
+  },
+  "deployment": {
+    "helmRevision": 133,
+    "restartHoldRemoved": true,
+    "clusterHealthy": true,
+    "postBackupPhase": "completed",
+    "postBackupId": "20261019T054924",
+    "containers": [
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-admission-845b669bbc-9tpjk",
+        "container": "admission",
+        "image": "ghcr.io/alphabravo-oss/constellation/admission@sha256:b747fb3ab87c66eb04e687f48a0893bba2a9e5d06011fec103863261286a0c4c",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/admission@sha256:b747fb3ab87c66eb04e687f48a0893bba2a9e5d06011fec103863261286a0c4c"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-api-5b95979b98-72w4v",
+        "container": "wait-for-migrations",
+        "image": "ghcr.io/alphabravo-oss/constellation/api@sha256:7ca489d94f9e27cf00d8fd5f41e7bf4c8202fec344849846223fd4c1090a4f31",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/api@sha256:7ca489d94f9e27cf00d8fd5f41e7bf4c8202fec344849846223fd4c1090a4f31"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-api-5b95979b98-72w4v",
+        "container": "api",
+        "image": "ghcr.io/alphabravo-oss/constellation/api@sha256:7ca489d94f9e27cf00d8fd5f41e7bf4c8202fec344849846223fd4c1090a4f31",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/api@sha256:7ca489d94f9e27cf00d8fd5f41e7bf4c8202fec344849846223fd4c1090a4f31"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-cnpg-postgres-1",
+        "container": "bootstrap-controller",
+        "image": "ghcr.io/alphabravo-oss/constellation/cnpg-operator@sha256:cc61009ac3d2cdf0aa2ff7f44f85dbb7bdf85ab50425d41a71da2af6521cc1b9",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/cnpg-operator@sha256:cc61009ac3d2cdf0aa2ff7f44f85dbb7bdf85ab50425d41a71da2af6521cc1b9"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-cnpg-postgres-1",
+        "container": "plugin-barman-cloud",
+        "image": "ghcr.io/alphabravo-oss/constellation/barman-sidecar@sha256:5c6b5559b08b7b49c89937b6d823a37fbeb8e7b883d4b0da6278fe09de87d1f1",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/barman-sidecar@sha256:5c6b5559b08b7b49c89937b6d823a37fbeb8e7b883d4b0da6278fe09de87d1f1"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-cnpg-postgres-1",
+        "container": "postgres",
+        "image": "ghcr.io/alphabravo-oss/constellation/postgres:16.14-dev-98087f2e517416edda6e3649154c3be4a5a7b0ce2228c4fab3f4e2bed430d92a@sha256:98087f2e517416edda6e3649154c3be4a5a7b0ce2228c4fab3f4e2bed430d92a",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/postgres@sha256:98087f2e517416edda6e3649154c3be4a5a7b0ce2228c4fab3f4e2bed430d92a"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-discoverer-7859bdf8d6-cwtx6",
+        "container": "discoverer",
+        "image": "ghcr.io/alphabravo-oss/constellation/discoverer@sha256:ffb3150e112bce4d2a529d7b6e969edb145251cbb5745562e693fa7839fdabfa",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/discoverer@sha256:ffb3150e112bce4d2a529d7b6e969edb145251cbb5745562e693fa7839fdabfa"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-frontend-54c8c65656-jznhl",
+        "container": "nginx",
+        "image": "ghcr.io/alphabravo-oss/constellation/frontend@sha256:ba43ada1e1182ab1ff0bb8cde358f9aec70486543a0ffade5ec7ce29c418c8da",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/frontend@sha256:ba43ada1e1182ab1ff0bb8cde358f9aec70486543a0ffade5ec7ce29c418c8da"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-network-policy-applier-56649f4cd-5csff",
+        "container": "applier",
+        "image": "ghcr.io/alphabravo-oss/constellation/operator@sha256:8b027d505cf4946bdbd5afc92a7446f9305e92bbf4e0c15e67a7bd40237d8e3b",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/operator@sha256:8b027d505cf4946bdbd5afc92a7446f9305e92bbf4e0c15e67a7bd40237d8e3b"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-operator-7cbdd4c966-8bfxj",
+        "container": "operator",
+        "image": "ghcr.io/alphabravo-oss/constellation/operator@sha256:8b027d505cf4946bdbd5afc92a7446f9305e92bbf4e0c15e67a7bd40237d8e3b",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/operator@sha256:8b027d505cf4946bdbd5afc92a7446f9305e92bbf4e0c15e67a7bd40237d8e3b"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-runtime-agent-xm2pp",
+        "container": "agent",
+        "image": "ghcr.io/alphabravo-oss/constellation/runtime-agent@sha256:d8d0e4903abc6c291fb98e32806ac61ea11b562b0abfa62c60230e3fa5afaadf",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/runtime-agent@sha256:d8d0e4903abc6c291fb98e32806ac61ea11b562b0abfa62c60230e3fa5afaadf"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-scanner-b94d64457-2m44c",
+        "container": "scanner",
+        "image": "ghcr.io/alphabravo-oss/constellation/scanner@sha256:716b0300f3d1992a1e7d142a306f2255af7b09171989bf67c87a2e961e2a5823",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/scanner@sha256:716b0300f3d1992a1e7d142a306f2255af7b09171989bf67c87a2e961e2a5823"
+      },
+      {
+        "namespace": "cnpg-system",
+        "pod": "barman-cloud-669fcf8689-rqt4x",
+        "container": "barman-cloud",
+        "image": "ghcr.io/alphabravo-oss/constellation/barman-plugin@sha256:de96d9e4bf0f2f69f8d2b3c1a8bc953ea8235d613901ae19754600b55cb07590",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/barman-plugin@sha256:de96d9e4bf0f2f69f8d2b3c1a8bc953ea8235d613901ae19754600b55cb07590"
+      },
+      {
+        "namespace": "cnpg-system",
+        "pod": "cnpg-controller-manager-fb6948887-xwgx8",
+        "container": "manager",
+        "image": "ghcr.io/alphabravo-oss/constellation/cnpg-operator@sha256:cc61009ac3d2cdf0aa2ff7f44f85dbb7bdf85ab50425d41a71da2af6521cc1b9",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/cnpg-operator@sha256:cc61009ac3d2cdf0aa2ff7f44f85dbb7bdf85ab50425d41a71da2af6521cc1b9"
+      }
+    ]
+  },
+  "publicAssets": {
+    "index": 200,
+    "main": "/static/index-C4xyiLuY.js",
+    "clusterCardIncludedInMain": true,
+    "semanticWarningToken": true,
+    "assetSha256": "e87eb01a9b5947b96a7b9cf554bfda8649ecec30f688d799723fb0d6b219e3f9"
+  },
+  "api": {
+    "refresh": 200,
+    "authenticatedClusters": 200
+  },
+  "priorFailures": [
+    {
+      "run": 39252551961,
+      "failure": "Design-token adoption rejected raw amber class in ClustersLandingPage."
+    },
+    {
+      "run": 39253906486,
+      "failure": "NodeDetailPage history test queried sorting header after request dispatch but before result rendered."
+    }
+  ],
+  "broaderCI": {
+    "conclusion": "cancelled",
+    "jobs": [
+      {
+        "name": "security (gitleaks)",
+        "status": "completed",
+        "conclusion": "failure"
+      },
+      {
+        "name": "security (govulncheck)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "go-tests (integration)",
+        "status": "completed",
+        "conclusion": "cancelled"
+      },
+      {
+        "name": "browser",
+        "status": "completed",
+        "conclusion": "cancelled"
+      },
+      {
+        "name": "go-tests (unit)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "quality",
+        "status": "completed",
+        "conclusion": "failure"
+      },
+      {
+        "name": "security (gosec)",
+        "status": "completed",
+        "conclusion": "failure"
+      },
+      {
+        "name": "npm-dependencies (tools/vscode-extension, vscode-extension)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "npm-dependencies (frontend, frontend)",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "fips",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "frontend",
+        "status": "completed",
+        "conclusion": "failure"
+      },
+      {
+        "name": "python-dependencies",
+        "status": "completed",
+        "conclusion": "success"
+      },
+      {
+        "name": "required",
+        "status": "completed",
+        "conclusion": "failure"
+      }
+    ],
+    "status": "completed"
+  },
+  "limitations": [
+    "Browser visual inspection unavailable: T3 preview sandbox blocked by host AppArmor. Public asset validation is not visual verification.",
+    "Broader quality/security/history-secret scan findings remain open.",
+    "No new NeuVector parity parent requirement closed."
+  ]
+}

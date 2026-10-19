@@ -1,7 +1,7 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-19** (Helm 132 Calico default-tier authorization and traffic qualification; broader parity remains active)
+Last reconciled: **2026-10-19** (Helm 133 frontend regression fixes and hosted candidate validation; broader parity remains active)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -16,6 +16,30 @@ understand the result, and prove that the control is enforced. Constellation's
 stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
 
+
+## Frontend regression recovery (Helm 133)
+
+The cluster-card inventory warning now uses the shared `status-warning` theme
+token. Full CI had rejected its raw amber palette class. A subsequent hosted run
+exposed a node-detail history test race: request dispatch did not mean the filtered
+table had rendered. The test now waits for rows and the sorting control, retaining
+its severity, fixability, source, sorting and history assertions.
+
+[Hosted run 39254329683](https://github.com/alphabravo-oss/constellation/actions/runs/39254329683)
+passed all **2,444 frontend tests** and built the frontend OCI candidate from
+`73654a4ffcf5f1090ec6ec8a4ba1cc0f4c00ea68`. The dedicated candidate workflow runs
+on frontend changes and gates packaging on this full suite. Registry image
+`sha256:ba43ada1e1182ab1ff0bb8cde358f9aec70486543a0ffade5ec7ce29c418c8da`
+passed the unsuppressed image gate: zero critical/high, three medium findings.
+Helm 133 deploys that digest, preserving schema 184 and all other images.
+
+All 14 container identities/controllers are healthy. Authenticated refresh and
+cluster queries return 200; the public main bundle contains the corrected token.
+Browser visual inspection was unavailable because host AppArmor blocked the T3
+preview sandbox. This asset check is not a visual verification. Broader quality,
+gosec and historical secret-scan failures remain open; the frontend candidate
+success does not establish a green full CI run. **66 checked / 88 open** remains
+unchanged. Evidence: `deploy/dev/registry-release/validation-frontend-ci-20261019.json`.
 
 ## Calico default-tier protection (Helm 132)
 

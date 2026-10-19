@@ -93,10 +93,10 @@
     {
       "name": "frontend",
       "role": "frontend",
-      "source": "constellation/frontend:packages-final-20261019",
-      "digest": "sha256:6d419115228f0942f4bbdde114acbb9454d00e2b83c7496e823b98b6af9f40d4",
+      "source": "constellation/frontend:candidate-73654a4ffcf5f1090ec6ec8a4ba1cc0f4c00ea68",
+      "digest": "sha256:ba43ada1e1182ab1ff0bb8cde358f9aec70486543a0ffade5ec7ce29c418c8da",
       "repository": "ghcr.io/alphabravo-oss/constellation/frontend",
-      "tag": "dev-6d419115228f0942f4bbdde114acbb9454d00e2b83c7496e823b98b6af9f40d4"
+      "tag": "dev-ba43ada1e1182ab1ff0bb8cde358f9aec70486543a0ffade5ec7ce29c418c8da"
     }
   ],
   "helm_values": {
@@ -187,7 +187,7 @@
     "frontend": {
       "image": {
         "repository": "ghcr.io/alphabravo-oss/constellation/frontend",
-        "digest": "sha256:6d419115228f0942f4bbdde114acbb9454d00e2b83c7496e823b98b6af9f40d4"
+        "digest": "sha256:ba43ada1e1182ab1ff0bb8cde358f9aec70486543a0ffade5ec7ce29c418c8da"
       }
     },
     "operator": {
