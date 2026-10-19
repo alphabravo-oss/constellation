@@ -1,0 +1,2141 @@
+{
+  "date": "2026-10-19",
+  "helmRevision": 131,
+  "sourceRevision": "bb2d19b4354da97a29419b91401f0f240b8b58e8",
+  "testRevision": "3ae716fecbddbc6df86f9a8326664398a0241ff3",
+  "productionSourcesIdenticalBetweenRevisions": true,
+  "operatorImage": {
+    "name": "operator",
+    "role": "operator",
+    "source": "constellation/operator:candidate-bb2d19b4354da97a29419b91401f0f240b8b58e8",
+    "digest": "sha256:8b027d505cf4946bdbd5afc92a7446f9305e92bbf4e0c15e67a7bd40237d8e3b",
+    "repository": "ghcr.io/alphabravo-oss/constellation/operator",
+    "tag": "dev-8b027d505cf4946bdbd5afc92a7446f9305e92bbf4e0c15e67a7bd40237d8e3b"
+  },
+  "buildRun": "https://github.com/alphabravo-oss/constellation/actions/runs/39248389977",
+  "regression": {
+    "run": "https://github.com/alphabravo-oss/constellation/actions/runs/39248982471",
+    "passedExecutions": 482,
+    "skippedOptInHelperExecutions": 2
+  },
+  "priorDefaultFailure": "https://github.com/alphabravo-oss/constellation/actions/runs/39247081837",
+  "dataplaneProofs": [
+    {
+      "name": "default-proof",
+      "run": "https://github.com/alphabravo-oss/constellation/actions/runs/39248503840",
+      "evidence": {
+        "nonce": "67161c5641",
+        "namespaces": [
+          "constellation-policy-proof-app-67161c5641",
+          "constellation-policy-proof-system-67161c5641"
+        ],
+        "image": "ghcr.io/alphabravo-oss/constellation/migrate@sha256:604a275f6c7c11bfc8d80825ebe389a71e9a7a561b9a3aeba25f8fb66877fe56",
+        "flavor": "cilium",
+        "probes": [
+          {
+            "tag": "baseline-protectedPod",
+            "sourceNamespace": "constellation-policy-proof-app-67161c5641",
+            "sourcePod": "client",
+            "target": "http://10.244.0.10:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-protectedService",
+            "sourceNamespace": "constellation-policy-proof-app-67161c5641",
+            "sourcePod": "client",
+            "target": "http://10.96.243.47:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-sharedRequiredPort",
+            "sourceNamespace": "constellation-policy-proof-app-67161c5641",
+            "sourcePod": "client",
+            "target": "http://10.244.0.162:18081/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-ordinaryPod",
+            "sourceNamespace": "constellation-policy-proof-app-67161c5641",
+            "sourcePod": "client",
+            "target": "http://10.244.0.162:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-ordinaryNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-67161c5641",
+            "sourcePod": "client",
+            "target": "http://172.18.0.2:30181/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-ordinary-ingress",
+            "sourceNamespace": "constellation-policy-proof-app-67161c5641",
+            "sourcePod": "ordinary",
+            "target": "http://10.244.0.218:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-0-protectedPod",
+            "sourceNamespace": "constellation-policy-proof-app-67161c5641",
+            "sourcePod": "client",
+            "target": "http://10.244.0.10:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-0-protectedService",
+            "sourceNamespace": "constellation-policy-proof-app-67161c5641",
+            "sourcePod": "client",
+            "target": "http://10.96.243.47:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-0-sharedRequiredPort",
+            "sourceNamespace": "constellation-policy-proof-app-67161c5641",
+            "sourcePod": "client",
+            "target": "http://10.244.0.162:18081/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-0-ordinaryPod",
+            "sourceNamespace": "constellation-policy-proof-app-67161c5641",
+            "sourcePod": "client",
+            "target": "http://10.244.0.162:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-0-ordinaryNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-67161c5641",
+            "sourcePod": "client",
+            "target": "http://172.18.0.2:30181/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-0-system-ingress",
+            "sourceNamespace": "constellation-policy-proof-system-67161c5641",
+            "sourcePod": "protected",
+            "target": "http://10.244.0.218:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-0-ordinary-ingress",
+            "sourceNamespace": "constellation-policy-proof-app-67161c5641",
+            "sourcePod": "ordinary",
+            "target": "http://10.244.0.218:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-1-protectedPod",
+            "sourceNamespace": "constellation-policy-proof-app-67161c5641",
+            "sourcePod": "client",
+            "target": "http://10.244.0.10:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-1-protectedService",
+            "sourceNamespace": "constellation-policy-proof-app-67161c5641",
+            "sourcePod": "client",
+            "target": "http://10.96.243.47:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-1-sharedRequiredPort",
+            "sourceNamespace": "constellation-policy-proof-app-67161c5641",
+            "sourcePod": "client",
+            "target": "http://10.244.0.162:18081/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-1-ordinaryPod",
+            "sourceNamespace": "constellation-policy-proof-app-67161c5641",
+            "sourcePod": "client",
+            "target": "http://10.244.0.162:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-1-ordinaryNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-67161c5641",
+            "sourcePod": "client",
+            "target": "http://172.18.0.2:30181/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-1-system-ingress",
+            "sourceNamespace": "constellation-policy-proof-system-67161c5641",
+            "sourcePod": "protected",
+            "target": "http://10.244.0.218:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-1-ordinary-ingress",
+            "sourceNamespace": "constellation-policy-proof-app-67161c5641",
+            "sourcePod": "ordinary",
+            "target": "http://10.244.0.218:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-2-protectedPod",
+            "sourceNamespace": "constellation-policy-proof-app-67161c5641",
+            "sourcePod": "client",
+            "target": "http://10.244.0.10:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-2-protectedService",
+            "sourceNamespace": "constellation-policy-proof-app-67161c5641",
+            "sourcePod": "client",
+            "target": "http://10.96.243.47:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-2-sharedRequiredPort",
+            "sourceNamespace": "constellation-policy-proof-app-67161c5641",
+            "sourcePod": "client",
+            "target": "http://10.244.0.162:18081/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-2-ordinaryPod",
+            "sourceNamespace": "constellation-policy-proof-app-67161c5641",
+            "sourcePod": "client",
+            "target": "http://10.244.0.162:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-2-ordinaryNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-67161c5641",
+            "sourcePod": "client",
+            "target": "http://172.18.0.2:30181/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-2-system-ingress",
+            "sourceNamespace": "constellation-policy-proof-system-67161c5641",
+            "sourcePod": "protected",
+            "target": "http://10.244.0.218:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-2-ordinary-ingress",
+            "sourceNamespace": "constellation-policy-proof-app-67161c5641",
+            "sourcePod": "ordinary",
+            "target": "http://10.244.0.218:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "recovery-ordinary-egress",
+            "sourceNamespace": "constellation-policy-proof-app-67161c5641",
+            "sourcePod": "client",
+            "target": "http://10.244.0.162:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "recovery-ordinary-ingress",
+            "sourceNamespace": "constellation-policy-proof-app-67161c5641",
+            "sourcePod": "ordinary",
+            "target": "http://10.244.0.218:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          }
+        ],
+        "sharedIdentityRefusedBeforeWrite": true,
+        "effectivePolicy": {
+          "apiVersion": "cilium.io/v2",
+          "kind": "CiliumNetworkPolicy",
+          "metadata": {
+            "annotations": {
+              "constellation.alphabravo.io/communication-namespaces": "constellation-policy-proof-system-67161c5641",
+              "constellation.alphabravo.io/protected-namespaces": "constellation-policy-proof-system-67161c5641,kube-node-lease,kube-public,kube-system",
+              "constellation.alphabravo.io/system-communication": "preserved"
+            },
+            "creationTimestamp": "2026-10-19T12:00:47Z",
+            "generation": 1,
+            "name": "communication-proof",
+            "namespace": "constellation-policy-proof-app-67161c5641",
+            "resourceVersion": "775",
+            "uid": "83d3970b-82eb-4b98-a6c3-efcd2c5162c2"
+          },
+          "spec": {
+            "egress": [
+              {
+                "toEndpoints": [
+                  {
+                    "matchExpressions": [
+                      {
+                        "key": "k8s:io.kubernetes.pod.namespace",
+                        "operator": "In",
+                        "values": [
+                          "constellation-policy-proof-system-67161c5641"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toEndpoints": [
+                  {
+                    "matchLabels": {
+                      "k8s:io.cilium.k8s.namespace.labels.constellation.alphabravo.io/protection-proof": "67161c5641",
+                      "k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name": "constellation-policy-proof-system-67161c5641",
+                      "k8s:io.cilium.k8s.policy.cluster": "default",
+                      "k8s:io.cilium.k8s.policy.serviceaccount": "default",
+                      "k8s:io.kubernetes.pod.namespace": "constellation-policy-proof-system-67161c5641",
+                      "k8s:proof-role": "protected"
+                    }
+                  }
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "18080",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toEndpoints": [
+                  {
+                    "matchLabels": {
+                      "gen:io.cilium.k8s.named-ports": "dns.UDP.53_dns-tcp.TCP.53_liveness-probe.TCP.8080",
+                      "gen:io.cilium.k8s.named-ports-1": "metrics.TCP.9153_readiness-probe.TCP.8181",
+                      "k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name": "kube-system",
+                      "k8s:io.cilium.k8s.policy.cluster": "default",
+                      "k8s:io.cilium.k8s.policy.serviceaccount": "coredns",
+                      "k8s:io.kubernetes.pod.namespace": "kube-system",
+                      "k8s:k8s-app": "kube-dns"
+                    }
+                  }
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toEndpoints": [
+                  {
+                    "matchLabels": {
+                      "gen:io.cilium.k8s.named-ports": "dns.UDP.53_dns-tcp.TCP.53_liveness-probe.TCP.8080",
+                      "gen:io.cilium.k8s.named-ports-1": "metrics.TCP.9153_readiness-probe.TCP.8181",
+                      "k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name": "kube-system",
+                      "k8s:io.cilium.k8s.policy.cluster": "default",
+                      "k8s:io.cilium.k8s.policy.serviceaccount": "coredns",
+                      "k8s:io.kubernetes.pod.namespace": "kube-system",
+                      "k8s:k8s-app": "kube-dns"
+                    }
+                  }
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "UDP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toEndpoints": [
+                  {
+                    "matchLabels": {
+                      "k8s:io.cilium.k8s.namespace.labels.constellation.alphabravo.io/protection-proof": "67161c5641",
+                      "k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name": "constellation-policy-proof-app-67161c5641",
+                      "k8s:io.cilium.k8s.policy.cluster": "default",
+                      "k8s:io.cilium.k8s.policy.serviceaccount": "default",
+                      "k8s:io.kubernetes.pod.namespace": "constellation-policy-proof-app-67161c5641",
+                      "k8s:proof-role": "ordinary"
+                    }
+                  }
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "18081",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.96.0.1/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "443",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.96.0.10/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.96.0.10/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "UDP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.96.243.47/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "18080",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.96.243.251/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "18081",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.244.0.10/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "18080",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.244.0.19/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.244.0.19/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "UDP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.244.0.125/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.244.0.125/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "UDP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.244.0.162/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "18081",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "172.18.0.2/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "6443",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toEntities": [
+                  "host",
+                  "remote-node",
+                  "kube-apiserver"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "6443",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "enableDefaultDeny": {
+              "egress": true,
+              "ingress": true
+            },
+            "endpointSelector": {
+              "matchLabels": {
+                "proof-role": "client"
+              }
+            },
+            "ingress": [
+              {
+                "fromEndpoints": [
+                  {
+                    "matchExpressions": [
+                      {
+                        "key": "k8s:io.kubernetes.pod.namespace",
+                        "operator": "In",
+                        "values": [
+                          "constellation-policy-proof-system-67161c5641"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "fromEntities": [
+                  "host",
+                  "remote-node",
+                  "kube-apiserver"
+                ]
+              }
+            ]
+          },
+          "status": {
+            "conditions": [
+              {
+                "lastTransitionTime": "2026-10-19T12:00:47Z",
+                "message": "Policy validation succeeded",
+                "status": "True",
+                "type": "Valid"
+              }
+            ]
+          }
+        },
+        "dnsSucceeded": true,
+        "coreMetricsBlockedWithDNSWorking": true,
+        "apiTransportSucceeded": true,
+        "passed": true,
+        "cleanupErrors": []
+      }
+    },
+    {
+      "name": "default-repeat",
+      "run": "https://github.com/alphabravo-oss/constellation/actions/runs/39248982479",
+      "evidence": {
+        "nonce": "410e4835c1",
+        "namespaces": [
+          "constellation-policy-proof-app-410e4835c1",
+          "constellation-policy-proof-system-410e4835c1"
+        ],
+        "image": "ghcr.io/alphabravo-oss/constellation/migrate@sha256:604a275f6c7c11bfc8d80825ebe389a71e9a7a561b9a3aeba25f8fb66877fe56",
+        "flavor": "cilium",
+        "probes": [
+          {
+            "tag": "baseline-protectedPod",
+            "sourceNamespace": "constellation-policy-proof-app-410e4835c1",
+            "sourcePod": "client",
+            "target": "http://10.244.0.233:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-protectedService",
+            "sourceNamespace": "constellation-policy-proof-app-410e4835c1",
+            "sourcePod": "client",
+            "target": "http://10.96.134.93:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-sharedRequiredPort",
+            "sourceNamespace": "constellation-policy-proof-app-410e4835c1",
+            "sourcePod": "client",
+            "target": "http://10.244.0.239:18081/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-ordinaryPod",
+            "sourceNamespace": "constellation-policy-proof-app-410e4835c1",
+            "sourcePod": "client",
+            "target": "http://10.244.0.239:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-ordinaryNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-410e4835c1",
+            "sourcePod": "client",
+            "target": "http://172.18.0.2:30943/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-ordinary-ingress",
+            "sourceNamespace": "constellation-policy-proof-app-410e4835c1",
+            "sourcePod": "ordinary",
+            "target": "http://10.244.0.180:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-0-protectedPod",
+            "sourceNamespace": "constellation-policy-proof-app-410e4835c1",
+            "sourcePod": "client",
+            "target": "http://10.244.0.233:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-0-protectedService",
+            "sourceNamespace": "constellation-policy-proof-app-410e4835c1",
+            "sourcePod": "client",
+            "target": "http://10.96.134.93:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-0-sharedRequiredPort",
+            "sourceNamespace": "constellation-policy-proof-app-410e4835c1",
+            "sourcePod": "client",
+            "target": "http://10.244.0.239:18081/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-0-ordinaryPod",
+            "sourceNamespace": "constellation-policy-proof-app-410e4835c1",
+            "sourcePod": "client",
+            "target": "http://10.244.0.239:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-0-ordinaryNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-410e4835c1",
+            "sourcePod": "client",
+            "target": "http://172.18.0.2:30943/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-0-system-ingress",
+            "sourceNamespace": "constellation-policy-proof-system-410e4835c1",
+            "sourcePod": "protected",
+            "target": "http://10.244.0.180:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-0-ordinary-ingress",
+            "sourceNamespace": "constellation-policy-proof-app-410e4835c1",
+            "sourcePod": "ordinary",
+            "target": "http://10.244.0.180:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-1-protectedPod",
+            "sourceNamespace": "constellation-policy-proof-app-410e4835c1",
+            "sourcePod": "client",
+            "target": "http://10.244.0.233:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-1-protectedService",
+            "sourceNamespace": "constellation-policy-proof-app-410e4835c1",
+            "sourcePod": "client",
+            "target": "http://10.96.134.93:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-1-sharedRequiredPort",
+            "sourceNamespace": "constellation-policy-proof-app-410e4835c1",
+            "sourcePod": "client",
+            "target": "http://10.244.0.239:18081/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-1-ordinaryPod",
+            "sourceNamespace": "constellation-policy-proof-app-410e4835c1",
+            "sourcePod": "client",
+            "target": "http://10.244.0.239:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-1-ordinaryNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-410e4835c1",
+            "sourcePod": "client",
+            "target": "http://172.18.0.2:30943/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-1-system-ingress",
+            "sourceNamespace": "constellation-policy-proof-system-410e4835c1",
+            "sourcePod": "protected",
+            "target": "http://10.244.0.180:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-1-ordinary-ingress",
+            "sourceNamespace": "constellation-policy-proof-app-410e4835c1",
+            "sourcePod": "ordinary",
+            "target": "http://10.244.0.180:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-2-protectedPod",
+            "sourceNamespace": "constellation-policy-proof-app-410e4835c1",
+            "sourcePod": "client",
+            "target": "http://10.244.0.233:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-2-protectedService",
+            "sourceNamespace": "constellation-policy-proof-app-410e4835c1",
+            "sourcePod": "client",
+            "target": "http://10.96.134.93:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-2-sharedRequiredPort",
+            "sourceNamespace": "constellation-policy-proof-app-410e4835c1",
+            "sourcePod": "client",
+            "target": "http://10.244.0.239:18081/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-2-ordinaryPod",
+            "sourceNamespace": "constellation-policy-proof-app-410e4835c1",
+            "sourcePod": "client",
+            "target": "http://10.244.0.239:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-2-ordinaryNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-410e4835c1",
+            "sourcePod": "client",
+            "target": "http://172.18.0.2:30943/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-2-system-ingress",
+            "sourceNamespace": "constellation-policy-proof-system-410e4835c1",
+            "sourcePod": "protected",
+            "target": "http://10.244.0.180:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-2-ordinary-ingress",
+            "sourceNamespace": "constellation-policy-proof-app-410e4835c1",
+            "sourcePod": "ordinary",
+            "target": "http://10.244.0.180:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "recovery-ordinary-egress",
+            "sourceNamespace": "constellation-policy-proof-app-410e4835c1",
+            "sourcePod": "client",
+            "target": "http://10.244.0.239:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "recovery-ordinary-ingress",
+            "sourceNamespace": "constellation-policy-proof-app-410e4835c1",
+            "sourcePod": "ordinary",
+            "target": "http://10.244.0.180:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          }
+        ],
+        "sharedIdentityRefusedBeforeWrite": true,
+        "effectivePolicy": {
+          "apiVersion": "cilium.io/v2",
+          "kind": "CiliumNetworkPolicy",
+          "metadata": {
+            "annotations": {
+              "constellation.alphabravo.io/communication-namespaces": "constellation-policy-proof-system-410e4835c1",
+              "constellation.alphabravo.io/protected-namespaces": "constellation-policy-proof-system-410e4835c1,kube-node-lease,kube-public,kube-system",
+              "constellation.alphabravo.io/system-communication": "preserved"
+            },
+            "creationTimestamp": "2026-10-19T12:04:31Z",
+            "generation": 1,
+            "name": "communication-proof",
+            "namespace": "constellation-policy-proof-app-410e4835c1",
+            "resourceVersion": "758",
+            "uid": "60f3d696-03ae-4334-bf8f-ee6572ad140e"
+          },
+          "spec": {
+            "egress": [
+              {
+                "toEndpoints": [
+                  {
+                    "matchExpressions": [
+                      {
+                        "key": "k8s:io.kubernetes.pod.namespace",
+                        "operator": "In",
+                        "values": [
+                          "constellation-policy-proof-system-410e4835c1"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toEndpoints": [
+                  {
+                    "matchLabels": {
+                      "gen:io.cilium.k8s.named-ports": "dns.UDP.53_dns-tcp.TCP.53_liveness-probe.TCP.8080",
+                      "gen:io.cilium.k8s.named-ports-1": "metrics.TCP.9153_readiness-probe.TCP.8181",
+                      "k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name": "kube-system",
+                      "k8s:io.cilium.k8s.policy.cluster": "default",
+                      "k8s:io.cilium.k8s.policy.serviceaccount": "coredns",
+                      "k8s:io.kubernetes.pod.namespace": "kube-system",
+                      "k8s:k8s-app": "kube-dns"
+                    }
+                  }
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toEndpoints": [
+                  {
+                    "matchLabels": {
+                      "gen:io.cilium.k8s.named-ports": "dns.UDP.53_dns-tcp.TCP.53_liveness-probe.TCP.8080",
+                      "gen:io.cilium.k8s.named-ports-1": "metrics.TCP.9153_readiness-probe.TCP.8181",
+                      "k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name": "kube-system",
+                      "k8s:io.cilium.k8s.policy.cluster": "default",
+                      "k8s:io.cilium.k8s.policy.serviceaccount": "coredns",
+                      "k8s:io.kubernetes.pod.namespace": "kube-system",
+                      "k8s:k8s-app": "kube-dns"
+                    }
+                  }
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "UDP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toEndpoints": [
+                  {
+                    "matchLabels": {
+                      "k8s:io.cilium.k8s.namespace.labels.constellation.alphabravo.io/protection-proof": "410e4835c1",
+                      "k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name": "constellation-policy-proof-system-410e4835c1",
+                      "k8s:io.cilium.k8s.policy.cluster": "default",
+                      "k8s:io.cilium.k8s.policy.serviceaccount": "default",
+                      "k8s:io.kubernetes.pod.namespace": "constellation-policy-proof-system-410e4835c1",
+                      "k8s:proof-role": "protected"
+                    }
+                  }
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "18080",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toEndpoints": [
+                  {
+                    "matchLabels": {
+                      "k8s:io.cilium.k8s.namespace.labels.constellation.alphabravo.io/protection-proof": "410e4835c1",
+                      "k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name": "constellation-policy-proof-app-410e4835c1",
+                      "k8s:io.cilium.k8s.policy.cluster": "default",
+                      "k8s:io.cilium.k8s.policy.serviceaccount": "default",
+                      "k8s:io.kubernetes.pod.namespace": "constellation-policy-proof-app-410e4835c1",
+                      "k8s:proof-role": "ordinary"
+                    }
+                  }
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "18081",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.96.0.1/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "443",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.96.0.10/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.96.0.10/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "UDP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.96.72.211/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "18081",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.96.134.93/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "18080",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.244.0.17/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.244.0.17/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "UDP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.244.0.139/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.244.0.139/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "UDP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.244.0.233/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "18080",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.244.0.239/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "18081",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "172.18.0.2/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "6443",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toEntities": [
+                  "host",
+                  "remote-node",
+                  "kube-apiserver"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "6443",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "enableDefaultDeny": {
+              "egress": true,
+              "ingress": true
+            },
+            "endpointSelector": {
+              "matchLabels": {
+                "proof-role": "client"
+              }
+            },
+            "ingress": [
+              {
+                "fromEndpoints": [
+                  {
+                    "matchExpressions": [
+                      {
+                        "key": "k8s:io.kubernetes.pod.namespace",
+                        "operator": "In",
+                        "values": [
+                          "constellation-policy-proof-system-410e4835c1"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "fromEntities": [
+                  "host",
+                  "remote-node",
+                  "kube-apiserver"
+                ]
+              }
+            ]
+          },
+          "status": {
+            "conditions": [
+              {
+                "lastTransitionTime": "2026-10-19T12:04:31Z",
+                "message": "Policy validation succeeded",
+                "status": "True",
+                "type": "Valid"
+              }
+            ]
+          }
+        },
+        "dnsSucceeded": true,
+        "coreMetricsBlockedWithDNSWorking": true,
+        "apiTransportSucceeded": true,
+        "passed": true,
+        "cleanupErrors": []
+      }
+    },
+    {
+      "name": "native-proof",
+      "run": null,
+      "evidence": {
+        "nonce": "730ee6f083",
+        "namespaces": [
+          "constellation-policy-proof-app-730ee6f083",
+          "constellation-policy-proof-system-730ee6f083"
+        ],
+        "image": "ghcr.io/alphabravo-oss/constellation/migrate@sha256:604a275f6c7c11bfc8d80825ebe389a71e9a7a561b9a3aeba25f8fb66877fe56",
+        "flavor": "native",
+        "probes": [
+          {
+            "tag": "baseline-protectedPod",
+            "sourceNamespace": "constellation-policy-proof-app-730ee6f083",
+            "sourcePod": "client",
+            "target": "http://10.42.0.119:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-protectedService",
+            "sourceNamespace": "constellation-policy-proof-app-730ee6f083",
+            "sourcePod": "client",
+            "target": "http://10.43.119.52:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-sharedRequiredPort",
+            "sourceNamespace": "constellation-policy-proof-app-730ee6f083",
+            "sourcePod": "client",
+            "target": "http://10.42.0.118:18081/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-ordinaryPod",
+            "sourceNamespace": "constellation-policy-proof-app-730ee6f083",
+            "sourcePod": "client",
+            "target": "http://10.42.0.118:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-ordinaryNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-730ee6f083",
+            "sourcePod": "client",
+            "target": "http://5.78.190.70:32767/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-ordinary-ingress",
+            "sourceNamespace": "constellation-policy-proof-app-730ee6f083",
+            "sourcePod": "ordinary",
+            "target": "http://10.42.0.117:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-0-protectedPod",
+            "sourceNamespace": "constellation-policy-proof-app-730ee6f083",
+            "sourcePod": "client",
+            "target": "http://10.42.0.119:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-0-protectedService",
+            "sourceNamespace": "constellation-policy-proof-app-730ee6f083",
+            "sourcePod": "client",
+            "target": "http://10.43.119.52:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-0-sharedRequiredPort",
+            "sourceNamespace": "constellation-policy-proof-app-730ee6f083",
+            "sourcePod": "client",
+            "target": "http://10.42.0.118:18081/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-0-ordinaryPod",
+            "sourceNamespace": "constellation-policy-proof-app-730ee6f083",
+            "sourcePod": "client",
+            "target": "http://10.42.0.118:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: can't connect to remote host (10.42.0.118): Connection refused\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-0-ordinaryNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-730ee6f083",
+            "sourcePod": "client",
+            "target": "http://5.78.190.70:32767/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: can't connect to remote host (5.78.190.70): Connection refused\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-0-system-ingress",
+            "sourceNamespace": "constellation-policy-proof-system-730ee6f083",
+            "sourcePod": "protected",
+            "target": "http://10.42.0.117:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-0-ordinary-ingress",
+            "sourceNamespace": "constellation-policy-proof-app-730ee6f083",
+            "sourcePod": "ordinary",
+            "target": "http://10.42.0.117:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: can't connect to remote host (10.42.0.117): Connection refused\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-1-protectedPod",
+            "sourceNamespace": "constellation-policy-proof-app-730ee6f083",
+            "sourcePod": "client",
+            "target": "http://10.42.0.119:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-1-protectedService",
+            "sourceNamespace": "constellation-policy-proof-app-730ee6f083",
+            "sourcePod": "client",
+            "target": "http://10.43.119.52:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-1-sharedRequiredPort",
+            "sourceNamespace": "constellation-policy-proof-app-730ee6f083",
+            "sourcePod": "client",
+            "target": "http://10.42.0.118:18081/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-1-ordinaryPod",
+            "sourceNamespace": "constellation-policy-proof-app-730ee6f083",
+            "sourcePod": "client",
+            "target": "http://10.42.0.118:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: can't connect to remote host (10.42.0.118): Connection refused\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-1-ordinaryNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-730ee6f083",
+            "sourcePod": "client",
+            "target": "http://5.78.190.70:32767/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: can't connect to remote host (5.78.190.70): Connection refused\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-1-system-ingress",
+            "sourceNamespace": "constellation-policy-proof-system-730ee6f083",
+            "sourcePod": "protected",
+            "target": "http://10.42.0.117:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-1-ordinary-ingress",
+            "sourceNamespace": "constellation-policy-proof-app-730ee6f083",
+            "sourcePod": "ordinary",
+            "target": "http://10.42.0.117:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: can't connect to remote host (10.42.0.117): Connection refused\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-2-protectedPod",
+            "sourceNamespace": "constellation-policy-proof-app-730ee6f083",
+            "sourcePod": "client",
+            "target": "http://10.42.0.119:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-2-protectedService",
+            "sourceNamespace": "constellation-policy-proof-app-730ee6f083",
+            "sourcePod": "client",
+            "target": "http://10.43.119.52:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-2-sharedRequiredPort",
+            "sourceNamespace": "constellation-policy-proof-app-730ee6f083",
+            "sourcePod": "client",
+            "target": "http://10.42.0.118:18081/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-2-ordinaryPod",
+            "sourceNamespace": "constellation-policy-proof-app-730ee6f083",
+            "sourcePod": "client",
+            "target": "http://10.42.0.118:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: can't connect to remote host (10.42.0.118): Connection refused\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-2-ordinaryNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-730ee6f083",
+            "sourcePod": "client",
+            "target": "http://5.78.190.70:32767/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: can't connect to remote host (5.78.190.70): Connection refused\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-2-system-ingress",
+            "sourceNamespace": "constellation-policy-proof-system-730ee6f083",
+            "sourcePod": "protected",
+            "target": "http://10.42.0.117:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-2-ordinary-ingress",
+            "sourceNamespace": "constellation-policy-proof-app-730ee6f083",
+            "sourcePod": "ordinary",
+            "target": "http://10.42.0.117:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: can't connect to remote host (10.42.0.117): Connection refused\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "recovery-ordinary-egress",
+            "sourceNamespace": "constellation-policy-proof-app-730ee6f083",
+            "sourcePod": "client",
+            "target": "http://10.42.0.118:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "recovery-ordinary-ingress",
+            "sourceNamespace": "constellation-policy-proof-app-730ee6f083",
+            "sourcePod": "ordinary",
+            "target": "http://10.42.0.117:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          }
+        ],
+        "effectivePolicy": {
+          "apiVersion": "networking.k8s.io/v1",
+          "kind": "NetworkPolicy",
+          "metadata": {
+            "annotations": {
+              "constellation.alphabravo.io/communication-namespaces": "constellation-policy-proof-system-730ee6f083",
+              "constellation.alphabravo.io/protected-namespaces": "constellation-policy-proof-system-730ee6f083,kube-node-lease,kube-public,kube-system",
+              "constellation.alphabravo.io/system-communication": "preserved"
+            },
+            "creationTimestamp": "2026-10-19T12:03:00Z",
+            "generation": 1,
+            "name": "communication-proof",
+            "namespace": "constellation-policy-proof-app-730ee6f083",
+            "resourceVersion": "4365083",
+            "uid": "7d2d342f-21d4-4522-b229-215962d3258d"
+          },
+          "spec": {
+            "egress": [
+              {
+                "to": [
+                  {
+                    "namespaceSelector": {
+                      "matchExpressions": [
+                        {
+                          "key": "kubernetes.io/metadata.name",
+                          "operator": "In",
+                          "values": [
+                            "constellation-policy-proof-system-730ee6f083"
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "ports": [
+                  {
+                    "port": 6443,
+                    "protocol": "TCP"
+                  }
+                ],
+                "to": [
+                  {
+                    "ipBlock": {
+                      "cidr": "5.78.190.70/32"
+                    }
+                  }
+                ]
+              },
+              {
+                "ports": [
+                  {
+                    "port": 53,
+                    "protocol": "TCP"
+                  }
+                ],
+                "to": [
+                  {
+                    "ipBlock": {
+                      "cidr": "10.42.0.2/32"
+                    }
+                  }
+                ]
+              },
+              {
+                "ports": [
+                  {
+                    "port": 53,
+                    "protocol": "UDP"
+                  }
+                ],
+                "to": [
+                  {
+                    "ipBlock": {
+                      "cidr": "10.42.0.2/32"
+                    }
+                  }
+                ]
+              },
+              {
+                "ports": [
+                  {
+                    "port": 18081,
+                    "protocol": "TCP"
+                  }
+                ],
+                "to": [
+                  {
+                    "ipBlock": {
+                      "cidr": "10.42.0.118/32"
+                    }
+                  }
+                ]
+              },
+              {
+                "ports": [
+                  {
+                    "port": 18080,
+                    "protocol": "TCP"
+                  }
+                ],
+                "to": [
+                  {
+                    "ipBlock": {
+                      "cidr": "10.42.0.119/32"
+                    }
+                  }
+                ]
+              },
+              {
+                "ports": [
+                  {
+                    "port": 443,
+                    "protocol": "TCP"
+                  }
+                ],
+                "to": [
+                  {
+                    "ipBlock": {
+                      "cidr": "10.43.0.1/32"
+                    }
+                  }
+                ]
+              },
+              {
+                "ports": [
+                  {
+                    "port": 53,
+                    "protocol": "TCP"
+                  }
+                ],
+                "to": [
+                  {
+                    "ipBlock": {
+                      "cidr": "10.43.0.10/32"
+                    }
+                  }
+                ]
+              },
+              {
+                "ports": [
+                  {
+                    "port": 53,
+                    "protocol": "UDP"
+                  }
+                ],
+                "to": [
+                  {
+                    "ipBlock": {
+                      "cidr": "10.43.0.10/32"
+                    }
+                  }
+                ]
+              },
+              {
+                "ports": [
+                  {
+                    "port": 18081,
+                    "protocol": "TCP"
+                  }
+                ],
+                "to": [
+                  {
+                    "ipBlock": {
+                      "cidr": "10.43.81.102/32"
+                    }
+                  }
+                ]
+              },
+              {
+                "ports": [
+                  {
+                    "port": 18080,
+                    "protocol": "TCP"
+                  }
+                ],
+                "to": [
+                  {
+                    "ipBlock": {
+                      "cidr": "10.43.119.52/32"
+                    }
+                  }
+                ]
+              }
+            ],
+            "ingress": [
+              {
+                "from": [
+                  {
+                    "namespaceSelector": {
+                      "matchExpressions": [
+                        {
+                          "key": "kubernetes.io/metadata.name",
+                          "operator": "In",
+                          "values": [
+                            "constellation-policy-proof-system-730ee6f083"
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            ],
+            "podSelector": {
+              "matchLabels": {
+                "proof-role": "client"
+              }
+            },
+            "policyTypes": [
+              "Ingress",
+              "Egress"
+            ]
+          }
+        },
+        "dnsSucceeded": true,
+        "coreMetricsBlockedWithDNSWorking": true,
+        "apiTransportSucceeded": true,
+        "passed": true,
+        "cleanupErrors": []
+      }
+    }
+  ],
+  "gate": {
+    "image": "ghcr.io/alphabravo-oss/constellation/operator@sha256:8b027d505cf4946bdbd5afc92a7446f9305e92bbf4e0c15e67a7bd40237d8e3b",
+    "runtime_manifest": "sha256:52df6e879bfb6d16bd6767eb22c7fd6bff12b5ae6c78f13d6820eeb08fcbf633",
+    "configuration": "sha256:74d12a939b5f5fe3a42a2be1294825be429bd9a16c0d5cfbb30869057db7f70b",
+    "passed": true,
+    "policy": "no-fixable-critical-or-high",
+    "scanner_version": "0.120.1-constellation.1",
+    "database": {
+      "schemaVersion": "v6.1.10",
+      "from": "https://grype.anchore.io/databases/v6/vulnerability-db_v6.1.10_2026-10-19T00:32:50Z_1792391955.tar.zst?checksum=sha256%3A13a192236b248579678bbf06cefb2a07a5dcbd00da110cfb5c3e26eb68a7ce58",
+      "built": "2026-10-19T06:39:15Z",
+      "path": "/root/.cache/grype/db/6/vulnerability.db",
+      "valid": true
+    },
+    "counts": {},
+    "blockers": [],
+    "evaluated_at": "2026-10-19T12:02:01.160408+00:00",
+    "report_sha256": "3b68fedaf97718c5a48068b8e10dffe5d3c9556851d1481d6f11a3035af7d514"
+  },
+  "liveImageScan": {
+    "id": "7e810b46-d194-44a8-8622-7ac04db16e56",
+    "status": "completed",
+    "leaseId": "20540c1c-ff2c-45ba-b98f-71c4ad521c5f",
+    "packages": 170,
+    "findings": 0,
+    "engines": {
+      "syft": "succeeded",
+      "grype": "succeeded",
+      "trivy": "succeeded"
+    }
+  },
+  "rollout": {
+    "helmRevision": 131,
+    "restartHoldRemoved": true,
+    "clusterHealthy": true,
+    "postBackupPhase": "completed",
+    "postBackupId": "20261019T054924",
+    "containers": [
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-admission-845b669bbc-9tpjk",
+        "container": "admission",
+        "image": "ghcr.io/alphabravo-oss/constellation/admission@sha256:b747fb3ab87c66eb04e687f48a0893bba2a9e5d06011fec103863261286a0c4c",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/admission@sha256:b747fb3ab87c66eb04e687f48a0893bba2a9e5d06011fec103863261286a0c4c"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-api-5b95979b98-72w4v",
+        "container": "wait-for-migrations",
+        "image": "ghcr.io/alphabravo-oss/constellation/api@sha256:7ca489d94f9e27cf00d8fd5f41e7bf4c8202fec344849846223fd4c1090a4f31",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/api@sha256:7ca489d94f9e27cf00d8fd5f41e7bf4c8202fec344849846223fd4c1090a4f31"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-api-5b95979b98-72w4v",
+        "container": "api",
+        "image": "ghcr.io/alphabravo-oss/constellation/api@sha256:7ca489d94f9e27cf00d8fd5f41e7bf4c8202fec344849846223fd4c1090a4f31",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/api@sha256:7ca489d94f9e27cf00d8fd5f41e7bf4c8202fec344849846223fd4c1090a4f31"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-cnpg-postgres-1",
+        "container": "bootstrap-controller",
+        "image": "ghcr.io/alphabravo-oss/constellation/cnpg-operator@sha256:cc61009ac3d2cdf0aa2ff7f44f85dbb7bdf85ab50425d41a71da2af6521cc1b9",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/cnpg-operator@sha256:cc61009ac3d2cdf0aa2ff7f44f85dbb7bdf85ab50425d41a71da2af6521cc1b9"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-cnpg-postgres-1",
+        "container": "plugin-barman-cloud",
+        "image": "ghcr.io/alphabravo-oss/constellation/barman-sidecar@sha256:5c6b5559b08b7b49c89937b6d823a37fbeb8e7b883d4b0da6278fe09de87d1f1",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/barman-sidecar@sha256:5c6b5559b08b7b49c89937b6d823a37fbeb8e7b883d4b0da6278fe09de87d1f1"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-cnpg-postgres-1",
+        "container": "postgres",
+        "image": "ghcr.io/alphabravo-oss/constellation/postgres:16.14-dev-98087f2e517416edda6e3649154c3be4a5a7b0ce2228c4fab3f4e2bed430d92a@sha256:98087f2e517416edda6e3649154c3be4a5a7b0ce2228c4fab3f4e2bed430d92a",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/postgres@sha256:98087f2e517416edda6e3649154c3be4a5a7b0ce2228c4fab3f4e2bed430d92a"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-discoverer-7859bdf8d6-cwtx6",
+        "container": "discoverer",
+        "image": "ghcr.io/alphabravo-oss/constellation/discoverer@sha256:ffb3150e112bce4d2a529d7b6e969edb145251cbb5745562e693fa7839fdabfa",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/discoverer@sha256:ffb3150e112bce4d2a529d7b6e969edb145251cbb5745562e693fa7839fdabfa"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-frontend-7465f554cb-hmm78",
+        "container": "nginx",
+        "image": "ghcr.io/alphabravo-oss/constellation/frontend@sha256:6d419115228f0942f4bbdde114acbb9454d00e2b83c7496e823b98b6af9f40d4",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/frontend@sha256:6d419115228f0942f4bbdde114acbb9454d00e2b83c7496e823b98b6af9f40d4"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-network-policy-applier-56649f4cd-5csff",
+        "container": "applier",
+        "image": "ghcr.io/alphabravo-oss/constellation/operator@sha256:8b027d505cf4946bdbd5afc92a7446f9305e92bbf4e0c15e67a7bd40237d8e3b",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/operator@sha256:8b027d505cf4946bdbd5afc92a7446f9305e92bbf4e0c15e67a7bd40237d8e3b"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-operator-7cbdd4c966-8bfxj",
+        "container": "operator",
+        "image": "ghcr.io/alphabravo-oss/constellation/operator@sha256:8b027d505cf4946bdbd5afc92a7446f9305e92bbf4e0c15e67a7bd40237d8e3b",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/operator@sha256:8b027d505cf4946bdbd5afc92a7446f9305e92bbf4e0c15e67a7bd40237d8e3b"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-runtime-agent-xm2pp",
+        "container": "agent",
+        "image": "ghcr.io/alphabravo-oss/constellation/runtime-agent@sha256:d8d0e4903abc6c291fb98e32806ac61ea11b562b0abfa62c60230e3fa5afaadf",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/runtime-agent@sha256:d8d0e4903abc6c291fb98e32806ac61ea11b562b0abfa62c60230e3fa5afaadf"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-scanner-b94d64457-2m44c",
+        "container": "scanner",
+        "image": "ghcr.io/alphabravo-oss/constellation/scanner@sha256:716b0300f3d1992a1e7d142a306f2255af7b09171989bf67c87a2e961e2a5823",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/scanner@sha256:716b0300f3d1992a1e7d142a306f2255af7b09171989bf67c87a2e961e2a5823"
+      },
+      {
+        "namespace": "cnpg-system",
+        "pod": "barman-cloud-669fcf8689-rqt4x",
+        "container": "barman-cloud",
+        "image": "ghcr.io/alphabravo-oss/constellation/barman-plugin@sha256:de96d9e4bf0f2f69f8d2b3c1a8bc953ea8235d613901ae19754600b55cb07590",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/barman-plugin@sha256:de96d9e4bf0f2f69f8d2b3c1a8bc953ea8235d613901ae19754600b55cb07590"
+      },
+      {
+        "namespace": "cnpg-system",
+        "pod": "cnpg-controller-manager-fb6948887-xwgx8",
+        "container": "manager",
+        "image": "ghcr.io/alphabravo-oss/constellation/cnpg-operator@sha256:cc61009ac3d2cdf0aa2ff7f44f85dbb7bdf85ab50425d41a71da2af6521cc1b9",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/cnpg-operator@sha256:cc61009ac3d2cdf0aa2ff7f44f85dbb7bdf85ab50425d41a71da2af6521cc1b9"
+      }
+    ]
+  },
+  "rbac": [
+    {
+      "serviceAccount": "system:serviceaccount:constellation-system:constellation-network-policy-applier",
+      "verb": "list",
+      "group": "cilium.io",
+      "resource": "ciliumendpoints",
+      "allowed": true,
+      "review": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"constellation-network-policy-applier\" of ClusterRole \"constellation-network-policy-applier\" to ServiceAccount \"constellation-network-policy-applier/constellation-system\""
+      },
+      "namespace": ""
+    },
+    {
+      "serviceAccount": "system:serviceaccount:constellation-system:constellation-network-policy-applier",
+      "verb": "list",
+      "group": "cilium.io",
+      "resource": "ciliumidentities",
+      "allowed": true,
+      "review": {
+        "allowed": true,
+        "reason": "RBAC: allowed by ClusterRoleBinding \"constellation-network-policy-applier\" of ClusterRole \"constellation-network-policy-applier\" to ServiceAccount \"constellation-network-policy-applier/constellation-system\""
+      },
+      "namespace": ""
+    },
+    {
+      "serviceAccount": "system:serviceaccount:constellation-system:constellation-network-policy-applier",
+      "verb": "create",
+      "group": "cilium.io",
+      "resource": "ciliumidentities",
+      "allowed": false,
+      "review": {
+        "allowed": false
+      },
+      "namespace": ""
+    },
+    {
+      "serviceAccount": "system:serviceaccount:constellation-system:constellation-network-policy-applier",
+      "verb": "patch",
+      "group": "cilium.io",
+      "resource": "ciliumendpoints",
+      "allowed": false,
+      "review": {
+        "allowed": false
+      },
+      "namespace": ""
+    },
+    {
+      "serviceAccount": "system:serviceaccount:constellation-system:constellation-network-policy-applier",
+      "verb": "get",
+      "group": "",
+      "resource": "secrets",
+      "allowed": false,
+      "review": {
+        "allowed": false
+      },
+      "namespace": "constellation-system"
+    },
+    {
+      "serviceAccount": "system:serviceaccount:constellation-system:constellation-network-policy-applier",
+      "verb": "delete",
+      "group": "",
+      "resource": "services",
+      "allowed": false,
+      "review": {
+        "allowed": false
+      },
+      "namespace": "constellation-system"
+    }
+  ],
+  "authenticatedChecks": {
+    "refresh": 200,
+    "clusters": 200
+  },
+  "nonImageHelmValuesUnchanged": true,
+  "liveCNI": "native",
+  "remainingLimits": [
+    "Single-node IPv4 Cilium 1.20.3 with kube-proxy; other dataplane profiles unqualified",
+    "Cilium endpoint and identity CRDs must be published; incomplete identity state refuses writes",
+    "Identity labels and membership can change after snapshot; reads are not an atomic transaction",
+    "Existing unsafe denies, third-party policies and Calico live qualification remain open"
+  ],
+  "artifactSHA256": {}
+}

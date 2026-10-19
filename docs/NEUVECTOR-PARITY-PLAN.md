@@ -1,7 +1,7 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-19** (Cilium profile-specific dataplane evidence; Helm 130 remains deployed; broader parity remains active)
+Last reconciled: **2026-10-19** (Helm 131 default-Cilium identity-aware communication protection; broader parity remains active)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -17,7 +17,34 @@ stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
 
 
-## Cilium communication qualification and default-profile blocker
+## Default-Cilium backend identity protection (Helm 131)
+
+Helm 131 deploys operator/applier source `bb2d19b4354da97a29419b91401f0f240b8b58e8`
+as digest `sha256:8b027d505cf4946bdbd5afc92a7446f9305e92bbf4e0c15e67a7bd40237d8e3b`.
+Required managed pod backends now receive port-limited Cilium endpoint selectors
+from verified endpoint ownership/IP and actual security identity inventories.
+Before writing, the applier checks all matching identities, including label
+supersets, and refuses any exception that would admit unrelated endpoints.
+Incomplete identity inventory refuses the write. Added Cilium RBAC is list-only.
+
+This resolves the CIDR-only failure below for the tested default Cilium profile.
+Two hosted default-Cilium 1.20.3 runs each passed 29 traffic checks plus explicit
+shared-identity refusal before a write, DNS/API transport and blocked DNS metrics.
+The native live proof also passed 29 checks and cleanup. Repeated regression
+passed 482 executions, with two opt-in helper skips subsequently exercised live.
+The image gate and live three-engine scan found zero findings (170 packages).
+All 14 container identities, controllers and authenticated API checks passed after
+the rollout. Six authorization reviews verified cluster-wide inventory reads and
+refusal of Cilium inventory mutation, secret reads and service deletion.
+
+The live installation remains on native CNI. Cilium CRD publication is required;
+identity churn is not an atomic transaction, and multi-node, IPv6, kube-proxy
+replacement, Calico and existing unsafe/third-party denies remain open. No broad
+parity checkbox is closed. See `docs/network-policy-self-protection.md` and
+`deploy/dev/registry-release/validation-cilium-identities-20261019.json` for the
+full evidence, source/build distinction, test runs and artifact hashes.
+
+## Earlier Cilium profile experiment (default failure fixed in Helm 131)
 
 The hosted actual-applier proof now exercises disposable Cilium 1.20.3 on kind
 v0.33.0 / Kubernetes v1.35.8. Default CIDR matching failed at the required port
@@ -27,9 +54,9 @@ all 29 traffic probes, DNS/API transport, DNS-metrics isolation and recovery
 passed. Both runs removed their owned resources. This is single-node IPv4 with
 kube-proxy enabled, not complete CNI or runtime dataplane qualification.
 
-The default profile remains a blocker: identity-aware preservation or an enforced
-compatibility preflight is still required. The applier currently does not verify
-the pod-CIDR prerequisite. No live CNI configuration or deployment was changed.
+At that stage the default profile remained a blocker. Helm 131 now preserves
+managed pod identities without requiring pod-CIDR matching in the tested profile.
+The earlier experiment did not change the live CNI configuration or deployment.
 See `docs/network-policy-self-protection.md` and
 `deploy/dev/registry-release/validation-cilium-communication-20261019.json` for
 run URLs, effective policies, individual probes and artifact hashes. The helper
@@ -39,7 +66,7 @@ checkbox is closed by this narrower evidence.
 
 ## Application-side system communication protection (Helm 130)
 
-Operator/applier source `af4abc345484cf26d2b3122a8835355de441095e` is deployed
+Operator/applier source `af4abc345484cf26d2b3122a8835355de441095e` was deployed
 as Helm 130. Direct protected-namespace refusals remain, and application-side
 policies now preserve trusted installation/admin-added namespace peers plus
 required service/backend protocol and destination ports. Kubernetes core

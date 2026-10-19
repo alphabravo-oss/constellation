@@ -27,7 +27,9 @@ endpoint exclusions. On the application side:
 - Cilium preserves empty directions and explicit default-deny settings. Trusted installation
   peers and required service ports are added to affected directions, including deny-only
   directions. Node identities receive only declared service/backend destination
-  ports for egress, never unrestricted node egress. Node-origin ingress follows
+  ports for egress, never unrestricted node egress. Managed pod backends additionally
+  use verified Cilium security identities and declared ports, so default CIDR
+  matching does not break DNS or shared pod dependencies. Node-origin ingress follows
   the native Kubernetes trust boundary.
 - Explicit Cilium CIDR denies are refused when they overlap any protected endpoint.
   IPv4-mapped CIDRs, unbounded denies, other deny-selector forms and `fromRequires`/
@@ -86,8 +88,9 @@ not reached, so this run makes no claim about their outcome.
 
 Cilium's [documented CIDR semantics](https://docs.cilium.io/en/v1.20/security/policy/layer3/)
 exclude managed pod peers in the default profile. Selectorless `toServices` rules
-also translate to CIDRs, so changing that field alone is insufficient. Default
-Cilium system-communication protection is **not qualified**. The workflow's
+also translate to CIDRs, so changing that field alone is insufficient. This
+established that the original CIDR-only
+implementation was **not qualified** under default Cilium settings. The workflow's
 manual `cidr_mode=pods` input permits a separate explicit-profile experiment;
 a passing explicit profile must not be represented as a default-profile fix.
 
@@ -97,13 +100,53 @@ All 29 traffic probes passed, as did DNS, API transport, blocked DNS metrics and
 recovery after policy deletion. Both fixture namespaces and the kind cluster
 were removed. This qualifies only this single-node IPv4, kube-proxy-enabled
 Cilium 1.20.3 profile. It does not qualify kube-proxy replacement, multi-node,
-other versions, or the default profile. The applier does not yet verify this
-Cilium prerequisite before applying a policy; that enforcement gap remains open.
+other versions, or the default profile. That experiment did not fix the
+default-profile gap; the identity-aware change
+below subsequently addresses it.
 Machine-readable evidence and artifact hashes are in
 `deploy/dev/registry-release/validation-cilium-communication-20261019.json`.
 
-Third-party policies,
-CNI configuration, external firewall rules and availability failures can still
+
+### Identity-aware protection under default Cilium settings (Helm 131)
+
+Helm 131 deploys operator/applier source `bb2d19b4354da97a29419b91401f0f240b8b58e8`.
+The [regression run](https://github.com/alphabravo-oss/constellation/actions/runs/39248982471)
+passed 482 executions with two opt-in helper skips. Default Cilium runs
+[39248503840](https://github.com/alphabravo-oss/constellation/actions/runs/39248503840)
+and [39248982479](https://github.com/alphabravo-oss/constellation/actions/runs/39248982479)
+each passed 29 traffic checks plus the shared-identity refusal, DNS/API and
+DNS-metrics checks. The native live proof also passed its 29 checks and cleanup.
+Evidence is in `deploy/dev/registry-release/validation-cilium-identities-20261019.json`.
+
+The applier now reads complete paginated `CiliumEndpoint` and `CiliumIdentity`
+inventories when required service addresses belong to managed pods. It verifies
+that each backend endpoint belongs to the current Pod UID and contains the
+observed IP, then obtains the actual identity's security labels. Kubernetes
+presentation labels are not a substitute for Cilium identity data. Host-network
+and external addresses retain their existing port-limited treatment.
+
+Required pod access uses `toEndpoints` plus the exact declared protocol/port.
+Before writing, every observed Cilium endpoint whose identity matches those
+labels (including identities with additional labels) must already be authorized
+for that port or belong to a trusted communication namespace. Otherwise the
+write is refused explicitly. Empty/missing identities, ownership/address changes,
+failed inventory pages and repeated pagination tokens also refuse the write.
+The new RBAC permissions are list-only for the two Cilium resource types.
+
+The default-profile proof includes a pod that shares the dependency identity but
+is not a declared backend: the attempted exception must be refused and no policy
+created. After deleting that pod, the same apply path must preserve the required
+shared port, DNS and API transport while blocking ordinary ingress/egress,
+unrelated NodePorts and DNS metrics. The live proof checks recovery after deletion.
+
+Cilium endpoint/identity CRD publication must be enabled. Missing, initializing or
+unresolvable identities cause refusal and retry, not a wider exception. Cilium
+security identities remain a label-based trust boundary: an endpoint introduced
+after the snapshot can join an identity. Kubernetes and Cilium reads are not an
+atomic transaction; inventory churn, alternate identity backends without these
+CRDs, multi-node, IPv6 and kube-proxy replacement need separate qualification.
+
+Third-party policies, CNI configuration, external firewall rules and availability failures can still
 block communication. Address-based exceptions trust the declared network endpoint;
 shared external IP/port hosting is not an application-layer identity boundary.
 Inventory is refreshed on policy reconciliation, not in a distributed transaction

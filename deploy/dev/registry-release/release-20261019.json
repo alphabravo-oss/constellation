@@ -12,10 +12,10 @@
     {
       "name": "operator",
       "role": "operator",
-      "source": "constellation/operator:candidate-af4abc345484cf26d2b3122a8835355de441095e",
-      "digest": "sha256:479a0b67c7dccbdd9ce5cbd8f69b7ee4fe603c8eef49e7a80570357a2212a7e5",
+      "source": "constellation/operator:candidate-bb2d19b4354da97a29419b91401f0f240b8b58e8",
+      "digest": "sha256:8b027d505cf4946bdbd5afc92a7446f9305e92bbf4e0c15e67a7bd40237d8e3b",
       "repository": "ghcr.io/alphabravo-oss/constellation/operator",
-      "tag": "dev-479a0b67c7dccbdd9ce5cbd8f69b7ee4fe603c8eef49e7a80570357a2212a7e5"
+      "tag": "dev-8b027d505cf4946bdbd5afc92a7446f9305e92bbf4e0c15e67a7bd40237d8e3b"
     },
     {
       "name": "scanner",
@@ -193,7 +193,7 @@
     "operator": {
       "image": {
         "repository": "ghcr.io/alphabravo-oss/constellation/operator",
-        "digest": "sha256:cae3765afeeedd1abc23647d166bf536cc4b01fe0b0ff54af6cdb4a2f6d9f15a"
+        "digest": "sha256:8b027d505cf4946bdbd5afc92a7446f9305e92bbf4e0c15e67a7bd40237d8e3b"
       }
     },
     "scanner": {

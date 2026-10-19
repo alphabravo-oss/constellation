@@ -92,7 +92,7 @@
   "operator": {
     "image": {
       "repository": "ghcr.io/alphabravo-oss/constellation/operator",
-      "digest": "sha256:479a0b67c7dccbdd9ce5cbd8f69b7ee4fe603c8eef49e7a80570357a2212a7e5"
+      "digest": "sha256:8b027d505cf4946bdbd5afc92a7446f9305e92bbf4e0c15e67a7bd40237d8e3b"
     }
   },
   "scanner": {
