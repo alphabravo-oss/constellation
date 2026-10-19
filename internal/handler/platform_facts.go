@@ -96,15 +96,16 @@ type PlatformEvidenceView struct {
 }
 
 type PlatformScanJobView struct {
-	ID             uuid.UUID               `json:"id"`
-	Status         string                  `json:"status"`
-	Error          string                  `json:"error,omitempty"`
-	PackageCount   int                     `json:"package_count,omitempty"`
-	FindingCount   int                     `json:"finding_count,omitempty"`
-	BundleMetadata *scanner.BundleMetadata `json:"bundle_metadata,omitempty"`
-	RequestedAt    time.Time               `json:"requested_at"`
-	ClaimedAt      *time.Time              `json:"claimed_at,omitempty"`
-	FinishedAt     *time.Time              `json:"finished_at,omitempty"`
+	ClaimedInventoryHash string                  `json:"claimed_inventory_hash,omitempty"`
+	ID                   uuid.UUID               `json:"id"`
+	Status               string                  `json:"status"`
+	Error                string                  `json:"error,omitempty"`
+	PackageCount         int                     `json:"package_count,omitempty"`
+	FindingCount         int                     `json:"finding_count,omitempty"`
+	BundleMetadata       *scanner.BundleMetadata `json:"bundle_metadata,omitempty"`
+	RequestedAt          time.Time               `json:"requested_at"`
+	ClaimedAt            *time.Time              `json:"claimed_at,omitempty"`
+	FinishedAt           *time.Time              `json:"finished_at,omitempty"`
 }
 
 type PlatformFindingsSummary struct {
@@ -373,7 +374,7 @@ func (h *PlatformFactsHandler) Get(w http.ResponseWriter, r *http.Request) {
 		ClusterID:       clusterID,
 		ClusterName:     clusterName,
 		Distro:          distro,
-		Status:          platformFactsStatus(facts, evidence, job),
+		Status:          platformFactsStatus(facts, target, evidence, job),
 		Facts:           facts,
 		ScanTarget:      target,
 		Evidence:        evidence,
@@ -537,12 +538,12 @@ func (h *PlatformFactsHandler) loadPlatformJob(r *http.Request, orgID, targetID 
 	var bundleRaw []byte
 	err := h.db.Pool().QueryRow(r.Context(), `
 SELECT id, status, COALESCE(error, ''), COALESCE(package_count, 0), COALESCE(finding_count, 0),
-       COALESCE(bundle_metadata, '{}'::jsonb), requested_at, claimed_at, finished_at
+       COALESCE(bundle_metadata, '{}'::jsonb), requested_at, claimed_at, finished_at, COALESCE(claimed_inventory_hash, '')
   FROM scan_jobs
  WHERE org_id = $1 AND target_id = $2
  ORDER BY requested_at DESC
  LIMIT 1`, orgID, targetID).Scan(&out.ID, &out.Status, &out.Error, &out.PackageCount, &out.FindingCount,
-		&bundleRaw, &out.RequestedAt, &out.ClaimedAt, &out.FinishedAt)
+		&bundleRaw, &out.RequestedAt, &out.ClaimedAt, &out.FinishedAt, &out.ClaimedInventoryHash)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -754,18 +755,31 @@ func nullableUUID(id uuid.UUID) any {
 	return id
 }
 
-func platformFactsStatus(facts *ClusterPlatformFacts, evidence *PlatformEvidenceView, job *PlatformScanJobView) string {
+func platformFactsStatus(facts *ClusterPlatformFacts, target *PlatformScanTargetView, evidence *PlatformEvidenceView, job *PlatformScanJobView) string {
 	if facts == nil {
 		return "missing"
 	}
-	if job != nil {
-		if job.Status == "completed" {
-			return "scanned"
-		}
-		return job.Status
+	if evidence == nil {
+		return "reported"
 	}
-	if evidence != nil {
+	if target == nil || evidence.InventoryHash == "" || target.InventoryHash != evidence.InventoryHash {
+		return "unverified"
+	}
+	if job == nil {
 		return "ready"
 	}
-	return "reported"
+	// Pending work has not selected its inventory yet. The claim snapshots it.
+	if job.Status == "pending" {
+		return "pending"
+	}
+	if job.ClaimedInventoryHash == "" {
+		return "unverified"
+	}
+	if job.ClaimedInventoryHash != evidence.InventoryHash {
+		return "outdated"
+	}
+	if job.Status == "completed" {
+		return "scanned"
+	}
+	return job.Status
 }

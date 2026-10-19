@@ -56,3 +56,18 @@ an empty or partial inventory. Collection has a shared 20-second deadline. The
 next reconciliation retries, and the existing observed timestamp remains unchanged
 until a complete report succeeds. This is a complete read of each resource list,
 not an atomic snapshot across Kubernetes resource types.
+
+## Scan status and inventory changes
+
+Scan jobs record `claimed_inventory_hash` from the owned target in the same SQL
+statement that claims the job. A target update cannot rewrite that claimed
+identity; a retry records the newly selected inventory. Migration 183 leaves older
+jobs unverified instead of copying today's target identity into historical jobs.
+
+The platform response returns this hash on `latest_job`. Its top-level status is
+`scanned` only for a completed job matching the current target and package evidence.
+A different claimed hash is `outdated`; an absent hash or inconsistent evidence is
+`unverified`. Pending jobs have not selected inventory yet and remain `pending`.
+The advanced job status still describes that individual job, so it can legitimately
+say `completed` while the overall platform status is `outdated`. Historical finding
+counts remain historical/open records and are not proof of a current scan.

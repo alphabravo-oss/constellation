@@ -497,6 +497,7 @@ UPDATE scan_jobs sj
    SET status           = 'running',
        worker_id        = $1,
        claimed_at       = NOW(),
+       claimed_inventory_hash = (SELECT st.inventory_hash FROM scan_targets st WHERE st.id = sj.target_id AND st.org_id = sj.org_id),
        lease_expires_at = NOW() + $3::interval,
        attempt_count    = COALESCE(attempt_count, 0) + 1,
        last_attempt_at  = NOW(),
