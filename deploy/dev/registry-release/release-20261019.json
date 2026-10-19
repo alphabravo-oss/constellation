@@ -44,10 +44,10 @@
     {
       "name": "operator",
       "role": "operator",
-      "source": "constellation/operator:recovery-20261017-034f2baf49c1",
-      "digest": "sha256:3db722619dd78102dc777bf2bb44a6db4544db45633bfae274197fcaf5153ee3",
+      "source": "constellation/operator:netpolicy-protection-20261019-9216c91",
+      "digest": "sha256:6e61e659a6dd2a959949c8538c636dd1c6acec164e0af91f04884c3405f91a1a",
       "repository": "ghcr.io/alphabravo-oss/constellation/operator",
-      "tag": "dev-3db722619dd78102dc777bf2bb44a6db4544db45633bfae274197fcaf5153ee3"
+      "tag": "dev-6e61e659a6dd2a959949c8538c636dd1c6acec164e0af91f04884c3405f91a1a"
     },
     {
       "name": "scanner",

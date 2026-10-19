@@ -32,7 +32,7 @@
   "operator": {
     "image": {
       "repository": "ghcr.io/alphabravo-oss/constellation/operator",
-      "digest": "sha256:3db722619dd78102dc777bf2bb44a6db4544db45633bfae274197fcaf5153ee3"
+      "digest": "sha256:6e61e659a6dd2a959949c8538c636dd1c6acec164e0af91f04884c3405f91a1a"
     }
   },
   "scanner": {
@@ -46,5 +46,10 @@
       "repository": "ghcr.io/alphabravo-oss/constellation/migrate",
       "digest": "sha256:d8f0975552412ace65a4c9fc21085524e57fb99a2e5e5a80069e21c1afa2c5c8"
     }
+  },
+  "networkPolicyApplier": {
+    "protectedNamespaces": [
+      "cnpg-system"
+    ]
   }
 }
