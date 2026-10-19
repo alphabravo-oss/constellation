@@ -742,6 +742,14 @@ func main() {
 	killProcEnabled := responseKillProcessEnabledFromEnv(os.Getenv("CONSTELLATION_RESPONSE_KILL_PROCESS"))
 	killSessEnabled := responseKillSessionEnabledFromEnv(os.Getenv("CONSTELLATION_RESPONSE_KILL_SESSION"))
 	if uploadEnabled && (killProcEnabled || killSessEnabled) {
+		var sessionProtection func(context.Context, responseAction) string
+		if killSessEnabled {
+			var err error
+			sessionProtection, err = newSessionProtection(protectedNS)
+			if err != nil {
+				logger.Error("session protection unavailable; session actions will be refused", slog.String("err", err.Error()))
+			}
+		}
 		resp := newResponder(responderConfig{
 			Node:                node,
 			HostRoot:            hostScanHostRootFromEnv(),
@@ -750,6 +758,7 @@ func main() {
 			Workloads:           workloads,
 			Protected:           protectedNS,
 			currentProcessStart: a.ProcessStartIdentity,
+			sessionProtection:   sessionProtection,
 			Logger:              logger,
 		})
 		respWorker := &responseActionWorker{

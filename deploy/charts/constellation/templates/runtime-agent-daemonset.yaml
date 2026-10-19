@@ -19,6 +19,7 @@ spec:
     spec:
       {{- include "constellation.pullSecrets" . | nindent 6 }}
       hostPID: true
+      serviceAccountName: {{ include "constellation.fullname" . }}-runtime-agent
       hostNetwork: true
       # hostNetwork inherits the host's resolv.conf by default, which
       # can't resolve cluster Services like "constellation-api". Force

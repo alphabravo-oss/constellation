@@ -84,6 +84,7 @@ type responderConfig struct {
 	conntrackRun        func(context.Context, []string) ([]byte, error)
 	openProcess         func(int) (responseProcessHandle, error)
 	currentProcessStart func(uint32) (uint64, bool)
+	sessionProtection   func(context.Context, responseAction) string
 }
 
 type responder struct {
@@ -191,6 +192,12 @@ func (r *responder) killSession(ctx context.Context, a responseAction) (bool, st
 	}
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	if r.cfg.sessionProtection == nil {
+		return false, "session workload protection unavailable"
+	}
+	if reason := r.cfg.sessionProtection(cctx, a); reason != "" {
+		return false, reason
+	}
 	out, err := r.cfg.conntrackRun(cctx, args)
 	if err != nil {
 		// conntrack exits non-zero when no matching flow exists; treat "0 flows

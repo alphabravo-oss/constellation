@@ -217,7 +217,7 @@ func runResponderProcessCase(t *testing.T, tc responderProcessCase) {
 func TestResponderExecute_KillSessionRequiresExactTuple(t *testing.T) {
 	calls := 0
 	var received []string
-	r := newResponder(responderConfig{KillSessionEnabled: true, conntrackRun: func(_ context.Context, args []string) ([]byte, error) {
+	r := newResponder(responderConfig{KillSessionEnabled: true, sessionProtection: func(context.Context, responseAction) string { return "" }, conntrackRun: func(_ context.Context, args []string) ([]byte, error) {
 		calls++
 		received = append([]string{}, args...)
 		return nil, nil
