@@ -1,7 +1,7 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-19** (Helm 133 frontend regression fixes and hosted candidate validation; broader parity remains active)
+Last reconciled: **2026-10-19** (Helm 133 live; compliance signer cancellation bounds verified in source; broader parity remains active)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -16,6 +16,30 @@ understand the result, and prove that the control is enforced. Constellation's
 stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
 
+
+## Compliance signer cancellation bounds (source verified)
+
+Source `d3f564005e68ce1c9bbb6f72dd6e208aab7af130` prevents a stalled cosign
+process from indefinitely holding scheduler startup or report signing. Key
+generation uses the shutdown context with a 30-second limit; signing has a
+two-minute limit and honors earlier caller deadlines. Subprocess waits are
+bounded, cancellation remains inspectable as a context error, and canceled
+operations do not publish a key or return a successful signature. Key-generation
+output is discarded instead of accumulated in an unbounded buffer.
+
+[Hosted run 39255635763](https://github.com/alphabravo-oss/constellation/actions/runs/39255635763)
+passed 158 race/shuffle executions against a fresh database, including both
+repetitions of the deadline tests and configured-signing-failure delivery guards.
+Two repetitions of an unrelated root-only directory ownership test skipped.
+No security alerts were suppressed. The existing explicit checksum fallback when
+bootstrap cannot configure a signer is unchanged; failure of an already configured
+signer still prevents delivery of that report.
+
+This standalone scheduler is not installed in the live cluster or packaged by
+the current Helm chart. Helm 133 remains deployed; source evidence does not close
+scheduler launch, shared storage, signing or live delivery requirements. The
+broader security/quality gates remain open and parity remains **66 checked / 88
+open**. Evidence: `deploy/dev/registry-release/validation-compliance-signing-20261019.json`.
 
 ## Frontend regression recovery (Helm 133)
 

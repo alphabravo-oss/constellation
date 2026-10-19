@@ -1,0 +1,141 @@
+{
+  "date": "2026-10-19",
+  "sourceCommit": "d3f564005e68ce1c9bbb6f72dd6e208aab7af130",
+  "run": "https://github.com/alphabravo-oss/constellation/actions/runs/39255635763",
+  "conclusion": "success",
+  "change": "Bound compliance cosign key generation to 30 seconds and signing to two minutes, preserving earlier caller cancellation; bounded subprocess wait and no successful signature after cancellation.",
+  "regression": {
+    "mode": "fresh database, race detector, shuffled tests, count=2",
+    "passedExecutions": 158,
+    "skippedExecutions": 2,
+    "skipReason": "TestManagedDirectoryRejectsAnotherOwner requires root; both repetitions skipped on hosted unprivileged runner.",
+    "reportSha256": "e5e372accea7f1abd8adfba69c581d44d7cd830d60d9cc132036b19cb9011d79",
+    "selectedResults": [
+      {
+        "Package": "github.com/alphabravocompany/constellation/cmd/constellation-compliance-scheduler",
+        "Test": "TestCosignBootstrapDeadlineDoesNotPublishKey",
+        "Action": "pass",
+        "Elapsed": 0.25
+      },
+      {
+        "Package": "github.com/alphabravocompany/constellation/cmd/constellation-compliance-scheduler",
+        "Test": "TestNewCosignKeypairPublishedWithExplicitPermissions",
+        "Action": "pass",
+        "Elapsed": 0.12
+      },
+      {
+        "Package": "github.com/alphabravocompany/constellation/cmd/constellation-compliance-scheduler",
+        "Test": "TestCosignSigningDeadlineDoesNotProduceSignatureOrChecksumFallback",
+        "Action": "pass",
+        "Elapsed": 0.25
+      },
+      {
+        "Package": "github.com/alphabravocompany/constellation/cmd/constellation-compliance-scheduler",
+        "Test": "TestCosignBootstrapHonorsCancellationBeforeUsingConfiguredKey",
+        "Action": "pass",
+        "Elapsed": 0
+      },
+      {
+        "Package": "github.com/alphabravocompany/constellation/cmd/constellation-compliance-scheduler",
+        "Test": "TestConfiguredSigningFailureFailsRunBeforeEveryDelivery/signer_error",
+        "Action": "pass",
+        "Elapsed": 0.05
+      },
+      {
+        "Package": "github.com/alphabravocompany/constellation/cmd/constellation-compliance-scheduler",
+        "Test": "TestConfiguredSigningFailureFailsRunBeforeEveryDelivery/empty_signature",
+        "Action": "pass",
+        "Elapsed": 0.03
+      },
+      {
+        "Package": "github.com/alphabravocompany/constellation/cmd/constellation-compliance-scheduler",
+        "Test": "TestConfiguredSigningFailureFailsRunBeforeEveryDelivery/blank_signature",
+        "Action": "pass",
+        "Elapsed": 0.03
+      },
+      {
+        "Package": "github.com/alphabravocompany/constellation/cmd/constellation-compliance-scheduler",
+        "Test": "TestConfiguredSigningFailureFailsRunBeforeEveryDelivery",
+        "Action": "pass",
+        "Elapsed": 0.15
+      },
+      {
+        "Package": "github.com/alphabravocompany/constellation/cmd/constellation-compliance-scheduler",
+        "Test": "TestCosignBootstrapDeadlineDoesNotPublishKey",
+        "Action": "pass",
+        "Elapsed": 0.25
+      },
+      {
+        "Package": "github.com/alphabravocompany/constellation/cmd/constellation-compliance-scheduler",
+        "Test": "TestNewCosignKeypairPublishedWithExplicitPermissions",
+        "Action": "pass",
+        "Elapsed": 0
+      },
+      {
+        "Package": "github.com/alphabravocompany/constellation/cmd/constellation-compliance-scheduler",
+        "Test": "TestCosignSigningDeadlineDoesNotProduceSignatureOrChecksumFallback",
+        "Action": "pass",
+        "Elapsed": 0.25
+      },
+      {
+        "Package": "github.com/alphabravocompany/constellation/cmd/constellation-compliance-scheduler",
+        "Test": "TestCosignBootstrapHonorsCancellationBeforeUsingConfiguredKey",
+        "Action": "pass",
+        "Elapsed": 0
+      },
+      {
+        "Package": "github.com/alphabravocompany/constellation/cmd/constellation-compliance-scheduler",
+        "Test": "TestConfiguredSigningFailureFailsRunBeforeEveryDelivery/signer_error",
+        "Action": "pass",
+        "Elapsed": 0.05
+      },
+      {
+        "Package": "github.com/alphabravocompany/constellation/cmd/constellation-compliance-scheduler",
+        "Test": "TestConfiguredSigningFailureFailsRunBeforeEveryDelivery/empty_signature",
+        "Action": "pass",
+        "Elapsed": 0.03
+      },
+      {
+        "Package": "github.com/alphabravocompany/constellation/cmd/constellation-compliance-scheduler",
+        "Test": "TestConfiguredSigningFailureFailsRunBeforeEveryDelivery/blank_signature",
+        "Action": "pass",
+        "Elapsed": 0.03
+      },
+      {
+        "Package": "github.com/alphabravocompany/constellation/cmd/constellation-compliance-scheduler",
+        "Test": "TestConfiguredSigningFailureFailsRunBeforeEveryDelivery",
+        "Action": "pass",
+        "Elapsed": 0.15
+      },
+      {
+        "Package": "github.com/alphabravocompany/constellation/internal/securefiles",
+        "Test": "TestManagedDirectoryRejectsAnotherOwner",
+        "Action": "skip",
+        "Elapsed": 0
+      },
+      {
+        "Package": "github.com/alphabravocompany/constellation/internal/securefiles",
+        "Test": "TestManagedDirectoryRejectsAnotherOwner",
+        "Action": "skip",
+        "Elapsed": 0
+      }
+    ]
+  },
+  "deployment": {
+    "helmRevision": 133,
+    "status": "deployed",
+    "changed": false,
+    "reason": "Standalone compliance scheduler is not installed in the current cluster or packaged by the current chart; source verification does not prove live scheduled delivery."
+  },
+  "securityTriage": {
+    "sourceRun": 39254338640,
+    "gosecFindings": 137,
+    "suppressed": 0,
+    "note": "Static alerts were inspected; this corrects a confirmed unbounded subprocess availability issue without claiming all alerts are vulnerabilities or that the security gate passes."
+  },
+  "limits": [
+    "No live scheduler rollout or external report delivery performed.",
+    "Existing checksum fallback when bootstrap cannot configure a signer is unchanged; a configured signer failing during a report still fails that report.",
+    "Other security/quality findings and broad NeuVector parity remain open."
+  ]
+}
