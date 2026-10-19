@@ -66,7 +66,43 @@ Every fixture namespace is uniquely owned and removed afterward. Production
 runtime response/kill flags are not enabled by this probe.
 
 Native live evidence does not qualify Cilium or Calico dataplanes. Their rule
-construction tests are separate from full CNI qualification. Third-party policies,
+construction tests are separate from full CNI qualification.
+
+### Cilium profile qualification (2026-10-19)
+
+The hosted `Cilium communication validation` workflow now builds the actual
+apply-path helper and creates a disposable kind v0.33.0 / Kubernetes v1.35.8 /
+Cilium v1.20.3 cluster. It uses kube-proxy, default CIDR matching, pinned node and
+fixture images, positive traffic controls, and owned-namespace cleanup. It does
+not install or change Cilium in the live Constellation cluster.
+
+[Run 39247081837](https://github.com/alphabravo-oss/constellation/actions/runs/39247081837)
+**failed** at `protected-0-sharedRequiredPort`. All six baseline probes and the
+protected pod/service probes succeeded; the required port 18081 on the shared
+pod endpoint timed out after policy application. Namespace cleanup completed.
+The Kubernetes API accepted the policy and its protection annotation was present;
+neither establishes dataplane protection. Later DNS/API and recovery probes were
+not reached, so this run makes no claim about their outcome.
+
+Cilium's [documented CIDR semantics](https://docs.cilium.io/en/v1.20/security/policy/layer3/)
+exclude managed pod peers in the default profile. Selectorless `toServices` rules
+also translate to CIDRs, so changing that field alone is insufficient. Default
+Cilium system-communication protection is **not qualified**. The workflow's
+manual `cidr_mode=pods` input permits a separate explicit-profile experiment;
+a passing explicit profile must not be represented as a default-profile fix.
+
+[Run 39247533627](https://github.com/alphabravo-oss/constellation/actions/runs/39247533627)
+used the same applier implementation and probes with `policyCIDRMatchMode: [pods]`.
+All 29 traffic probes passed, as did DNS, API transport, blocked DNS metrics and
+recovery after policy deletion. Both fixture namespaces and the kind cluster
+were removed. This qualifies only this single-node IPv4, kube-proxy-enabled
+Cilium 1.20.3 profile. It does not qualify kube-proxy replacement, multi-node,
+other versions, or the default profile. The applier does not yet verify this
+Cilium prerequisite before applying a policy; that enforcement gap remains open.
+Machine-readable evidence and artifact hashes are in
+`deploy/dev/registry-release/validation-cilium-communication-20261019.json`.
+
+Third-party policies,
 CNI configuration, external firewall rules and availability failures can still
 block communication. Address-based exceptions trust the declared network endpoint;
 shared external IP/port hosting is not an application-layer identity boundary.

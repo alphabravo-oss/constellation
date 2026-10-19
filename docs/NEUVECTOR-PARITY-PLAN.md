@@ -1,7 +1,7 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-19** (Helm 130 native network-policy system communication protection; broader parity remains active)
+Last reconciled: **2026-10-19** (Cilium profile-specific dataplane evidence; Helm 130 remains deployed; broader parity remains active)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -16,6 +16,26 @@ understand the result, and prove that the control is enforced. Constellation's
 stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
 
+
+## Cilium communication qualification and default-profile blocker
+
+The hosted actual-applier proof now exercises disposable Cilium 1.20.3 on kind
+v0.33.0 / Kubernetes v1.35.8. Default CIDR matching failed at the required port
+on a shared pod endpoint after six successful baseline checks and successful
+protected pod/service checks. With only `policyCIDRMatchMode: [pods]` changed,
+all 29 traffic probes, DNS/API transport, DNS-metrics isolation and recovery
+passed. Both runs removed their owned resources. This is single-node IPv4 with
+kube-proxy enabled, not complete CNI or runtime dataplane qualification.
+
+The default profile remains a blocker: identity-aware preservation or an enforced
+compatibility preflight is still required. The applier currently does not verify
+the pod-CIDR prerequisite. No live CNI configuration or deployment was changed.
+See `docs/network-policy-self-protection.md` and
+`deploy/dev/registry-release/validation-cilium-communication-20261019.json` for
+run URLs, effective policies, individual probes and artifact hashes. The helper
+change also passed 456 regression executions with two opt-in live-helper skips;
+the helper was then exercised explicitly in the hosted CNI runs. No broad parity
+checkbox is closed by this narrower evidence.
 
 ## Application-side system communication protection (Helm 130)
 
