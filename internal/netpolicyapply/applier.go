@@ -84,18 +84,24 @@ type ResourceClient interface {
 type KubernetesResourceClient struct {
 	Client       dynamic.Interface
 	FieldManager string
+	Protection   *Protection
 }
 
 func (c KubernetesResourceClient) Apply(ctx context.Context, resource ManifestResource, manifestJSON []byte) error {
 	if c.Client == nil {
 		return errors.New("kubernetes dynamic client is nil")
 	}
+	var err error
+	manifestJSON, err = c.Protection.Guard(resource, manifestJSON)
+	if err != nil {
+		return err
+	}
 	manager := strings.TrimSpace(c.FieldManager)
 	if manager == "" {
 		manager = "constellation-netpolicy-applier"
 	}
 	force := true
-	_, err := resourceInterface(c.Client, resource).Patch(ctx, resource.Name, types.ApplyPatchType, manifestJSON, metav1.PatchOptions{
+	_, err = resourceInterface(c.Client, resource).Patch(ctx, resource.Name, types.ApplyPatchType, manifestJSON, metav1.PatchOptions{
 		FieldManager: manager,
 		Force:        &force,
 	})

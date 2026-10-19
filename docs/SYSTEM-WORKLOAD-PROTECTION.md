@@ -1,0 +1,46 @@
+# System workload visibility and enforcement
+
+The findings page and cluster landing page default to application scope, with an
+“Include Constellation system workloads” toggle. Shared images and unknown owners
+remain visible. This presentation classification never grants enforcement immunity.
+Scanning, findings retention, and alerts continue independently of the filter.
+Dashboard scope alignment and ownership of separately managed dependencies remain
+open work.
+
+## Network policy write boundary
+
+The network-policy applier protects its own namespace, obtained from the downward
+API, plus kube-system, kube-public, and kube-node-lease. Helm's
+`networkPolicyApplier.protectedNamespaces` adds dependency namespaces; it cannot
+remove the mandatory set. External invocation must supply
+`CONSTELLATION_POD_NAMESPACE` explicitly. Missing protection refuses writes.
+
+The Kubernetes client checks the parsed manifest identity and protection immediately
+before applying policies, covering lifecycle policies and direct enforcement actions.
+Native and Cilium policies targeting protected namespaces return an error before a
+Kubernetes write. Calico global policies preserve their namespace selector and add
+an AND condition requiring a namespace-name label and excluding the protected set.
+The original pod selector and policy rules are retained. Unbalanced selector grouping
+and ambiguous escape syntax are rejected before composition. Kubernetes still
+validates the selector grammar. The effective Calico namespace selector is narrower
+than the stored candidate by this mandatory exclusion.
+
+Policy deletion remains available so existing policies can be lifted. This guard
+protects policy targets; it does not exempt every application connection to a system
+service from an application policy. Application isolation can still disconnect an
+application from system services.
+
+Reference: https://docs.tigera.io/calico/latest/reference/resources/globalnetworkpolicy
+
+## Remaining protection review
+
+Admission excludes the installation namespace. Runtime process/file protections and
+session endpoint safeguards are implemented. The existing namespace-wide exclusions
+also protect unrelated workloads installed in those namespaces. Finer component
+identity protection remains open; UI classification labels are not sufficient proof.
+
+Remaining work includes quarantine API feedback, separately managed dependency
+configuration across admission/runtime/network enforcement, and a complete audit of
+all disruptive response paths. Calico selector transformation is tested at the client
+write boundary; live Calico/Cilium data-plane enforcement still requires their own
+cluster fixtures. The development cluster's native rollout does not prove those CNIs.

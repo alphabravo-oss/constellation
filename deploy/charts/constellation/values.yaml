@@ -269,6 +269,8 @@ operator:
 # applies/deletes the selected Kubernetes policy flavor in this cluster.
 networkPolicyApplier:
   enabled: true
+  # Additive only: own namespace and Kubernetes system namespaces are mandatory.
+  protectedNamespaces: []
   # native | cilium | calico. Native works on any CNI that enforces Kubernetes
   # NetworkPolicy; Cilium and Calico require their CRDs to be installed.
   flavor: native

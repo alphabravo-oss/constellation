@@ -102,7 +102,12 @@ func main() {
 		logger.Error("dynamic client", slog.String("err", err.Error()))
 		os.Exit(1)
 	}
-	client := netpolicyapply.KubernetesResourceClient{Client: dyn, FieldManager: "constellation-netpolicy-applier"}
+	protection, err := netpolicyapply.NewProtection(os.Getenv("CONSTELLATION_POD_NAMESPACE"), strings.Split(os.Getenv("CONSTELLATION_ENFORCEMENT_PROTECTED_NAMESPACES"), ","))
+	if err != nil {
+		logger.Error("network policy protection", slog.String("err", err.Error()))
+		os.Exit(2)
+	}
+	client := netpolicyapply.KubernetesResourceClient{Client: dyn, FieldManager: "constellation-netpolicy-applier", Protection: protection}
 
 	logger.Info("network policy applier starting",
 		slog.String("cluster_id", cfg.clusterID),
