@@ -57,7 +57,8 @@ helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
 constellation.roleImage returns the fully qualified image for a given role.
 
 Default convention: <image.registry>/<role>:<image.tag-or-appVersion>
-A role can override either the repository or tag via .Values.<role>.image.
+A role can override repository, tag, or digest via .Values.<role>.image.
+A digest takes precedence over tags and is specific to one role.
 
 Args: dict of "ctx" (root) and "role" (key under .Values, e.g. "api").
 The role name used in the default path is the kebab-case form of the key.
@@ -74,6 +75,7 @@ The role name used in the default path is the kebab-case form of the key.
 {{- if $ctx.Values.fips.enabled -}}{{- $registry = $ctx.Values.fips.registry -}}{{- end -}}
 {{- $repo := printf "%s/%s" $registry $rolePath -}}
 {{- $tag  := default $ctx.Chart.AppVersion $ctx.Values.image.tag -}}
+{{- $digest := "" -}}
 {{- if and $top (kindIs "map" $top) (hasKey $top "image") -}}
   {{- $img := index $top "image" -}}
   {{- if and (kindIs "map" $img) $img.repository -}}
@@ -82,8 +84,18 @@ The role name used in the default path is the kebab-case form of the key.
   {{- if and (kindIs "map" $img) $img.tag -}}
     {{- $tag = $img.tag -}}
   {{- end -}}
+  {{- if and (kindIs "map" $img) $img.digest -}}
+    {{- $digest = $img.digest -}}
+  {{- end -}}
 {{- end -}}
-{{- printf "%s:%s" $repo $tag -}}
+{{- if $digest -}}
+  {{- if not (regexMatch "^sha256:[a-f0-9]{64}$" $digest) -}}
+    {{- fail (printf "%s.image.digest must be a lowercase sha256 digest" $role) -}}
+  {{- end -}}
+  {{- printf "%s@%s" $repo $digest -}}
+{{- else -}}
+  {{- printf "%s:%s" $repo $tag -}}
+{{- end -}}
 {{- end -}}
 
 {{/*

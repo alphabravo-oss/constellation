@@ -12,7 +12,9 @@
 #
 # To pin every role to a specific build, set `image.tag` here. To override a
 # single role (e.g. canary a new scanner) set `<role>.image.repository` and/or
-# `<role>.image.tag`.
+# `<role>.image.tag`. For immutable deployments use `<role>.image.digest`
+# (sha256 plus 64 lowercase hex characters); it takes precedence over tags.
+# Digests are per-role because each role is a separate image.
 image:
   registry: ghcr.io/alphabravo-oss/constellation
   pullPolicy: IfNotPresent
