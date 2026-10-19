@@ -323,7 +323,7 @@ export function ClusterTile({ cluster }: { cluster: ClusterSummary }) {
 
       <details className="text-[11px] text-muted-foreground">
         <summary className="flex cursor-pointer items-center justify-between gap-2 rounded py-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
-          <span className={!freshExposure || (exposure?.unverified_occurrences ?? 0) > 0 ? "text-amber-500" : undefined}>
+          <span className={!freshExposure || (exposure?.unverified_occurrences ?? 0) > 0 ? "text-status-warning" : undefined}>
             {!freshExposure
               ? exposure?.inventory_status === "stale" ? "Inventory out of date" : "Inventory unavailable"
               : exposure.unverified_occurrences > 0 ? "Partial coverage" : "About these counts"}
