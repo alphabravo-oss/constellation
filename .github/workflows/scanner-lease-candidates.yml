@@ -11,7 +11,7 @@ on:
   push:
     branches: [main, 'implement/**']
     paths:
-      - deploy/dev/lease-validation/Dockerfile.migrate
+      - deploy/docker/Dockerfile.migrate
       - deploy/docker/goose/**
 
 permissions:
@@ -42,7 +42,7 @@ jobs:
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
-          file: ${{ matrix.role == 'migrate' && 'deploy/dev/lease-validation/Dockerfile.migrate' || format('deploy/docker/Dockerfile.{0}', matrix.role) }}
+          file: ${{ format('deploy/docker/Dockerfile.{0}', matrix.role) }}
           platforms: linux/amd64
           outputs: type=oci,dest=${{ runner.temp }}/image.tar
           tags: constellation/${{ matrix.role }}:candidate-${{ github.sha }}
