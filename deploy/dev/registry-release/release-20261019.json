@@ -44,10 +44,10 @@
     {
       "name": "operator",
       "role": "operator",
-      "source": "constellation/operator:enforcement-status-20261019-ff981b6",
-      "digest": "sha256:d2cadace5a9e99d347a124cfed94fda28527674e80390eef860dae0f4c7873ce",
+      "source": "constellation/operator:lifecycle-lock-20261019-aa88a1a",
+      "digest": "sha256:1e4e345666f9b1f6aa4bfbeb97925c7f378552b1d54d7717121684e2636aa47d",
       "repository": "ghcr.io/alphabravo-oss/constellation/operator",
-      "tag": "dev-d2cadace5a9e99d347a124cfed94fda28527674e80390eef860dae0f4c7873ce"
+      "tag": "dev-1e4e345666f9b1f6aa4bfbeb97925c7f378552b1d54d7717121684e2636aa47d"
     },
     {
       "name": "scanner",
