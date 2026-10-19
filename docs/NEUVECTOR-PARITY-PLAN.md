@@ -1,8 +1,8 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-19** (selected console contract has dated qualification;
-current follow-up awaits hosted verification, security and release work remains active)
+Last reconciled: **2026-10-19** (Helm 88 application rollout and schedule conflict
+qualification; container-image vulnerability reduction added to the backlog)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -16,6 +16,48 @@ helps an operator move from NeuVector, perform the equivalent security workflow,
 understand the result, and prove that the control is enforced. Constellation's
 stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
+
+
+## Current deployment and next hardening work (2026-10-19)
+
+Main development runs **Helm 88 / schema 180**, API and frontend source
+**ace2a49**, after completed CNPG backup `20261019T024500`. Scanner and runtime
+remain on ef0ca39; migration remains on 5b82b12. All seven Deployments and the
+runtime DaemonSet are ready. All 200 frontend files and the API binary match
+the built artifacts. API health/readiness return 200 and anonymous protected
+requests return 401. Public login renders the updated branding without JavaScript
+errors. Authenticated main-browser acceptance remains unverified: the bootstrap
+credential failed, and T3 could not attach the user's signed-in browser because
+of its sandbox error. Scheduler activation and enforcement configuration did not
+change. This application rollout reuses the previous OS image layers.
+
+The prior c9fcd11 hosted run passed 2,425 frontend tests, 285 browser checks and
+the backend suites, with four existing quality/security gates failed. The added
+schedule fix sends `expected_updated_at` and atomically conditions the server
+UPDATE on the loaded timestamp. A stale editor or concurrent writer receives
+409; the UI retains the draft and explains reopening. Eight PostgreSQL test
+executions (four cases twice, shuffled), all 80 schedule UI tests, eight browser
+checks, TypeScript and the production build pass. New full hosted CI is pending;
+these focused results do not replace it. Legacy clients may omit the explicit
+version, but still receive conflict protection between the handler read/write.
+
+- [ ] Reduce vulnerabilities in shipped Constellation and supporting images:
+  inventory exact running digests separately from historical pods/scans; establish
+  per-image OS and embedded-tool baselines with a dated vulnerability database;
+  refresh and pin bases, update bundled scanner tools, and remove unneeded runtime
+  packages; verify native enforcement, TLS, scanning and backup compatibility;
+  retain before/after SBOMs and scans and gate newly introduced fixable critical/high
+  findings. Do not count suppression or missing package metadata as remediation.
+
+Initial read-only triage finds substantial infrastructure findings in pgvector,
+kubectl, ingress-nginx and cert-manager as well as Constellation scanner images.
+Stored scanner critical/high findings identify Perl, util-linux, OpenSSL, gzip
+and libtasn1. The 15,535 stored vulnerability rows include historical image/pod
+records and are not a count of distinct vulnerabilities in current workloads.
+No reduction is claimed yet. The canonical backlog is now **66 checked / 88 open**;
+one image-hardening acceptance row was added and no parent gate was closed.
+
+The older checkpoints below retain their original results and limits.
 
 Exact source **ef0ca39** completes isolated qualification with **598** passing
 race/shuffle/count-two executions across three affected packages, two explicit
@@ -3340,7 +3382,7 @@ Unchecked parent items remain open until **all** their acceptance requirements
 are met. Code present is not the same as verified or release-ready. The older
 deficiency ledger includes findings that already have fixes; do not use its
 historical counts as a count of currently open defects.
-Acceptance backlog: **87 open** (selected console scope qualified and deployed
+Acceptance backlog: **88 open** (selected console scope qualified and deployed
 on schema177 above). Lease-scoped private-registry proof and
 live scanner revision/capacity visibility close two REG-1 items. The October 12 browser/FIPS CI gate closes one
 bounded item with local and hosted evidence. The September reconciliation reached 98;

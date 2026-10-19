@@ -2689,3 +2689,40 @@ reserve. Forecasts are 2,425 global frontend cases, 371 cases in eleven affected
 files, unchanged Timeline30 and 285 browser cases. Hosted qualification is
 required; none of these forecasts receives pass credit. No Go source, deployed
 payload, scheduler state or canonical acceptance count changes.
+
+
+### Helm 88 and schedule concurrency protection (2026-10-19)
+
+API and frontend source ace2a49 are deployed after fresh completed CNPG backup
+`constellation-pre-console-c9fcd11-20261019`, backup ID `20261019T024500`, stopped
+2026-10-19T02:52:33Z. Helm 88 is deployed and schema stays 180. Seven Deployments,
+the runtime DaemonSet and intended StatefulSet replicas are ready. The public
+login page loads the new branding without page errors; all 200 frontend file
+hashes and the running API binary match the artifacts. Health/readiness return
+200; anonymous auth/me and schedule-list requests return 401. The normal Helm
+upgrade retains the previous chart values except API/frontend image tags.
+Scheduler/enforcement remain unchanged. Existing base-image packages are inherited;
+this rollout does not claim an OS vulnerability reduction.
+
+The new schedule patch precondition rejects an outdated editor timestamp, and
+its UPDATE predicate rejects changes committed after the handler read. PostgreSQL
+regressions cover stale versions, no overwrite, one successful-update audit,
+foreign-organization rejection, and an actual blocked UPDATE behind a concurrent
+transaction. Four schedule patch/request cases pass twice in shuffled order;
+all 80 schedule UI cases and eight production-build browser cases pass. The UI
+retains failed drafts and gives conflict-specific guidance. TypeScript and Vite
+pass. Initial c9fcd11 typechecking hit an explicitly imposed 768 MiB heap limit;
+the 1536 MiB attempt passed. New full hosted CI remains pending.
+
+Evidence and logs: `/tmp/constellation-release-c9fcd11/`, including
+`deployment-verification.json`, `schedule-conflict-go-tests-final.log`,
+`schedule-conflict-ui-tests.log`, `conflict-browser.log`, and `helm-upgrade.log`.
+The directory also contains private Helm values and must not be published wholesale.
+The T3 browser remained unavailable after setup, with the AppArmor sandbox error;
+bootstrap login returned 401. The user's reported sign-in did not expose a tab to
+the tool. No authenticated main-browser acceptance is claimed.
+
+Read-only image triage is recorded in the canonical plan. Historical pods and
+image findings must be separated from exact running digests before stating current
+critical/high totals. Image hardening adds one open acceptance row (66 checked /
+88 open). Existing lint/gosec/history debt remains unwaived.
