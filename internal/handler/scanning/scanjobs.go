@@ -303,12 +303,36 @@ func (h *ScanJobs) Enqueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Registry provenance alone must not authorize credential release. Resolve the
+	// selected registry within the caller's organization before attaching it to
+	// the target consumed by the lease-bound credential endpoint.
+	var registryID *uuid.UUID
+	if req.SourceType == "registry" {
+		id, err := uuid.Parse(req.SourceRef)
+		if err != nil || req.TargetType != "image" {
+			jsonError(w, http.StatusBadRequest, "registry-sourced scans require an image target and registry UUID source_ref")
+			return
+		}
+		var exists bool
+		if err := h.db.Pool().QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM registries WHERE id=$1 AND org_id=$2)`, id, subj.OrgID).Scan(&exists); err != nil {
+			jsonError(w, http.StatusInternalServerError, "registry lookup failed")
+			return
+		}
+		if !exists {
+			jsonError(w, http.StatusNotFound, "registry not found")
+			return
+		}
+		req.SourceRef = id.String()
+		registryID = &id
+	}
+
 	target, err := h.upsertScanTarget(r.Context(), nil, subj.OrgID, handler.ScanTargetUpsert{
 		TargetType:      req.TargetType,
 		TargetRef:       req.TargetRef,
 		TargetClusterID: req.TargetClusterID,
 		SourceType:      req.SourceType,
 		SourceRef:       req.SourceRef,
+		RegistryID:      registryID,
 		ImageRef:        imageRefForTarget(req.TargetType, req.TargetRef, ""),
 		Platform:        req.Platform,
 		InventoryHash:   req.InventoryHash,
