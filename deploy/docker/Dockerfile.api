@@ -5,7 +5,7 @@
 # live in the scanner image, which receives jobs over HTTP from this API.
 
 ARG GO_VERSION=1.26.9
-ARG RUNTIME_IMAGE=debian:bookworm-slim
+ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian13:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3
 
 # -----------------------------------------------------------------------------
 # Build
@@ -19,25 +19,32 @@ ARG VERSION=dev
 ARG COMMIT=dev
 ARG BUILD_TIME=
 ENV CGO_ENABLED=0 GOOS=linux
-RUN go build -trimpath -ldflags="-s -w -X github.com/alphabravocompany/constellation/pkg/version.Version=${VERSION} -X github.com/alphabravocompany/constellation/pkg/version.Commit=${COMMIT} -X github.com/alphabravocompany/constellation/pkg/version.BuildTime=${BUILD_TIME}" \
+RUN go build -tags timetzdata -trimpath -ldflags="-s -w -X github.com/alphabravocompany/constellation/pkg/version.Version=${VERSION} -X github.com/alphabravocompany/constellation/pkg/version.Commit=${COMMIT} -X github.com/alphabravocompany/constellation/pkg/version.BuildTime=${BUILD_TIME}" \
       -o /out/constellation-api ./cmd/constellation-api \
- && go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/constellationctl ./cmd/constellationctl
+ && go build -tags timetzdata -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/constellationctl ./cmd/constellationctl
+
+# Account files are data; creating them here keeps account-management programs
+# out of the runtime. Preserve the existing API/CLI identity and home directory.
+RUN mkdir -p /out/home \
+ && printf 'root:x:0:0:root:/root:/sbin/nologin\nconstellation:x:10001:10001:Constellation:/home/constellation:/sbin/nologin\n' > /out/passwd \
+ && printf 'root:x:0:\nconstellation:x:10001:\n' > /out/group
 
 # -----------------------------------------------------------------------------
-# Runtime — minimal debian-slim, no scanner CLIs. (Off Chainguard per project policy.)
+# Runtime — static Go programs, CA roots and timezone data; no shell/package manager.
+# timetzdata also retains legacy timezone aliases used by existing schedules.
+# Keep UID/GID and the writable home compatible with existing Helm/CLI consumers.
 # -----------------------------------------------------------------------------
 FROM ${RUNTIME_IMAGE} AS runtime
 ARG VERSION=dev
 ARG COMMIT=dev
 LABEL org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${COMMIT}"
-RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates tzdata \
- && rm -rf /var/lib/apt/lists/* \
- && groupadd -r -g 10001 constellation \
- && useradd -r -u 10001 -g constellation -m -d /home/constellation -s /usr/sbin/nologin constellation
+COPY --from=build /out/passwd /etc/passwd
+COPY --from=build /out/group /etc/group
+COPY --from=build --chown=10001:10001 /out/home/ /home/constellation/
 COPY --from=build /out/constellation-api /usr/local/bin/constellation-api
 COPY --from=build /out/constellationctl  /usr/local/bin/constellationctl
+ENV HOME=/home/constellation
 USER 10001:10001
 WORKDIR /home/constellation
 EXPOSE 8080

@@ -34,6 +34,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 docker build -f deploy/docker/Dockerfile.api -t "$run_id-api" . >"$artifact_dir/api-build.log" 2>&1
+bash scripts/test-api-runtime.sh "$run_id-api" >"$artifact_dir/api-runtime-check.log" 2>&1
 docker build -f deploy/docker/Dockerfile.frontend --build-arg "NODE_VERSION=$(cat .node-version)" -t "$run_id-frontend" . >"$artifact_dir/frontend-build.log" 2>&1
 docker image inspect --format '{{.RepoTags}} {{.Id}}' "$run_id-api" "$run_id-frontend" >"$artifact_dir/images.txt"
 network="$(docker network create "$run_id")"

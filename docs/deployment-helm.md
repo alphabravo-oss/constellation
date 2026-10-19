@@ -706,3 +706,23 @@ Federation admin proxy requests reject redirects, including same-host redirects
 that could escape a reader's path allowlist. Redirect Location/Set-Cookie headers
 are not relayed to the browser. Configure the final member endpoint directly.
 Live ingress/mTLS and multi-cluster acceptance are still required before release.
+
+
+### Minimal API runtime
+
+The API image uses a digest-pinned Distroless static runtime. It retains the API
+and operator CLI, system CA roots, UID/GID 10001 and `/home/constellation`; both Go
+binaries embed timezone data, including legacy schedule aliases. It contains no
+shell, package manager, or native dynamic linker. Kubernetes HTTP probes and the
+`constellation-api -check-schema` init command work directly. Use `kubectl logs`,
+the HTTP health/readiness endpoints, and an approved ephemeral debug container
+when diagnosing it; `kubectl exec ... -- sh` is no longer available.
+
+Run `bash scripts/test-api-runtime.sh IMAGE` after building. Browser CI runs this
+check before its fresh-database API suite. The check verifies application identity,
+home ownership, CA roots, timezone aliases, embedded timezone build tags, static
+ELF executables, writable temporary storage, and API/CLI startup under a read-only
+filesystem with all capabilities dropped. Refresh the runtime digest deliberately,
+verify its upstream signature, and compare exact-image scans using the same dated
+vulnerability database. Scanner and native runtime-agent images have separate
+runtime dependencies and are not converted by this change.
