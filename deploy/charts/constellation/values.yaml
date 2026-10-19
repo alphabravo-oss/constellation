@@ -22,7 +22,7 @@ image:
   # release tags or digest-qualified role overrides in production.
   tag: ""
   # Optional list of imagePullSecrets applied to every Deployment / DaemonSet /
-  # CronJob / Job rendered by this chart.
+  # CronJob / Job and CNPG Cluster rendered by this chart.
   pullSecrets: []
   # - name: ghcr-pull-secret
 

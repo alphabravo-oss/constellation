@@ -1,0 +1,25 @@
+{
+  "spec": {
+    "template": {
+      "spec": {
+        "imagePullSecrets": [
+          {
+            "name": "constellation-ghcr-pull"
+          }
+        ],
+        "containers": [
+          {
+            "name": "barman-cloud",
+            "image": "ghcr.io/alphabravo-oss/constellation/barman-plugin@sha256:de96d9e4bf0f2f69f8d2b3c1a8bc953ea8235d613901ae19754600b55cb07590",
+            "env": [
+              {
+                "name": "SIDECAR_IMAGE",
+                "value": "ghcr.io/alphabravo-oss/constellation/barman-sidecar@sha256:61b55f0807293213c68d3d7a5572c41d5b7fa164dba2f956d0c660952779f261"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

@@ -65,6 +65,17 @@ class ReleaseIdentityTests(unittest.TestCase):
 
 
 class HelmImageDigestTests(unittest.TestCase):
+    def test_cnpg_receives_private_image_credentials(self):
+        result = self.render("postgres.embedded=false", "postgres.cloudnativepg.enabled=true",
+                             "image.pullSecrets[0].name=registry-reader")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        cluster = next(doc for doc in result.stdout.split("---") if "kind: Cluster\n" in doc)
+        self.assertIn("  imagePullSecrets:\n    - name: registry-reader", cluster)
+        public = self.render("postgres.embedded=false", "postgres.cloudnativepg.enabled=true")
+        self.assertEqual(public.returncode, 0, public.stderr)
+        cluster = next(doc for doc in public.stdout.split("---") if "kind: Cluster\n" in doc)
+        self.assertNotIn("imagePullSecrets:", cluster)
+
     def render(self, *values):
         args = ["helm", "template", "release", str(ROOT / "deploy/charts/constellation")]
         for value in values:

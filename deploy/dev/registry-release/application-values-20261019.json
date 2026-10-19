@@ -1,0 +1,50 @@
+{
+  "runtimeAgent": {
+    "image": {
+      "repository": "ghcr.io/alphabravo-oss/constellation/runtime-agent",
+      "digest": "sha256:c758eff15a7903ec0d7da34b2b2a4242960a03c29af7a87af315633015d7c884"
+    }
+  },
+  "admission": {
+    "image": {
+      "repository": "ghcr.io/alphabravo-oss/constellation/admission",
+      "digest": "sha256:6c55b997afacda7880b51f5e637b6a3dc8e44de11bba4add8ed72df6ef5473e6"
+    }
+  },
+  "api": {
+    "image": {
+      "repository": "ghcr.io/alphabravo-oss/constellation/api",
+      "digest": "sha256:5df027512438610718b59dcde0a0e11baff8ca3dbfc9c6c743169c79b7ac0a54"
+    }
+  },
+  "discoverer": {
+    "image": {
+      "repository": "ghcr.io/alphabravo-oss/constellation/discoverer",
+      "digest": "sha256:b0b873fd618893ddfde183c439229a0930e9e3d6dfe9646b97ac27399a4f6232"
+    }
+  },
+  "frontend": {
+    "image": {
+      "repository": "ghcr.io/alphabravo-oss/constellation/frontend",
+      "digest": "sha256:44397711093b2c8c184e97a62248f6575602bbe82f43d1ade7a8cf94c4131dab"
+    }
+  },
+  "operator": {
+    "image": {
+      "repository": "ghcr.io/alphabravo-oss/constellation/operator",
+      "digest": "sha256:3db722619dd78102dc777bf2bb44a6db4544db45633bfae274197fcaf5153ee3"
+    }
+  },
+  "scanner": {
+    "image": {
+      "repository": "ghcr.io/alphabravo-oss/constellation/scanner",
+      "digest": "sha256:f6c1c072de953e5031331c5ab556158ff05fd75e33859be5a7ab7ef68156e629"
+    }
+  },
+  "migrate": {
+    "image": {
+      "repository": "ghcr.io/alphabravo-oss/constellation/migrate",
+      "digest": "sha256:d8f0975552412ace65a4c9fc21085524e57fb99a2e5e5a80069e21c1afa2c5c8"
+    }
+  }
+}
