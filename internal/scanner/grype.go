@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -81,6 +82,7 @@ func findingsFromGrypeReport(doc grypeReport, engineName string) []EngineFinding
 		ef := EngineFinding{
 			Engine:          engineName,
 			VulnerabilityID: m.Vulnerability.ID,
+			Aliases:         grypeAliases(m.Vulnerability.ID, m.RelatedVulnerabilities),
 			Severity:        strings.ToLower(m.Vulnerability.Severity),
 			Title:           firstNonEmpty(m.Vulnerability.Description, m.Vulnerability.ID),
 			Description:     m.Vulnerability.Description,
@@ -95,8 +97,8 @@ func findingsFromGrypeReport(doc grypeReport, engineName string) []EngineFinding
 			Published:    strings.TrimSpace(m.Vulnerability.Published),
 			Confidence:   0.85,
 		}
-		// CVSS scores can be in either vulnerability or relatedVulnerabilities; pick the
-		// highest base score we see.
+		// Keep the matched advisory scoring. Related identities inform deduplication,
+		// without replacing this advisory's vulnerability fields.
 		if len(m.Vulnerability.CVSS) > 0 {
 			ef.CVSSBase, ef.CVSSVector = bestCVSS(m.Vulnerability.CVSS)
 		}
@@ -106,10 +108,41 @@ func findingsFromGrypeReport(doc grypeReport, engineName string) []EngineFinding
 }
 
 type grypeReport struct {
-	Matches []struct {
-		Vulnerability grypeVuln     `json:"vulnerability"`
-		Artifact      grypeArtifact `json:"artifact"`
-	} `json:"matches"`
+	Matches []grypeMatch `json:"matches"`
+}
+
+type grypeMatch struct {
+	Vulnerability          grypeVuln     `json:"vulnerability"`
+	Artifact               grypeArtifact `json:"artifact"`
+	RelatedVulnerabilities []grypeVuln   `json:"relatedVulnerabilities"`
+}
+
+var grypeAliasID = regexp.MustCompile(`^(CVE-[0-9]{4}-[0-9]{4,}|GO-[0-9]{4}-[0-9]+|GHSA-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4})$`)
+
+// Grype exposes database aliases and package CVE identities here. Only accept
+// individual vulnerability identities here: vendor advisories can group multiple
+// CVEs, and must not turn distinct vulnerabilities into one finding.
+func grypeAliases(primary string, related []grypeVuln) []string {
+	primary = strings.ToUpper(strings.TrimSpace(primary))
+	if !grypeAliasID.MatchString(primary) {
+		return nil
+	}
+	ids := []string{primary}
+	for _, item := range related {
+		id := strings.ToUpper(strings.TrimSpace(item.ID))
+		if grypeAliasID.MatchString(id) {
+			ids = mergeStrings(ids, []string{id})
+		}
+	}
+	families := map[string]string{}
+	for _, id := range ids {
+		family, _, _ := strings.Cut(id, "-")
+		if previous, exists := families[family]; exists && previous != id {
+			return nil
+		}
+		families[family] = id
+	}
+	return ids[1:]
 }
 
 type grypeVuln struct {

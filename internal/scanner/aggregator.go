@@ -306,6 +306,7 @@ func dedupe(engines []EngineResult) []Finding {
 	bucket := map[key]*Finding{}
 	prov := map[key]map[string]float64{}
 	canonical := map[key]string{}
+	identities := map[key][]string{}
 
 	// Resolve a canonical vulnerability identity per package via the alias sets, so a
 	// VulnDB GHSA/OSV finding (alias CVE-X) and a Trivy/Grype CVE-X for the SAME
@@ -330,6 +331,7 @@ func dedupe(engines []EngineResult) []Finding {
 				name: pk.name,
 				ver:  pk.ver,
 			}
+			identities[k] = mergeStrings(identities[k], vulnIDSet(f.VulnerabilityID, f.Aliases))
 			cur, ok := bucket[k]
 			if !ok {
 				cur = &Finding{
@@ -396,6 +398,15 @@ func dedupe(engines []EngineResult) []Finding {
 			}
 			return engines[i].Engine < engines[j].Engine
 		})
+		// Preserve every source identity even when the chosen primary id belongs
+		// to another engine. Aliases are evidence, not extra vulnerability rows.
+		f.Aliases = nil
+		for _, id := range identities[k] {
+			if !strings.EqualFold(strings.TrimSpace(f.VulnerabilityID), id) {
+				f.Aliases = append(f.Aliases, id)
+			}
+		}
+		sort.Strings(f.Aliases)
 		f.CanonicalEngine = canonical[k]
 		f.Engines = engines
 		out = append(out, *f)

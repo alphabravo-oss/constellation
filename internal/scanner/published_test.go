@@ -39,16 +39,10 @@ func TestMatchersThreadPublishedDate(t *testing.T) {
 
 	t.Run("grype", func(t *testing.T) {
 		var doc grypeReport
-		doc.Matches = append(doc.Matches, struct {
-			Vulnerability grypeVuln     `json:"vulnerability"`
-			Artifact      grypeArtifact `json:"artifact"`
-		}{
+		doc.Matches = append(doc.Matches, grypeMatch{
 			Vulnerability: grypeVuln{ID: "CVE-2026-4000", Published: "2026-02-03T00:00:00Z"},
 			Artifact:      grypeArtifact{Name: "openssl", Version: "3.0.13", Type: "deb"},
-		}, struct {
-			Vulnerability grypeVuln     `json:"vulnerability"`
-			Artifact      grypeArtifact `json:"artifact"`
-		}{
+		}, grypeMatch{
 			Vulnerability: grypeVuln{ID: "CVE-2026-4001"},
 			Artifact:      grypeArtifact{Name: "left-pad", Version: "1.0.0", Type: "npm"},
 		})

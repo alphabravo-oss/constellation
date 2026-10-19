@@ -185,7 +185,7 @@ func purlType(eco string) string {
 		return "pypi"
 	case "gem", "ruby", "rubygems":
 		return "gem"
-	case "go", "golang", "go-module":
+	case "go", "golang", "go-module", "gobinary", "gomod":
 		return "golang"
 	case "maven", "java", "jar":
 		return "maven"
