@@ -10,14 +10,6 @@
       "tag": "dev-d8d0e4903abc6c291fb98e32806ac61ea11b562b0abfa62c60230e3fa5afaadf"
     },
     {
-      "name": "frontend",
-      "role": "frontend",
-      "source": "constellation/frontend:refusal-audit-20261019-833b537",
-      "digest": "sha256:faa3bc055e8b07143b1e98dad0ac23b8f8841c922a5a5f5d3c4d544381412fb7",
-      "repository": "ghcr.io/alphabravo-oss/constellation/frontend",
-      "tag": "dev-faa3bc055e8b07143b1e98dad0ac23b8f8841c922a5a5f5d3c4d544381412fb7"
-    },
-    {
       "name": "operator",
       "role": "operator",
       "source": "constellation/operator:lifecycle-lock-20261019-aa88a1a",
@@ -97,6 +89,14 @@
       "digest": "sha256:892e7060016d06b7a609494fcfa6109eb28c7927b274814edcbde699674c25c2",
       "repository": "ghcr.io/alphabravo-oss/constellation/api",
       "tag": "dev-892e7060016d06b7a609494fcfa6109eb28c7927b274814edcbde699674c25c2"
+    },
+    {
+      "name": "frontend",
+      "role": "frontend",
+      "source": "constellation/frontend:packages-final-20261019",
+      "digest": "sha256:6d419115228f0942f4bbdde114acbb9454d00e2b83c7496e823b98b6af9f40d4",
+      "repository": "ghcr.io/alphabravo-oss/constellation/frontend",
+      "tag": "dev-6d419115228f0942f4bbdde114acbb9454d00e2b83c7496e823b98b6af9f40d4"
     }
   ],
   "helm_values": {
@@ -187,7 +187,7 @@
     "frontend": {
       "image": {
         "repository": "ghcr.io/alphabravo-oss/constellation/frontend",
-        "digest": "sha256:faa3bc055e8b07143b1e98dad0ac23b8f8841c922a5a5f5d3c4d544381412fb7"
+        "digest": "sha256:6d419115228f0942f4bbdde114acbb9454d00e2b83c7496e823b98b6af9f40d4"
       }
     },
     "operator": {

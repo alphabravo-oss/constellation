@@ -68,3 +68,23 @@ a caller-provided test credential directory. The home directory remains read-onl
 `BAKE_VULN_DB=1` now prepares optional air-gap databases in a build stage. A failed
 DB download fails that build instead of silently producing an unusable offline
 image. The default remains runtime DB refresh or operator-preloaded caches.
+
+## Frontend runtime refresh (2026-10-19)
+
+The frontend Dockerfile updates libexpat, zlib, libx11, and libxpm from its
+configured signed Alpine repositories during the runtime build, then restores UID
+101. This catches fixes published after the nginx base image. The deployed refresh
+preserves the existing SPA bytes and nginx configuration. Minimum fixed versions
+are encoded in the Dockerfile; the resulting release is pinned by image digest.
+
+Using the same Grype database built 2026-10-19T06:39:15Z, the original frontend
+image had 3 High and 8 Medium findings; the refreshed image had 0 High and 3 Medium.
+The three remaining records are CVE-2025-60876 on busybox, busybox-binsh, and
+ssl_client 1.37.0-r31. The configured Alpine repository had no newer BusyBox build.
+They remain visible and unsuppressed. Alpine's tracker lists this version as
+possibly vulnerable: https://security.alpinelinux.org/vuln/CVE-2025-60876.
+
+Earlier six-finding live results used a different database vintage and are not the
+before/after comparison. New advisories for X11/Xpm became visible after refreshing
+Grype. Exact image digests, database metadata, package versions and validation are
+recorded in the development release evidence.

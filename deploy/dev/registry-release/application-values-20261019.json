@@ -86,7 +86,7 @@
   "frontend": {
     "image": {
       "repository": "ghcr.io/alphabravo-oss/constellation/frontend",
-      "digest": "sha256:faa3bc055e8b07143b1e98dad0ac23b8f8841c922a5a5f5d3c4d544381412fb7"
+      "digest": "sha256:6d419115228f0942f4bbdde114acbb9454d00e2b83c7496e823b98b6af9f40d4"
     }
   },
   "operator": {
