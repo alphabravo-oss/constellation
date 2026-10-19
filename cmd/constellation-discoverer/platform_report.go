@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/alphabravocompany/constellation/internal/imageid"
+	"github.com/google/go-containerregistry/pkg/name"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -183,7 +184,7 @@ func componentsFromDaemonSet(ds appsv1.DaemonSet) []platformReportComponent {
 func componentsFromPodSpec(namespace, workloadName string, spec corev1.PodSpec, kind string) []platformReportComponent {
 	out := []platformReportComponent{}
 	for _, image := range podSpecImages(spec) {
-		name := platformComponentName(namespace, workloadName, image)
+		name := platformComponentName(image)
 		if name == "" {
 			continue
 		}
@@ -202,28 +203,35 @@ func componentsFromPodSpec(namespace, workloadName string, spec corev1.PodSpec, 
 	return out
 }
 
-func platformComponentName(namespace, workloadName, image string) string {
-	value := strings.ToLower(namespace + "/" + workloadName + " " + image)
-	switch {
-	case strings.Contains(value, "coredns"):
+// Platform identity must come from the container image, never the workload or
+// namespace name: helpers and sidecars often share a product's workload name.
+// Keep repository matches exact. Unknown mirrors still receive image scanning,
+// but need explicit mapping before supplying product-specific platform evidence.
+func platformComponentName(image string) string {
+	ref, err := name.ParseReference(image)
+	if err != nil {
+		return ""
+	}
+	switch ref.Context().Name() {
+	case "index.docker.io/coredns/coredns", "registry.k8s.io/coredns/coredns", "index.docker.io/rancher/mirrored-coredns-coredns":
 		return "coredns"
-	case strings.Contains(value, "ingress-nginx") || strings.Contains(value, "nginx-ingress"):
+	case "registry.k8s.io/ingress-nginx/controller", "k8s.gcr.io/ingress-nginx/controller", "quay.io/kubernetes-ingress-controller/nginx-ingress-controller":
 		return "ingress-nginx"
-	case strings.Contains(value, "cert-manager-cainjector"):
-		return "cert-manager-cainjector"
-	case strings.Contains(value, "cert-manager-webhook"):
-		return "cert-manager-webhook"
-	case strings.Contains(value, "cert-manager"):
+	case "quay.io/jetstack/cert-manager-controller":
 		return "cert-manager"
-	case strings.Contains(value, "metrics-server"):
+	case "quay.io/jetstack/cert-manager-cainjector":
+		return "cert-manager-cainjector"
+	case "quay.io/jetstack/cert-manager-webhook":
+		return "cert-manager-webhook"
+	case "registry.k8s.io/metrics-server/metrics-server", "k8s.gcr.io/metrics-server/metrics-server", "index.docker.io/rancher/mirrored-metrics-server":
 		return "metrics-server"
-	case strings.Contains(value, "cilium"):
+	case "quay.io/cilium/cilium", "index.docker.io/cilium/cilium":
 		return "cilium"
-	case strings.Contains(value, "calico"):
+	case "index.docker.io/calico/node", "quay.io/calico/node":
 		return "calico"
-	case strings.Contains(value, "flannel"):
+	case "quay.io/coreos/flannel", "index.docker.io/flannel/flannel", "ghcr.io/flannel-io/flannel":
 		return "flannel"
-	case strings.Contains(value, "traefik"):
+	case "index.docker.io/library/traefik":
 		return "traefik"
 	default:
 		return ""

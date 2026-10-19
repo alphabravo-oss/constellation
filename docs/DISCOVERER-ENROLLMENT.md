@@ -30,3 +30,19 @@ scanner credential; only revoke bundles whose consumers have all been migrated.
 
 The development installation's dedicated enrollment expires January 17, 2027.
 The release validation artifact records its non-secret bundle ID and exact expiry.
+
+## Platform component evidence
+
+The discoverer identifies platform components from exact recognized image
+repositories, independently for each container. Namespace and workload names are
+source locations, not product evidence. For example, a k3s `svclb-ingress-nginx-*`
+DaemonSet using `rancher/klipper-lb` must not report ingress-nginx at the helper's
+version. Unrelated sidecars and init containers likewise do not inherit identity.
+
+Recognized repository aliases are explicit in `platformComponentName`. Unknown
+repositories and private mirrors remain in ordinary image inventory/scanning, but
+are not guessed into platform package identities. Add a verified repository mapping
+when supporting a new mirror. Tags provide reported version evidence; untagged,
+`latest`, and digest-only references do not supply a guessed version. Repository
+recognition is not image signature verification. Correcting current platform facts
+does not delete historical findings or assert that a vulnerability was remediated.
