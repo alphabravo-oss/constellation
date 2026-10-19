@@ -129,6 +129,7 @@ func TestGlobalPolicySelectorCannotEscapeProtection(t *testing.T) {
 	}
 }
 
-func fixtureDependencies(context.Context, *Protection) ([]netip.Addr, error) {
-	return []netip.Addr{netip.MustParseAddr("10.43.0.1"), netip.MustParseAddr("192.0.2.10"), netip.MustParseAddr("2001:db8::10")}, nil
+func fixtureDependencies(context.Context, *Protection) (DependencySnapshot, error) {
+	addresses := []netip.Addr{netip.MustParseAddr("10.43.0.1"), netip.MustParseAddr("192.0.2.10"), netip.MustParseAddr("2001:db8::10")}
+	return DependencySnapshot{Addresses: addresses, Services: []ServicePeer{{addresses[0], 443, "TCP", false}, {addresses[1], 6443, "TCP", true}, {addresses[2], 6443, "TCP", true}}}, nil
 }

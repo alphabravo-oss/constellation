@@ -73,8 +73,8 @@ func TestNativeProtectionPreservesDirectionAndOriginalRules(t *testing.T) {
 					key = "to"
 				}
 				peers := rules[0].(map[string]any)[key].([]any)
-				if len(peers) != 4 {
-					t.Fatalf("expected namespace and three exact address peers: %v", peers)
+				if len(peers) != 1 {
+					t.Fatalf("expected only trusted namespace peer in unrestricted rule: %v", peers)
 				}
 				raw, _ := json.Marshal(peers[0])
 				for _, ns := range []string{"own", "cnpg-system", "kube-system"} {
@@ -82,11 +82,23 @@ func TestNativeProtectionPreservesDirectionAndOriginalRules(t *testing.T) {
 						t.Fatal("missing trusted namespace", ns)
 					}
 				}
-				for _, v := range peers[1:] {
-					cidr := v.(map[string]any)["ipBlock"].(map[string]any)["cidr"].(string)
-					p := netip.MustParsePrefix(cidr)
-					if p.Bits() != p.Addr().BitLen() {
-						t.Fatal("broadened dependency address", cidr)
+				if d == "egress" {
+					for _, r := range rules[1:] {
+						rule := r.(map[string]any)
+						v := rule["to"].([]any)[0]
+						cidr := v.(map[string]any)["ipBlock"].(map[string]any)["cidr"].(string)
+						prefix := netip.MustParsePrefix(cidr)
+						if prefix.Bits() != prefix.Addr().BitLen() {
+							t.Fatal("broadened dependency address")
+						}
+						ports := rule["ports"].([]any)
+						if len(ports) != 1 {
+							t.Fatal("service peer must restrict destination ports")
+						}
+						port := ports[0].(map[string]any)["port"].(float64)
+						if port != 443 && port != 6443 {
+							t.Fatal("unrelated node port allowed")
+						}
 					}
 				}
 			}
@@ -130,23 +142,23 @@ func TestCiliumDenyProtectionAndDefaultSemantics(t *testing.T) {
 		denied bool
 	}{{"10.43.0.1/32", true}, {"192.0.2.0/24", true}, {"2001:db8::/64", true}, {"0.0.0.0/0", true}, {"198.51.100.4/32", false}} {
 		spec := map[string]any{"egressDeny": []any{map[string]any{"toCIDR": []any{tc.cidr}}}}
-		if err := guardCiliumDeny(spec, "egressDeny", "toCIDR", ips); (err != nil) != tc.denied {
+		if err := guardCiliumDeny(spec, "egressDeny", "toCIDR", ips.Addresses); (err != nil) != tc.denied {
 			t.Fatalf("%s: %v", tc.cidr, err)
 		}
 		if !tc.denied {
 			got := effectivePolicy(t, "CiliumNetworkPolicy", spec)
-			if len(got["egress"].([]any)) != 3 {
+			if len(got["egress"].([]any)) != 5 {
 				t.Fatal("deny direction omitted protected communication")
 			}
 		}
 	}
 	for _, rule := range []any{map[string]any{}, map[string]any{"toEntities": []any{"all"}}, map[string]any{"toEndpoints": []any{map[string]any{}}}} {
-		if err := guardCiliumDeny(map[string]any{"egressDeny": []any{rule}}, "egressDeny", "toCIDR", ips); err == nil {
+		if err := guardCiliumDeny(map[string]any{"egressDeny": []any{rule}}, "egressDeny", "toCIDR", ips.Addresses); err == nil {
 			t.Fatal("unproven deny allowed")
 		}
 	}
 	got := effectivePolicy(t, "CiliumNetworkPolicy", map[string]any{"egress": []any{map[string]any{"toEndpoints": []any{map[string]any{"matchLabels": map[string]any{"app": "customer"}}}}}})
-	if len(got["egress"].([]any)) != 4 {
+	if len(got["egress"].([]any)) != 6 {
 		t.Fatal("missing protected namespace/entity/CIDR rules")
 	}
 	if containsRequirement(map[string]any{"egress": []any{map[string]any{"toRequires": []any{}}}}) != true {
@@ -161,8 +173,8 @@ func TestDependencyFailureNeverWritesButAllowsRecoveryDelete(t *testing.T) {
 		writes++
 		return true, &unstructured.Unstructured{}, nil
 	})
-	client := KubernetesResourceClient{Client: dyn, Protection: p, Dependencies: func(context.Context, *Protection) ([]netip.Addr, error) {
-		return nil, errors.New("inventory unavailable")
+	client := KubernetesResourceClient{Client: dyn, Protection: p, Dependencies: func(context.Context, *Protection) (DependencySnapshot, error) {
+		return DependencySnapshot{}, errors.New("inventory unavailable")
 	}}
 	resource, data, _ := ParseManifest(FlavorNative, "apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: test\n  namespace: customer\nspec: {}")
 	if err := client.Apply(context.Background(), resource, data); err == nil || writes != 0 {
@@ -179,7 +191,13 @@ func TestDependencyInventoryReadsAllPagesAndFailsOnIncompleteData(t *testing.T) 
 		for _, kind := range []string{"pods", "services", "nodes"} {
 			lists[schema.GroupVersionResource{Version: "v1", Resource: kind}] = map[string]string{"pods": "PodList", "services": "ServiceList", "nodes": "NodeList"}[kind]
 		}
+		lists[schema.GroupVersionResource{Group: "discovery.k8s.io", Version: "v1", Resource: "endpointslices"}] = "EndpointSliceList"
 		dyn := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), lists)
+		dyn.PrependReactor("get", "endpoints", func(ktesting.Action) (bool, runtime.Object, error) {
+			e := corev1.Endpoints{Subsets: []corev1.EndpointSubset{{Addresses: []corev1.EndpointAddress{{IP: "192.0.2.10"}}, Ports: []corev1.EndpointPort{{Port: 6443, Protocol: corev1.ProtocolTCP}}}}}
+			m, _ := runtime.DefaultUnstructuredConverter.ToUnstructured(&e)
+			return true, &unstructured.Unstructured{Object: m}, nil
+		})
 		calls := 0
 		dyn.PrependReactor("list", "pods", func(ktesting.Action) (bool, runtime.Object, error) {
 			calls++
@@ -210,8 +228,58 @@ func TestDependencyInventoryReadsAllPagesAndFailsOnIncompleteData(t *testing.T) 
 			}
 			continue
 		}
-		if err != nil || len(ips) != 3 || calls != 2 {
+		if err != nil || len(ips.Addresses) != 3 || calls != 2 {
 			t.Fatalf("complete inventory: %v %v calls=%d", ips, err, calls)
+		}
+	}
+}
+
+func TestEmptyCiliumDirectionsDoNotStartIsolatingTraffic(t *testing.T) {
+	for _, empty := range []any{nil, []any{}} {
+		got := effectivePolicy(t, "CiliumNetworkPolicy", map[string]any{"egress": empty})
+		if rules, ok := got["egress"].([]any); ok && len(rules) > 0 {
+			t.Fatal("empty direction acquired default-deny rules")
+		}
+	}
+}
+
+func TestServiceExceptionsNeverPermitUnrelatedNodePorts(t *testing.T) {
+	for _, kind := range []string{"NetworkPolicy", "CiliumNetworkPolicy", "GlobalNetworkPolicy"} {
+		spec := map[string]any{"policyTypes": []any{"Egress"}, "types": []any{"Egress"}, "egress": []any{map[string]any{"toEndpoints": []any{map[string]any{"matchLabels": map[string]any{"app": "application"}}}}}}
+		// Use a genuinely isolated direction for native and Calico; Cilium needs a
+		// nonempty direction to enable default deny, so it retains its application rule.
+		if kind != "CiliumNetworkPolicy" {
+			spec["egress"] = []any{}
+		}
+		got := effectivePolicy(t, kind, spec)
+		for _, raw := range got["egress"].([]any) {
+			rule := raw.(map[string]any)
+			switch kind {
+			case "NetworkPolicy":
+				peers, _ := rule["to"].([]any)
+				for _, v := range peers {
+					if _, ip := v.(map[string]any)["ipBlock"]; ip {
+						if len(rule["ports"].([]any)) == 0 {
+							t.Fatal("unrestricted IP exception")
+						}
+					}
+				}
+			case "CiliumNetworkPolicy":
+				_, ip := rule["toCIDR"]
+				_, node := rule["toEntities"]
+				if ip || node {
+					if len(rule["toPorts"].([]any)) == 0 {
+						t.Fatal("unrestricted node/IP exception")
+					}
+				}
+			case "GlobalNetworkPolicy":
+				dest := rule["destination"].(map[string]any)
+				if _, ip := dest["nets"]; ip {
+					if len(dest["ports"].([]any)) == 0 {
+						t.Fatal("unrestricted node/IP exception")
+					}
+				}
+			}
 		}
 	}
 }

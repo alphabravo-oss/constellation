@@ -15,8 +15,9 @@ import (
 // Preserve required peers on the application side of a policy. Namespace names
 // come from trusted installation configuration, addresses from live Kubernetes
 // inventory; presentation labels never confer an exemption.
-func (p *Protection) preserveCommunication(resource ManifestResource, data []byte, addresses []netip.Addr) ([]byte, error) {
-	if len(addresses) == 0 {
+func (p *Protection) preserveCommunication(resource ManifestResource, data []byte, snapshot DependencySnapshot) ([]byte, error) {
+	addresses := snapshot.Addresses
+	if len(addresses) == 0 || len(snapshot.Services) == 0 {
 		return nil, errors.New("network policy protection: dependency inventory is empty")
 	}
 	var obj unstructured.Unstructured
@@ -28,14 +29,17 @@ func (p *Protection) preserveCommunication(resource ManifestResource, data []byt
 		names = append(names, ns)
 	}
 	sort.Strings(names)
-	cidrs := []any{}
 	for _, ip := range addresses {
 		if !ip.IsValid() || ip.IsUnspecified() || ip.IsMulticast() {
 			return nil, errors.New("network policy protection: invalid dependency address")
 		}
-		ip = ip.Unmap()
-		cidrs = append(cidrs, netip.PrefixFrom(ip, ip.BitLen()).String())
 	}
+	for _, peer := range snapshot.Services {
+		if !peer.Address.IsValid() || peer.Port < 1 || peer.Port > 65535 || (peer.Protocol != "TCP" && peer.Protocol != "UDP" && peer.Protocol != "SCTP") {
+			return nil, errors.New("network policy protection: invalid service endpoint")
+		}
+	}
+
 	nsValues := make([]any, len(names))
 	quoted := make([]string, len(names))
 	for i, n := range names {
@@ -62,14 +66,18 @@ func (p *Protection) preserveCommunication(resource ManifestResource, data []byt
 			}
 			types = append(types, strings.ToUpper(direction[:1])+direction[1:])
 			peers := []any{map[string]any{"namespaceSelector": nsSelector}}
-			for _, cidr := range cidrs {
-				peers = append(peers, map[string]any{"ipBlock": map[string]any{"cidr": cidr}})
-			}
 			key := "from"
 			if direction == "egress" {
 				key = "to"
 			}
-			if err := prependRules(spec, direction, []any{map[string]any{key: peers}}); err != nil {
+			rules := []any{map[string]any{key: peers}}
+			if direction == "egress" {
+				for _, peer := range snapshot.Services {
+					cidr := netip.PrefixFrom(peer.Address, peer.Address.BitLen()).String()
+					rules = append(rules, map[string]any{"to": []any{map[string]any{"ipBlock": map[string]any{"cidr": cidr}}}, "ports": []any{map[string]any{"port": int64(peer.Port), "protocol": peer.Protocol}}})
+				}
+			}
+			if err := prependRules(spec, direction, rules); err != nil {
 				return nil, err
 			}
 		}
@@ -91,9 +99,11 @@ func (p *Protection) preserveCommunication(resource ManifestResource, data []byt
 				key = "destination"
 			}
 			rules := []any{map[string]any{"action": "Allow", key: map[string]any{"namespaceSelector": selector, "selector": "all()"}}}
-			// Calico forbids mixing IPv4 and IPv6 nets in one rule.
-			for _, cidr := range cidrs {
-				rules = append(rules, map[string]any{"action": "Allow", key: map[string]any{"nets": []any{cidr}}})
+			if direction == "egress" {
+				for _, peer := range snapshot.Services {
+					cidr := netip.PrefixFrom(peer.Address, peer.Address.BitLen()).String()
+					rules = append(rules, map[string]any{"action": "Allow", "protocol": peer.Protocol, key: map[string]any{"nets": []any{cidr}, "ports": []any{int64(peer.Port)}}})
+				}
 			}
 			if err := prependRules(spec, direction, rules); err != nil {
 				return nil, err
@@ -152,10 +162,19 @@ func (p *Protection) preserveCommunication(resource ManifestResource, data []byt
 				}
 
 				peer := map[string]any{"matchExpressions": []any{map[string]any{"key": "k8s:io.kubernetes.pod.namespace", "operator": "In", "values": nsValues}}}
-				rules := []any{
-					map[string]any{prefix + "Endpoints": []any{peer}},
-					map[string]any{prefix + "Entities": []any{"host", "remote-node", "kube-apiserver"}},
-					map[string]any{prefix + "CIDR": cidrs},
+				rules := []any{map[string]any{prefix + "Endpoints": []any{peer}}}
+				if direction == "ingress" {
+					// Match native Kubernetes' node-origin ingress trust boundary.
+					rules = append(rules, map[string]any{"fromEntities": []any{"host", "remote-node", "kube-apiserver"}})
+				} else {
+					for _, endpoint := range snapshot.Services {
+						cidr := netip.PrefixFrom(endpoint.Address, endpoint.Address.BitLen()).String()
+						rule := map[string]any{"toCIDR": []any{cidr}, "toPorts": []any{map[string]any{"ports": []any{map[string]any{"port": strconv.Itoa(int(endpoint.Port)), "protocol": endpoint.Protocol}}}}}
+						rules = append(rules, rule)
+						if endpoint.Node {
+							rules = append(rules, map[string]any{"toEntities": []any{"host", "remote-node", "kube-apiserver"}, "toPorts": rule["toPorts"]})
+						}
+					}
 				}
 				if err := prependRules(s, direction, rules); err != nil {
 					return nil, err
