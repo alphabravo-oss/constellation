@@ -176,6 +176,18 @@ def main():
         if result.returncode:
             raise RuntimeError('guarded apply failed; see helper.log')
         evidence['effectivePolicy'] = get(policy_kind, policy_name, policy_namespace)
+        if args.flavor == 'calico' and env.get('CONSTELLATION_POLICY_PROOF_SERVICE_ACCOUNT'):
+            update = subprocess.run([str(args.helper.resolve()), '-test.run', '^TestApplyNativeCommunicationLive$', '-test.v'],
+                                    env=dict(env, CONSTELLATION_POLICY_PROOF_ACTION='reapply'), text=True, capture_output=True, timeout=45)
+            (args.output/'update-helper.log').write_text(update.stdout + update.stderr)
+            if update.returncode:
+                raise AssertionError('service-account policy update failed; see update-helper.log')
+            updated = get(policy_kind, policy_name, policy_namespace)
+            if (updated['metadata']['uid'] != evidence['effectivePolicy']['metadata']['uid']
+                    or updated['metadata'].get('annotations', {}).get('constellation.alphabravo.io/protection-proof-update') != nonce):
+                raise AssertionError('policy update was not persisted on the same resource')
+            evidence['serviceAccountUpdateVerified'] = True
+            evidence['effectivePolicy'] = updated
         time.sleep(5)  # Bounded dataplane convergence before fresh TCP probes.
         for repeat in range(3):
             for tag, target in targets.items():

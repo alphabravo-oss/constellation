@@ -123,6 +123,16 @@ rules:
   - apiGroups: ["cilium.io"]
     resources: ["ciliumnetworkpolicies"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Calico admission checks tier authorization in addition to resource RBAC.
+  # Generated policies use the default tier; other tiers require an explicit grant.
+  - apiGroups: ["projectcalico.org"]
+    resources: ["tiers"]
+    resourceNames: ["default"]
+    verbs: ["get"]
+  - apiGroups: ["projectcalico.org"]
+    resources: ["tier.globalnetworkpolicies"]
+    resourceNames: ["default.*"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["projectcalico.org"]
     resources: ["globalnetworkpolicies"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]

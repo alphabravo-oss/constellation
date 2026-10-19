@@ -75,3 +75,21 @@ class SystemProtectionChartTests(unittest.TestCase):
             self.assertTrue(set(rule['verbs']) <= {'get','list','watch'})
             self.assertNotIn('secrets',rule['resources'])
             self.assertNotIn('*',rule['resources'])
+
+    def test_calico_authorization_is_limited_to_default_tier(self):
+        result = self.render({'protectedNamespaces': []})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        role = next(d for d in yaml.safe_load_all(result.stdout)
+                    if d and d['kind'] == 'ClusterRole' and d['metadata']['name'].endswith('-network-policy-applier'))
+        tier_rules = [r for r in role['rules'] if 'tiers' in r['resources']]
+        self.assertEqual(tier_rules, [{'apiGroups': ['projectcalico.org'], 'resources': ['tiers'],
+                                      'resourceNames': ['default'], 'verbs': ['get']}])
+        policy_rules = [r for r in role['rules'] if 'tier.globalnetworkpolicies' in r['resources']]
+        self.assertEqual(len(policy_rules), 1)
+        self.assertEqual(policy_rules[0]['resourceNames'], ['default.*'])
+        self.assertEqual(policy_rules[0]['apiGroups'], ['projectcalico.org'])
+        self.assertEqual(set(policy_rules[0]['verbs']), {'get', 'list', 'watch', 'create', 'update', 'patch', 'delete'})
+        for rule in role['rules']:
+            self.assertNotIn('*', rule['resources'])
+            self.assertNotIn('*', rule['verbs'])
+            self.assertNotIn('secrets', rule['resources'])

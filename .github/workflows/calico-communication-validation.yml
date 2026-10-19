@@ -7,6 +7,8 @@ on:
       - .github/workflows/calico-communication-validation.yml
       - scripts/test-system-communication.py
       - internal/netpolicyapply/**
+      - deploy/charts/constellation/templates/network-policy-applier-deployment.yaml
+      - scripts/tests/test_system_protection_chart.py
 permissions:
   contents: read
 concurrency:

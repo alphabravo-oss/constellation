@@ -86,6 +86,13 @@ func TestApplyNativeCommunicationLive(t *testing.T) {
 	default:
 		t.Fatal("live fixture flavor not implemented")
 	}
+	action := os.Getenv("CONSTELLATION_POLICY_PROOF_ACTION")
+	if action != "" && action != "delete" && action != "reapply" {
+		t.Fatal("unexpected fixture action")
+	}
+	if action == "reapply" {
+		obj["metadata"].(map[string]any)["annotations"] = map[string]any{"constellation.alphabravo.io/protection-proof-update": nonce}
+	}
 	raw, _ := json.Marshal(obj)
 	resource, data, err := ParseManifest(flavor, string(raw))
 	if err != nil {
@@ -103,20 +110,21 @@ func TestApplyNativeCommunicationLive(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if action := os.Getenv("CONSTELLATION_POLICY_PROOF_ACTION"); action != "" {
-		if action != "delete" {
-			t.Fatal("unexpected fixture action")
+	if flavor == FlavorCalico {
+		existing, err := resourceInterface(client, resource).Get(ctx, resource.Name, metav1.GetOptions{})
+		if action == "delete" || action == "reapply" {
+			if err != nil || existing.GetLabels()["constellation.alphabravo.io/protection-proof"] != nonce {
+				t.Fatalf("global fixture policy ownership unavailable: %v", err)
+			}
+		} else if !apierrors.IsNotFound(err) {
+			t.Fatalf("global fixture policy name is not unused: %v", err)
 		}
+	}
+	if action == "delete" {
 		if err := (KubernetesResourceClient{Client: applyClient, Protection: p}).Delete(ctx, resource); err != nil {
 			t.Fatal(err)
 		}
 		return
-	}
-	if flavor == FlavorCalico {
-		_, err := resourceInterface(client, resource).Get(ctx, resource.Name, metav1.GetOptions{})
-		if !apierrors.IsNotFound(err) {
-			t.Fatalf("global fixture policy name is not unused: %v", err)
-		}
 	}
 	if err := (KubernetesResourceClient{Client: applyClient, Protection: p}).Apply(ctx, resource, data); err != nil {
 		t.Fatal(err)
