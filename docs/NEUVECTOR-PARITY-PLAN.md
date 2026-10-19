@@ -1,7 +1,7 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-19** (Helm 100 completed-pod inventory correction deployed; application-first findings and self-protection requested; broader parity remains active)
+Last reconciled: **2026-10-19** (Helm 101 findings scope and session protection deployed; dependency attribution and remaining protection paths open; broader parity remains active)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -16,6 +16,44 @@ understand the result, and prove that the control is enforced. Constellation's
 stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
 
+
+## Findings scope and session protection rollout (Helm 101)
+
+API/frontend source `7204fa9` and runtime source `bf0ef0b` are deployed with verified
+registry digests. All fourteen running/completed-init identities match the release
+lock; application controllers, runtime DaemonSet and database are healthy. Runtime
+response/enforcement flags remain unchanged (response actions disabled/unset).
+
+Live findings checks reconcile 7,055 application/unclassified open findings plus
+1,095 known Constellation findings to 8,150 combined findings. These counts are a
+validation snapshot, not fixed totals. The default checkbox is off, enabling it
+includes system findings, its URL state survives refresh, and no page errors occur.
+The earlier raw SQL inventory count included legacy workload vulnerability rows
+that the normal findings API excludes, so it is not the UI's hidden-system count.
+
+Session termination previously called conntrack without the protected-set guard.
+It now requires fresh complete Kubernetes pod/service/node inventories, a running
+container identity matching the requested workload and one tuple endpoint, and no
+protected endpoint on either side. Own/system/extra protected namespaces, host-network
+pods, node addresses, Kubernetes API service, protected service cluster/external/LB
+IPs, resolved protected service hostnames, loopback/link-local and invalid endpoints
+are checked. Missing identity, inventory, DNS resolution or guard wiring refuses the
+action with an explicit non-applied result. Full current container IDs are required;
+telemetry prefix matches do not authorize session destruction.
+
+A dedicated runtime service account has only list permissions on pods, services and
+nodes. Live impersonation confirms those permissions and denies secret reads and
+network-policy creation. Focused guard tests include an allowed application session
+and protected/spoofed/unknown/refused cases; the full runtime-agent race suite passes.
+Helm lint and rendered account/role binding checks pass. No live conntrack sessions
+were terminated during validation; isolated tests use an injected command runner.
+
+The existing process/file guard protects the full installation namespace, and that
+protection is preserved. It is broader than the desired future component identity
+model. Separately managed dependencies, dashboard/cluster count scope propagation,
+and remaining quarantine/network blocking paths remain open; do not claim complete
+self-protection from the session guard alone. Evidence:
+`deploy/dev/registry-release/validation-system-scope-20261019.json`.
 
 ## Completed-pod current inventory correction (Helm 100)
 
@@ -48,7 +86,7 @@ provides the include-system toggle and displays the filtered system count; saved
 views preserve that choice. The API default stays `all` for existing clients.
 Exact finding-instance links include system findings so alerts still open their
 intended evidence. Database parity tests and 65 focused frontend tests pass;
-TypeScript checking passes. This work is **not deployed yet**.
+TypeScript checking passes. This work is **deployed as Helm 101** (API/frontend source `7204fa9`).
 
 The initial presentation classifier requires the Constellation chart/name/part-of/
 Helm labels on attributed deployments; it is not an enforcement identity. Shared

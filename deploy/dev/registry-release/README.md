@@ -86,3 +86,9 @@ scanning reports 4 critical / 47 high findings; the Python critical advisory is
 still open. See `validation-barman-candidate-20261019.json` for the frozen-database
 comparison and rollout evidence. Post-rollout backup
 `constellation-post-expat-20261019` completed successfully (backup ID `20261019T054924`).
+
+Helm 101 deploys API/frontend `7204fa9` and runtime `bf0ef0b` with the image pins in
+this lock. Findings default to excluding known Constellation chart workloads while
+shared/unclassified ownership remains visible. Session termination now validates
+current Kubernetes identity and protected endpoints; response flags were not enabled.
+See `validation-system-scope-20261019.json` for live checks and remaining scope.
