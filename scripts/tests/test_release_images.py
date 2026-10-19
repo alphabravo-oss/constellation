@@ -15,6 +15,17 @@ OTHER = "sha256:" + "b" * 64
 
 
 class ReleaseIdentityTests(unittest.TestCase):
+    def test_status_digits_in_reference_are_not_authorization_errors(self):
+        for fragment in ["401", "403", "404"]:
+            ref = "example.com/team/api:dev-a" + fragment + "b" * 60
+            result = subprocess.CompletedProcess([], 1, "", "ERROR: " + ref + ": not found")
+            with patch.object(publisher.subprocess, "run", return_value=result):
+                self.assertIsNone(publisher.remote_digest(ref))
+            result.stderr = "ERROR: " + ref + ": connection timed out"
+            with patch.object(publisher.subprocess, "run", return_value=result):
+                with self.assertRaisesRegex(RuntimeError, "inspection failed"):
+                    publisher.remote_digest(ref)
+
     def image(self):
         return {"name": "api", "role": "api", "source": "local/api:tested",
                 "repository": "example.com/team/api", "tag": "dev-" + "a" * 64, "digest": DIGEST}

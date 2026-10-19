@@ -40,10 +40,13 @@ def remote_digest(ref):
     result = subprocess.run(["docker", "buildx", "imagetools", "inspect", "--format",
                              "{{json .Manifest}}", ref], text=True, capture_output=True, check=False)
     if result.returncode:
+        # Image refs can contain status-like digits or words. Classify the
+        # diagnostic, not the echoed reference (including its digest/tag).
+        diagnostic = result.stderr.replace(ref, "")
         # Auth failures are never treated as an empty destination.
-        if re.search(r"(?:403|401|unauthorized|denied|forbidden)", result.stderr, re.I):
+        if re.search(r"\b(?:403|401|unauthorized|denied|forbidden)\b", diagnostic, re.I):
             raise RuntimeError("Registry authorization failed for " + ref)
-        if "not found" in result.stderr.lower() or "404" in result.stderr:
+        if "not found" in diagnostic.lower() or re.search(r"\b404\b", diagnostic):
             return None
         raise RuntimeError("Registry inspection failed for " + ref)
     digest = json.loads(result.stdout).get("digest", "")
