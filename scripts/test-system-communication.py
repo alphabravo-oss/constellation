@@ -197,7 +197,15 @@ def main():
         if not re.search(r'HTTP/\S+ (200|401|403)', api.stderr):
             raise AssertionError('Kubernetes API transport unavailable: ' + api.stderr)
         evidence['apiTransportSucceeded'] = True
-        kubectl('delete', policy_kind, policy_name, *policy_scope)
+        if args.flavor == 'calico' and env.get('CONSTELLATION_POLICY_PROOF_SERVICE_ACCOUNT'):
+            removal = subprocess.run([str(args.helper.resolve()), '-test.run', '^TestApplyNativeCommunicationLive$', '-test.v'],
+                                     env=dict(env, CONSTELLATION_POLICY_PROOF_ACTION='delete'), text=True, capture_output=True, timeout=45)
+            (args.output/'delete-helper.log').write_text(removal.stdout + removal.stderr)
+            if removal.returncode:
+                raise AssertionError('service-account recovery deletion failed; see delete-helper.log')
+            evidence['serviceAccountApplyAndDelete'] = env['CONSTELLATION_POLICY_PROOF_SERVICE_ACCOUNT']
+        else:
+            kubectl('delete', policy_kind, policy_name, *policy_scope)
         time.sleep(5)
         probe(app, 'client', targets['ordinaryPod'], True, 'recovery-ordinary-egress')
         probe(app, 'ordinary', f'http://{client_ip}:18080/', True, 'recovery-ordinary-ingress')

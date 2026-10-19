@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
@@ -90,13 +91,34 @@ func TestApplyNativeCommunicationLive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	applyClient := client
+	if account := os.Getenv("CONSTELLATION_POLICY_PROOF_SERVICE_ACCOUNT"); account != "" {
+		if account != "system:serviceaccount:constellation-policy-proof-auth:constellation-network-policy-applier" {
+			t.Fatal("unexpected fixture service account")
+		}
+		scoped := rest.CopyConfig(config)
+		scoped.Impersonate = rest.ImpersonationConfig{UserName: account}
+		applyClient, err = dynamic.NewForConfig(scoped)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if action := os.Getenv("CONSTELLATION_POLICY_PROOF_ACTION"); action != "" {
+		if action != "delete" {
+			t.Fatal("unexpected fixture action")
+		}
+		if err := (KubernetesResourceClient{Client: applyClient, Protection: p}).Delete(ctx, resource); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
 	if flavor == FlavorCalico {
 		_, err := resourceInterface(client, resource).Get(ctx, resource.Name, metav1.GetOptions{})
 		if !apierrors.IsNotFound(err) {
 			t.Fatalf("global fixture policy name is not unused: %v", err)
 		}
 	}
-	if err := (KubernetesResourceClient{Client: client, Protection: p}).Apply(ctx, resource, data); err != nil {
+	if err := (KubernetesResourceClient{Client: applyClient, Protection: p}).Apply(ctx, resource, data); err != nil {
 		t.Fatal(err)
 	}
 	effective, err := resourceInterface(client, resource).Get(ctx, resource.Name, metav1.GetOptions{})

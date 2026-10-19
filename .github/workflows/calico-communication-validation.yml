@@ -31,6 +31,9 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version-file: go.mod
+      - uses: azure/setup-helm@bf6a7d304bc2fdb57e0331155b7ebf2c504acf0a
+        with:
+          version: v3.21.0
       - name: Build actual apply-path helper on hosted runner
         run: |
           mkdir -p artifacts
@@ -51,7 +54,7 @@ jobs:
           with open('artifacts/kind.yaml', 'w') as stream:
               json.dump(config, stream, indent=2)
           PYCONFIG
-          kind create cluster --name constellation-calico-proof --config artifacts/kind.yaml --image kindest/node:v1.35.8@sha256:07b2536e30b803ed61d1677a79df6115f798ce64c80f9e22f6ed45afd09323c0
+          kind create cluster --retain --name constellation-calico-proof --config artifacts/kind.yaml --image kindest/node:v1.35.8@sha256:07b2536e30b803ed61d1677a79df6115f798ce64c80f9e22f6ed45afd09323c0
           curl --fail --silent --show-error --location https://raw.githubusercontent.com/projectcalico/calico/v3.33.0/manifests/v3_projectcalico_org-v1beta1.yaml -o artifacts/v3-crds.yaml
           curl --fail --silent --show-error --location https://raw.githubusercontent.com/projectcalico/calico/v3.33.0/manifests/tigera-operator.yaml -o artifacts/tigera-operator.yaml
           echo 'd04319fd4cc918107ebe3fdbe1b34d81904499a4e3726938f8334ab56ffa7e28  artifacts/v3-crds.yaml' | sha256sum --check
@@ -94,7 +97,23 @@ jobs:
           kubectl get ippools.projectcalico.org -o json > artifacts/ip-pools.json
           kubectl get pods -A -o json > artifacts/cluster-pods.json
           kubectl get crd/globalnetworkpolicies.projectcalico.org -o json > artifacts/global-policy-crd.json
+      - name: Install chart service-account permissions only
+        run: |
+          python3 -m pip install --disable-pip-version-check PyYAML==6.0.3
+          kubectl create namespace constellation-policy-proof-auth
+          helm template constellation deploy/charts/constellation --namespace constellation-policy-proof-auth --set networkPolicyApplier.flavor=calico --show-only templates/network-policy-applier-deployment.yaml > artifacts/applier-template.yaml
+          python3 - <<'PYRBAC'
+          import json, yaml
+          docs = list(yaml.safe_load_all(open('artifacts/applier-template.yaml')))
+          selected = [obj for obj in docs if obj and obj['kind'] in ['ServiceAccount', 'ClusterRole', 'ClusterRoleBinding']]
+          assert len(selected) == 3
+          with open('artifacts/applier-rbac.json', 'w') as stream:
+              json.dump({'apiVersion': 'v1', 'kind': 'List', 'items': selected}, stream)
+          PYRBAC
+          kubectl create -f artifacts/applier-rbac.json
       - name: Exercise protected peers and application isolation
+        env:
+          CONSTELLATION_POLICY_PROOF_SERVICE_ACCOUNT: system:serviceaccount:constellation-policy-proof-auth:constellation-network-policy-applier
         run: |
           placement=()
           if [[ "$CALICO_PROFILE" == cross-node ]]; then
@@ -107,6 +126,7 @@ jobs:
           kubectl -n calico-system logs -l k8s-app=calico-node --all-containers=true --tail=100 > artifacts/calico.log 2>&1 || true
           kubectl -n tigera-operator logs deployment/tigera-operator --tail=100 > artifacts/operator.log 2>&1 || true
           kubectl get events -A -o json > artifacts/events.json 2>&1 || true
+          kind export logs --name constellation-calico-proof artifacts/kind-logs || true
           kind delete cluster --name constellation-calico-proof
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
