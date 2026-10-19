@@ -33405,7 +33405,46 @@
     },
     "/api/v1/scan-jobs/claim": {
       "post": {
-        "summary": "Scanner worker claims the next pending scan job"
+        "summary": "Scanner worker claims the next pending scan job",
+        "description": "Every successful claim returns a fresh lease_id UUID, including reclaim and manual retries. Echo it in X-Constellation-Scan-Lease on lease-bound requests.",
+        "responses": {
+          "200": {
+            "description": "Claimed job and its lease identity.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "lease_id",
+                    "lease_expires_at",
+                    "attempt_count"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "lease_id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "lease_expires_at": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "attempt_count": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "No eligible job."
+          }
+        }
       }
     },
     "/api/v1/scan-jobs/{id}/attempts": {
@@ -33507,12 +33546,60 @@
     },
     "/api/v1/scan-jobs/{id}/complete": {
       "post": {
-        "summary": "Scanner worker records completed target scan results"
+        "summary": "Scanner worker records completed target scan results",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Constellation-Scan-Lease",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Required for claims carrying lease_id. Must match the current unexpired claim, including after reclaim or manual retry. Omit only for an unexpired pre-upgrade claim without lease_id."
+          }
+        ],
+        "description": "Scanner token and instance ownership are required. Expired or superseded requests cannot mutate scan state. Completed/canceled acknowledgements retain existing idempotency behavior where applicable.",
+        "responses": {
+          "200": {
+            "description": "Operation acknowledged."
+          },
+          "400": {
+            "description": "Malformed job or lease ID, or invalid request body."
+          },
+          "409": {
+            "description": "Job is not owned by this active lease, or is not in an eligible state."
+          }
+        }
       }
     },
     "/api/v1/scan-jobs/{id}/fail": {
       "post": {
-        "summary": "Scanner worker records failed target scan"
+        "summary": "Scanner worker records failed target scan",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Constellation-Scan-Lease",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Required for claims carrying lease_id. Must match the current unexpired claim, including after reclaim or manual retry. Omit only for an unexpired pre-upgrade claim without lease_id."
+          }
+        ],
+        "description": "Scanner token and instance ownership are required. Expired or superseded requests cannot mutate scan state. Completed/canceled acknowledgements retain existing idempotency behavior where applicable.",
+        "responses": {
+          "200": {
+            "description": "Operation acknowledged."
+          },
+          "400": {
+            "description": "Malformed job or lease ID."
+          },
+          "409": {
+            "description": "Job is not owned by this active lease, or is not in an eligible state."
+          }
+        }
       }
     },
     "/api/v1/scan-jobs/{id}/pause": {
@@ -33522,7 +33609,31 @@
     },
     "/api/v1/scan-jobs/{id}/renew": {
       "post": {
-        "summary": "Scanner-worker lease renewal for a running scan job"
+        "summary": "Scanner-worker lease renewal for a running scan job",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Constellation-Scan-Lease",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Required for claims carrying lease_id. Must match the current unexpired claim, including after reclaim or manual retry. Omit only for an unexpired pre-upgrade claim without lease_id."
+          }
+        ],
+        "description": "Scanner token and instance ownership are required. Expired or superseded requests cannot mutate scan state. Completed/canceled acknowledgements retain existing idempotency behavior where applicable.",
+        "responses": {
+          "200": {
+            "description": "Operation acknowledged."
+          },
+          "400": {
+            "description": "Malformed job or lease ID."
+          },
+          "409": {
+            "description": "Job is not owned by this active lease, or is not in an eligible state."
+          }
+        }
       }
     },
     "/api/v1/scan-jobs/{id}/resume": {
@@ -33683,7 +33794,7 @@
           }
         },
         "summary": "Get credentials for an actively leased registry scan",
-        "description": "Scanner-token authentication required. The job must be running with an unexpired lease owned by the token and X-Constellation-Scanner-Instance, and its image target must reference this registry in the same organization. Credential release requires a redacted audit receipt. Responses use Cache-Control: no-store.",
+        "description": "Scanner-token authentication required. The job must be running with an unexpired lease owned by the token and X-Constellation-Scanner-Instance, and its image target must reference this registry in the same organization. Credential release requires a redacted audit receipt. Responses use Cache-Control: no-store. Claims with lease_id require the matching X-Constellation-Scan-Lease header.",
         "parameters": [
           {
             "in": "query",
@@ -33711,6 +33822,16 @@
               "type": "string"
             },
             "description": "Must match the instance used to claim the job."
+          },
+          {
+            "in": "header",
+            "name": "X-Constellation-Scan-Lease",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Required for claims carrying lease_id. Must match the current unexpired claim, including after reclaim or manual retry. Omit only for an unexpired pre-upgrade claim without lease_id."
           }
         ]
       }

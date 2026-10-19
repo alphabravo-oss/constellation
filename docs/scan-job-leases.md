@@ -35,3 +35,11 @@ worker's job becomes reclaimable after expiry; this is not immediate pod-deletio
 detection. Explicit lease IDs fence late requests even when the replacement worker
 uses the same stable instance name. Shorter recovery deadlines and immutable
 attempt history across manual retry are separate follow-up work.
+
+`Scan lease validation` runs the scanner and handler regression suites against a
+fresh migrated database on a hosted runner. `Scanner lease candidates` builds OCI
+artifacts for scanner, API and the development migration overlay. Building these
+artifacts does not authorize promotion: inspect the regression result, verify
+artifact/source identities, run the published-image gates, and follow the upgrade
+order above. The overlay copies migrations onto the current pinned migration
+runtime; it does not silently rebuild or replace that runtime's tools.
