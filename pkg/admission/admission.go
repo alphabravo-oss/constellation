@@ -305,7 +305,8 @@ type EvidenceArtifactDetail struct {
 // PolicyEngine is the built-in evaluator. Policies are simple structured rules — anything
 // requiring Rego/CEL goes through the Phase-5 plugin engines.
 type PolicyEngine struct {
-	mu sync.RWMutex
+	WorkloadOwners WorkloadOwnerResolver
+	mu             sync.RWMutex
 
 	// Rules is the active policy set. Hot-reloaded by the webhook server.
 	Rules []Rule
@@ -643,6 +644,7 @@ func (e *PolicyEngine) Evaluate(ctx context.Context, req *admissionv1.AdmissionR
 	rules := append([]Rule(nil), e.Rules...)
 	evidence := e.Evidence
 	qsrc := e.Quarantine
+	workloadOwners := e.WorkloadOwners
 	onDeny := e.OnDeny
 	rbac := e.RBAC
 	labeler := e.NamespaceLabeler
@@ -679,7 +681,13 @@ func (e *PolicyEngine) Evaluate(ctx context.Context, req *admissionv1.AdmissionR
 	// deny event whose RuleID encodes the quarantine entry id so the
 	// audit trail links pod → quarantine entry → upstream alert.
 	if qsrc != nil {
-		if hit := qsrc.Current().Match(pod); hit != nil {
+		hit, resolveErr := matchQuarantine(ctx, req, pod, qsrc.Current(), workloadOwners)
+		if resolveErr != nil {
+			resp.Allowed = false
+			resp.Result = &metav1.Status{Message: "quarantine workload identity unavailable: " + resolveErr.Error()}
+			return resp
+		}
+		if hit != nil {
 			resp.Allowed = false
 			resp.Result = &metav1.Status{
 				Message: fmt.Sprintf("quarantined by constellation (scope=%s match=%s): %s",

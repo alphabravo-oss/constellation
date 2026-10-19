@@ -274,6 +274,14 @@ func main() {
 	}))
 
 	mux := http.NewServeMux()
+	if qsrc != nil {
+		client, err := newAdmissionKubeClient(os.Getenv("KUBECONFIG"))
+		if err != nil {
+			tel.Logger.Error("quarantine owner resolver unavailable; owned pods in quarantined namespaces will be refused", "err", err)
+		} else {
+			engine.SetWorkloadOwners(&workloadOwnerResolver{client: client})
+		}
+	}
 	mux.HandleFunc("/validate", validateHandler(chain, tel))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {

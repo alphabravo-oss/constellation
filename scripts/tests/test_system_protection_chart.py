@@ -60,3 +60,18 @@ class SystemProtectionChartTests(unittest.TestCase):
         webhook=next(d for d in yaml.safe_load_all(result.stdout) if d and d['kind']=='ValidatingWebhookConfiguration')['webhooks'][0]
         self.assertTrue(any('pods/ephemeralcontainers' in rule['resources'] and 'UPDATE' in rule['operations'] and '' in rule['apiGroups'] for rule in webhook['rules']))
         self.assertIn('cnpg-system',webhook['namespaceSelector']['matchExpressions'][0]['values'])
+
+    def test_admission_owner_lookup_uses_dedicated_read_only_account(self):
+        result=self.render({'protectedNamespaces':[]})
+        self.assertEqual(result.returncode,0,result.stderr)
+        docs=list(yaml.safe_load_all(result.stdout))
+        pod=next(d for d in docs if d and d['kind']=='Deployment' and d['metadata']['name'].endswith('-admission'))['spec']['template']['spec']
+        self.assertTrue(pod['automountServiceAccountToken'])
+        self.assertTrue(pod['serviceAccountName'].endswith('-admission'))
+        role=next(d for d in docs if d and d['kind']=='ClusterRole' and '-admission-' in d['metadata']['name'])
+        self.assertTrue(any(r['resources']==['replicasets'] and r['verbs']==['get'] for r in role['rules']))
+        self.assertTrue(any(r['resources']==['jobs'] and r['verbs']==['get'] for r in role['rules']))
+        for rule in role['rules']:
+            self.assertTrue(set(rule['verbs']) <= {'get','list','watch'})
+            self.assertNotIn('secrets',rule['resources'])
+            self.assertNotIn('*',rule['resources'])

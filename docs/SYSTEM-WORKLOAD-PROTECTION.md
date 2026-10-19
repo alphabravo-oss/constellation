@@ -161,3 +161,24 @@ records this explicit rule update. Existing system namespace exclusions still ap
 Automatic repository quarantine intentionally covers every tag in the repository;
 quarantining only the scanned digest while resolving tagged admissions requires further
 image-resolution work.
+
+## Workload quarantine ancestry
+
+Admission checks the admitted controller's own name and namespace, then its controller
+owner. For pods owned by a ReplicaSet or Job it resolves that object using a bounded
+one-second Kubernetes GET, verifies the referenced UID, and checks the Deployment or
+CronJob parent. No Deployment name is guessed from a ReplicaSet suffix. Both
+`namespace/name` and runtime `namespace/kind/name` keys are accepted. Controller
+pod-template metadata cannot substitute for the admitted object's identity.
+
+Owner lookups run only in namespaces with active workload quarantine entries. A missing
+resolver, missing owner UID, replaced owner, or lookup failure refuses the admission
+request when ancestry is needed; it does not silently bypass quarantine. Unrelated
+namespaces need no lookup, and unrelated verified controllers remain admissible.
+System namespace exclusions continue to apply before webhook invocation.
+
+The admission Deployment uses a dedicated service account. Its role allows GET on
+ReplicaSets and Jobs, list/watch on namespaces for namespace-selector policies, and
+list on role/binding resources for the existing RBAC policy resolver. It grants no
+secret reads or mutation verbs. Previously disabled namespace/RBAC resolvers can now
+use their intended read-only Kubernetes access.

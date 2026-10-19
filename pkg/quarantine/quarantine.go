@@ -140,6 +140,29 @@ func imageEntryMatches(e Entry, image string) bool {
 	return err == nil && candidate.Name() == reference.Name()
 }
 
+// WorkloadHit checks an exact controller identity supplied by the admission resolver.
+func (s *Snapshot) WorkloadHit(key string) *Hit {
+	if s == nil {
+		return nil
+	}
+	if e, ok := s.workloads[key]; ok && e.Active(s.at) {
+		return &Hit{Entry: e, MatchKind: "workload", MatchValue: key}
+	}
+	return nil
+}
+
+func (s *Snapshot) HasWorkloads(namespace string) bool {
+	if s == nil || namespace == "" {
+		return false
+	}
+	for key, e := range s.workloads {
+		if strings.HasPrefix(key, namespace+"/") && e.Active(s.at) {
+			return true
+		}
+	}
+	return false
+}
+
 // Stats reports the index size — useful for /metrics and for noticing
 // when a cluster's quarantine list has gotten unreasonably large
 // (a sign of runaway auto-quarantine).
@@ -305,10 +328,9 @@ func (s *Source) Health() Health {
 // Job) set ownerReferences; this function uses the top-level owner kind
 // + name when present. Naked pods fall back to "namespace/pod-name".
 //
-// We deliberately don't synthesize a Deployment name from a ReplicaSet
-// suffix — too brittle. Operators authoring quarantine workload keys
-// for Deployments should target the Deployment's ReplicaSet name as
-// reported by the runtime alert, which is what we record.
+// This immediate-owner key remains compatible with existing entries. The admission
+// engine also checks the admitted controller itself and verified ReplicaSet/Job
+// ancestry; Deployment names are never synthesized from name suffixes.
 func workloadKeyForPod(pod *corev1.Pod) string {
 	if pod.Namespace == "" {
 		return ""
