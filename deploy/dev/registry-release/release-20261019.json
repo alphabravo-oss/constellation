@@ -20,10 +20,10 @@
     {
       "name": "scanner",
       "role": "scanner",
-      "source": "constellation/scanner:db-recovery-20261019-1a8fae7",
-      "digest": "sha256:f6c1c072de953e5031331c5ab556158ff05fd75e33859be5a7ab7ef68156e629",
+      "source": "constellation/scanner:patched-tools-final-20261019",
+      "digest": "sha256:fd574a4169f963300acb6a57a66a416f38134a1d979956f3249a149ae21bcd39",
       "repository": "ghcr.io/alphabravo-oss/constellation/scanner",
-      "tag": "dev-f6c1c072de953e5031331c5ab556158ff05fd75e33859be5a7ab7ef68156e629"
+      "tag": "dev-fd574a4169f963300acb6a57a66a416f38134a1d979956f3249a149ae21bcd39"
     },
     {
       "name": "postgres",
@@ -199,7 +199,7 @@
     "scanner": {
       "image": {
         "repository": "ghcr.io/alphabravo-oss/constellation/scanner",
-        "digest": "sha256:f6c1c072de953e5031331c5ab556158ff05fd75e33859be5a7ab7ef68156e629"
+        "digest": "sha256:fd574a4169f963300acb6a57a66a416f38134a1d979956f3249a149ae21bcd39"
       }
     },
     "migrate": {

@@ -99,6 +99,13 @@ suppress advisories or relabel vulnerable dependency versions. Trivy and ORAS
 retain checksum-verified upstream binaries. The release-check CLI installer is
 separate and still uses the pinned upstream Grype binary.
 
+The Helm 124 deployment passes real-tool acceptance and a queued production scan
+with Syft, Grype and Trivy successful. Same-database standalone Grype counts drop
+from 9 Critical / 48 High to 0 Critical / 1 High. The combined live scan retains
+5 High records without listed fixes; these are not the same measurement as the
+standalone Grype comparison. Exact identities and evidence are recorded in
+`deploy/dev/registry-release/validation-scanner-tools-20261019.json`.
+
 ## Frontend runtime refresh (2026-10-19)
 
 The frontend Dockerfile updates libexpat, zlib, libx11, and libxpm from its

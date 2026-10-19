@@ -1,7 +1,7 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-19** (Helm 101 findings scope and session protection deployed; dependency attribution and remaining protection paths open; broader parity remains active)
+Last reconciled: **2026-10-19** (Helm 124 scanner tool hardening; broader parity remains active)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -16,6 +16,38 @@ understand the result, and prove that the control is enforced. Constellation's
 stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
 
+
+## Scanner tool hardening and release gates (Helm 124)
+
+Scanner tool source `2ae5bcd` is deployed as Helm 124. The scanner worker binary
+is preserved from source `1a8fae7`; Syft, Grype, and Cosign are rebuilt from pinned
+upstream modules with Go 1.26.9 and reviewed dependency locks. With the same
+Grype database built 2026-10-19T06:39:15Z, the previous image reports 9 Critical,
+48 High, 10 Medium and 2 Unknown records; the deployed image reports 0 Critical,
+1 High, 1 Medium and 2 Unknown. The remaining High has no listed fix and is not
+suppressed. These are Grype records for this image, not cluster-wide UI totals.
+
+Private-image and package-matching acceptance passed with the actual bundled
+binaries, as did legacy/keyless signature verification and negative trust checks,
+under the normal scanner user with a read-only root and dropped capabilities.
+The immutable registry image passed the release gate. Live job
+`be51ecb3-83d8-48b7-b2e0-7d59f1974491` completed with 1,337 packages and all
+three engines successful. Combined live results contain 0 Critical, 5 High,
+4 Medium and 4 Info records; none of the High records lists a fix. These combined
+engine results are separate from the comparable standalone Grype counts above.
+Evidence: `deploy/dev/registry-release/validation-scanner-tools-20261019.json`.
+Fourteen running/completed
+init-container identities match the release lock; controllers and CNPG are healthy.
+
+Release source `f30e4da` adds a fixable Critical/High gate before versioned image
+promotion for all 12 release matrix roles. Local tests and real frontend/scanner
+reports exercise the gate; an actual remote tagged release run remains unverified.
+Development publishing still requires its explicit validation. Broader CNI
+isolation, response fencing, unattended rebuilds, and parity work remain open.
+
+The sections below retain dated rollout snapshots. Their counts and outstanding
+items describe those checkpoints; use the latest release lock and validation
+artifacts for current deployment state.
 
 ## Findings scope and session protection rollout (Helm 101)
 
