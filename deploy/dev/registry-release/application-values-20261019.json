@@ -73,7 +73,7 @@
   "api": {
     "image": {
       "repository": "ghcr.io/alphabravo-oss/constellation/api",
-      "digest": "sha256:892e7060016d06b7a609494fcfa6109eb28c7927b274814edcbde699674c25c2"
+      "digest": "sha256:7ca489d94f9e27cf00d8fd5f41e7bf4c8202fec344849846223fd4c1090a4f31"
     }
   },
   "discoverer": {
@@ -98,13 +98,13 @@
   "scanner": {
     "image": {
       "repository": "ghcr.io/alphabravo-oss/constellation/scanner",
-      "digest": "sha256:16dcaa6e161a88635643171af046dda104ee62b1f1e347cb459ca8a678e305e0"
+      "digest": "sha256:716b0300f3d1992a1e7d142a306f2255af7b09171989bf67c87a2e961e2a5823"
     }
   },
   "migrate": {
     "image": {
       "repository": "ghcr.io/alphabravo-oss/constellation/migrate",
-      "digest": "sha256:6abc8c6581f88021124d263b17dd80219a906a8523e4ceb744cd4655192fd1d8"
+      "digest": "sha256:604a275f6c7c11bfc8d80825ebe389a71e9a7a561b9a3aeba25f8fb66877fe56"
     }
   },
   "networkPolicyApplier": {

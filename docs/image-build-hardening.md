@@ -179,3 +179,24 @@ zero findings, admission from 256 to one informational finding, and operator
 from 256 to zero. All three scan engines succeeded for each image. Exact image
 identities, package counts, remaining advisory and runtime checks are recorded in
 `deploy/dev/registry-release/validation-static-runtimes-20261019.json`.
+
+## Migration runtime hardening
+
+The migration image builds Goose v3.27.1 with Go 1.26.9, verifies the upstream
+module archive checksum, and applies the checked-in `deploy/docker/goose` module
+locks. The PostgreSQL-only build excludes unused database drivers and their
+transitive dependencies. Dependency locks also pin patched x/net, x/text and gRPC
+versions; builds use `-mod=readonly`.
+
+The runtime uses digest-pinned Alpine 3.24, refreshes its signed distribution
+packages and runs as UID/GID 10001. Shell and psql remain available for existing
+operator workflows. Alpine 3.20 in the previous image is beyond normal support;
+a passing fixable-Critical/High gate alone does not establish complete coverage
+for an end-of-life distribution. See [Alpine's support table](https://alpinelinux.org/releases/).
+
+The hosted `Scanner lease candidates` migration job tests the actual OCI runtime
+against a disposable PostgreSQL database: fresh upgrade, idempotent repeat,
+migration 184 rollback and reapply. It uses a read-only root filesystem and drops
+all capabilities. This recipe is shared by development and tagged releases;
+publication still requires an immutable-image vulnerability gate, and tagged
+release workflow acceptance remains separate from development deployment evidence.

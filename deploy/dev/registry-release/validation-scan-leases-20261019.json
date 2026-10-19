@@ -1,0 +1,387 @@
+{
+  "verifiedAt": "2026-10-19T10:58:25.863445+00:00",
+  "deployed": true,
+  "helmRevision": 129,
+  "scannerFirstRevision": 128,
+  "schemaVersion": 184,
+  "sourceCommits": {
+    "scanner": "6046aa9c5bac973572e90f00e03cd859115e43ae",
+    "api": "91275b6ed5c83291dbc8446e6a4ba9320c276c88",
+    "migrate": "1628ce188b469e10aeb1cccde0629f617887ac64"
+  },
+  "regression": {
+    "run": "https://github.com/alphabravo-oss/constellation/actions/runs/39238667425",
+    "tests": 1858,
+    "skipped": 2,
+    "skipReason": "Opt-in Grype corrupt-database recovery fixture absent; separate from lease tests",
+    "race": true,
+    "shuffle": true,
+    "repeat": 2
+  },
+  "buildRuns": {
+    "scanner": "https://github.com/alphabravo-oss/constellation/actions/runs/39237862401",
+    "api": "https://github.com/alphabravo-oss/constellation/actions/runs/39238679620",
+    "migrate": "https://github.com/alphabravo-oss/constellation/actions/runs/39240483284"
+  },
+  "migrationRuntimeValidation": {
+    "freshUpgrade": 184,
+    "repeatUpgrade": 184,
+    "downThenUp": 184,
+    "user": "10001:10001",
+    "readOnlyRoot": true,
+    "capabilities": "none",
+    "allSqlFilesMatchSource": true
+  },
+  "images": [
+    {
+      "name": "api",
+      "role": "api",
+      "source": "constellation/api:candidate-91275b6ed5c83291dbc8446e6a4ba9320c276c88",
+      "digest": "sha256:7ca489d94f9e27cf00d8fd5f41e7bf4c8202fec344849846223fd4c1090a4f31",
+      "repository": "ghcr.io/alphabravo-oss/constellation/api",
+      "tag": "dev-7ca489d94f9e27cf00d8fd5f41e7bf4c8202fec344849846223fd4c1090a4f31"
+    },
+    {
+      "name": "scanner",
+      "role": "scanner",
+      "source": "constellation/scanner:candidate-6046aa9c5bac973572e90f00e03cd859115e43ae",
+      "digest": "sha256:716b0300f3d1992a1e7d142a306f2255af7b09171989bf67c87a2e961e2a5823",
+      "repository": "ghcr.io/alphabravo-oss/constellation/scanner",
+      "tag": "dev-716b0300f3d1992a1e7d142a306f2255af7b09171989bf67c87a2e961e2a5823"
+    },
+    {
+      "name": "migrate",
+      "role": "migrate",
+      "source": "constellation/migrate:candidate-1628ce188b469e10aeb1cccde0629f617887ac64",
+      "digest": "sha256:604a275f6c7c11bfc8d80825ebe389a71e9a7a561b9a3aeba25f8fb66877fe56",
+      "repository": "ghcr.io/alphabravo-oss/constellation/migrate",
+      "tag": "dev-604a275f6c7c11bfc8d80825ebe389a71e9a7a561b9a3aeba25f8fb66877fe56"
+    }
+  ],
+  "publishedImageGates": {
+    "api": {
+      "image": "ghcr.io/alphabravo-oss/constellation/api@sha256:7ca489d94f9e27cf00d8fd5f41e7bf4c8202fec344849846223fd4c1090a4f31",
+      "runtime_manifest": "sha256:bc6f1a524756b21c946c9486f736cb8e5db73683f7db73ee0d40c1841d61f51f",
+      "configuration": "sha256:1709b41d78e57774cc5055a1f047906c06dd567af680dc0553953731725f855b",
+      "passed": true,
+      "policy": "no-fixable-critical-or-high",
+      "scanner_version": "0.120.1-constellation.1",
+      "database": {
+        "schemaVersion": "v6.1.10",
+        "from": "https://grype.anchore.io/databases/v6/vulnerability-db_v6.1.10_2026-10-19T00:32:50Z_1792391955.tar.zst?checksum=sha256%3A13a192236b248579678bbf06cefb2a07a5dcbd00da110cfb5c3e26eb68a7ce58",
+        "built": "2026-10-19T06:39:15Z",
+        "path": "/root/.cache/grype/db/6/vulnerability.db",
+        "valid": true
+      },
+      "counts": {},
+      "blockers": [],
+      "evaluated_at": "2026-10-19T10:47:43.692819+00:00",
+      "report_sha256": "c3fea035b962697d44a96bf674e5eef70bd0b819d303df1cc752680a547ef003"
+    },
+    "scanner": {
+      "image": "ghcr.io/alphabravo-oss/constellation/scanner@sha256:716b0300f3d1992a1e7d142a306f2255af7b09171989bf67c87a2e961e2a5823",
+      "runtime_manifest": "sha256:fc0aa4b7876b2b015e5bbb2844eb9b86941e274223c5af71b5af9315ed62bb21",
+      "configuration": "sha256:82f473945d1b14b6bb6b7cd8d69b8ddd8dcbdd1fa326da38a4353c797d5c3a22",
+      "passed": true,
+      "policy": "no-fixable-critical-or-high",
+      "scanner_version": "0.120.1-constellation.1",
+      "database": {
+        "schemaVersion": "v6.1.10",
+        "from": "https://grype.anchore.io/databases/v6/vulnerability-db_v6.1.10_2026-10-19T00:32:50Z_1792391955.tar.zst?checksum=sha256%3A13a192236b248579678bbf06cefb2a07a5dcbd00da110cfb5c3e26eb68a7ce58",
+        "built": "2026-10-19T06:39:15Z",
+        "path": "/root/.cache/grype/db/6/vulnerability.db",
+        "valid": true
+      },
+      "counts": {
+        "medium": 1,
+        "high": 1,
+        "unknown": 2
+      },
+      "blockers": [],
+      "evaluated_at": "2026-10-19T10:47:52.189635+00:00",
+      "report_sha256": "751da9483a54fc339f15cfdd4b2e257acbb971dfd558016d8e51965e460dc689"
+    },
+    "migrate": {
+      "image": "ghcr.io/alphabravo-oss/constellation/migrate@sha256:604a275f6c7c11bfc8d80825ebe389a71e9a7a561b9a3aeba25f8fb66877fe56",
+      "runtime_manifest": "sha256:31a92c2e3f36377c489eea3403fdf9e0a287a826c20f6981b5dcf89e35f8ca69",
+      "configuration": "sha256:0ea0f60a3e103413552389a1518baf08a338087450fafdc2a74109ede318b2b1",
+      "passed": true,
+      "policy": "no-fixable-critical-or-high",
+      "scanner_version": "0.120.1-constellation.1",
+      "database": {
+        "schemaVersion": "v6.1.10",
+        "from": "https://grype.anchore.io/databases/v6/vulnerability-db_v6.1.10_2026-10-19T00:32:50Z_1792391955.tar.zst?checksum=sha256%3A13a192236b248579678bbf06cefb2a07a5dcbd00da110cfb5c3e26eb68a7ce58",
+        "built": "2026-10-19T06:39:15Z",
+        "path": "/root/.cache/grype/db/6/vulnerability.db",
+        "valid": true
+      },
+      "counts": {
+        "medium": 3
+      },
+      "blockers": [],
+      "evaluated_at": "2026-10-19T10:53:50.628232+00:00",
+      "report_sha256": "9b301ddae3f0bce051b65b279d221526eaa094261431a9916dd084dfa67c01df"
+    }
+  },
+  "bundledScannerTools": {
+    "previous": {
+      "syft": "2f2207164ea1529519e211f315d3a4914d89244987fe0cfd7a7d80958dfba305",
+      "trivy": "1f889576636db0623539cb339df7d06c40ebf39e7919489eafa1160e29808f19",
+      "grype": "abed138b1b86a14b1fc6ad53808ac59747108d81f8f892afa03e7c8dace9b625",
+      "cosign": "2ebd62579ddb6937028cbbc65eb9f65f1af87d89b8161df6fd7446301c63f755",
+      "oras": "7c43d74f5f64c94932b31c76103bb7f48af837fe8aa5316fba7968b6c523350e"
+    },
+    "candidate": {
+      "syft": "2f2207164ea1529519e211f315d3a4914d89244987fe0cfd7a7d80958dfba305",
+      "trivy": "1f889576636db0623539cb339df7d06c40ebf39e7919489eafa1160e29808f19",
+      "grype": "abed138b1b86a14b1fc6ad53808ac59747108d81f8f892afa03e7c8dace9b625",
+      "cosign": "2ebd62579ddb6937028cbbc65eb9f65f1af87d89b8161df6fd7446301c63f755",
+      "oras": "7c43d74f5f64c94932b31c76103bb7f48af837fe8aa5316fba7968b6c523350e"
+    },
+    "identical": true
+  },
+  "migrationComparison": {
+    "baselineCounts": {
+      "high": 10,
+      "critical": 1,
+      "medium": 3
+    },
+    "finalCounts": {
+      "medium": 3
+    },
+    "databaseBuilt": "2026-10-19T06:39:15Z",
+    "oldDistro": {
+      "name": "alpine",
+      "version": "3.20.10",
+      "idLike": []
+    },
+    "newDistro": {
+      "name": "alpine",
+      "version": "3.24.2",
+      "idLike": []
+    },
+    "suppressed": false
+  },
+  "legacyApiPrivateScan": {
+    "id": "c8c4bc04-a97f-4a0d-b613-a005eadada6c",
+    "status": "completed",
+    "worker": "scanner:scanner-bootstrap:fd412426-90c4-4368-bbfa-18ab85df96aa:constellation-scanner-b94d64457-2m44c",
+    "attempt": 1,
+    "registry_id": "5945476f-53b0-42a4-8de6-c8ddb1ca0c82",
+    "packages": 192,
+    "findings": 0,
+    "engines": {
+      "syft": "succeeded",
+      "grype": "succeeded",
+      "trivy": "succeeded"
+    }
+  },
+  "newLeaseScans": [
+    {
+      "id": "24fae2b9-b111-435a-bbe7-8ce7e7033abd",
+      "status": "completed",
+      "lease_id": "e07de7f8-56b3-4ba9-aa19-04e60e5d6b32",
+      "worker_id": "scanner:scanner-bootstrap:fd412426-90c4-4368-bbfa-18ab85df96aa:constellation-scanner-b94d64457-2m44c",
+      "attempt_count": 1,
+      "registry_id": null,
+      "ref": "ghcr.io/alphabravo-oss/constellation/api@sha256:7ca489d94f9e27cf00d8fd5f41e7bf4c8202fec344849846223fd4c1090a4f31",
+      "package_count": 201,
+      "finding_count": 1,
+      "engine_status": {
+        "syft": "succeeded",
+        "grype": "succeeded",
+        "trivy": "succeeded"
+      },
+      "credential_receipts": 0,
+      "severity_counts": {
+        "info": 1
+      }
+    },
+    {
+      "id": "fc897ccf-1d3a-488c-abc3-8abcbc7b2a20",
+      "status": "completed",
+      "lease_id": "50345682-75d7-41ae-b7eb-86f4238ee1eb",
+      "worker_id": "scanner:scanner-bootstrap:fd412426-90c4-4368-bbfa-18ab85df96aa:constellation-scanner-b94d64457-2m44c",
+      "attempt_count": 1,
+      "registry_id": null,
+      "ref": "ghcr.io/alphabravo-oss/constellation/scanner@sha256:716b0300f3d1992a1e7d142a306f2255af7b09171989bf67c87a2e961e2a5823",
+      "package_count": 1337,
+      "finding_count": 8,
+      "engine_status": {
+        "syft": "succeeded",
+        "grype": "succeeded",
+        "trivy": "succeeded"
+      },
+      "credential_receipts": 0,
+      "severity_counts": {
+        "high": 3,
+        "info": 3,
+        "medium": 2
+      }
+    },
+    {
+      "id": "d05c17d3-2b31-4e06-94a8-dd01db95dc25",
+      "status": "completed",
+      "lease_id": "5c0eeea2-62db-49e7-b934-0980c0119392",
+      "worker_id": "scanner:scanner-bootstrap:fd412426-90c4-4368-bbfa-18ab85df96aa:constellation-scanner-b94d64457-2m44c",
+      "attempt_count": 1,
+      "registry_id": "5945476f-53b0-42a4-8de6-c8ddb1ca0c82",
+      "ref": "ghcr.io/alphabravo-oss/constellation/cnpg-operator@sha256:cc61009ac3d2cdf0aa2ff7f44f85dbb7bdf85ab50425d41a71da2af6521cc1b9",
+      "package_count": 192,
+      "finding_count": 0,
+      "engine_status": {
+        "syft": "succeeded",
+        "grype": "succeeded",
+        "trivy": "succeeded"
+      },
+      "credential_receipts": 1,
+      "severity_counts": {}
+    },
+    {
+      "id": "6803cbac-8582-49db-a238-a7cccba69331",
+      "status": "completed",
+      "lease_id": "5df97e50-61d3-4505-9f57-6e17fbfa6c9e",
+      "worker_id": "scanner:scanner-bootstrap:fd412426-90c4-4368-bbfa-18ab85df96aa:constellation-scanner-b94d64457-2m44c",
+      "attempt_count": 1,
+      "registry_id": null,
+      "ref": "ghcr.io/alphabravo-oss/constellation/migrate@sha256:604a275f6c7c11bfc8d80825ebe389a71e9a7a561b9a3aeba25f8fb66877fe56",
+      "package_count": 38,
+      "finding_count": 3,
+      "engine_status": {
+        "syft": "succeeded",
+        "grype": "succeeded",
+        "trivy": "succeeded"
+      },
+      "credential_receipts": 0,
+      "severity_counts": {
+        "medium": 3
+      }
+    }
+  ],
+  "runtime": {
+    "helmRevision": 129,
+    "restartHoldRemoved": true,
+    "clusterHealthy": true,
+    "postBackupPhase": "completed",
+    "postBackupId": "20261019T054924",
+    "containers": [
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-admission-845b669bbc-9tpjk",
+        "container": "admission",
+        "image": "ghcr.io/alphabravo-oss/constellation/admission@sha256:b747fb3ab87c66eb04e687f48a0893bba2a9e5d06011fec103863261286a0c4c",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/admission@sha256:b747fb3ab87c66eb04e687f48a0893bba2a9e5d06011fec103863261286a0c4c"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-api-5b95979b98-72w4v",
+        "container": "wait-for-migrations",
+        "image": "ghcr.io/alphabravo-oss/constellation/api@sha256:7ca489d94f9e27cf00d8fd5f41e7bf4c8202fec344849846223fd4c1090a4f31",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/api@sha256:7ca489d94f9e27cf00d8fd5f41e7bf4c8202fec344849846223fd4c1090a4f31"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-api-5b95979b98-72w4v",
+        "container": "api",
+        "image": "ghcr.io/alphabravo-oss/constellation/api@sha256:7ca489d94f9e27cf00d8fd5f41e7bf4c8202fec344849846223fd4c1090a4f31",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/api@sha256:7ca489d94f9e27cf00d8fd5f41e7bf4c8202fec344849846223fd4c1090a4f31"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-cnpg-postgres-1",
+        "container": "bootstrap-controller",
+        "image": "ghcr.io/alphabravo-oss/constellation/cnpg-operator@sha256:cc61009ac3d2cdf0aa2ff7f44f85dbb7bdf85ab50425d41a71da2af6521cc1b9",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/cnpg-operator@sha256:cc61009ac3d2cdf0aa2ff7f44f85dbb7bdf85ab50425d41a71da2af6521cc1b9"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-cnpg-postgres-1",
+        "container": "plugin-barman-cloud",
+        "image": "ghcr.io/alphabravo-oss/constellation/barman-sidecar@sha256:5c6b5559b08b7b49c89937b6d823a37fbeb8e7b883d4b0da6278fe09de87d1f1",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/barman-sidecar@sha256:5c6b5559b08b7b49c89937b6d823a37fbeb8e7b883d4b0da6278fe09de87d1f1"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-cnpg-postgres-1",
+        "container": "postgres",
+        "image": "ghcr.io/alphabravo-oss/constellation/postgres:16.14-dev-98087f2e517416edda6e3649154c3be4a5a7b0ce2228c4fab3f4e2bed430d92a@sha256:98087f2e517416edda6e3649154c3be4a5a7b0ce2228c4fab3f4e2bed430d92a",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/postgres@sha256:98087f2e517416edda6e3649154c3be4a5a7b0ce2228c4fab3f4e2bed430d92a"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-discoverer-7859bdf8d6-cwtx6",
+        "container": "discoverer",
+        "image": "ghcr.io/alphabravo-oss/constellation/discoverer@sha256:ffb3150e112bce4d2a529d7b6e969edb145251cbb5745562e693fa7839fdabfa",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/discoverer@sha256:ffb3150e112bce4d2a529d7b6e969edb145251cbb5745562e693fa7839fdabfa"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-frontend-7465f554cb-hmm78",
+        "container": "nginx",
+        "image": "ghcr.io/alphabravo-oss/constellation/frontend@sha256:6d419115228f0942f4bbdde114acbb9454d00e2b83c7496e823b98b6af9f40d4",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/frontend@sha256:6d419115228f0942f4bbdde114acbb9454d00e2b83c7496e823b98b6af9f40d4"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-network-policy-applier-77dff48d46-56gwl",
+        "container": "applier",
+        "image": "ghcr.io/alphabravo-oss/constellation/operator@sha256:cae3765afeeedd1abc23647d166bf536cc4b01fe0b0ff54af6cdb4a2f6d9f15a",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/operator@sha256:cae3765afeeedd1abc23647d166bf536cc4b01fe0b0ff54af6cdb4a2f6d9f15a"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-operator-787c79654-r5d5r",
+        "container": "operator",
+        "image": "ghcr.io/alphabravo-oss/constellation/operator@sha256:cae3765afeeedd1abc23647d166bf536cc4b01fe0b0ff54af6cdb4a2f6d9f15a",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/operator@sha256:cae3765afeeedd1abc23647d166bf536cc4b01fe0b0ff54af6cdb4a2f6d9f15a"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-runtime-agent-xm2pp",
+        "container": "agent",
+        "image": "ghcr.io/alphabravo-oss/constellation/runtime-agent@sha256:d8d0e4903abc6c291fb98e32806ac61ea11b562b0abfa62c60230e3fa5afaadf",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/runtime-agent@sha256:d8d0e4903abc6c291fb98e32806ac61ea11b562b0abfa62c60230e3fa5afaadf"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-scanner-b94d64457-2m44c",
+        "container": "scanner",
+        "image": "ghcr.io/alphabravo-oss/constellation/scanner@sha256:716b0300f3d1992a1e7d142a306f2255af7b09171989bf67c87a2e961e2a5823",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/scanner@sha256:716b0300f3d1992a1e7d142a306f2255af7b09171989bf67c87a2e961e2a5823"
+      },
+      {
+        "namespace": "cnpg-system",
+        "pod": "barman-cloud-669fcf8689-rqt4x",
+        "container": "barman-cloud",
+        "image": "ghcr.io/alphabravo-oss/constellation/barman-plugin@sha256:de96d9e4bf0f2f69f8d2b3c1a8bc953ea8235d613901ae19754600b55cb07590",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/barman-plugin@sha256:de96d9e4bf0f2f69f8d2b3c1a8bc953ea8235d613901ae19754600b55cb07590"
+      },
+      {
+        "namespace": "cnpg-system",
+        "pod": "cnpg-controller-manager-fb6948887-xwgx8",
+        "container": "manager",
+        "image": "ghcr.io/alphabravo-oss/constellation/cnpg-operator@sha256:cc61009ac3d2cdf0aa2ff7f44f85dbb7bdf85ab50425d41a71da2af6521cc1b9",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/cnpg-operator@sha256:cc61009ac3d2cdf0aa2ff7f44f85dbb7bdf85ab50425d41a71da2af6521cc1b9"
+      }
+    ]
+  },
+  "nonImageHelmValuesUnchanged": true,
+  "publicHttp": 200,
+  "authenticatedClustersHttp": 200,
+  "diskPressure": false,
+  "limitations": [
+    "Single-replica API restart briefly refused scanner claims; no zero-downtime HA claim",
+    "Scanner combined engine results retain unfixed High findings",
+    "30-minute lease and five-minute renewal remain",
+    "Reclaimed historical attempts and manual-retry attempt history still need improvement",
+    "Tagged release workflow end-to-end and cross-CNI enforcement remain open"
+  ],
+  "localArtifacts": "/root/constellation-scan-leases-20261019",
+  "evidenceHashes": {
+    "regression.log": "aaf0294585060baae0c652dd965e0f80feea80d826a84d718e1d872ddfc109d9",
+    "migration-final-validation.log": "09ec25d723a7169dcbbe9f70ef6ca8bd2d5f6b7063d0bb44dc0a35fcbc94ca00",
+    "api-published-scan.json": "c3fea035b962697d44a96bf674e5eef70bd0b819d303df1cc752680a547ef003",
+    "scanner-published-scan.json": "751da9483a54fc339f15cfdd4b2e257acbb971dfd558016d8e51965e460dc689",
+    "migrate-final-published-scan.json": "9b301ddae3f0bce051b65b279d221526eaa094261431a9916dd084dfa67c01df"
+  }
+}

@@ -20,10 +20,10 @@
     {
       "name": "scanner",
       "role": "scanner",
-      "source": "constellation/scanner:aliases-20261019",
-      "digest": "sha256:16dcaa6e161a88635643171af046dda104ee62b1f1e347cb459ca8a678e305e0",
+      "source": "constellation/scanner:candidate-6046aa9c5bac973572e90f00e03cd859115e43ae",
+      "digest": "sha256:716b0300f3d1992a1e7d142a306f2255af7b09171989bf67c87a2e961e2a5823",
       "repository": "ghcr.io/alphabravo-oss/constellation/scanner",
-      "tag": "dev-16dcaa6e161a88635643171af046dda104ee62b1f1e347cb459ca8a678e305e0"
+      "tag": "dev-716b0300f3d1992a1e7d142a306f2255af7b09171989bf67c87a2e961e2a5823"
     },
     {
       "name": "postgres",
@@ -77,18 +77,18 @@
     {
       "name": "migrate",
       "role": "migrate",
-      "source": "constellation/migrate:platform-scan-status-20261019-8e47288",
-      "digest": "sha256:6abc8c6581f88021124d263b17dd80219a906a8523e4ceb744cd4655192fd1d8",
+      "source": "constellation/migrate:candidate-1628ce188b469e10aeb1cccde0629f617887ac64",
+      "digest": "sha256:604a275f6c7c11bfc8d80825ebe389a71e9a7a561b9a3aeba25f8fb66877fe56",
       "repository": "ghcr.io/alphabravo-oss/constellation/migrate",
-      "tag": "dev-6abc8c6581f88021124d263b17dd80219a906a8523e4ceb744cd4655192fd1d8"
+      "tag": "dev-604a275f6c7c11bfc8d80825ebe389a71e9a7a561b9a3aeba25f8fb66877fe56"
     },
     {
       "name": "api",
       "role": "api",
-      "source": "constellation/api:image-completion-20261019-1be2b08",
-      "digest": "sha256:892e7060016d06b7a609494fcfa6109eb28c7927b274814edcbde699674c25c2",
+      "source": "constellation/api:candidate-91275b6ed5c83291dbc8446e6a4ba9320c276c88",
+      "digest": "sha256:7ca489d94f9e27cf00d8fd5f41e7bf4c8202fec344849846223fd4c1090a4f31",
       "repository": "ghcr.io/alphabravo-oss/constellation/api",
-      "tag": "dev-892e7060016d06b7a609494fcfa6109eb28c7927b274814edcbde699674c25c2"
+      "tag": "dev-7ca489d94f9e27cf00d8fd5f41e7bf4c8202fec344849846223fd4c1090a4f31"
     },
     {
       "name": "frontend",

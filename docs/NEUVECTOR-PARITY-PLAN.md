@@ -1,7 +1,7 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-19** (Helm 127 static service runtime hardening; broader parity remains active)
+Last reconciled: **2026-10-19** (Helm 129 scan lease fencing and migration runtime hardening; broader parity remains active)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -16,6 +16,58 @@ understand the result, and prove that the control is enforced. Constellation's
 stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
 
+
+## Scan lease fencing and migration runtime hardening (Helm 129)
+
+Each claim now has a fresh UUID, echoed by the worker on renewal, completion,
+failure and registry credential requests. The API checks that UUID, scanner
+identity and the database clock after acquiring mutation locks. Expired or
+superseded requests cannot overwrite a newer attempt, even if a worker name is
+reused or manual retry resets the attempt counter. Existing authentication and
+organization checks remain required. New credential audit receipts identify the
+claim without storing credentials.
+
+The [hosted regression run](https://github.com/alphabravo-oss/constellation/actions/runs/39238667425)
+passed 1,858 executions with two skips for the separate opt-in Grype database
+recovery fixture. Repeated race/shuffle cases cover expiry during lock waits,
+same-worker reclaim, manual retry, missing/wrong identities, legacy expiry and
+worker header propagation. Scanner tools are byte-identical to the previously
+validated tools. Scanner source `6046aa9` was deployed first as Helm 128 and
+completed a private-registry scan with the old API (192 packages, zero findings,
+all three engines successful).
+
+API source `91275b6` and migration image source `1628ce1` are deployed as Helm 129;
+schema 184 was applied by the normal chart migration job. The API init guard waited
+for it. This single-replica development rollout briefly refused scanner claims
+while the API restarted; the worker recovered without queue edits. This does not
+establish zero-downtime HA. All 14 running/completed-init image identities match
+the release lock and non-image Helm values are unchanged.
+
+The original migration candidate exposed 1 Critical and 10 High Grype records in
+its inherited Goose/runtime dependencies. The final recipe verifies Goose source,
+uses patched dependency locks and only the PostgreSQL driver, and upgrades the
+EOL Alpine 3.20 runtime to digest-pinned Alpine 3.24. The final published image has
+zero Critical/High and three Medium records; the API has zero records, while the
+scanner retains one unfixed High, one Medium and two Unknown records. All three
+passed the immutable-image fixable Critical/High gate with unsuppressed reports.
+Development and tagged releases now share the migration recipe. The
+[hosted migration test](https://github.com/alphabravo-oss/constellation/actions/runs/39240483284)
+passed fresh upgrade, repeat, schema-184 rollback and reapply under UID 10001 with
+a read-only root filesystem and all capabilities dropped.
+
+Post-upgrade private-registry job `d05c17d3-2b31-4e06-94a8-dd01db95dc25`
+completed with a nonempty lease UUID, a matching credential audit receipt, 192
+packages and zero findings; all three engines succeeded. Live API, scanner and
+migration image scans also succeeded under fresh lease IDs. Combined results are
+API one Info, scanner three High/two Medium/three Info, and migration three Medium.
+The scanner High records list no fixes. These combined-engine results are separate
+from the standalone Grype gate counts above; none were suppressed. Public HTTP and
+authenticated API checks passed, and node DiskPressure is false.
+
+Evidence: `deploy/dev/registry-release/validation-scan-leases-20261019.json`.
+The 30-minute lease/five-minute renewal cadence remains unchanged. Immutable attempt history
+across manual retry, closing historical attempts on reclaim, shorter dead-worker
+recovery, tagged release end-to-end acceptance and broader parity remain open.
 
 ## Static service runtime hardening deployed (Helm 127)
 
