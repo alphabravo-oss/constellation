@@ -18,14 +18,6 @@
       "tag": "dev-240157999b92f787f88718ff7a9b78d8935a1198cf80e57807c2be67d5175fd1"
     },
     {
-      "name": "discoverer",
-      "role": "discoverer",
-      "source": "constellation/discoverer:workload-presence-20261019-5cf9e2d",
-      "digest": "sha256:e249a9f8f2ac31fc34fd5bc64aaa4b27f9346a099038e511cd86926d736f8173",
-      "repository": "ghcr.io/alphabravo-oss/constellation/discoverer",
-      "tag": "dev-e249a9f8f2ac31fc34fd5bc64aaa4b27f9346a099038e511cd86926d736f8173"
-    },
-    {
       "name": "frontend",
       "role": "frontend",
       "source": "constellation/frontend:refusal-audit-20261019-833b537",
@@ -97,6 +89,14 @@
       "digest": "sha256:730ace2dbb89124410926a0174d96d05d31e3ab2ad3d0db3e5435f217010b24c",
       "repository": "ghcr.io/alphabravo-oss/constellation/admission",
       "tag": "dev-730ace2dbb89124410926a0174d96d05d31e3ab2ad3d0db3e5435f217010b24c"
+    },
+    {
+      "name": "discoverer",
+      "role": "discoverer",
+      "source": "constellation/discoverer:platform-identity-20261019-d10449e",
+      "digest": "sha256:7d98a84c79b483dd7093c3727d77ead6eff0afb81870816273013378280f551f",
+      "repository": "ghcr.io/alphabravo-oss/constellation/discoverer",
+      "tag": "dev-7d98a84c79b483dd7093c3727d77ead6eff0afb81870816273013378280f551f"
     }
   ],
   "helm_values": {
@@ -180,7 +180,7 @@
     "discoverer": {
       "image": {
         "repository": "ghcr.io/alphabravo-oss/constellation/discoverer",
-        "digest": "sha256:e249a9f8f2ac31fc34fd5bc64aaa4b27f9346a099038e511cd86926d736f8173"
+        "digest": "sha256:7d98a84c79b483dd7093c3727d77ead6eff0afb81870816273013378280f551f"
       },
       "tokenSecret": "constellation-discoverer-enrolled-token"
     },
