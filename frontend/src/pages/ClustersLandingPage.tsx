@@ -310,14 +310,27 @@ export function ClusterTile({ cluster }: { cluster: ClusterSummary }) {
         />
       </div>
 
-      <div className="text-[11px] text-muted-foreground" role="note">
-        <p>Distinct open vulnerabilities linked to current inventory.</p>
-        {exposure?.observed_at && <p>Inventory observed {fmtRelative(exposure.observed_at)}</p>}
-        {!freshExposure && <p className="text-amber-500">Current exposure is unverified: inventory is {exposure?.inventory_status ?? "unavailable"}.</p>}
-        <p>{stats.critical_open + stats.high_open} total critical/high finding occurrences, including history.</p>
-        {exposure && <p>{exposure.historical_occurrences} historical pod occurrences · {exposure.unverified_occurrences} unverified occurrences</p>}
-        {exposure && exposure.unverified_occurrences > 0 && <p className="text-amber-500">Current totals are incomplete until unverified findings are linked to fresh inventory.</p>}
-      </div>
+      <details className="text-[11px] text-muted-foreground">
+        <summary className="flex cursor-pointer items-center justify-between gap-2 rounded py-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
+          <span className={!freshExposure || (exposure?.unverified_occurrences ?? 0) > 0 ? "text-amber-500" : undefined}>
+            {!freshExposure
+              ? exposure?.inventory_status === "stale" ? "Inventory out of date" : "Inventory unavailable"
+              : exposure.unverified_occurrences > 0 ? "Partial coverage" : "About these counts"}
+          </span>
+          <span className="underline underline-offset-2">Details</span>
+        </summary>
+        <div className="mt-2 space-y-2 rounded border border-border bg-muted/20 p-3">
+          <p>Counts show unique critical and high vulnerabilities matched to current inventory.</p>
+          {!freshExposure && <p>Counts are unavailable until fresh inventory arrives.</p>}
+          {freshExposure && exposure.unverified_occurrences > 0 && <p>Some findings have not been matched to current inventory, so the counts may be incomplete.</p>}
+          <dl className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1">
+            <dt>Total occurrences</dt><dd className="text-right tabular-nums">{(stats.critical_open + stats.high_open).toLocaleString()}</dd>
+            {exposure && <><dt>Historical findings</dt><dd className="text-right tabular-nums">{exposure.historical_occurrences.toLocaleString()}</dd>
+              <dt>Unverified findings</dt><dd className="text-right tabular-nums">{exposure.unverified_occurrences.toLocaleString()}</dd></>}
+            {exposure?.observed_at && <><dt>Inventory updated</dt><dd className="text-right">{fmtRelative(exposure.observed_at)}</dd></>}
+          </dl>
+        </div>
+      </details>
 
       <div className="grid grid-cols-2 gap-2 text-[11px]">
         <div className="rounded border border-border bg-muted/30 px-2 py-1.5">
