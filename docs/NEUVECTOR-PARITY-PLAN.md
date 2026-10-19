@@ -1,7 +1,7 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-19** (Helm 136 manual registry credential binding deployed and verified; Go symbol reporting work remains; broader parity remains active)
+Last reconciled: **2026-10-19** (Helm 137 binary evidence matching deployed; live engine provenance corrected, totals unchanged; broader parity remains active)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -16,6 +16,35 @@ understand the result, and prove that the control is enforced. Constellation's
 stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
 
+
+## Binary evidence matching (Helm 137)
+
+Source `7c97cf9` makes successful image results replace the same engine's lossy
+package fallback, including clean image results. Absent/failed engines retain
+fallback matching. Syft captures Go symbols, and Grype fallback receives its
+original native SBOM when available. Host/platform package scans and independent
+matchers remain conservative. No CVE-specific exclusions were added.
+
+[Hosted regression](https://github.com/alphabravo-oss/constellation/actions/runs/39264512090)
+passed 2,154 executions with eight opt-in skips. The compiled actual-tool helper
+subsequently passed against the immutable scanner fixture: 8,413 symbol-package
+entries captured, direct/native Grype results both two unique findings, and
+package-only matching seven. The tested Syft/Grype hashes exactly match the
+packaged candidate. The image gate retains one High and one Medium finding.
+
+All 15 container identities/controllers verified healthy. Three authenticated
+live scans (unchanged scanner digest, unchanged private scheduler digest, and new
+scanner digest) passed all engines and produced lease-matched credential receipts.
+Live totals did **not** fall: scanner images retain 3 High, 2 Medium and 2 Info;
+the scheduler retains 2 Info. The unchanged scanner now attributes five broader
+matches only to Trivy, rather than falsely reporting Grype corroboration. Both
+OpenPGP module findings remain visible from Trivy. Cross-engine negative-evidence
+presentation and remediation of the remaining Docker module are still open.
+The Docker module enters Grype through local-image shell completion; evaluate the
+maintained Moby client while preserving that functionality.
+
+Behavior and acceptance contracts: `docs/scanner-evidence.md`. Evidence:
+`deploy/dev/registry-release/validation-go-symbols-20261019.json`.
 
 ## Manual registry credential binding (Helm 136)
 

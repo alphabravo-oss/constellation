@@ -20,10 +20,10 @@
     {
       "name": "scanner",
       "role": "scanner",
-      "source": "constellation/scanner:candidate-08fa88625674d7be9a9543cc6152767819568320",
-      "digest": "sha256:95be6270804d6ebffbd09e354d6ffd29630b8a350ee037c8db93f6f23f1d4fc1",
+      "source": "constellation/scanner:candidate-7c97cf92cb40570598c5b950fcc5e576a93eaafd",
+      "digest": "sha256:3f1ff9640dcf8f8194c0b0744a63968c329e63802287fd1de5ae0c7f4d2f5399",
       "repository": "ghcr.io/alphabravo-oss/constellation/scanner",
-      "tag": "dev-95be6270804d6ebffbd09e354d6ffd29630b8a350ee037c8db93f6f23f1d4fc1"
+      "tag": "dev-3f1ff9640dcf8f8194c0b0744a63968c329e63802287fd1de5ae0c7f4d2f5399"
     },
     {
       "name": "postgres",
@@ -207,7 +207,7 @@
     "scanner": {
       "image": {
         "repository": "ghcr.io/alphabravo-oss/constellation/scanner",
-        "digest": "sha256:95be6270804d6ebffbd09e354d6ffd29630b8a350ee037c8db93f6f23f1d4fc1"
+        "digest": "sha256:3f1ff9640dcf8f8194c0b0744a63968c329e63802287fd1de5ae0c7f4d2f5399"
       }
     },
     "migrate": {
