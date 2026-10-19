@@ -17,6 +17,21 @@ those acknowledgements do not accept new results. Completion checks the database
 clock after locking job/target rows. Failure and renewal lock the owned job before
 checking its current expiry and claim identity.
 
+## Manually requested registry scans
+
+For `POST /api/v1/scan-jobs`, use `target_type: image`, `source_type: registry`,
+and the configured registry UUID as `source_ref`. The API resolves that UUID
+within the caller's organization and binds it to the scan target, including an
+existing target created without the binding. Missing or malformed UUIDs and
+non-image registry requests return HTTP 400; absent or foreign registries return
+the same HTTP 404. Rejected requests do not create a scan target or job.
+
+The claim includes the registry ID. The worker retrieves credentials using the
+job's organization, worker identity and current lease, then checks the image's
+registry authority before passing credentials to tools. An arbitrary `source_ref`
+on a manual or other non-registry source does not grant registry credentials.
+This does not add automatic credential discovery for unrelated manual scans.
+
 ## Upgrade order
 
 Deploy the new scanner before the API: it can consume old claim responses without

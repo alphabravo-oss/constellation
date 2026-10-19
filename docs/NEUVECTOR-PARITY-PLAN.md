@@ -1,7 +1,7 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-19** (Helm 135 signing dependency remediation deployed; scan reporting and registry binding gaps verified; broader parity remains active)
+Last reconciled: **2026-10-19** (Helm 136 manual registry credential binding deployed and verified; Go symbol reporting work remains; broader parity remains active)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -16,6 +16,34 @@ understand the result, and prove that the control is enforced. Constellation's
 stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
 
+
+## Manual registry credential binding (Helm 136)
+
+Manual registry-sourced image requests now resolve `source_ref` within the caller's
+organization and bind the selected registry to the scan target. This also repairs
+existing unbound targets. Invalid references fail before queue creation; foreign
+and absent registries share HTTP 404. Worker credential release still requires
+the current lease, organization and worker identity, and the worker checks image
+authority before passing credentials to tools.
+
+[Hosted regression](https://github.com/alphabravo-oss/constellation/actions/runs/39262952995)
+passed 1,868 executions with two opt-in Grype recovery skips. The API image gate
+reports zero findings. All 15 container identities/controllers verified healthy.
+Live rejection checks passed, and the previously failing private scheduler image
+completed Syft, Trivy and Grype scanning with a credential audit receipt matching
+its lease. Two Info findings remain; this is scan-path success, not a clean-image
+claim. The prior signed report remains downloadable and independently verifiable.
+A brief claim refusal during the single-replica API restart recovered normally.
+
+A separate same-image experiment narrows the reporting gap: default Syft native
+SBOMs omit Go function symbols and produce ten Grype occurrence matches; enabling
+`SYFT_GOLANG_CAPTURE_SYMBOLS=all` produces the same two matches as direct Grype image
+scanning. Grype's direct image path enables symbol capture itself. The simplified
+CycloneDX package path also omits this evidence. Preserve symbol-level evidence
+and matching precision in the product pipeline before changing reported results;
+no suppression or scanner behavior change was deployed here.
+
+Evidence: `deploy/dev/registry-release/validation-registry-binding-20261019.json`.
 
 ## Signing dependency remediation (Helm 135)
 
