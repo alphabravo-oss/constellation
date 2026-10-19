@@ -694,6 +694,7 @@ func (h *ScanJobs) Complete(w http.ResponseWriter, r *http.Request) {
 		attemptCount           int
 		claimedAt              *time.Time
 		jobVulnDBBundleVersion string
+		claimedInventoryHash   string
 		target                 handler.ScanTarget
 	)
 	if err := tx.QueryRow(r.Context(),
@@ -702,7 +703,7 @@ func (h *ScanJobs) Complete(w http.ResponseWriter, r *http.Request) {
 		        COALESCE(sj.worker_id, ''),
 		        COALESCE(sj.attempt_count, 0),
 		        sj.claimed_at,
-		        COALESCE(sj.vulndb_bundle_version, ''),
+		        COALESCE(sj.vulndb_bundle_version, ''), COALESCE(sj.claimed_inventory_hash, ''),
 		        st.id, st.org_id, st.cluster_id, st.type, st.ref, st.source_type,
 		        COALESCE(st.source_ref, ''), COALESCE(st.image_ref, ''),
 		        COALESCE(st.image_digest, ''),
@@ -712,7 +713,7 @@ func (h *ScanJobs) Complete(w http.ResponseWriter, r *http.Request) {
 		   JOIN scan_targets st ON st.id = sj.target_id AND st.org_id = sj.org_id
 		  WHERE sj.id = $1
 		  FOR UPDATE OF sj, st`, id,
-	).Scan(&orgID, &status, &workerID, &attemptCount, &claimedAt, &jobVulnDBBundleVersion,
+	).Scan(&orgID, &status, &workerID, &attemptCount, &claimedAt, &jobVulnDBBundleVersion, &claimedInventoryHash,
 		&target.ID, &target.OrgID, &target.ClusterID, &target.Type, &target.Ref, &target.SourceType,
 		&target.SourceRef, &target.ImageRef, &target.ImageDigest, &target.RegistryID, &target.Platform, &target.InventoryHash); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -749,6 +750,8 @@ func (h *ScanJobs) Complete(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusConflict, "job claimed by different worker")
 		return
 	}
+
+	inventoryStatus := scanCompletionInventoryStatus(claimedInventoryHash, target.InventoryHash)
 
 	identity, err := scanCompletionImageIdentity(target, body, jobVulnDBBundleVersion)
 	if err != nil {
@@ -788,7 +791,9 @@ func (h *ScanJobs) Complete(w http.ResponseWriter, r *http.Request) {
 		bundleMetadataJSON = &encoded
 	}
 
-	if _, err := tx.Exec(r.Context(), `
+	// Historical results must not roll newer target metadata backward.
+	if inventoryStatus != "outdated" {
+		if _, err := tx.Exec(r.Context(), `
 UPDATE scan_targets
    SET last_seen_at = NOW(),
        image_ref = COALESCE(NULLIF($2, ''), image_ref),
@@ -796,9 +801,10 @@ UPDATE scan_targets
        platform = COALESCE(NULLIF($4, ''), platform),
        inventory_hash = COALESCE(NULLIF($5, ''), inventory_hash)
  WHERE id = $1 AND org_id = $6`,
-		target.ID, target.ImageRef, target.ImageDigest, target.Platform, target.InventoryHash, orgID); err != nil {
-		jsonError(w, http.StatusInternalServerError, "target update: "+err.Error())
-		return
+			target.ID, target.ImageRef, target.ImageDigest, target.Platform, target.InventoryHash, orgID); err != nil {
+			jsonError(w, http.StatusInternalServerError, "target update: "+err.Error())
+			return
+		}
 	}
 
 	assetID, err := upsertScanAsset(r.Context(), tx, orgID, target, identity, body.Signature, body.Layers)
@@ -879,23 +885,26 @@ UPDATE scan_targets
 			imageScanFindingID = uuid.NewSHA1(uuid.NameSpaceURL, []byte("constellation:image-scan-finding:"+imageScanResultID.String()+":"+imageScanFindingKey))
 		}
 		detail, _ := json.Marshal(scannerFindingDetail(f, scanFindingContext{
-			ScanFindingKey:      findingKey,
-			ImageRef:            target.ImageRef,
-			ImageDigest:         identity.Digest,
-			Platform:            identity.Platform,
-			ScannerProfile:      identity.ScannerProfile,
-			ImageScanResultID:   imageScanResultID,
-			ImageScanFindingID:  imageScanFindingID,
-			ImageScanFindingKey: imageScanFindingKey,
-			TargetID:            target.ID,
-			TargetType:          target.Type,
-			TargetRef:           target.Ref,
-			TargetClusterID:     target.ClusterID,
-			SourceType:          target.SourceType,
-			SourceRef:           target.SourceRef,
-			TargetMetadata:      target.Metadata,
-			BundleMetadata:      body.BundleMetadata,
-			VulnProfileDecision: vulnProfileDecision,
+			ScanFindingKey:       findingKey,
+			ScanJobID:            id,
+			ClaimedInventoryHash: claimedInventoryHash,
+			InventoryStatus:      inventoryStatus,
+			ImageRef:             target.ImageRef,
+			ImageDigest:          identity.Digest,
+			Platform:             identity.Platform,
+			ScannerProfile:       identity.ScannerProfile,
+			ImageScanResultID:    imageScanResultID,
+			ImageScanFindingID:   imageScanFindingID,
+			ImageScanFindingKey:  imageScanFindingKey,
+			TargetID:             target.ID,
+			TargetType:           target.Type,
+			TargetRef:            target.Ref,
+			TargetClusterID:      target.ClusterID,
+			SourceType:           target.SourceType,
+			SourceRef:            target.SourceRef,
+			TargetMetadata:       target.Metadata,
+			BundleMetadata:       body.BundleMetadata,
+			VulnProfileDecision:  vulnProfileDecision,
 		}))
 		title := f.Title
 		if title == "" {
@@ -979,12 +988,14 @@ ON CONFLICT (job_id, attempt_number) DO UPDATE
 		return
 	}
 	after := map[string]any{
-		"finding_count":     len(body.Findings),
-		"findings_inserted": findingsInserted,
-		"asset_id":          assetID.String(),
-		"target_id":         target.ID.String(),
-		"target_type":       target.Type,
-		"target_ref":        target.Ref,
+		"claimed_inventory_hash":         claimedInventoryHash,
+		"inventory_status_at_completion": inventoryStatus,
+		"finding_count":                  len(body.Findings),
+		"findings_inserted":              findingsInserted,
+		"asset_id":                       assetID.String(),
+		"target_id":                      target.ID.String(),
+		"target_type":                    target.Type,
+		"target_ref":                     target.Ref,
 	}
 	if target.Type == "image" {
 		after["image_scan_result_id"] = imageScanResultID.String()
@@ -1000,7 +1011,10 @@ ON CONFLICT (job_id, attempt_number) DO UPDATE
 	// txn has committed so a buggy rule can never roll back the scan ingest; panic-isolated
 	// and best-effort like the runtime path's dispatchResponseRules. Keep the operational
 	// completion audit below regardless of the response-rule outcome.
-	if h.evalResponseRules != nil {
+	if inventoryStatus == "outdated" {
+		after["response_rules_skipped"] = "inventory_changed_since_claim"
+	}
+	if h.evalResponseRules != nil && inventoryStatus != "outdated" {
 		h.dispatchScanResponseRules(r.Context(), token.OrgID, target, identity, body.Findings)
 	}
 	_, _, _ = h.audit.Log(r.Context(), audit.Event{
@@ -1011,10 +1025,11 @@ ON CONFLICT (job_id, attempt_number) DO UPDATE
 		After:      after,
 	})
 	httpx.WriteJSON(w, 200, map[string]any{
-		"status":               "completed",
-		"asset_id":             assetID,
-		"image_scan_result_id": imageScanResultID,
-		"findings_inserted":    findingsInserted,
+		"status":                         "completed",
+		"inventory_status_at_completion": inventoryStatus,
+		"asset_id":                       assetID,
+		"image_scan_result_id":           imageScanResultID,
+		"findings_inserted":              findingsInserted,
 	})
 }
 
@@ -2001,23 +2016,26 @@ func vulnerabilityProfileNamespace(target handler.ScanTarget) string {
 }
 
 type scanFindingContext struct {
-	ScanFindingKey      string
-	ImageRef            string
-	ImageDigest         string
-	Platform            string
-	ScannerProfile      string
-	ImageScanResultID   uuid.UUID
-	ImageScanFindingID  uuid.UUID
-	ImageScanFindingKey string
-	TargetID            uuid.UUID
-	TargetType          string
-	TargetRef           string
-	TargetClusterID     *uuid.UUID
-	SourceType          string
-	SourceRef           string
-	TargetMetadata      json.RawMessage
-	BundleMetadata      *scanner.BundleMetadata
-	VulnProfileDecision map[string]any
+	ScanJobID            uuid.UUID
+	ClaimedInventoryHash string
+	InventoryStatus      string
+	ScanFindingKey       string
+	ImageRef             string
+	ImageDigest          string
+	Platform             string
+	ScannerProfile       string
+	ImageScanResultID    uuid.UUID
+	ImageScanFindingID   uuid.UUID
+	ImageScanFindingKey  string
+	TargetID             uuid.UUID
+	TargetType           string
+	TargetRef            string
+	TargetClusterID      *uuid.UUID
+	SourceType           string
+	SourceRef            string
+	TargetMetadata       json.RawMessage
+	BundleMetadata       *scanner.BundleMetadata
+	VulnProfileDecision  map[string]any
 }
 
 func scannerFindingDetail(f scanner.Finding, ctx scanFindingContext) map[string]any {
@@ -2035,6 +2053,15 @@ func scannerFindingDetail(f scanner.Finding, ctx scanFindingContext) map[string]
 		"target_type": ctx.TargetType,
 		"target_ref":  ctx.TargetRef,
 		"source_type": ctx.SourceType,
+	}
+	if ctx.ScanJobID != uuid.Nil {
+		detail["scan_job_id"] = ctx.ScanJobID.String()
+	}
+	if ctx.ClaimedInventoryHash != "" {
+		detail["claimed_inventory_hash"] = ctx.ClaimedInventoryHash
+	}
+	if ctx.InventoryStatus != "" {
+		detail["inventory_status_at_completion"] = ctx.InventoryStatus
 	}
 	// A4: persist the CVE publish date so the admission grace-window
 	// (detail_json->>'published') can exclude freshly-disclosed CVEs. Omitted
@@ -2308,4 +2335,15 @@ SELECT status, COALESCE(worker_id, '')
 		return false
 	}
 	return status == "canceled" && (owner == "" || owner == workerID)
+}
+
+// Empty claim hashes are historical/unknown, never proof of a current inventory.
+func scanCompletionInventoryStatus(claimed, current string) string {
+	if claimed == "" {
+		return "unverified"
+	}
+	if claimed != current {
+		return "outdated"
+	}
+	return "current"
 }

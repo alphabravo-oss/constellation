@@ -71,3 +71,20 @@ A different claimed hash is `outdated`; an absent hash or inconsistent evidence 
 The advanced job status still describes that individual job, so it can legitimately
 say `completed` while the overall platform status is `outdated`. Historical finding
 counts remain historical/open records and are not proof of a current scan.
+
+## Completion provenance and outdated results
+
+Scan completion reads the job's claimed inventory and the target's current hash
+under row locks. Findings record the job ID, claimed hash when known, and
+`inventory_status_at_completion` (`current`, `outdated`, or `unverified`). The
+completion audit records the same evidence. This is the state at completion,
+not a promise that inventory remains unchanged afterward.
+
+A known hash mismatch retains the scan and its findings as history, preserves
+newer scan-target metadata, and skips automatic scan-response rule evaluation.
+The audit records `response_rules_skipped: inventory_changed_since_claim`.
+A repeated completion remains idempotent. Existing jobs without a claimed hash
+remain unverified and retain their prior response behavior; registry/image scans
+without package-inventory hashes need a separate immutable image identity check.
+Historical finding totals are not automatically suppressed or reclassified by this
+provenance change.
