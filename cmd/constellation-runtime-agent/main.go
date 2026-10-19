@@ -213,7 +213,7 @@ func main() {
 		// the whole verdict-capable datapath stays dormant and every workload is on
 		// the TAP mirror path, so nothing is intercepted inline by accident.
 		enforceActive := envTruthy(os.Getenv("CONSTELLATION_DP_ENFORCE")) && (cniNFQueueSafe || enforceOnCilium)
-		tapProvider := selectTapProvider(logger, enforceActive)
+		tapProvider := selectTapProvider(logger, enforceActive, protectedNS)
 		enforceProvider := selectEnforceProvider(tapProvider, enforceActive, logger)
 		if enforceProvider != nil {
 			logger.Info("dp: inline enforcement ENABLED (per-workload, label-scoped)",
@@ -1262,7 +1262,7 @@ func postBatch(ctx context.Context, client *http.Client, url, token string, batc
 // of whether CONSTELLATION_DP_TAP_PORTS is set. "podveth" forces sysfs
 // auto-discovery regardless. The defaulted fall-through prefers env-var
 // when explicit ports are configured, else auto-discovery.
-func selectTapProvider(logger *slog.Logger, enforceActive bool) dp.TapProvider {
+func selectTapProvider(logger *slog.Logger, enforceActive bool, protected *protectedSet) dp.TapProvider {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("CONSTELLATION_DP_TAP_PROVIDER"))) {
 	case "none":
 		return nil
@@ -1274,7 +1274,7 @@ func selectTapProvider(logger *slog.Logger, enforceActive bool) dp.TapProvider {
 		// matched against the on-wire (pod-side) MACs. See container_tap.go.
 		return dp.NewPodVethProvider(logger)
 	case "container":
-		return dp.NewContainerTapProvider(logger, crictlContainerLister(enforceActive))
+		return dp.NewContainerTapProvider(logger, crictlContainerLister(enforceActive, protected))
 	}
 	// Explicit env-var ports still win (dev/test bootstrap).
 	if env := dp.NewEnvTapProvider(); env != nil {
@@ -1283,7 +1283,7 @@ func selectTapProvider(logger *slog.Logger, enforceActive bool) dp.TapProvider {
 	// Default: per-container netns tapping (NeuVector's proven model). This
 	// replaces PodVethProvider as the active auto-discovery provider so the
 	// network map sees real traffic.
-	return dp.NewContainerTapProvider(logger, crictlContainerLister(enforceActive))
+	return dp.NewContainerTapProvider(logger, crictlContainerLister(enforceActive, protected))
 }
 
 // selectEnforceProvider returns the inline (NFQUEUE) enforce provider, or nil
@@ -1306,7 +1306,7 @@ func selectEnforceProvider(tp dp.TapProvider, enforceActive bool, logger *slog.L
 // crictlContainerLister adapts hostscan.ListRunningContainers (crictl over the
 // host CRI socket) into dp.ContainerLister. Kept here so the dp package needn't
 // import hostscan (hostscan already imports dp).
-func crictlContainerLister(enforceActive bool) dp.ContainerLister {
+func crictlContainerLister(enforceActive bool, protected *protectedSet) dp.ContainerLister {
 	hostRoot := hostScanHostRootFromEnv()
 	return func(ctx context.Context) ([]dp.RunningContainer, error) {
 		raw, err := hostscan.ListRunningContainers(ctx, hostscan.ListRunningContainersOptions{
@@ -1318,24 +1318,22 @@ func crictlContainerLister(enforceActive bool) dp.ContainerLister {
 		}
 		out := make([]dp.RunningContainer, 0, len(raw))
 		for _, c := range raw {
-			waf, dlp, enforce := dpiOptIn(c.PodLabels)
-			out = append(out, dp.RunningContainer{
-				ID: c.ID, PodName: c.PodName, PodUID: c.PodUID, PID: c.PID,
-				WAF: waf, DLP: dlp,
-				// Pod identity for group→sensor binding resolution (NET-43): the
-				// namespace + user labels the group selectors match on.
-				Namespace: c.PodNS,
-				Labels:    c.PodLabels,
-				// Inline enforcement activates ONLY under the agent gate
-				// (enforceActive = CONSTELLATION_DP_ENFORCE + NFQUEUE-safe CNI);
-				// the pod's enforce label alone is inert. This keeps the Enforce
-				// flag and the ContainerEnforceProvider consistent, so a labeled
-				// pod is never skipped-from-tap without an enforce reconciler to
-				// pick it up.
-				Enforce: enforceActive && enforce,
-			})
+			out = append(out, dpiRunningContainer(c, enforceActive, protected))
 		}
 		return out, nil
+	}
+}
+
+// dpiRunningContainer keeps protected and unattributed workloads on passive taps.
+// The guard is evaluated on every inventory refresh before either provider sees
+// the target. Labels can request inspection, but cannot override protection.
+func dpiRunningContainer(c hostscan.RunningContainer, enforceActive bool, protected *protectedSet) dp.RunningContainer {
+	waf, dlp, enforce := dpiOptIn(c.PodLabels)
+	return dp.RunningContainer{
+		ID: c.ID, PodName: c.PodName, PodUID: c.PodUID, PID: c.PID,
+		Namespace: c.PodNS, Labels: c.PodLabels, WAF: waf, DLP: dlp,
+		Enforce: enforceActive && enforce && protected != nil &&
+			strings.TrimSpace(c.PodNS) != "" && !protected.protects(c.ID, c.PodNS),
 	}
 }
 

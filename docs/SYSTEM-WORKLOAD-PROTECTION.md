@@ -58,6 +58,18 @@ all disruptive response paths. Calico selector transformation is tested at the c
 write boundary; live Calico/Cilium data-plane enforcement still requires their own
 cluster fixtures. The development cluster's native rollout does not prove those CNIs.
 
+## Inline network inspection
+
+The runtime container inventory adapter checks the same trusted protected namespace
+set before marking any target for inline NFQUEUE enforcement. The fleet gate and
+pod opt-in must both be enabled, protection configuration must exist, and container
+identity and namespace must be known. Protected or unattributed targets retain their
+passive inspection settings but cannot opt into inline enforcement through labels.
+This covers the container provider; alternate passive providers cannot activate the
+inline provider. Host-network namespace exclusion also remains in the tap provider.
+Production verification keeps inline blocking disabled; guard and provider tests
+exercise the enabled-gate cases without blocking live system traffic.
+
 ## Direct enforcement status and removal
 
 Direct network enforcement actions hold their database row lock while applying or
