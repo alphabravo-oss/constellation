@@ -9,6 +9,8 @@ on:
       - internal/securefiles/**
       - internal/complianceevidence/**
       - deploy/docker/Dockerfile.compliance-scheduler
+      - deploy/docker/scanner-tools/**
+      - scripts/build-scanner-tools.py
       - deploy/charts/constellation/templates/compliance-scheduler-deployment.yaml
       - scripts/tests/test_compliance_scheduler_chart.py
 permissions:
@@ -30,6 +32,19 @@ jobs:
         with:
           go-version-file: go.mod
       - run: bash scripts/install-ci-tools.sh goose gotestsum
+      - name: Validate maintained registry credentials and OpenPGP dependencies
+        run: |
+          python3 scripts/build-scanner-tools.py --tool cosign --prepare-only --work "$RUNNER_TEMP/cosign-source" --output "$RUNNER_TEMP/tool-output"
+          cp deploy/docker/scanner-tools/cosign/registry_security_test.go "$RUNNER_TEMP/cosign-source/cosign/cmd/cosign/cli/options/constellation_registry_security_test.go"
+          cd "$RUNNER_TEMP/cosign-source/cosign"
+          GOWORK=off go list -mod=readonly -deps ./cmd/cosign > "$GITHUB_WORKSPACE/artifacts-cosign-dependencies.txt"
+          if grep -E '^(github.com/chrismellard/docker-credential-acr-env|golang.org/x/crypto/openpgp)(/|$)' "$GITHUB_WORKSPACE/artifacts-cosign-dependencies.txt"; then
+            echo "retired vulnerable package remains in Cosign dependency graph" >&2
+            exit 1
+          fi
+          GOWORK=off go test -mod=readonly -race -shuffle=on -count=2 ./cmd/cosign/cli/options github.com/osscontainertools/docker-credential-acr/pkg/credhelper github.com/sigstore/rekor/pkg/pki/pgp
+          mkdir -p "$GITHUB_WORKSPACE/artifacts"
+          mv "$GITHUB_WORKSPACE/artifacts-cosign-dependencies.txt" "$GITHUB_WORKSPACE/artifacts/cosign-dependencies.txt"
       - name: Database-backed compliance scheduler regression suite
         run: |
           bash scripts/test-go.sh integration ./cmd/constellation-compliance-scheduler ./internal/securefiles ./internal/complianceevidence
@@ -53,7 +68,7 @@ jobs:
   images:
     needs: regression
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

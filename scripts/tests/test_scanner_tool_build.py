@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import hashlib
 from pathlib import Path
 import tempfile
 import unittest
@@ -19,6 +20,33 @@ class ScannerBuildTests(unittest.TestCase):
         for key in ['Path', 'Version', 'Sum']:
             with self.subTest(key=key), self.assertRaises(ValueError):
                 builder.source_directory({**valid, key: 'different'}, source)
+
+    def test_source_patch_requires_exact_input_and_unique_match(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root/'registry.go'
+            original = b'old-helper'
+            target.write_bytes(original)
+            change = {'path': 'registry.go', 'sha256': hashlib.sha256(original).hexdigest(),
+                      'replacements': {'old-helper': 'maintained-helper'}}
+            builder.patch_source(root, {'patches': [change]})
+            self.assertEqual(target.read_bytes(), b'maintained-helper')
+            with self.assertRaisesRegex(ValueError, 'reviewed input'):
+                builder.patch_source(root, {'patches': [change]})
+            for path in ['../outside.go', '/outside.go']:
+                with self.assertRaisesRegex(ValueError, 'inside'):
+                    builder.patch_source(root, {'patches': [{**change, 'path': path}]})
+            target.write_bytes(original)
+            with self.assertRaisesRegex(ValueError, 'exactly one'):
+                builder.patch_source(root, {'patches': [{**change, 'replacements': {'missing': 'new'}}]})
+            self.assertEqual(target.read_bytes(), original)
+            target.unlink()
+            outside = root/'other.go'
+            outside.write_bytes(original)
+            target.symlink_to(outside)
+            with self.assertRaisesRegex(ValueError, 'symlinks'):
+                builder.patch_source(root, {'patches': [change]})
+            self.assertEqual(outside.read_bytes(), original)
 
     def test_unpatched_compiler_rejected_before_download_or_output(self):
         with tempfile.TemporaryDirectory() as directory:
