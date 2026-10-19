@@ -135,3 +135,18 @@ presence filter can reopen those retained rows. Zero-replica workloads remain
 visible and are labeled. This changes inventory classification, not finding
 lifecycle: absence does not mean vulnerabilities were fixed. Previously stored
 findings and workload identities remain available for investigation.
+
+## Image-wide scan responses
+
+Registry scan responses resolve only clusters owned by the scanning organization,
+including when image-link inventory is inconsistent. Each quarantine insert checks
+cluster ownership again at the database write boundary; nonexistent or foreign
+clusters are errors rather than successful no-ops. Duplicate owned entries remain
+idempotent. Image-wide entries are retained for shared application owners; protected
+namespaces remain excluded from admission validation.
+
+Scan-response audit payloads report `outcome: quarantine_recorded`,
+`enforced: not_verified`, and `recorded_clusters`. They do not claim that a deny-list
+entry proves a pod was blocked. Webhook coverage, namespace exclusions, and actual
+admission decisions determine effective blocking. Existing image-prefix matching
+semantics remain unchanged; exact image-reference scope needs separate review.

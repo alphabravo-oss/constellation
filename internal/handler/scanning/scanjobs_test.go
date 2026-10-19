@@ -2857,6 +2857,14 @@ VALUES ($1, $2, $3, 'payments/api', 'payments', 'api', 'Deployment', $4, $4, $5,
 			orgID, cid, deploymentID, imageRef, repo, digest)
 	}
 
+	// An inconsistent inventory link must not grant authority over another tenant.
+	foreignOrg, foreignCluster, ownedDeployment := uuid.New(), uuid.New(), uuid.New()
+	mustExec(`INSERT INTO orgs(id,name,display_name) VALUES($1,$2,$2)`, foreignOrg, "foreign-quarantine-"+foreignOrg.String())
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id=$1`, foreignOrg) })
+	mustExec(`INSERT INTO clusters(id,org_id,name) VALUES($1,$2,'foreign')`, foreignCluster, foreignOrg)
+	mustExec(`INSERT INTO deployments(id,org_id,cluster_id,namespace,name,kind) VALUES($1,$2,$3,'payments','polluted-link','Deployment')`, ownedDeployment, orgID, clusterA)
+	mustExec(`INSERT INTO image_workload_links(org_id,cluster_id,deployment_id,workload_id,namespace,name,kind,image_ref,image_ref_normalized,image_repository,image_tag,image_digest) VALUES($1,$2,$3,'payments/polluted-link','payments','polluted-link','Deployment',$4,$4,$5,'',$6)`, orgID, foreignCluster, ownedDeployment, imageRef, repo, digest)
+
 	// Registry scan target: type image, cluster_id NULL.
 	target := handler.ScanTarget{
 		ID:        uuid.New(),
@@ -2870,6 +2878,23 @@ VALUES ($1, $2, $3, 'payments/api', 'payments', 'api', 'Deployment', $4, $4, $5,
 
 	h := NewScanJobs(d, audit.New(pool))
 	h.applyScanResponseRuleActions(ctx, orgID, target, identity, ev, []responserule.Action{{Type: responserule.ActionQuarantine}})
+
+	if err := h.recordImageQuarantine(ctx, orgID, foreignCluster, repo, "cross-tenant request"); err == nil {
+		t.Fatal("foreign cluster quarantine accepted")
+	}
+	if err := h.recordImageQuarantine(ctx, orgID, uuid.New(), repo, "missing cluster"); err == nil {
+		t.Fatal("missing cluster quarantine accepted")
+	}
+	if err := h.recordImageQuarantine(ctx, orgID, clusterA, repo, "duplicate owned target"); err != nil {
+		t.Fatalf("owned duplicate should be idempotent: %v", err)
+	}
+	var outcome, enforced, scope string
+	if err := pool.QueryRow(ctx, `SELECT after->>'outcome',after->>'enforced',after->>'admission_scope' FROM audit_events WHERE org_id=$1 AND action='response_rule.action.quarantine' AND target_id=$2 ORDER BY id DESC LIMIT 1`, orgID, imageRef).Scan(&outcome, &enforced, &scope); err != nil {
+		t.Fatal(err)
+	}
+	if outcome != "quarantine_recorded" || enforced != "not_verified" || !strings.Contains(scope, "protected namespaces remain excluded") {
+		t.Fatalf("misleading quarantine outcome: %s %s %s", outcome, enforced, scope)
+	}
 
 	rows, err := pool.Query(ctx, `
 SELECT cluster_id, match_key, scope, origin, source_kind
