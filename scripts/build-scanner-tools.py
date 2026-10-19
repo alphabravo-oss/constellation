@@ -56,8 +56,9 @@ def build(lock_dir, work, output, go='go', tool=None, prepare_only=False):
         if directory.exists():
             shutil.rmtree(directory)
         shutil.copytree(source_directory(metadata, source), directory)
+        directory.chmod(directory.stat().st_mode | 0o200)
         for file in directory.rglob('*'):
-            if file.is_file():
+            if file.is_file() or file.is_dir():
                 file.chmod(file.stat().st_mode | 0o200)
         for filename in ['go.mod', 'go.sum']:
             shutil.copyfile(lock_dir/name/filename, directory/filename)
