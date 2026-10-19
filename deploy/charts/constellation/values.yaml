@@ -146,6 +146,10 @@ controlPlane:
 # /clusters/<id> views instead of only an empty registered cluster row.
 discoverer:
   enabled: true
+  # Existing Secret with key "token", issued for this cluster by an init bundle.
+  # Empty shares runtimeAgent.tokenSecret; an unbound bootstrap token cannot
+  # submit platform facts. A dedicated secret permits independent enrollment.
+  tokenSecret: ""
   replicas: 1
   image: {}
   args: []
