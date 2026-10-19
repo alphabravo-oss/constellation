@@ -1,8 +1,7 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-19** (Helm 89 minimal API runtime deployed; measured image vulnerability
-reduction, dependency and broader parity work remain active)
+Last reconciled: **2026-10-19** (Helm 90 API dependency fixes deployed; scanner and broader parity work remain active)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -20,7 +19,44 @@ first-class.
 
 ## Current deployment and next hardening work (2026-10-19)
 
-Latest deployment: **Helm 89 / schema 180**, API source **670f3b9**, frontend
+Latest deployment: **Helm 90 / schema 180**, API source **0fcc16f**. Frontend
+ace2a49, scanner/runtime ef0ca39 and migration 5b82b12 remain deployed. Updates
+cover go-ntlmssp 0.1.1, cel-go 0.30.0, gRPC 1.83.2 and klauspost/compress 1.18.7.
+The exact API release image scans at **0 critical / 0 high / 0 medium / 0 low /
+1 unknown**, using the same Trivy 0.69.3 database as the Helm 89 comparison.
+The unknown GO-2026-5932 advisory remains visible: govulncheck reports it at
+module level, while the affected x/crypto/openpgp package is absent from the API
+import graph. No reachable API finding was reported; this is not proof of no
+vulnerabilities.
+
+Affected-package checks passed (519 test/subtest passes, with 17 backup skips
+subsequently replaced by a correctly configured database run of 77 passes and
+no skips); 11 Hubble tests passed. Runtime compatibility and isolated schema-180
+startup checks passed. All seven Deployments and the runtime DaemonSet are ready;
+live health/readiness are 200 and protected anonymous endpoints are 401. The
+running image configuration matches the release OCI index and amd64 manifest.
+The API-only upgrade reused the completed same-day backup; schema and enforcement
+settings did not change. Full hosted CI and authenticated browser acceptance
+remain outstanding.
+
+The current scanner baseline contains **19 critical / 382 high package findings**,
+including repeated dependencies across bundled executables. Of those, 117
+critical/high findings concern embedded Go standard libraries. Replacing only
+the scanner worker binary will not fix its bundled tools. Next work is to update
+Syft, Trivy, Grype, Cosign and ORAS with verified checksums, test their output and
+signature-verification contracts, and minimize the scanner OS runtime. Native
+runtime agents and infrastructure images need separate compatibility validation.
+See [image build hardening](image-build-hardening.md) for the build policy and
+remaining release-gate work.
+
+Evidence: `/root/constellation-dependency-hardening-20261019/` contains release
+scan/SBOM, govulncheck output, test logs, runtime/startup checks and live digest
+verification. No parent acceptance row closes: **66 checked / 88 open**.
+
+## Previous minimal-runtime checkpoint (Helm 89)
+
+
+Previous deployment: **Helm 89 / schema 180**, API source **670f3b9**, frontend
 ace2a49, scanner/runtime ef0ca39 and migration 5b82b12. The API now uses a
 signature-verified, digest-pinned Distroless static runtime with the existing
 UID/GID/home and both API/CLI binaries. Embedded timezone data preserves legacy
