@@ -1634,7 +1634,18 @@ export interface ClusterStats {
   total_findings: number;
 }
 
+export interface ClusterExposure {
+  inventory_status: "fresh" | "stale" | "missing";
+  observed_at?: string;
+  current_critical: number;
+  current_high: number;
+  current_occurrences: number;
+  historical_occurrences: number;
+  unverified_occurrences: number;
+}
+
 export interface ClusterSummary {
+  exposure?: ClusterExposure;
   id: string;
   name: string;
   distro: string;

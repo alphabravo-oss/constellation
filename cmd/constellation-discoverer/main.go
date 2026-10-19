@@ -1184,9 +1184,16 @@ SELECT id, namespace, name, kind
 }
 
 func (r *reconciler) syncPods(ctx context.Context) (int, error) {
+	observedAt := time.Now().UTC()
 	pods, err := r.cs.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return 0, fmt.Errorf("list pods: %w", err)
+	}
+	if pods.Continue != "" {
+		return 0, fmt.Errorf("refusing incomplete pod inventory snapshot")
+	}
+	if err := r.storeInventoryPresence(ctx, observedAt, pods.Items); err != nil {
+		return 0, fmt.Errorf("store pod inventory presence: %w", err)
 	}
 	ownerDeploymentIDs := r.deploymentIDsByKey(ctx)
 	// Publish the fresh owner map for the pod informer (Phase C) to read without a

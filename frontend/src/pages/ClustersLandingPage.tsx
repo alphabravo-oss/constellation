@@ -76,7 +76,7 @@ export function ClustersLandingPage() {
       <StatGrid>
         <StatCard label="Clusters" value={list.data ? data.length : "—"} />
         <StatCard label="Need attention" value={list.data ? needsAttention : "—"} />
-        <StatCard label="Critical findings" value={list.data ? data.reduce((total, c) => total + (c.stats?.critical_open ?? 0), 0) : "—"} />
+        <StatCard label="Current critical vulnerabilities" value={list.data && data.every((c) => c.exposure?.inventory_status === "fresh") ? data.reduce((total, c) => total + (c.exposure?.current_critical ?? 0), 0) : "—"} />
       </StatGrid>
       <Tabs value={tab} onValueChange={setTab} items={[
         { value: "overview", label: "Overview", content: <div className="space-y-4">
@@ -242,10 +242,12 @@ function InitBundlesPanel() {
   }
 }
 
-function ClusterTile({ cluster }: { cluster: ClusterSummary }) {
+export function ClusterTile({ cluster }: { cluster: ClusterSummary }) {
   const stats = cluster.stats ?? { critical_open: 0, high_open: 0, open_findings: 0, total_findings: 0 };
-  const hasCritical = stats.critical_open > 0;
-  const hasHigh = stats.high_open > 0;
+  const exposure = cluster.exposure;
+  const freshExposure = exposure?.inventory_status === "fresh";
+  const hasCritical = freshExposure && exposure.current_critical > 0;
+  const hasHigh = freshExposure && exposure.current_high > 0;
   const stateTone =
     cluster.state === "healthy" || cluster.state === "connected" || cluster.state === "ready"
       ? "var(--color-status-success)"
@@ -296,16 +298,25 @@ function ClusterTile({ cluster }: { cluster: ClusterSummary }) {
       <div className="grid grid-cols-2 gap-2 text-xs">
         <Stat
           icon={<AlertOctagon className="h-3 w-3" aria-hidden />}
-          label="Critical (open)"
-          value={stats.critical_open}
+          label="Current critical"
+          value={freshExposure ? exposure.current_critical : "—"}
           tone={hasCritical ? "critical" : "muted"}
         />
         <Stat
           icon={<AlertTriangle className="h-3 w-3" aria-hidden />}
-          label="High (open)"
-          value={stats.high_open}
+          label="Current high"
+          value={freshExposure ? exposure.current_high : "—"}
           tone={hasHigh ? "high" : "muted"}
         />
+      </div>
+
+      <div className="text-[11px] text-muted-foreground" role="note">
+        <p>Distinct open vulnerabilities linked to current inventory.</p>
+        {exposure?.observed_at && <p>Inventory observed {fmtRelative(exposure.observed_at)}</p>}
+        {!freshExposure && <p className="text-amber-500">Current exposure is unverified: inventory is {exposure?.inventory_status ?? "unavailable"}.</p>}
+        <p>{stats.critical_open + stats.high_open} total critical/high finding occurrences, including history.</p>
+        {exposure && <p>{exposure.historical_occurrences} historical pod occurrences · {exposure.unverified_occurrences} unverified occurrences</p>}
+        {exposure && exposure.unverified_occurrences > 0 && <p className="text-amber-500">Current totals are incomplete until unverified findings are linked to fresh inventory.</p>}
       </div>
 
       <div className="grid grid-cols-2 gap-2 text-[11px]">
@@ -366,7 +377,7 @@ function Stat({
 }: {
   icon: React.ReactNode;
   label: string;
-  value: number;
+  value: number | string;
   tone: "critical" | "high" | "muted";
 }) {
   const color =

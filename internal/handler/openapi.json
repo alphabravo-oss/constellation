@@ -12876,7 +12876,8 @@
     },
     "/api/v1/clusters": {
       "get": {
-        "summary": "List registered clusters with risk and sensor rollups"
+        "summary": "List registered clusters with risk and sensor rollups",
+        "description": "Includes exposure: inventory_status (fresh, stale, missing), observed_at, current_critical/current_high (distinct open vulnerability IDs), current_occurrences, historical_occurrences (absent or completed pods), and unverified_occurrences (including unmatched image digests). Exposure counts cover critical/high vulnerability findings; existing stats preserve all historical open finding occurrences. Missing or stale discovery cannot establish current exposure."
       }
     },
     "/api/v1/clusters/{id}": {

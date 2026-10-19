@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/db"
+	"github.com/alphabravocompany/constellation/internal/inventorypresence"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 )
 
@@ -43,6 +44,11 @@ func NewClusters(d *db.DB, a ...*audit.Logger) *Clusters {
 // (no N+1 fan-out per cluster card).
 func (h *Clusters) List(w http.ResponseWriter, r *http.Request) {
 	subj, _ := SubjectFrom(r.Context())
+	exposures, err := inventorypresence.ReadAll(r.Context(), h.db.Pool(), subj.OrgID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "read current finding exposure"})
+		return
+	}
 	rows, err := h.db.Pool().Query(r.Context(), `
 SELECT c.id, c.name, c.distro, COALESCE(c.cloud_provider,''), COALESCE(c.region,''),
        c.state, COALESCE(c.agent_version, ''),
@@ -125,6 +131,7 @@ SELECT c.id, c.name, c.distro, COALESCE(c.cloud_provider,''), COALESCE(c.region,
 				"open_findings":  openFindings,
 				"total_findings": totalFindings,
 			},
+			"exposure":     exposures[uuid.MustParse(id)],
 			"last_flow_at": lastFlowOut,
 			"platform": map[string]any{
 				"kubernetes_git_version": kubernetesVersion,
