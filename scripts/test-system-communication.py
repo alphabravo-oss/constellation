@@ -37,9 +37,13 @@ def main():
     parser.add_argument('--helper', type=Path, required=True)
     parser.add_argument('--image', required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--client-node')
+    parser.add_argument('--peer-node')
     args = parser.parse_args()
     if not re.fullmatch(r'[a-z0-9./_-]+@sha256:[a-f0-9]{64}', args.image):
         raise ValueError('fixture image must be digest pinned')
+    if bool(args.client_node) != bool(args.peer_node) or (args.client_node and args.client_node == args.peer_node):
+        raise ValueError('cross-node proof requires two distinct explicit node names')
     args.output.mkdir(parents=True, exist_ok=True)
     nonce = uuid.uuid4().hex[:10]
     app = 'constellation-policy-proof-app-' + nonce
@@ -63,11 +67,14 @@ def main():
     def pod(namespace, name, role):
         serve = "while true; do printf 'HTTP/1.1 200 OK\\r\\nContent-Length: 2\\r\\nConnection: close\\r\\n\\r\\nok' | nc -l -p PORT -w 2; done"
         command = '(' + serve.replace('PORT', '18080') + ') & (' + serve.replace('PORT', '18081') + ') & wait'
-        return {'apiVersion': 'v1', 'kind': 'Pod', 'metadata': {'name': name, 'namespace': namespace, 'labels': {'proof-role': role}},
+        obj = {'apiVersion': 'v1', 'kind': 'Pod', 'metadata': {'name': name, 'namespace': namespace, 'labels': {'proof-role': role}},
                 'spec': {'automountServiceAccountToken': False, 'terminationGracePeriodSeconds': 1, 'securityContext': {'runAsNonRoot': True, 'runAsUser': 10001, 'runAsGroup': 10001},
                          'containers': [{'name': 'fixture', 'image': args.image, 'command': ['/bin/sh', '-c', command],
                                          'securityContext': {'allowPrivilegeEscalation': False, 'readOnlyRootFilesystem': True, 'capabilities': {'drop': ['ALL']}},
                                          'resources': {'requests': {'cpu': '10m', 'memory': '16Mi'}, 'limits': {'cpu': '100m', 'memory': '64Mi'}}}]}}
+        if args.client_node:
+            obj['spec']['nodeName'] = args.client_node if name == 'client' else args.peer_node
+        return obj
 
     try:
         for namespace in [app, system]:
@@ -82,8 +89,17 @@ def main():
         for namespace in [app, system]:
             kubectl('wait', '-n', namespace, '--for=condition=Ready', 'pod', '--all', '--timeout=90s')
         client = get('pod', 'client', app)
-        ordinary_ip = get('pod', 'ordinary', app)['status']['podIP']
-        protected_ip = get('pod', 'protected', system)['status']['podIP']
+        ordinary = get('pod', 'ordinary', app)
+        protected = get('pod', 'protected', system)
+        ordinary_ip = ordinary['status']['podIP']
+        protected_ip = protected['status']['podIP']
+        evidence['placement'] = {name: {'node': item['spec']['nodeName'], 'ip': item['status']['podIP']}
+                                 for name, item in [('client', client), ('ordinary', ordinary), ('protected', protected)]}
+        if args.client_node:
+            if (client['spec']['nodeName'] != args.client_node or ordinary['spec']['nodeName'] != args.peer_node
+                    or protected['spec']['nodeName'] != args.peer_node):
+                raise AssertionError('cross-node placement was not honored')
+            evidence['crossNodeVerified'] = True
         client_ip = client['status']['podIP']
         protected_service = get('service', 'protected', system)['spec']['clusterIP']
         node = get('node', client['spec']['nodeName'])
@@ -103,6 +119,10 @@ def main():
         targets = {'protectedPod': f'http://{protected_ip}:18080/', 'protectedService': f'http://{protected_service}:18080/',
                    'sharedRequiredPort': f'http://{ordinary_ip}:18081/', 'ordinaryPod': f'http://{ordinary_ip}:18080/',
                    'ordinaryNodePort': f'http://{node_ip}:{node_port}/'}
+        if args.peer_node:
+            peer = get('node', args.peer_node)
+            peer_ip = next(a['address'] for a in peer['status']['addresses'] if a['type'] == 'InternalIP')
+            targets['ordinaryRemoteNodePort'] = f'http://{peer_ip}:{node_port}/'
         for tag, target in targets.items():
             probe(app, 'client', target, True, 'baseline-' + tag)
         probe(app, 'ordinary', f'http://{client_ip}:18080/', True, 'baseline-ordinary-ingress')

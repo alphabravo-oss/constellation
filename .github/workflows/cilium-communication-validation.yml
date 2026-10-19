@@ -22,8 +22,13 @@ jobs:
   dataplane:
     runs-on: ubuntu-24.04
     timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [single-kubeproxy, multi-kubeproxy, multi-replacement]
     env:
       GOMAXPROCS: '2'
+      CILIUM_PROFILE: ${{ matrix.profile }}
       CIDR_MODE: ${{ inputs.cidr_mode || 'default' }}
       KUBECONFIG: /tmp/constellation-cilium-proof.kubeconfig
     steps:
@@ -45,27 +50,50 @@ jobs:
           curl --fail --silent --show-error --location https://github.com/kubernetes-sigs/kind/releases/download/v0.33.0/kind-linux-amd64 -o /tmp/kind-linux-amd64
           echo 'aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d  /tmp/kind-linux-amd64' | sha256sum --check
           sudo install /tmp/kind-linux-amd64 /usr/local/bin/kind
-          cat > artifacts/kind.yaml <<'CONFIG'
-          kind: Cluster
-          apiVersion: kind.x-k8s.io/v1alpha4
-          nodes:
-            - role: control-plane
-          networking:
-            disableDefaultCNI: true
-          CONFIG
+          python3 - <<'PYCONFIG'
+          import json, os
+          profile = os.environ['CILIUM_PROFILE']
+          config = {'kind': 'Cluster', 'apiVersion': 'kind.x-k8s.io/v1alpha4',
+                    'nodes': [{'role': 'control-plane'}], 'networking': {'disableDefaultCNI': True}}
+          if profile.startswith('multi-'):
+              config['nodes'] += [{'role': 'worker'}, {'role': 'worker'}]
+          if profile == 'multi-replacement':
+              config['networking']['kubeProxyMode'] = 'none'
+          with open('artifacts/kind.yaml', 'w') as stream:
+              json.dump(config, stream, indent=2)
+          PYCONFIG
           kind create cluster --name constellation-cilium-proof --config artifacts/kind.yaml --image kindest/node:v1.35.8@sha256:07b2536e30b803ed61d1677a79df6115f798ce64c80f9e22f6ed45afd09323c0
           helm repo add cilium https://helm.cilium.io/
           cilium_options=()
           if [[ "$CIDR_MODE" == pods ]]; then cilium_options+=(--set 'policyCIDRMatchMode[0]=pods'); fi
-          helm install cilium cilium/cilium --version 1.20.3 --namespace kube-system --set ipam.mode=kubernetes --set operator.replicas=1 --set kubeProxyReplacement=false --wait --timeout 5m "${cilium_options[@]}"
+          replacement=false
+          if [[ "$CILIUM_PROFILE" == multi-replacement ]]; then
+            replacement=true
+            api_ip=$(docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' constellation-cilium-proof-control-plane)
+            cilium_options+=(--set "k8sServiceHost=$api_ip" --set k8sServicePort=6443)
+          fi
+          helm install cilium cilium/cilium --version 1.20.3 --namespace kube-system --set ipam.mode=kubernetes --set operator.replicas=1 --set "kubeProxyReplacement=$replacement" --wait --timeout 5m "${cilium_options[@]}"
           kubectl wait nodes --all --for=condition=Ready --timeout=120s
           kubectl -n kube-system rollout status deployment/coredns --timeout=120s
+          kubectl -n kube-system get daemonsets -o json > artifacts/daemonsets.json
+          python3 - <<'PYVERIFY'
+          import json, os
+          state = json.load(open('artifacts/daemonsets.json'))
+          kubeproxy = [x for x in state['items'] if x['metadata']['name'] == 'kube-proxy']
+          assert bool(kubeproxy) == (os.environ['CILIUM_PROFILE'] != 'multi-replacement')
+          PYVERIFY
+          kubectl get nodes -o json > artifacts/nodes.json
+          kubectl -n kube-system exec ds/cilium -- cilium-dbg status --verbose > artifacts/cilium-status.txt
           helm get values cilium -n kube-system --all -o json > artifacts/cilium-values.json
           kubectl get pods -A -o json > artifacts/cluster-pods.json
           kubectl version -o json > artifacts/kubernetes-version.json
       - name: Exercise protected peers and application isolation
         run: |
-          python3 scripts/test-system-communication.py --live --flavor cilium --helper artifacts/netpolicyapply.test --image ghcr.io/alphabravo-oss/constellation/migrate@sha256:604a275f6c7c11bfc8d80825ebe389a71e9a7a561b9a3aeba25f8fb66877fe56 --output artifacts/proof
+          placement=()
+          if [[ "$CILIUM_PROFILE" == multi-* ]]; then
+            placement=(--client-node constellation-cilium-proof-worker --peer-node constellation-cilium-proof-worker2)
+          fi
+          python3 scripts/test-system-communication.py --live --flavor cilium --helper artifacts/netpolicyapply.test --image ghcr.io/alphabravo-oss/constellation/migrate@sha256:604a275f6c7c11bfc8d80825ebe389a71e9a7a561b9a3aeba25f8fb66877fe56 --output artifacts/proof "${placement[@]}"
       - name: Capture CNI state and remove disposable cluster
         if: always()
         run: |
@@ -75,6 +103,6 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: cilium-communication-${{ github.sha }}-${{ env.CIDR_MODE }}
+          name: cilium-communication-${{ github.sha }}-${{ env.CIDR_MODE }}-${{ matrix.profile }}
           path: artifacts/
           retention-days: 14
