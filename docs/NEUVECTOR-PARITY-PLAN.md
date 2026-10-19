@@ -1,7 +1,7 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-19** (Helm 131 Cilium cross-node and kube-proxy replacement qualification; broader parity remains active)
+Last reconciled: **2026-10-19** (Helm 132 Calico default-tier authorization and traffic qualification; broader parity remains active)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -16,6 +16,37 @@ understand the result, and prove that the control is enforced. Constellation's
 stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
 
+
+## Calico default-tier protection (Helm 132)
+
+The [Calico proof](https://github.com/alphabravo-oss/constellation/actions/runs/39252540435)
+passed 33 single-node and 37 cross-node traffic checks on Calico 3.33.0,
+Kubernetes 1.35.8 and kind 0.33.0, using native v3 CRDs, Iptables and IPv4 VXLAN.
+Actual chart service-account requests created, updated and deleted the global
+policy. Protected system traffic, DNS/API transport, blocked unrelated workload
+traffic and DNS metrics, recovery and owned-resource cleanup all passed.
+
+The preceding [run](https://github.com/alphabravo-oss/constellation/actions/runs/39252011927)
+failed in both profiles: Calico admission refused the chart service account
+because it could not get the default tier. Helm 132 adds read access to that tier
+and policy authorization for `default.*`, without granting tier mutation, access
+to other tiers or secrets. Generated policies continue to use the default tier.
+Existing base GlobalNetworkPolicy resource permissions remain unchanged.
+
+This chart-only rollout preserves all production image digests and schema 184.
+All 14 container identities and controllers are healthy; authenticated refresh
+and cluster queries return 200. Eleven explicit authorization reviews verify
+the live RBAC scope. Those reviews do not replace actual Calico admission proof:
+the development cluster continues using its native CNI.
+Targeted regression and all three Cilium profiles also passed at source `cc2bc74`.
+
+Broader CI run 39252551961 remains non-green: quality, gosec, frontend and the
+full-history secret scan failed. Its 15 secret-scan matches span evidence, tests
+and historical files; they remain unresolved and were not suppressed. No broad
+parity item closes: **66 checked / 88 open**. IPv6, Calico eBPF, other tiers,
+cloud/bare-metal, scale, third-party policies and runtime DPI/IPS remain outside
+this qualification. Machine-readable evidence:
+`deploy/dev/registry-release/validation-calico-communication-20261019.json`.
 
 ## Cilium cross-node and kube-proxy replacement qualification
 

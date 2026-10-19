@@ -44,6 +44,18 @@ continues using native policy on its existing CNI. See
 `deploy/dev/registry-release/validation-cilium-topology-20261019.json` for probes,
 node placement, runtime status and artifact hashes.
 
+### Calico policy proof (Helm 132)
+
+[Run 39252540435](https://github.com/alphabravo-oss/constellation/actions/runs/39252540435)
+passed 33 single-node and 37 cross-node traffic checks with Calico 3.33.0 native
+v3 CRDs and admission, Kubernetes 1.35.8, kind 0.33.0, Iptables and IPv4 VXLAN.
+The chart service account created, updated and deleted the policy. System
+communication, application isolation, DNS/API, blocked DNS metrics, recovery
+and cleanup passed. Helm 132 fixes the discovered missing default-tier RBAC.
+This does not qualify Calico eBPF, IPv6, other tiers or runtime NFQUEUE/DPI.
+Evidence: `deploy/dev/registry-release/validation-calico-communication-20261019.json`.
+
+
 ## Tested CNI permutations
 
 | CNI                            | Detection | NFQUEUE Enforce | Cilium-Native Export | Test cluster | Notes |
