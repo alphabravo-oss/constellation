@@ -163,3 +163,13 @@ reported. Reclaim regenerable compiler/module and unused Docker build caches;
 preserve application volumes, backup data, image rollback artifacts and scan
 evidence. Verify node pressure clears and database, storage, controllers, API,
 scanner and runtime agents recover before starting another rollout.
+
+The `Static runtime candidates` workflow builds discoverer, admission and operator
+on GitHub-hosted runners. It runs for changes to those Dockerfiles, module pins or
+the workflow on main/implementation branches, and supports manual dispatch. Each
+artifact contains an OCI archive and source/digest identity, with build provenance
+and an SBOM. The workflow has read-only repository permissions and does not
+publish or deploy. Download the artifacts for runtime checks, publish their exact
+digests using the development publisher, then run the image gate and rollout
+validation. Changes elsewhere in application source require manual dispatch when
+no matching path triggered the workflow.
