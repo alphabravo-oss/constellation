@@ -71,7 +71,8 @@
       "source": "constellation/postgres:16.14-convergence-20261012",
       "digest": "sha256:98087f2e517416edda6e3649154c3be4a5a7b0ce2228c4fab3f4e2bed430d92a",
       "repository": "ghcr.io/alphabravo-oss/constellation/postgres",
-      "tag": "dev-98087f2e517416edda6e3649154c3be4a5a7b0ce2228c4fab3f4e2bed430d92a"
+      "tag": "dev-98087f2e517416edda6e3649154c3be4a5a7b0ce2228c4fab3f4e2bed430d92a",
+      "version_tag": "16.14-dev-98087f2e517416edda6e3649154c3be4a5a7b0ce2228c4fab3f4e2bed430d92a"
     },
     {
       "name": "cnpg-operator",

@@ -38,9 +38,16 @@ packages retain their existing private visibility. Verify a private image pull
 with Kubernetes before rolling database workloads.
 
 Before infrastructure rollout, complete a CNPG plugin backup and verify its status.
-Apply the infrastructure values through the existing Helm release with its reviewed
-values, then apply the two deployment patches using `kubectl patch --type=strategic
---patch-file ...` in `cnpg-system`. Preserve all other deployment configuration.
+The development application release uses external database mode: its CNPG Cluster
+is managed separately. Apply `constellation-cnpg-postgres-patch.json` with
+`kubectl patch cluster constellation-cnpg-postgres --type=merge --patch-file ...`
+in `constellation-system`. For chart-managed CNPG installations, use the reviewed
+infrastructure Helm values instead. Apply the two deployment patches using
+`kubectl patch --type=strategic --patch-file ...` in `cnpg-system`. Preserve all
+other configuration. CNPG requires a PostgreSQL version tag alongside the digest
+to validate upgrade compatibility; the published `16.14-dev-...@sha256:...`
+reference preserves both. Admission scan freshness is enforced for controller
+updates: refresh scans normally rather than bypassing the policy.
 Never apply these values to an unrelated release without reviewing its names,
 secret references, enabled roles, and database version.
 

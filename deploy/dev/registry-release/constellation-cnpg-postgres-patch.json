@@ -1,0 +1,10 @@
+{
+  "spec": {
+    "imageName": "ghcr.io/alphabravo-oss/constellation/postgres:16.14-dev-98087f2e517416edda6e3649154c3be4a5a7b0ce2228c4fab3f4e2bed430d92a@sha256:98087f2e517416edda6e3649154c3be4a5a7b0ce2228c4fab3f4e2bed430d92a",
+    "imagePullSecrets": [
+      {
+        "name": "constellation-ghcr-pull"
+      }
+    ]
+  }
+}
