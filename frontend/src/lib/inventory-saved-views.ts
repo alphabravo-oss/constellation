@@ -7,7 +7,7 @@ export const TIMELINE_VIEWS_KEY = "constellation.timeline.views.v1";
 export type InventoryViewKind = "findings" | "timeline";
 export interface FindingSavedView extends SavedViewBase {
   kind: FindingKind | ""; lifecycle: Lifecycle | ""; query: string;
-  groupMode?: string; idScope?: "all"; targetType?: string; severity?: Severity | ""; fixable?: boolean; view?: "instances" | "cve";
+  includeSystem?: boolean; groupMode?: string; idScope?: "all"; targetType?: string; severity?: Severity | ""; fixable?: boolean; view?: "instances" | "cve";
   group?: "none" | "severity" | "kind" | "asset"; sort?: string; order?: "asc" | "desc";
 }
 export interface TimelineSavedView extends SavedViewBase, TimelineFilterPayload {}
@@ -21,7 +21,7 @@ const record = (value: unknown): value is Record<string, unknown> => Boolean(val
 const optionalEnum = (value: unknown, allowed: string[]) => value === undefined || (typeof value === "string" && allowed.includes(value));
 export function isFindingSavedView(value: unknown): value is FindingSavedView {
   return record(value) && typeof value.kind === "string" && findingKinds.includes(value.kind) && typeof value.lifecycle === "string" && lifecycles.includes(value.lifecycle) && typeof value.query === "string"
-    && optionalEnum(value.groupMode, ["", "discover", "monitor", "protect"]) && optionalEnum(value.idScope, ["all"]) && optionalEnum(value.targetType, findingTargets) && optionalEnum(value.severity, ["", ...severities]) && (value.fixable === undefined || typeof value.fixable === "boolean") && optionalEnum(value.view, ["instances", "cve"]) && optionalEnum(value.group, ["none", "severity", "kind", "asset"]) && optionalEnum(value.sort, findingSorts) && optionalEnum(value.order, ["asc", "desc"]);
+    && (value.includeSystem === undefined || typeof value.includeSystem === "boolean") && optionalEnum(value.groupMode, ["", "discover", "monitor", "protect"]) && optionalEnum(value.idScope, ["all"]) && optionalEnum(value.targetType, findingTargets) && optionalEnum(value.severity, ["", ...severities]) && (value.fixable === undefined || typeof value.fixable === "boolean") && optionalEnum(value.view, ["instances", "cve"]) && optionalEnum(value.group, ["none", "severity", "kind", "asset"]) && optionalEnum(value.sort, findingSorts) && optionalEnum(value.order, ["asc", "desc"]);
 }
 export function isTimelineSavedView(value: unknown): value is TimelineSavedView {
   if (!record(value) || !optionalEnum(value.category, [...Object.keys(categories), "custom"]) || typeof value.category !== "string") return false;
@@ -41,7 +41,7 @@ export function findingViewPayload(params: URLSearchParams): Omit<FindingSavedVi
   const kind = params.get("kind") ?? ""; const lifecycle = params.get("lifecycle") === "all" ? "" : params.get("lifecycle") ?? "open";
   const severity = params.get("severity") ?? "";
   const view = params.get("view") ?? (kind && kind !== "vulnerability" ? "instances" : severity || lifecycle !== "open" ? "instances" : "cve");
-  const value = { kind, lifecycle, ...(params.has("group_mode") ? { groupMode: params.get("group_mode")! } : {}), ...(params.has("id_scope") ? { idScope: params.get("id_scope")! } : {}), ...(params.has("target_type") ? { targetType: params.get("target_type")! } : {}), query: params.get("q") ?? "", severity, fixable: params.get("fixable") === "true" || params.get("fixable") === "1", view: kind && kind !== "vulnerability" ? "instances" : view, group: params.get("group") ?? "none", sort: params.get("sort") ?? "risk", order: params.get("order") ?? "desc" };
+  const value = { kind, lifecycle, ...(params.get("include_system") === "true" ? { includeSystem: true } : {}), ...(params.has("group_mode") ? { groupMode: params.get("group_mode")! } : {}), ...(params.has("id_scope") ? { idScope: params.get("id_scope")! } : {}), ...(params.has("target_type") ? { targetType: params.get("target_type")! } : {}), query: params.get("q") ?? "", severity, fixable: params.get("fixable") === "true" || params.get("fixable") === "1", view: kind && kind !== "vulnerability" ? "instances" : view, group: params.get("group") ?? "none", sort: params.get("sort") ?? "risk", order: params.get("order") ?? "desc" };
   if (params.has("fixable") && !["true", "false", "1", "0", ""].includes(params.get("fixable")!)) return null;
   return isFindingSavedView(value) ? value : null;
 }

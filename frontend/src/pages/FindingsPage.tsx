@@ -94,6 +94,8 @@ export function FindingsPage() {
   const lifecycle: Lifecycle | "" = lifecycleValue === "all" ? "" : (["open", "triaged", "in_progress", "accepted", "suppressed", "resolved"] as const).find((value) => value === lifecycleValue) ?? "open";
   const query = searchParams.get("q") ?? "";
   const instanceChooser = isFindingChooserQuery(query);
+  const includeSystem = searchParams.get("include_system") === "true" || instanceChooser;
+  const workloadScope = includeSystem ? "all" as const : "application" as const;
   const debouncedQuery = useDebounced(query.trim(), 300);
   const querySettled = query.trim() === debouncedQuery;
   const serverQuery = [debouncedQuery, severity ? `severity:${severity}` : ""].filter(Boolean).join(" ");
@@ -124,12 +126,12 @@ export function FindingsPage() {
   const { views, deleteView, persistenceError } = useSavedViews<SavedView>(FINDING_VIEWS_KEY, { validate: isFindingSavedView });
   const navigate = useNavigate();
   const openFinding = (finding: Finding) => navigate({ href: findingHref(finding, clusterId) });
-  const request: NonNullable<Parameters<typeof findings.list>[0]> = { kind: activeView === "cve" ? "vulnerability" as const : kind || undefined, lifecycle: lifecycle || undefined, cluster_id: clusterId, ...(groupMode ? { group_mode: groupMode } : {}), ...(idScope ? { id_scope: idScope as "all" } : {}), ...(targetType ? { target_type: targetType } : {}), q: serverQuery || undefined, fixable: fixableOnly || undefined, sort: activeView === "cve" ? "risk" : sort, order: activeView === "cve" ? "desc" as const : order };
+  const request: NonNullable<Parameters<typeof findings.list>[0]> = { workload_scope: workloadScope, kind: activeView === "cve" ? "vulnerability" as const : kind || undefined, lifecycle: lifecycle || undefined, cluster_id: clusterId, ...(groupMode ? { group_mode: groupMode } : {}), ...(idScope ? { id_scope: idScope as "all" } : {}), ...(targetType ? { target_type: targetType } : {}), q: serverQuery || undefined, fixable: fixableOnly || undefined, sort: activeView === "cve" ? "risk" : sort, order: activeView === "cve" ? "desc" as const : order };
   const instanceKey = ["findings", ...owner, request, activeView, activeView === "instances" ? page : 0];
   // The rollup needs a single instance solely for its lifecycle counts.
   const q = useQuery({ queryKey: instanceKey, queryFn: () => findings.list({ ...request, limit: activeView === "instances" ? PAGE_SIZE : 1, offset: activeView === "instances" ? page * PAGE_SIZE : 0 }), enabled: scopeReady && querySettled, placeholderData: keepPreviousData });
   const cveKey = ["findings-cve", ...owner, request, page];
-  const cveQ = useQuery({ queryKey: cveKey, queryFn: () => findings.byCVE({ cluster_id: clusterId, ...(groupMode ? { group_mode: groupMode } : {}), ...(idScope ? { id_scope: idScope as "all" } : {}), ...(targetType ? { target_type: targetType } : {}), lifecycle: lifecycle || undefined, q: serverQuery || undefined, fixable: fixableOnly || undefined, limit: PAGE_SIZE, offset: page * PAGE_SIZE }), enabled: activeView === "cve" && scopeReady && querySettled, placeholderData: keepPreviousData });
+  const cveQ = useQuery({ queryKey: cveKey, queryFn: () => findings.byCVE({ workload_scope: workloadScope, cluster_id: clusterId, ...(groupMode ? { group_mode: groupMode } : {}), ...(idScope ? { id_scope: idScope as "all" } : {}), ...(targetType ? { target_type: targetType } : {}), lifecycle: lifecycle || undefined, q: serverQuery || undefined, fixable: fixableOnly || undefined, limit: PAGE_SIZE, offset: page * PAGE_SIZE }), enabled: activeView === "cve" && scopeReady && querySettled, placeholderData: keepPreviousData });
   const activeQ = activeView === "cve" ? cveQ : q;
   const validInstances = !q.data || Array.isArray(q.data.findings) && q.data.findings.every(row => !!row && typeof row.id === "string" && !!clusterId && findingBelongsToCluster(row, clusterId) && findingEpochNanos(row.first_seen_at) !== null && (!row.row_id || findingRowIDMatches(row))) && new Set(q.data.findings.map(findingRowKey)).size === q.data.findings.length;
   const ready = (activeView !== "instances" || validInstances) && scopeReady && querySettled && activeQ.isSuccess && !activeQ.isFetching && !activeQ.isPlaceholderData;
@@ -138,7 +140,7 @@ export function FindingsPage() {
   const total = ready ? activeQ.data?.total ?? 0 : undefined;
   const outOfRange = ready && page > 0 && page * PAGE_SIZE >= (total ?? 0);
   const grouped = useMemo(() => groupRows(rows, groupBy), [rows, groupBy]);
-  const selectionScope = JSON.stringify([owner, clusterId, groupMode, idScope, targetType, kind, lifecycle, severity, query, fixableOnly, activeView, groupBy, page, sort, order]);
+  const selectionScope = JSON.stringify([owner, clusterId, workloadScope, groupMode, idScope, targetType, kind, lifecycle, severity, query, fixableOnly, activeView, groupBy, page, sort, order]);
   const [selection, setSelection] = useState<{ scope: string; ids: Set<React.Key> }>({ scope: selectionScope, ids: new Set() });
   const selected = ready && activeView === "instances" && selection.scope === selectionScope ? selection.ids : new Set<React.Key>();
   const setSelected = (ids: Set<React.Key>) => setSelection({ scope: selectionScope, ids });
@@ -153,7 +155,7 @@ export function FindingsPage() {
   if (query) activeChips.push({ label: "q", value: query, onRemove: () => setQuery("") });
   if (fixableOnly) activeChips.push({ label: "fixable", value: "true", onRemove: () => setUrlFilter("fixable", "") });
   function applyView(value: SavedView) {
-    setFilters({ group_mode: value.groupMode ?? "", id_scope: value.idScope ?? "", target_type: value.targetType ?? "", kind: value.kind, lifecycle: value.lifecycle || "all", q: value.query, severity: value.severity ?? "", fixable: value.fixable ? "true" : "", view: value.view ?? ((value.kind && value.kind !== "vulnerability") || (value.lifecycle && value.lifecycle !== "open") || value.severity ? "instances" : "cve"), group: value.group ?? "none", sort: value.sort ?? "risk", order: value.order ?? "desc" });
+    setFilters({ include_system: value.includeSystem ? "true" : "", group_mode: value.groupMode ?? "", id_scope: value.idScope ?? "", target_type: value.targetType ?? "", kind: value.kind, lifecycle: value.lifecycle || "all", q: value.query, severity: value.severity ?? "", fixable: value.fixable ? "true" : "", view: value.view ?? ((value.kind && value.kind !== "vulnerability") || (value.lifecycle && value.lifecycle !== "open") || value.severity ? "instances" : "cve"), group: value.group ?? "none", sort: value.sort ?? "risk", order: value.order ?? "desc" });
   }
   const exportContext = JSON.stringify([owner, request, activeView, page, query]);
   const captureExport = useExportGuard(exportContext, !ready, () => !!clusterId && clusterCacheReady(qc, clusterId) && exportQueryReady(qc, activeView === "cve" ? cveKey : instanceKey, activeQ.data));
@@ -337,6 +339,11 @@ export function FindingsPage() {
             onChange={(e) => setQuery(e.target.value)}
             onClear={() => setQuery("")}
           />
+          <label className="flex items-center gap-2 text-xs">
+            <input type="checkbox" aria-label="Include Constellation system workloads" checked={includeSystem} disabled={instanceChooser} onChange={(event) => setUrlFilter("include_system", event.target.checked ? "true" : "")} />
+            Include Constellation system workloads
+          </label>
+          <span className="text-xs text-muted-foreground" role="status">{q.isSuccess && !q.isFetching && !q.isPlaceholderData && typeof q.data.system_total === "number" ? `${q.data.system_total.toLocaleString()} Constellation findings ${includeSystem ? "included" : "hidden"}` : "Constellation finding count unavailable"}</span>
           <Select label="Kind" value={kind} onChange={(v) => setFilters({ kind: v, ...(v && v !== "vulnerability" ? { view: "instances" } : {}) })}
             options={[["", "any kind"], ["vulnerability","vulnerability"], ["iac","iac"], ["license","license"],
                       ["cloud-config","cloud-config"], ["drift","drift"], ["signature","signature"],

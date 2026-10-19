@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/alphabravocompany/constellation/internal/handler/platformrole"
 	"github.com/alphabravocompany/constellation/internal/handler/sqlx"
 	searchdsl "github.com/alphabravocompany/constellation/pkg/search/dsl"
 )
@@ -17,6 +18,15 @@ import (
 func findingFilter(orgID uuid.UUID, values url.Values, includeLifecycle, includeFixable bool) (string, []any, error) {
 	args := []any{orgID}
 	parts := []string{"org_id = $1"}
+	switch scope := values.Get("workload_scope"); scope {
+	case "", "all":
+	case "application":
+		parts = append(parts, "NOT ("+platformrole.ConstellationFindingSQL("findings")+")")
+	case "constellation":
+		parts = append(parts, "("+platformrole.ConstellationFindingSQL("findings")+")")
+	default:
+		return "", nil, fmt.Errorf("invalid workload_scope")
+	}
 	exactID, instanceChooser := findingExactIDQuery(values.Get("q"))
 	if instanceChooser {
 		args = append(args, exactID)

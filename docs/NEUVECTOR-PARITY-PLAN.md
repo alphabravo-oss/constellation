@@ -42,6 +42,19 @@ are not implemented by this inventory correction.
 
 The user requested application findings by default, an explicit toggle to include
 Constellation findings, and protection against Constellation blocking itself.
+Local implementation now adds a shared `workload_scope` predicate for findings
+lists, lifecycle counts, CVE rollups and CSV. The UI defaults to application scope,
+provides the include-system toggle and displays the filtered system count; saved
+views preserve that choice. The API default stays `all` for existing clients.
+Exact finding-instance links include system findings so alerts still open their
+intended evidence. Database parity tests and 65 focused frontend tests pass;
+TypeScript checking passes. This work is **not deployed yet**.
+
+The initial presentation classifier requires the Constellation chart/name/part-of/
+Helm labels on attributed deployments; it is not an enforcement identity. Shared
+image cohorts and unclassified owners stay visible. Separately managed dependencies
+need explicit installation attribution; dashboard/cluster summary propagation and
+all disruptive-action safeguards still need implementation and live verification.
 Implementation and end-to-end verification remain open:
 
 - Default findings views to application scope; provide an explicit include-system
@@ -65,7 +78,7 @@ Implementation and end-to-end verification remain open:
 
 A minimal sidecar candidate is published at digest
 `sha256:5c6b5559b08b7b49c89937b6d823a37fbeb8e7b883d4b0da6278fe09de87d1f1`.
-It is **deployed and healthy**; post-rollout backup validation is still running. `deploy/docker/Dockerfile.barman-sidecar` preserves
+It is **deployed and healthy**; post-rollout backup validation completed. `deploy/docker/Dockerfile.barman-sidecar` preserves
 the qualified manager, Python environment and UID 26, installs Debian's signed
 Expat 2.9.0-1~deb13u1 package, removes the superseded versioned libraries, and
 updates the distroless package metadata from the package itself. The final image
@@ -94,8 +107,8 @@ CNPG restarted the single database instance normally; its replacement pod UID is
 `587287a6-5b79-4776-8c53-82e25fabfabe`. All fourteen runtime image identities match
 the updated release lock, controllers are healthy, the restart hold is absent,
 and authenticated UI disclosure/count reconciliation checks pass without page errors.
-`constellation-post-expat-20261019` is running; completion is still required before
-claiming end-to-end backup compatibility. Application Helm remains revision 99.
+`constellation-post-expat-20261019` completed successfully through the new sidecar
+(backup ID `20261019T054924`). Application Helm remains revision 99.
 
 A follow-up live inventory defect was identified while waiting: completed pod
 status images are merged into current workload image lists, causing auto-scan to

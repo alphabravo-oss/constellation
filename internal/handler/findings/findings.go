@@ -163,9 +163,24 @@ SELECT id, kind, external_id, title, severity, risk_score, lifecycle, asset_id, 
 			total += count
 		}
 	}
+	var systemTotal *int
+	if values.Get("workload_scope") != "" {
+		// Count the same filtered system findings even when they are hidden. Do
+		// not change the selected page's predicate or lifecycle totals.
+		systemValues := r.URL.Query()
+		systemValues.Set("workload_scope", "constellation")
+		systemWhere, systemArgs, _ := findingFilter(subj.OrgID, systemValues, true, true)
+		var count int
+		if err := f.db.Pool().QueryRow(r.Context(), `SELECT count(*) FROM findings WHERE `+systemWhere, systemArgs...).Scan(&count); err != nil {
+			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not count system findings"})
+			return
+		}
+		systemTotal = &count
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"findings": out, "limit": limit, "offset": offset, "total": total, "has_more": offset+len(out) < total,
 		"lifecycle_counts": lifecycleCounts,
+		"system_total":     systemTotal,
 	})
 }
 

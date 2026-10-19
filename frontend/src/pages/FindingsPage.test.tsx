@@ -132,7 +132,7 @@ it("exports all matching instances with the same predicates and global sort, ind
   route.initial = "view=instances&page=6&kind=runtime&lifecycle=suppressed&severity=high&fixable=true&q=asset:api%20!kev:true&sort=title&order=asc";
   await renderPage(); await settled(() => expect(button("Export filtered instances CSV").disabled).toBe(false));
   await click("Export filtered instances CSV");
-  await settled(() => expect(findings.exportCSV).toHaveBeenCalledWith({ kind: "runtime", lifecycle: "suppressed", cluster_id: "cluster", q: "asset:api !kev:true severity:high", fixable: true, sort: "title", order: "asc", limit: 100000, offset: 0 }, expect.any(Function)));
+  await settled(() => expect(findings.exportCSV).toHaveBeenCalledWith({ workload_scope: "application", kind: "runtime", lifecycle: "suppressed", cluster_id: "cluster", q: "asset:api !kev:true severity:high", fixable: true, sort: "title", order: "asc", limit: 100000, offset: 0 }, expect.any(Function)));
   expect(host.textContent).toContain("Up to 100,000 matching instances");
   expect(button("Export this page CSV")).toBeDefined();
 });
@@ -348,4 +348,18 @@ it('makes raw first observation essential only for the exact recurrence chooser 
   const key = `constellation.table.${JSON.stringify([identity.org_id, identity.user_id, 'findings.instances'])}.v1`; localStorage.setItem(key, JSON.stringify({ hiddenColumnIds: ['asset', 'instance', 'first-seen'], density: 'compact' }));
   route.initial = `view=instances&lifecycle=all&q=id:${id}`; vi.mocked(findings.list).mockResolvedValue({ ...listed(), findings: [earlier, later], total: 2, has_more: false }); await renderPage(); await settled(() => expect(host.querySelectorAll('tbody tr')).toHaveLength(2));
   expect(host.querySelector('th[data-column-id="first-seen"]')).not.toBeNull(); expect(host.querySelector('th[data-column-id="instance"]')).toBeNull(); expect(host.querySelector('tbody')?.textContent).toContain(earlier.first_seen_at); expect(host.querySelector('tbody')?.textContent).toContain(later.first_seen_at); expect(JSON.parse(localStorage.getItem(key)!).hiddenColumnIds).toContain('first-seen');
+});
+
+it("defaults to application scope and resets pagination when including Constellation", async () => {
+  route.initial = "view=instances&page=3";
+  vi.mocked(findings.list).mockImplementation(async params => ({ ...listed(params?.offset), system_total: 42 }));
+  await renderPage();
+  await settled(() => expect(findings.list).toHaveBeenLastCalledWith(expect.objectContaining({ workload_scope: "application", offset: 200 })));
+  await settled(() => expect(host.textContent).toContain("42 Constellation findings hidden"));
+  const toggle = host.querySelector<HTMLInputElement>('[aria-label="Include Constellation system workloads"]')!;
+  expect(toggle.checked).toBe(false);
+  await act(async () => toggle.click());
+  await settled(() => expect(findings.list).toHaveBeenLastCalledWith(expect.objectContaining({ workload_scope: "all", offset: 0 })));
+  expect(params().get("include_system")).toBe("true");
+  await settled(() => expect(host.textContent).toContain("42 Constellation findings included"));
 });

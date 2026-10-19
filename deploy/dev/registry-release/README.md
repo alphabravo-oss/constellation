@@ -85,4 +85,4 @@ The deployed sidecar loads Expat 2.9.0 and all controllers are healthy. Producti
 scanning reports 4 critical / 47 high findings; the Python critical advisory is
 still open. See `validation-barman-candidate-20261019.json` for the frozen-database
 comparison and rollout evidence. Post-rollout backup
-`constellation-post-expat-20261019` is running; its completion is not yet certified.
+`constellation-post-expat-20261019` completed successfully (backup ID `20261019T054924`).

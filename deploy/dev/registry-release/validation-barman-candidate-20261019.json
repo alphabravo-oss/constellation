@@ -66,7 +66,7 @@
     "repository": "ghcr.io/alphabravo-oss/constellation/barman-sidecar",
     "tag": "dev-5c6b5559b08b7b49c89937b6d823a37fbeb8e7b883d4b0da6278fe09de87d1f1"
   },
-  "scope": "Same-database Trivy comparison, successful production aggregate scan, healthy deployed runtime; post-rollout backup pending",
+  "scope": "Same-database Trivy comparison, successful production aggregate scan, healthy deployed runtime and completed backup through the new sidecar",
   "compatibility": [
     "Expat package checksums and narrow/wide runtime versions verified",
     "{\"/venv/bin/barman-cloud-restore\": 0, \"/venv/bin/barman-cloud-backup-delete\": 0, \"/venv/bin/barman-cloud-check-wal-archive\": 0, \"/venv/bin/barman-cloud-backup-show\": 0, \"/venv/bin/barman-cloud-backup-keep\": 0, \"/venv/bin/barman-cloud-wal-restore\": 0, \"/venv/bin/barman-cloud-wal-archive\": 0, \"/venv/bin/barman-cloud-backup\": 0, \"/venv/bin/barman-cloud-backup-list\": 0}"
@@ -351,8 +351,8 @@
     "helmRevision": 99,
     "restartHoldRemoved": true,
     "clusterHealthy": true,
-    "postBackupPhase": "started",
-    "postBackupId": null,
+    "postBackupPhase": "completed",
+    "postBackupId": "20261019T054924",
     "containers": [
       {
         "namespace": "constellation-system",
@@ -459,5 +459,12 @@
     "phase": "completed",
     "backupId": "20261019T053450"
   },
-  "post_backup": "constellation-post-expat-20261019"
+  "post_backup": "constellation-post-expat-20261019",
+  "post_backup_evidence": {
+    "name": "constellation-post-expat-20261019",
+    "uid": "2764723e-82b6-4be2-8eb9-164182090f97",
+    "phase": "completed",
+    "backupId": "20261019T054924",
+    "stoppedAt": "2026-10-19T05:56:09Z"
+  }
 }

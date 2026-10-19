@@ -45,3 +45,9 @@ it("captures precise Timeline event cohorts and rejects contradictory saved wind
  const payload=timelineViewPayload(new URLSearchParams({tab:"event",after,verdict:"alert,block,quarantine",after_exclusive:"false"}));expect(payload).toMatchObject({sources:["runtime_event"],after,verdicts:["alert","block","quarantine"],afterExclusive:false});expect(isTimelineSavedView(payload)).toBe(true);
  for(const raw of ["hours=0","hours=2161","after=invalid","tab=audit&verdict=alert","hours=24&from=2026-10-10","after_exclusive=true","verdict=unknown"]){expect(timelineViewPayload(new URLSearchParams(raw))).toBeNull();}
 });
+
+it("preserves explicit system visibility in Findings saved views", () => {
+ const payload = findingViewPayload(new URLSearchParams("include_system=true"));
+ expect(payload?.includeSystem).toBe(true);
+ expect(isFindingSavedView({ ...payload, includeSystem: "true" })).toBe(false);
+});
