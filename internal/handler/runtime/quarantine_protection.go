@@ -3,9 +3,11 @@ package runtime
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"strings"
+
 	"github.com/google/uuid"
 	"k8s.io/apimachinery/pkg/util/validation"
-	"strings"
 )
 
 // Only trusted API configuration establishes cluster-specific protection. UI
@@ -43,4 +45,21 @@ func (p quarantineProtection) protects(cluster uuid.UUID, namespace string) bool
 		return true
 	}
 	return p[cluster][namespace]
+}
+
+// A missing namespace cannot safely be assumed to mean the default namespace.
+// Return an error before any response action or quarantine record is queued.
+func checkResponseWorkloadProtection(cluster uuid.UUID, workload string) error {
+	namespace, name, ok := strings.Cut(strings.TrimSpace(workload), "/")
+	if !ok || name == "" || len(validation.IsDNS1123Label(namespace)) != 0 {
+		return fmt.Errorf("response action refused: workload namespace is required")
+	}
+	protection, err := parseQuarantineProtection(os.Getenv("CONSTELLATION_QUARANTINE_PROTECTED_NAMESPACES"))
+	if err != nil {
+		return fmt.Errorf("response action refused: protection configuration is invalid")
+	}
+	if protection.protects(cluster, namespace) {
+		return fmt.Errorf("response action refused: protected system namespace %s", namespace)
+	}
+	return nil
 }

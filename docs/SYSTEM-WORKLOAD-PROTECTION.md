@@ -53,7 +53,7 @@ session endpoint safeguards are implemented. The existing namespace-wide exclusi
 also protect unrelated workloads installed in those namespaces. Finer component
 identity protection remains open; UI classification labels are not sufficient proof.
 
-Remaining work includes automatic-response quarantine feedback, verification of every separately managed dependency assignment, and a complete audit of
+Remaining work includes durable UI visibility of automatic-response refusals, verification of every separately managed dependency assignment, and a complete audit of
 all disruptive response paths. Calico selector transformation is tested at the client
 write boundary; live Calico/Cilium data-plane enforcement still requires their own
 cluster fixtures. The development cluster's native rollout does not prove those CNIs.
@@ -73,8 +73,14 @@ Without an explicit cluster UUID the chart does not guess which cluster owns the
 installation namespace. Other clusters require their own trusted mapping in the API
 environment; only mandatory core refusals apply without one. Image-scoped quarantine
 can cover both system and application owners and is retained; protected namespaces
-are excluded by admission at enforcement time. This check does not yet cover automatic
-response-rule inserts or report their effective admission coverage.
+are excluded by admission at enforcement time.
+
+The runtime response-rule bridge uses this same configuration before quarantine,
+isolation, or process-kill actions. Protected or unattributed workload namespaces
+return refusal warnings and queue no quarantine, network-policy, or process-action
+rows. The dispatcher logs those warnings and does not report the refused actions as
+successful. Ordinary application responses remain enabled. These guards do not yet
+cover image-wide scan response rules or provide durable UI history for refusals.
 
 ## Inline network inspection
 

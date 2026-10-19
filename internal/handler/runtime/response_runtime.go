@@ -75,12 +75,18 @@ func (q *quarantineRuntime) Isolate(ctx context.Context, workload, reason string
 // Kill enqueues only the exact process observed by the triggering event.
 // Old events without kernel start identity are explicitly refused.
 func (q *quarantineRuntime) Kill(ctx context.Context, workload, reason string) error {
+	if err := checkResponseWorkloadProtection(q.clusterID, workload); err != nil {
+		return err
+	}
 	return q.enqueueProcessAction(ctx, workload, reason)
 }
 
 // record inserts the origin='auto' quarantine entry and returns its id. A nil id (with no
 // error) means there was nothing to record or an existing active entry collapsed the insert.
 func (q *quarantineRuntime) record(ctx context.Context, workload, reason string) (*uuid.UUID, error) {
+	if err := checkResponseWorkloadProtection(q.clusterID, workload); err != nil {
+		return nil, err
+	}
 	matchKey := strings.TrimSpace(workload)
 	if matchKey == "" {
 		return nil, nil // nothing to attribute the quarantine to
