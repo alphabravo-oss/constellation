@@ -17,11 +17,11 @@ stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
 
 
-## Barman Expat candidate qualification (2026-10-19)
+## Barman Expat rollout (2026-10-19)
 
 A minimal sidecar candidate is published at digest
 `sha256:5c6b5559b08b7b49c89937b6d823a37fbeb8e7b883d4b0da6278fe09de87d1f1`.
-It is **not deployed yet**. `deploy/docker/Dockerfile.barman-sidecar` preserves
+It is **deployed and healthy**; post-rollout backup validation is still running. `deploy/docker/Dockerfile.barman-sidecar` preserves
 the qualified manager, Python environment and UID 26, installs Debian's signed
 Expat 2.9.0-1~deb13u1 package, removes the superseded versioned libraries, and
 updates the distroless package metadata from the package itself. The final image
@@ -43,8 +43,22 @@ still marks Trixie Python 3.13.5-2+deb13u5 vulnerable, without a released fixed
 Trixie package. The flaw requires a TLS server SNI callback replacing its SSL
 context without retaining the original; TLS clients are unaffected. This narrows
 the applicability investigation but does not prove this deployment unaffected,
-and no finding is suppressed. The production queued scan and fresh pre-rollout
-backup are pending; deployment and a backup using the new sidecar remain required.
+and no finding is suppressed. The production queued scan completed with all Syft/Grype/Trivy engines successful:
+202 packages, 183 findings (4 critical, 47 high, 82 medium, 48 low, 2 info).
+The pre-rollout backup completed before changing the Barman controller environment.
+CNPG restarted the single database instance normally; its replacement pod UID is
+`587287a6-5b79-4776-8c53-82e25fabfabe`. All fourteen runtime image identities match
+the updated release lock, controllers are healthy, the restart hold is absent,
+and authenticated UI disclosure/count reconciliation checks pass without page errors.
+`constellation-post-expat-20261019` is running; completion is still required before
+claiming end-to-end backup compatibility. Application Helm remains revision 99.
+
+A follow-up live inventory defect was identified while waiting: completed pod
+status images are merged into current workload image lists, causing auto-scan to
+retry retired registry references. The live admission Deployment record retained
+its October 12 image alongside the current digest. The merge occurs in
+`cmd/constellation-discoverer/main.go:mergePodStatusImages`; correction and
+regression coverage remain open. Historical findings must remain available.
 
 ## Admission replica retirement (Helm 99)
 

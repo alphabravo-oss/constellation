@@ -93,10 +93,10 @@
     {
       "name": "barman-sidecar",
       "role": null,
-      "source": "constellation/barman-sidecar:0.15.1-go1.27.2",
-      "digest": "sha256:61b55f0807293213c68d3d7a5572c41d5b7fa164dba2f956d0c660952779f261",
+      "source": "constellation/barman-sidecar:expat-20261019",
+      "digest": "sha256:5c6b5559b08b7b49c89937b6d823a37fbeb8e7b883d4b0da6278fe09de87d1f1",
       "repository": "ghcr.io/alphabravo-oss/constellation/barman-sidecar",
-      "tag": "dev-61b55f0807293213c68d3d7a5572c41d5b7fa164dba2f956d0c660952779f261"
+      "tag": "dev-5c6b5559b08b7b49c89937b6d823a37fbeb8e7b883d4b0da6278fe09de87d1f1"
     }
   ],
   "helm_values": {

@@ -78,3 +78,11 @@ this rollout. Admission source `00429af` (Helm 99) permits unchanged-spec replic
 reductions while preserving checks on replacement Pods and custom Rego/CEL
 policies. Earlier versions required scaling only retired ReplicaSets through
 the Kubernetes scale API when stale evidence blocked their retirement updates.
+
+Barman sidecar Expat update (2026-10-19): the lock and controller patch now pin
+`sha256:5c6b5559b08b7b49c89937b6d823a37fbeb8e7b883d4b0da6278fe09de87d1f1`.
+The deployed sidecar loads Expat 2.9.0 and all controllers are healthy. Production
+scanning reports 4 critical / 47 high findings; the Python critical advisory is
+still open. See `validation-barman-candidate-20261019.json` for the frozen-database
+comparison and rollout evidence. Post-rollout backup
+`constellation-post-expat-20261019` is running; its completion is not yet certified.

@@ -14,7 +14,7 @@
             "env": [
               {
                 "name": "SIDECAR_IMAGE",
-                "value": "ghcr.io/alphabravo-oss/constellation/barman-sidecar@sha256:61b55f0807293213c68d3d7a5572c41d5b7fa164dba2f956d0c660952779f261"
+                "value": "ghcr.io/alphabravo-oss/constellation/barman-sidecar@sha256:5c6b5559b08b7b49c89937b6d823a37fbeb8e7b883d4b0da6278fe09de87d1f1"
               }
             ]
           }
