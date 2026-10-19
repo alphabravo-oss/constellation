@@ -15,14 +15,17 @@ import (
 // Protection is independent of presentation labels and request-supplied workload
 // attribution. The applier's namespace comes from the Kubernetes downward API.
 // Configuration can only add protected namespaces.
-type Protection struct{ namespaces map[string]bool }
+type Protection struct {
+	namespaces              map[string]bool
+	communicationNamespaces map[string]bool
+}
 
 func NewProtection(own string, extra []string) (*Protection, error) {
 	own = strings.TrimSpace(own)
 	if own == "" {
 		return nil, errors.New("own namespace required for network policy self-protection")
 	}
-	p := &Protection{namespaces: map[string]bool{}}
+	p := &Protection{namespaces: map[string]bool{}, communicationNamespaces: map[string]bool{}}
 	for _, raw := range append([]string{own, "kube-system", "kube-public", "kube-node-lease"}, extra...) {
 		ns := strings.TrimSpace(raw)
 		if ns == "" {
@@ -32,6 +35,13 @@ func NewProtection(own string, extra []string) (*Protection, error) {
 			return nil, fmt.Errorf("invalid protected namespace %q", ns)
 		}
 		p.namespaces[ns] = true
+	}
+	// Core namespaces are protected targets, but are not blanket communication
+	// peers: they may contain ingress proxies carrying ordinary application traffic.
+	for _, raw := range append([]string{own}, extra...) {
+		if ns := strings.TrimSpace(raw); ns != "" {
+			p.communicationNamespaces[ns] = true
+		}
 	}
 	return p, nil
 }

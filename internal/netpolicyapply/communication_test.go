@@ -78,7 +78,10 @@ func TestNativeProtectionPreservesDirectionAndOriginalRules(t *testing.T) {
 					t.Fatalf("expected only trusted namespace peer in unrestricted rule: %v", peers)
 				}
 				raw, _ := json.Marshal(peers[0])
-				for _, ns := range []string{"own", "cnpg-system", "kube-system"} {
+				if strings.Contains(string(raw), "kube-system") {
+					t.Fatal("core namespace received blanket peer access")
+				}
+				for _, ns := range []string{"own", "cnpg-system"} {
 					if !strings.Contains(string(raw), ns) {
 						t.Fatal("missing trusted namespace", ns)
 					}
@@ -328,5 +331,28 @@ func TestUnownedServiceSliceCannotGrantAnException(t *testing.T) {
 				t.Fatal("presentation label or retired pod granted protection")
 			}
 		}
+	}
+}
+
+func TestCoreServicesExposeDNSWithoutProxyOrMetricsPorts(t *testing.T) {
+	p, _ := NewProtection("own", nil)
+	svc := corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "kube-dns", Namespace: "kube-system"}, Spec: corev1.ServiceSpec{Ports: []corev1.ServicePort{{Name: "dns", Port: 53, Protocol: corev1.ProtocolUDP}, {Name: "metrics", Port: 9153, Protocol: corev1.ProtocolTCP}}}}
+	dns, metrics := svc.Spec.Ports[0], svc.Spec.Ports[1]
+	if !p.servicePortRequired(svc, dns) || p.servicePortRequired(svc, metrics) {
+		t.Fatal("core service port boundary changed")
+	}
+	proxy := svc.DeepCopy()
+	proxy.Name = "ingress-proxy"
+	if p.servicePortRequired(*proxy, corev1.ServicePort{Port: 443, Protocol: corev1.ProtocolTCP}) {
+		t.Fatal("core ingress proxy became an isolation bypass")
+	}
+	dnsName, metricsName := "dns", "metrics"
+	dnsPort, metricsPort := int32(5353), int32(9153)
+	udp, tcp := corev1.ProtocolUDP, corev1.ProtocolTCP
+	if !p.backendPortRequired(svc, discoveryv1.EndpointPort{Name: &dnsName, Port: &dnsPort, Protocol: &udp}) {
+		t.Fatal("named DNS backend omitted")
+	}
+	if p.backendPortRequired(svc, discoveryv1.EndpointPort{Name: &metricsName, Port: &metricsPort, Protocol: &tcp}) {
+		t.Fatal("DNS metrics port granted access")
 	}
 }

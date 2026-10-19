@@ -153,13 +153,16 @@ func dependencyReader(client dynamic.Interface) DependencyReader {
 								return empty, err
 							}
 							for _, port := range svc.Spec.Ports {
+								if !p.servicePortRequired(svc, port) {
+									continue
+								}
 								if err := peer(ip, port.Port, string(port.Protocol)); err != nil {
 									return empty, err
 								}
 							}
 						}
 						for _, port := range svc.Spec.Ports {
-							if port.NodePort != 0 {
+							if port.NodePort != 0 && p.servicePortRequired(svc, port) {
 								for ip := range nodes {
 									if err := peer(ip.String(), port.NodePort, string(port.Protocol)); err != nil {
 										return empty, err
@@ -192,6 +195,9 @@ func dependencyReader(client dynamic.Interface) DependencyReader {
 						}
 						for _, endpoint := range slice.Endpoints {
 							for _, ip := range endpoint.Addresses {
+								if _, err := add(ip); err != nil {
+									return empty, err
+								}
 								for _, port := range slice.Ports {
 									if port.Port == nil {
 										return empty, fmt.Errorf("network policy protection: unresolved protected endpoint port")
@@ -199,6 +205,9 @@ func dependencyReader(client dynamic.Interface) DependencyReader {
 									protocol := "TCP"
 									if port.Protocol != nil {
 										protocol = string(*port.Protocol)
+									}
+									if !p.backendPortRequired(svc, port) {
+										continue
 									}
 									if err := peer(ip, *port.Port, protocol); err != nil {
 										return empty, err
@@ -263,4 +272,51 @@ func dependencyReader(client dynamic.Interface) DependencyReader {
 		})
 		return result, nil
 	}
+}
+
+// Installation/admin-added service namespaces are explicit trust boundaries.
+// Kubernetes core namespaces additionally expose DNS, not arbitrary proxy ports.
+func (p *Protection) servicePortRequired(svc corev1.Service, port corev1.ServicePort) bool {
+	if p.communicationNamespaces[svc.Namespace] || svc.Namespace == "default" && svc.Name == "kubernetes" {
+		return true
+	}
+	return port.Port == 53 && (port.Protocol == "" || port.Protocol == corev1.ProtocolTCP || port.Protocol == corev1.ProtocolUDP)
+}
+func (p *Protection) backendPortRequired(svc corev1.Service, backend discoveryv1.EndpointPort) bool {
+	if p.communicationNamespaces[svc.Namespace] {
+		return true
+	}
+	for _, port := range svc.Spec.Ports {
+		if !p.servicePortRequired(svc, port) {
+			continue
+		}
+		protocol := corev1.ProtocolTCP
+		if backend.Protocol != nil {
+			protocol = *backend.Protocol
+		}
+		expected := port.Protocol
+		if expected == "" {
+			expected = corev1.ProtocolTCP
+		}
+		if protocol != expected {
+			continue
+		}
+		name := ""
+		if backend.Name != nil {
+			name = *backend.Name
+		}
+		if name != "" && port.Name == name {
+			return true
+		}
+		if name == "" && port.Name == "" && backend.Port != nil && port.TargetPort.StrVal == "" {
+			target := port.TargetPort.IntVal
+			if target == 0 {
+				target = port.Port
+			}
+			if target == *backend.Port {
+				return true
+			}
+		}
+	}
+	return false
 }

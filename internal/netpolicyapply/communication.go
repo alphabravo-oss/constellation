@@ -24,8 +24,8 @@ func (p *Protection) preserveCommunication(resource ManifestResource, data []byt
 	if err := json.Unmarshal(data, &obj.Object); err != nil {
 		return nil, err
 	}
-	names := make([]string, 0, len(p.namespaces))
-	for ns := range p.namespaces {
+	names := make([]string, 0, len(p.communicationNamespaces))
+	for ns := range p.communicationNamespaces {
 		names = append(names, ns)
 	}
 	sort.Strings(names)
@@ -189,7 +189,13 @@ func (p *Protection) preserveCommunication(resource ManifestResource, data []byt
 		annotations = map[string]string{}
 	}
 	annotations["constellation.alphabravo.io/system-communication"] = "preserved"
-	annotations["constellation.alphabravo.io/protected-namespaces"] = strings.Join(names, ",")
+	annotations["constellation.alphabravo.io/communication-namespaces"] = strings.Join(names, ",")
+	protected := make([]string, 0, len(p.namespaces))
+	for ns := range p.namespaces {
+		protected = append(protected, ns)
+	}
+	sort.Strings(protected)
+	annotations["constellation.alphabravo.io/protected-namespaces"] = strings.Join(protected, ",")
 	obj.SetAnnotations(annotations)
 	return json.Marshal(obj.Object)
 }
