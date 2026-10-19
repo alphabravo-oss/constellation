@@ -29,6 +29,7 @@ import (
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
 
 	"github.com/go-chi/chi/v5"
+	containername "github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -1037,22 +1038,35 @@ func scanCompletionImageIdentity(target handler.ScanTarget, body completeScanReq
 	if target.Type != "image" {
 		return scanImageIdentity{}, nil
 	}
+	targetRef := strings.TrimSpace(target.Ref)
+	targetIdentity := imageid.Parse(targetRef)
 	ref := strings.TrimSpace(body.ImageRef)
 	if ref == "" {
-		ref = strings.TrimSpace(target.ImageRef)
+		ref = targetRef
 	}
-	if ref == "" {
-		ref = strings.TrimSpace(target.Ref)
-	}
-
 	identity := imageid.Parse(ref)
-	targetIdentity := imageid.Parse(target.Ref)
+	// A digest-only target may acquire a friendly repository name, but must keep
+	// its immutable digest. Named targets must stay in the same repository.
+	var targetRepository string
+	if !strings.HasPrefix(targetRef, "sha256:") {
+		parsed, err := containername.ParseReference(targetRef)
+		if err != nil {
+			return scanImageIdentity{}, fmt.Errorf("invalid image target reference")
+		}
+		targetRepository = parsed.Context().Name()
+	}
+	if !strings.HasPrefix(ref, "sha256:") {
+		parsed, err := containername.ParseReference(ref)
+		if err != nil {
+			return scanImageIdentity{}, fmt.Errorf("invalid image completion reference")
+		}
+		if targetRepository != "" && parsed.Context().Name() != targetRepository {
+			return scanImageIdentity{}, fmt.Errorf("image completion repository differs from target")
+		}
+	}
 	digest := strings.TrimSpace(body.ImageDigest)
 	if digest == "" {
 		digest = identity.Digest
-	}
-	if digest == "" {
-		digest = strings.TrimSpace(target.ImageDigest)
 	}
 	if digest == "" {
 		digest = targetIdentity.Digest
@@ -1060,9 +1074,17 @@ func scanCompletionImageIdentity(target handler.ScanTarget, body completeScanReq
 	if digest == "" {
 		return scanImageIdentity{}, fmt.Errorf("image_digest required for image scan completion")
 	}
-	if !strings.HasPrefix(digest, "sha256:") {
-		return scanImageIdentity{}, fmt.Errorf("image_digest must be sha256")
+	normalizedDigest := normalizeSecretSHA256(digest)
+	if normalizedDigest == "" {
+		return scanImageIdentity{}, fmt.Errorf("image_digest must be a valid sha256 digest")
 	}
+	digest = normalizedDigest
+	for _, pinned := range []string{identity.Digest, targetIdentity.Digest} {
+		if pinned != "" && (normalizeSecretSHA256(pinned) == "" || normalizeSecretSHA256(pinned) != digest) {
+			return scanImageIdentity{}, fmt.Errorf("image completion digest differs from reference")
+		}
+	}
+
 	if identity.Repository == "" {
 		identity = targetIdentity
 	}

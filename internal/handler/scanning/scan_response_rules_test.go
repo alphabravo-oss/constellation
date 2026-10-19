@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -63,7 +64,7 @@ func TestScanResponseRuleSuppressLogCompletion(t *testing.T) {
 			targetID := uuid.New()
 			jobID := uuid.New()
 			imageRef := "registry.example.test/suppress-" + jobID.String() + ":latest"
-			imageDigest := "sha256:" + jobID.String()
+			imageDigest := "sha256:" + strings.Repeat(strings.ReplaceAll(jobID.String(), "-", ""), 2)
 			if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, display_name) VALUES ($1, $2, 'Scan Suppress Test')`, orgID, "scan-suppress-"+orgID.String()); err != nil {
 				t.Fatal(err)
 			}

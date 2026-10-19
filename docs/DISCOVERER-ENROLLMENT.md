@@ -88,3 +88,18 @@ remain unverified and retain their prior response behavior; registry/image scans
 without package-inventory hashes need a separate immutable image identity check.
 Historical finding totals are not automatically suppressed or reclassified by this
 provenance change.
+
+## Image completion identity
+
+Image completion validates a full 64-hex SHA-256 digest before writing results.
+The returned reference and explicit digest must agree. A named job target must
+stay in its canonical repository (including Docker Hub alias normalization), and
+a digest-pinned target cannot change digest. Digest-only targets may acquire a
+friendly repository name while retaining their digest. Tags may resolve to newer
+digests; a cached target digest alone is not accepted as evidence for an otherwise
+unpinned completion. The existing scanner pins registry references before scanning
+and preserves supplied pinned references, including multi-platform index references.
+
+These checks reject inconsistent worker reports before asset, finding, target, or
+completion-audit writes. They establish identity consistency, not independent proof
+of the worker's package scan or image signature verification.
