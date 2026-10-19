@@ -1,7 +1,7 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-19** (Helm 93 scanner recovery and post-eviction service recovery verified; broader parity remains active)
+Last reconciled: **2026-10-19** (Helm 94 compact exposure card deployed and authenticated browser validation passed; broader parity remains active)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -17,9 +17,30 @@ stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
 
 
+## Compact cluster exposure card (Helm 94)
+
+Latest deployment: **Helm 94 / schema 181**, frontend source **d0c5c50**,
+pinned to `ghcr.io/alphabravo-oss/constellation/frontend@sha256:44397711093b2c8c184e97a62248f6575602bbe82f43d1ade7a8cf94c4131dab`.
+The card shows current critical/high counts and a short coverage status. The
+count definition, inventory timestamp and historical/unverified occurrence totals
+are collapsed under a keyboard-accessible Details disclosure. Reporting semantics
+are unchanged. Four frontend tests, type checking and the production build passed.
+Authenticated live validation confirmed collapsed defaults, keyboard expansion,
+click collapse, API occurrence reconciliation and no page errors. All seven
+application Deployments remain available. No migration hooks ran for this UI rollout.
+
+The development image publisher now verifies source and registry OCI graph digests
+and supports per-role Helm digest pins. All twelve planned application/infrastructure
+images were published and verified in GHCR. Only the frontend has moved to its
+registry digest in this rollout; migrating the other workloads, private-image pull
+validation and registry scan credentials remain pending. Pull secrets exist in
+`constellation-system` and `cnpg-system`; they currently use the authorized publishing
+credential (write:packages), and should eventually use a dedicated read-only credential.
+Private infrastructure packages have not been made public.
+
 ## Scanner database recovery and service recovery (Helm 93)
 
-Latest deployment: **Helm 93 / schema 181**, scanner source **1a8fae7**. API
+Previous deployment: **Helm 93 / schema 181**, scanner source **1a8fae7**. API
 b7c72f6, discoverer/frontend/migration ab83212 and runtime ef0ca39 remain unchanged.
 The completed pre-181 CNPG backup `20261019T034312` remains available; this rollout
 has no schema change. The scanner's running configuration digest matches its
