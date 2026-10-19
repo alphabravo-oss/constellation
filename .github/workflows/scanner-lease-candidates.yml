@@ -58,7 +58,13 @@ jobs:
           CANDIDATE: constellation/migrate:candidate-${{ github.sha }}
         run: |
           set -euo pipefail
-          docker load -i "$RUNNER_TEMP/image.tar"
+          # Hosted Docker uses the classic image store, which cannot load OCI
+          # archives containing attestations directly. Import its runtime image
+          # for testing and retain the original OCI archive for publication.
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends skopeo
+          skopeo copy --override-os linux --override-arch amd64 \
+            "oci-archive:$RUNNER_TEMP/image.tar" "docker-daemon:$CANDIDATE"
           docker network create migration-validation
           trap 'docker rm -f migration-validation-db >/dev/null; docker network rm migration-validation >/dev/null' EXIT
           docker run -d --name migration-validation-db --network migration-validation \
