@@ -20,10 +20,10 @@
     {
       "name": "api",
       "role": "api",
-      "source": "constellation/api:system-scope-20261019-7204fa9",
-      "digest": "sha256:621bfd8d364ee7de13fdf23e1384d4372d8c47f4bd8e438f5eb819a2b01206be",
+      "source": "constellation/api:cluster-scope-20261019-35b8fd2",
+      "digest": "sha256:77c4a8d301f22c25aa0783a993e0a4c4e1f9d5849ba3b5508c23fbb83e355c54",
       "repository": "ghcr.io/alphabravo-oss/constellation/api",
-      "tag": "dev-621bfd8d364ee7de13fdf23e1384d4372d8c47f4bd8e438f5eb819a2b01206be"
+      "tag": "dev-77c4a8d301f22c25aa0783a993e0a4c4e1f9d5849ba3b5508c23fbb83e355c54"
     },
     {
       "name": "discoverer",
@@ -36,10 +36,10 @@
     {
       "name": "frontend",
       "role": "frontend",
-      "source": "constellation/frontend:system-scope-20261019-7204fa9",
-      "digest": "sha256:09974bc3a96a794e6423e5477756e5d8fc91275666c678c9d2888d078313846a",
+      "source": "constellation/frontend:cluster-scope-20261019-35b8fd2",
+      "digest": "sha256:eb927b405824ddb095d8df444ff1cf34b2e5b965fd5a07d11dd99c6786ed69da",
       "repository": "ghcr.io/alphabravo-oss/constellation/frontend",
-      "tag": "dev-09974bc3a96a794e6423e5477756e5d8fc91275666c678c9d2888d078313846a"
+      "tag": "dev-eb927b405824ddb095d8df444ff1cf34b2e5b965fd5a07d11dd99c6786ed69da"
     },
     {
       "name": "operator",
