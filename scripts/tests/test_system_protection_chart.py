@@ -11,7 +11,7 @@ CORE = {'custom-system', 'kube-system', 'kube-public', 'kube-node-lease'}
 class SystemProtectionChartTests(unittest.TestCase):
     def render(self, values):
         return subprocess.run(['helm', 'template', 'protection', str(CHART), '-n',
-            'custom-system', '--set-json', 'systemProtection='+json.dumps(values),
+            'custom-system', '--set', 'clusterRegistration.clusterId=11111111-1111-4111-8111-111111111111', '--set-json', 'systemProtection='+json.dumps(values),
             '--set', 'runtimeAgent.enforcement.protectedNamespaces[0]=runtime-extra',
             '--set', 'networkPolicyApplier.protectedNamespaces[0]=network-extra',
             '--set', 'admission.webhook.namespaceSelector.matchLabels.enforce=yes'],
@@ -23,6 +23,11 @@ class SystemProtectionChartTests(unittest.TestCase):
                 result=self.render({'protectedNamespaces': extras})
                 self.assertEqual(result.returncode, 0, result.stderr)
                 docs=list(yaml.safe_load_all(result.stdout))
+                api=next(d for d in docs if d and d['kind']=='Deployment' and d['metadata']['name'].endswith('-api'))
+                env=api['spec']['template']['spec']['containers'][0]['env']
+                protected=json.loads(next(e['value'] for e in env if e['name']=='CONSTELLATION_QUARANTINE_PROTECTED_NAMESPACES'))
+                self.assertEqual(set(protected), {'11111111-1111-4111-8111-111111111111'})
+                self.assertEqual(set(next(iter(protected.values()))), CORE | set(extras))
                 webhook=next(d for d in docs if d and d['kind']=='ValidatingWebhookConfiguration')
                 selector=webhook['webhooks'][0]['namespaceSelector']
                 expr=selector['matchExpressions'][0]
@@ -43,3 +48,8 @@ class SystemProtectionChartTests(unittest.TestCase):
                 result=self.render({'protectedNamespaces':bad})
                 self.assertNotEqual(result.returncode,0)
                 self.assertIn('systemProtection',result.stderr)
+
+    def test_unbound_install_does_not_guess_a_cluster_for_api_protection(self):
+        result=subprocess.run(['helm','template','protection',str(CHART),'--show-only','templates/api-deployment.yaml'],text=True,capture_output=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        self.assertNotIn('CONSTELLATION_QUARANTINE_PROTECTED_NAMESPACES',result.stdout)

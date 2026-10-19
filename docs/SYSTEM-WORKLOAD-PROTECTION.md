@@ -53,10 +53,28 @@ session endpoint safeguards are implemented. The existing namespace-wide exclusi
 also protect unrelated workloads installed in those namespaces. Finer component
 identity protection remains open; UI classification labels are not sufficient proof.
 
-Remaining work includes quarantine API feedback, verification of every separately managed dependency assignment, and a complete audit of
+Remaining work includes automatic-response quarantine feedback, verification of every separately managed dependency assignment, and a complete audit of
 all disruptive response paths. Calico selector transformation is tested at the client
 write boundary; live Calico/Cilium data-plane enforcement still requires their own
 cluster fixtures. The development cluster's native rollout does not prove those CNIs.
+
+## Manual quarantine refusal
+
+The API refuses workload and namespace quarantine requests for the mandatory core
+namespaces. When `clusterRegistration.clusterId` is explicitly configured, the chart
+passes that UUID's own and shared dependency namespaces to the API through
+`CONSTELLATION_QUARANTINE_PROTECTED_NAMESPACES` (a JSON map of cluster UUID to namespace
+array). This configuration is trusted installation input, never workload labels.
+Organization ownership and workload existence checks run first. Refusals return
+HTTP 403 with `code: protected_namespace` and create no quarantine entry. Invalid
+protection configuration refuses creation with HTTP 503; lifting remains available.
+
+Without an explicit cluster UUID the chart does not guess which cluster owns the
+installation namespace. Other clusters require their own trusted mapping in the API
+environment; only mandatory core refusals apply without one. Image-scoped quarantine
+can cover both system and application owners and is retained; protected namespaces
+are excluded by admission at enforcement time. This check does not yet cover automatic
+response-rule inserts or report their effective admission coverage.
 
 ## Inline network inspection
 

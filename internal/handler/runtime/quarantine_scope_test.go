@@ -51,3 +51,64 @@ func TestQuarantineCreateRequiresOwnedClusterAndExistingWorkload(t *testing.T) {
 		t.Errorf("quarantines=%d err=%v", count, err)
 	}
 }
+
+func TestQuarantineProtectionUsesTrustedClusterScope(t *testing.T) {
+	d := openTestDB(t)
+	t.Cleanup(d.Close)
+	ctx := t.Context()
+	org, foreignOrg, cluster, other, foreign, user := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	_, err := d.Pool().Exec(ctx, `INSERT INTO orgs(id,name,display_name) VALUES($1,$2,$2),($3,$4,$4)`, org, "protection-"+org.String(), foreignOrg, "protection-"+foreignOrg.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = d.Pool().Exec(context.Background(), `DELETE FROM quarantine_entries WHERE org_id=$1`, org)
+		_, _ = d.Pool().Exec(context.Background(), `DELETE FROM orgs WHERE id IN ($1,$2)`, org, foreignOrg)
+	})
+	_, err = d.Pool().Exec(ctx, `INSERT INTO clusters(id,org_id,name) VALUES($1,$4,'local'),($2,$4,'remote'),($3,$5,'foreign')`, cluster, other, foreign, org, foreignOrg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = d.Pool().Exec(ctx, `INSERT INTO deployments(org_id,cluster_id,namespace,name,kind) VALUES($1,$2,'custom-system','api','Deployment'),($1,$3,'custom-system','api','Deployment'),($1,$2,'payments','api','Deployment')`, org, cluster, other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CONSTELLATION_QUARANTINE_PROTECTED_NAMESPACES", fmt.Sprintf(`{%q:["custom-system","cnpg-system"]}`, cluster))
+	h := NewQuarantine(d, nil)
+	for _, tc := range []struct {
+		cluster       uuid.UUID
+		scope, target string
+		status        int
+	}{
+		{cluster, "workload", "custom-system/api", 403}, {cluster, "namespace", "custom-system", 403},
+		{cluster, "namespace", "cnpg-system", 403}, {other, "namespace", "kube-system", 403},
+		{foreign, "namespace", "custom-system", 404}, {cluster, "workload", "custom-system/missing", 404},
+		{other, "workload", "custom-system/api", 201}, {cluster, "workload", "payments/api", 201},
+		{cluster, "image", "shared/image", 201},
+	} {
+		body := fmt.Sprintf(`{"cluster_id":%q,"scope":%q,"match_key":%q,"reason":"test"}`, tc.cluster, tc.scope, tc.target)
+		r := httptest.NewRequestWithContext(ctx, http.MethodPost, "/quarantine", strings.NewReader(body))
+		r = r.WithContext(authctx.WithSubject(r.Context(), authctx.Subject{OrgID: org, UserID: user}))
+		w := httptest.NewRecorder()
+		h.Create(w, r)
+		if w.Code != tc.status {
+			t.Fatalf("%+v: status %d: %s", tc, w.Code, w.Body)
+		}
+		if tc.status == 403 && !strings.Contains(w.Body.String(), `"code":"protected_namespace"`) {
+			t.Fatalf("missing refusal code: %s", w.Body)
+		}
+	}
+	var count int
+	if err := d.Pool().QueryRow(ctx, `SELECT count(*) FROM quarantine_entries WHERE org_id=$1`, org).Scan(&count); err != nil || count != 3 {
+		t.Fatalf("stored=%d err=%v; refused requests must not persist", count, err)
+	}
+	t.Setenv("CONSTELLATION_QUARANTINE_PROTECTED_NAMESPACES", `{"not-a-uuid":["custom-system"]}`)
+	h = NewQuarantine(d, nil)
+	r := httptest.NewRequestWithContext(ctx, http.MethodPost, "/quarantine", strings.NewReader(fmt.Sprintf(`{"cluster_id":%q,"scope":"namespace","match_key":"team","reason":"test"}`, cluster)))
+	r = r.WithContext(authctx.WithSubject(r.Context(), authctx.Subject{OrgID: org, UserID: user}))
+	w := httptest.NewRecorder()
+	h.Create(w, r)
+	if w.Code != 503 {
+		t.Fatalf("invalid protection accepted: %d %s", w.Code, w.Body)
+	}
+}

@@ -62,6 +62,11 @@ spec:
           {{- end }}
           ports: [{ containerPort: 8080, name: http }]
           env:
+            {{- if .Values.clusterRegistration.clusterId }}
+            # Local cluster UUID binds trusted protection to this installation only.
+            - name: CONSTELLATION_QUARANTINE_PROTECTED_NAMESPACES
+              value: {{ dict .Values.clusterRegistration.clusterId (include "constellation.protectedNamespaces" (dict "ctx" .) | fromJsonArray) | toJson | quote }}
+            {{- end }}
             - name: LISTEN_ADDR
               value: ":8080"
             - name: DATABASE_URL

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -24,12 +25,15 @@ import (
 )
 
 type Quarantine struct {
-	db    *db.DB
-	audit *auditlog.Logger
+	db            *db.DB
+	audit         *auditlog.Logger
+	protection    quarantineProtection
+	protectionErr error
 }
 
 func NewQuarantine(database *db.DB, audit *auditlog.Logger) *Quarantine {
-	return &Quarantine{db: database, audit: audit}
+	protection, err := parseQuarantineProtection(os.Getenv("CONSTELLATION_QUARANTINE_PROTECTED_NAMESPACES"))
+	return &Quarantine{db: database, audit: audit, protection: protection, protectionErr: err}
 }
 
 type quarantineDTO struct {
@@ -109,12 +113,17 @@ func (h *Quarantine) Create(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, status, map[string]string{"error": "cluster not found in this organization"})
 		return
 	}
+	protectedNamespace := ""
+	if req.Scope == "namespace" {
+		protectedNamespace = req.MatchKey
+	}
 	if req.Scope == "workload" {
 		ns, name, found := strings.Cut(req.MatchKey, "/")
 		if !found || ns == "" || name == "" {
 			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "workload match_key must be namespace/name"})
 			return
 		}
+		protectedNamespace = ns
 		var workloadID uuid.UUID
 		if err := tx.QueryRow(r.Context(), `SELECT id FROM deployments WHERE org_id=$1 AND cluster_id=$2 AND namespace=$3 AND name=$4 LIMIT 1 FOR KEY SHARE`, subj.OrgID, req.ClusterID, ns, name).Scan(&workloadID); err != nil {
 			status := http.StatusInternalServerError
@@ -124,6 +133,14 @@ func (h *Quarantine) Create(w http.ResponseWriter, r *http.Request) {
 			httpx.WriteJSON(w, status, map[string]string{"error": "workload not found in the selected cluster"})
 			return
 		}
+	}
+	if h.protectionErr != nil {
+		httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "quarantine protection configuration is invalid", "code": "protection_unavailable"})
+		return
+	}
+	if h.protection.protects(req.ClusterID, protectedNamespace) {
+		httpx.WriteJSON(w, http.StatusForbidden, map[string]string{"error": "quarantine refused: protected system namespace " + protectedNamespace, "code": "protected_namespace"})
+		return
 	}
 	var expiresAt *time.Time
 	if req.ExpiresInHours != nil && *req.ExpiresInHours > 0 {
