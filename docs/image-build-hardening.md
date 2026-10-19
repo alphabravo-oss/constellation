@@ -84,6 +84,21 @@ a caller-provided test credential directory. The home directory remains read-onl
 DB download fails that build instead of silently producing an unusable offline
 image. The default remains runtime DB refresh or operator-preloaded caches.
 
+## Patched scanner tool builds
+
+The scanner Dockerfile rebuilds Syft 1.54.1, Grype 0.120.1 and Cosign 3.1.3
+from checksum-pinned upstream source modules with Go 1.26.9. Their upstream
+release binaries still embed vulnerable Go runtimes/dependencies. Reviewed
+`go.mod`/`go.sum` locks update x/net to 0.60.0 and Cosign's gRPC to 1.83.2;
+transitive x/* upgrades follow the module graph. Versions carry a
+`-constellation.1` suffix and the upstream source commit remains recorded.
+
+See [source locks and rebuild procedure](../deploy/docker/scanner-tools/README.md).
+This changes actual embedded code and preserves package evidence. It does not
+suppress advisories or relabel vulnerable dependency versions. Trivy and ORAS
+retain checksum-verified upstream binaries. The release-check CLI installer is
+separate and still uses the pinned upstream Grype binary.
+
 ## Frontend runtime refresh (2026-10-19)
 
 The frontend Dockerfile updates libexpat, zlib, libx11, and libxpm from its

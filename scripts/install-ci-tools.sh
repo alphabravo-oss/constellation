@@ -52,7 +52,7 @@ for tool in "$@"; do
       install -m 0755 "$temporary/shellcheck-v0.11.0/shellcheck" "$bin_dir/shellcheck"
       ;;
     grype)
-      # Match the scanner image's reviewed binary and checksum pins.
+      # Pinned upstream CLI for release checks; runtime tools use separate source locks.
       curl --fail --silent --show-error --location --retry 3 \
         https://github.com/anchore/grype/releases/download/v0.120.1/grype_0.120.1_linux_amd64.tar.gz \
         -o "$temporary/grype.tar.gz"
