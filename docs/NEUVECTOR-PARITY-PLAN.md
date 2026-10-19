@@ -17,6 +17,35 @@ stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
 
 
+## Barman Expat candidate qualification (2026-10-19)
+
+A minimal sidecar candidate is published at digest
+`sha256:5c6b5559b08b7b49c89937b6d823a37fbeb8e7b883d4b0da6278fe09de87d1f1`.
+It is **not deployed yet**. `deploy/docker/Dockerfile.barman-sidecar` preserves
+the qualified manager, Python environment and UID 26, installs Debian's signed
+Expat 2.9.0-1~deb13u1 package, removes the superseded versioned libraries, and
+updates the distroless package metadata from the package itself. The final image
+still has no shell or package manager. All package file checksums, both Expat
+library variants, XML parsing and nine Barman cloud CLI help commands pass under
+read-only filesystem, dropped capabilities and no-new-privileges settings.
+
+Same-database Trivy comparison reduces high findings from 36 to 31 and medium
+from 100 to 99; low remains 51 and unknown remains 2. This is Trivy-only evidence,
+not a comparison to the aggregate production scan's 4 critical/52 high findings.
+The initial older local database did not know the fix; the repeated comparison
+uses one frozen October 19 database and records its SHA-256 in
+`deploy/dev/registry-release/validation-barman-candidate-20261019.json`.
+[Debian DSA-6566-1](https://lists.debian.org/debian-security-announce/2026/msg00480.html)
+confirms the six Expat fixes. CVE-2025-66382 remains reported for Expat.
+
+[Debian's Python advisory](https://security-tracker.debian.org/tracker/CVE-2026-19445)
+still marks Trixie Python 3.13.5-2+deb13u5 vulnerable, without a released fixed
+Trixie package. The flaw requires a TLS server SNI callback replacing its SSL
+context without retaining the original; TLS clients are unaffected. This narrows
+the applicability investigation but does not prove this deployment unaffected,
+and no finding is suppressed. The production queued scan and fresh pre-rollout
+backup are pending; deployment and a backup using the new sidecar remain required.
+
 ## Admission replica retirement (Helm 99)
 
 Latest deployment: **Helm 99 / schema 181**, admission source **00429af**, image

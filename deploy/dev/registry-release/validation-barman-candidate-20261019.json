@@ -1,0 +1,77 @@
+{
+  "before": {
+    "counts": {
+      "MEDIUM": 100,
+      "LOW": 51,
+      "HIGH": 36,
+      "UNKNOWN": 2
+    },
+    "expat": [
+      [
+        "CVE-2026-66046",
+        "2.8.3-1~deb13u1"
+      ],
+      [
+        "CVE-2026-76956",
+        "2.8.3-1~deb13u1"
+      ],
+      [
+        "CVE-2026-76957",
+        "2.8.3-1~deb13u1"
+      ],
+      [
+        "CVE-2026-77214",
+        "2.8.3-1~deb13u1"
+      ],
+      [
+        "CVE-2026-93990",
+        "2.8.3-1~deb13u1"
+      ],
+      [
+        "CVE-2025-66382",
+        "2.8.3-1~deb13u1"
+      ],
+      [
+        "CVE-2026-102633",
+        "2.8.3-1~deb13u1"
+      ]
+    ]
+  },
+  "after": {
+    "counts": {
+      "MEDIUM": 99,
+      "LOW": 51,
+      "UNKNOWN": 2,
+      "HIGH": 31
+    },
+    "expat": [
+      [
+        "CVE-2025-66382",
+        "2.9.0-1~deb13u1"
+      ]
+    ]
+  },
+  "database": {
+    "Version": 2,
+    "NextUpdate": "2026-10-20T00:45:30.55304681Z",
+    "UpdatedAt": "2026-10-19T00:45:30.553047111Z",
+    "DownloadedAt": "2026-10-19T05:33:36.418030487Z"
+  },
+  "database_sha256": "f77d505dd54523c782ec55930758c3a5de9fefe03c67ccded62597df795672bb",
+  "candidate": {
+    "name": "barman-sidecar",
+    "role": null,
+    "source": "constellation/barman-sidecar:expat-20261019",
+    "digest": "sha256:5c6b5559b08b7b49c89937b6d823a37fbeb8e7b883d4b0da6278fe09de87d1f1",
+    "repository": "ghcr.io/alphabravo-oss/constellation/barman-sidecar",
+    "tag": "dev-5c6b5559b08b7b49c89937b6d823a37fbeb8e7b883d4b0da6278fe09de87d1f1"
+  },
+  "scope": "Trivy-only same-database comparison, not aggregate production scan or backup validation",
+  "compatibility": [
+    "Expat package checksums and narrow/wide runtime versions verified",
+    "{\"/venv/bin/barman-cloud-restore\": 0, \"/venv/bin/barman-cloud-backup-delete\": 0, \"/venv/bin/barman-cloud-check-wal-archive\": 0, \"/venv/bin/barman-cloud-backup-show\": 0, \"/venv/bin/barman-cloud-backup-keep\": 0, \"/venv/bin/barman-cloud-wal-restore\": 0, \"/venv/bin/barman-cloud-wal-archive\": 0, \"/venv/bin/barman-cloud-backup\": 0, \"/venv/bin/barman-cloud-backup-list\": 0}"
+  ],
+  "queued_scan_id": "ff0b2721-feaf-438a-91aa-a2af94ecf3a4",
+  "pre_backup": "constellation-pre-expat-20261019",
+  "deployed": false
+}
