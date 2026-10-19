@@ -2812,3 +2812,52 @@ smoke results). Private browser session state is excluded from published evidenc
 No parent acceptance row closes: **66 checked / 88 open**. Remaining image,
 registry-resolution and scanner-cache work below stays open.
 
+## Scanner database verification and recovery acceptance (2026-10-19)
+
+Source `1a8fae7` addresses a live failure where Grype's updater exited successfully
+but its reused database failed checksum validation. The former five-second status
+deadline also expired against a healthy live database whose validation took about
+eight seconds. Validation now permits one minute, respects cancellation, and
+reports unavailable when it cannot complete. Refresh success requires a valid
+installed revision; disabled engines are skipped and concurrent refreshes serialize.
+
+Online Grype recovery imports the recorded HTTPS archive only when it contains a
+valid SHA-256 checksum. The old database is not deleted before import. Post-import
+validation must pass before the downloaded revision or success log changes. Offline
+mode remains a no-op. Missing or unsafe archive provenance still requires operator
+repair. This does not add a full SQLite integrity check to Trivy's metadata probe.
+
+Validation evidence in `/root/constellation-db-recovery-20261019/`:
+- Full scanner command tests pass, including slow checksums, cancellation, disabled
+  engines, invalid metadata after exit zero, failed import, unsafe URLs and invalid
+  post-import databases. The refresh/snapshot race test passes.
+- Opt-in real-tool acceptance uses Grype 0.120.1 with deliberately invalid import
+  metadata in an isolated cache. The updater is forced to reproduce the observed
+  no-op; status and import use the real executable. Recovery completed in 85 seconds,
+  then verified revision `2026-10-18T06:27:17Z` with ready/applied/download agreement.
+- The release image starts with a read-only filesystem, no network and all
+  capabilities dropped. Its same-database Trivy scan remains **0 critical / 31 high /
+  45 medium / 3 low / 5 unknown**. No additional vulnerability reduction is claimed.
+
+During acceptance, compilation and database staging crossed the shared development
+node's disk threshold, causing pod evictions. Disposable test/compiler caches were
+removed. Catalog inspection then identified 162 unreferenced anonymous PostgreSQL
+16 volumes containing only `constellation_test`, `postgres` and template databases;
+removing those reclaimed 30.34 GiB. A manifest and per-volume removal results were
+retained. Application data and backups were not removed. Kubelet uses a 5% eviction
+threshold, 10% minimum reclaim and five-minute pressure-transition interval. Future
+heavy validation needs storage headroom above that recovery margin, not just above
+the initial eviction threshold.
+
+Helm 93 deployed scanner source `1a8fae7` without a schema change. After disk
+pressure cleared, local release images removed by image GC were reimported from
+exact retained builds, including the Barman plugin required for CNPG reconciliation.
+CNPG returned healthy, all seven application Deployments and the runtime DaemonSet
+became ready. The rebuilt scanner image/configuration digest matches, and
+health/readiness return 200. Heartbeat metadata reports both engines ready with
+matching download/applied revisions. A live CLI scan of `registry.k8s.io/pause:3.10`
+with offline databases and signature verification disabled completed with zero
+detected packages/findings and no engine errors. The authenticated cluster page
+passes with no JavaScript errors and reconciled occurrence totals. Free disk space
+after image restoration is approximately 57 GiB. Registry-backed releases remain
+necessary to remove the manual reimport dependency exposed by image GC.

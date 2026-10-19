@@ -46,16 +46,38 @@ There are **two supported mechanisms** for getting data in:
 Trivy supports **both** (a) and (b). Grype has no OCI-mirror mode, so it always
 uses the file/archive path (b).
 
-> **Cache-dir caveat (important).** The scanner deployment
-> (`deploy/charts/constellation/templates/scanner-deployment.yaml`) points both
-> cache dirs at an **ephemeral `emptyDir`**:
->
-> - `TRIVY_CACHE_DIR=/tmp/trivy`
-> - `GRYPE_DB_CACHE_DIR=/tmp/grype/db`
->
-> The `emptyDir` is **wiped on every pod restart**. So for offline mode you must
-> either persist these dirs (PVC) or re-load the DB on each start (baked image or
-> init job). See [section 5](#5-getting-dbs-into-the-air-gapped-scanner-pods).
+The chart mounts caches under `/var/lib/scanner-cache`: Grype at
+`grype/db`, Trivy at `trivy`, and Syft at `syft`. By default
+`scanner.cache.persistent: true` uses a PVC for a single replica with autoscaling
+disabled. Multiple replicas, autoscaling, or disabling persistence switches to
+`emptyDir`; that cache is lost when the pod is replaced (not merely when its
+container restarts). Offline deployments must preserve or reload the database
+for every new pod. See [section 5](#5-getting-dbs-into-the-air-gapped-scanner-pods).
+
+### Online refresh validation and recovery
+
+The refresh loop skips disabled engines and remains a no-op offline. A successful
+command exit alone does not produce a success log: the installed revision must
+validate first. Grype checksum validation has a one-minute deadline to accommodate
+multi-GB databases; command cancellation or unreadable output reports unavailable.
+Trivy revision validation reads its bounded metadata file; it is not a complete
+integrity check of the Trivy SQLite database.
+
+When `grype db update` leaves an invalid database, the worker can reimport the
+archive recorded in Grype's status. Automatic recovery requires an HTTPS URL with
+one valid SHA-256 checksum. Grype verifies the imported archive and the worker
+rechecks database validity before recording success. It does not delete the active
+cache before downloading a replacement. Missing/unsafe provenance, failed import,
+or invalid post-import status remains a failure. Recovery can restore the recorded
+revision; it does not prove that revision is the latest upstream release. Offline
+operators still import a verified archive themselves.
+
+On shared development nodes, allow space for the active database, downloaded
+archive and expanded replacement, plus compiler/build caches. Check kubelet
+`evictionHard`, `evictionMinimumReclaim` and its pressure-transition interval:
+freeing just enough to cross the initial eviction threshold may not restore
+scheduling. Retain evidence logs but remove owned disposable test caches after
+acceptance; do not run broad volume pruning against application or backup data.
 
 ---
 

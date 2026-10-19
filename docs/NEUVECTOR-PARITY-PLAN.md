@@ -1,7 +1,7 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-19** (Helm 92 current-exposure reporting and authenticated live validation verified; broader parity remains active)
+Last reconciled: **2026-10-19** (Helm 93 scanner recovery and post-eviction service recovery verified; broader parity remains active)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -17,9 +17,53 @@ stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
 
 
-## Current exposure reporting (Helm 92, 2026-10-19)
+## Scanner database recovery and service recovery (Helm 93)
 
-Latest deployment: **Helm 92 / schema 181**. API source **b7c72f6**;
+Latest deployment: **Helm 93 / schema 181**, scanner source **1a8fae7**. API
+b7c72f6, discoverer/frontend/migration ab83212 and runtime ef0ca39 remain unchanged.
+The completed pre-181 CNPG backup `20261019T034312` remains available; this rollout
+has no schema change. The scanner's running configuration digest matches its
+release OCI graph. All seven Deployments, the runtime DaemonSet and the CNPG
+cluster are healthy; scanner health/readiness return 200.
+
+Refresh now verifies installed status before claiming success. Grype validation
+has a one-minute deadline (the healthy live database exceeded the former five
+seconds), and online corruption recovery imports its recorded HTTPS archive only
+with a valid SHA-256 checksum. The original cache is not deleted before download.
+Post-import validation is mandatory. Disabled engines are skipped, refreshes
+serialize and offline mode performs no refresh/recovery. Missing or unsafe archive
+provenance remains an operator repair case; Trivy's metadata probe is not a full
+SQLite integrity check.
+
+Full scanner command tests and the refresh/snapshot race check pass. Actual Grype
+acceptance repaired deliberately invalid metadata in an isolated cache in 85
+seconds, then confirmed ready/applied/download agreement. The restricted release
+image starts, and its scan remains **0 critical / 31 high / 45 medium / 3 low /
+5 unknown**. Live heartbeat reports both engines ready with matching applied and
+downloaded revisions. A live offline-DB CLI scan of the pause image completes with
+zero detected packages/findings and no engine errors; signature verification was
+disabled for this database-focused check. Authenticated cluster-page validation
+passes without JavaScript errors and occurrence reconciliation still passes.
+
+Validation triggered disk pressure on the shared build/development node. All
+application pods were evicted. Disposable test/compiler caches plus 162 verified,
+unreferenced test-only PostgreSQL volumes were removed, restoring storage headroom.
+Kubernetes image GC also removed node-only release images; exact retained builds
+were reimported, including the CNPG/Barman components. CNPG returned healthy and
+the API-dependent workloads recovered. Database checks after recovery confirmed
+schema 181 and the pre-incident critical/high totals. Around **57 GiB remains free**
+after restoring images. The storage recovery interval and evidence are documented
+in `docs/security-testing.md`; application data and backups were preserved.
+
+This incident elevates the existing **registry-backed release path** gap: local
+image imports cannot survive node image GC without manual restoration. That work,
+broader image hardening, platform-facts scope repair and full parity remain open.
+Evidence is under `/root/constellation-db-recovery-20261019/`. Canonical acceptance
+remains **66 checked / 88 open**; no parent row closes.
+
+## Previous exposure reporting checkpoint (Helm 92, 2026-10-19)
+
+Previous deployment: **Helm 92 / schema 181**. API source **b7c72f6**;
 discoverer, frontend and migration source **ab83212**. Scanner remains 1d94b2d
 and runtime ef0ca39. Fresh CNPG backup `20261019T034312` completed before rollout.
 All seven Deployments and the runtime DaemonSet are ready. API, discoverer and
