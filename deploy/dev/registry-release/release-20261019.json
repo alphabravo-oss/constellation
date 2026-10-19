@@ -20,10 +20,10 @@
     {
       "name": "api",
       "role": "api",
-      "source": "constellation/api:workload-presence-20261019-5cf9e2d",
-      "digest": "sha256:78d710c6b3796ca5b0b9be005ad52fa31dc77785e412b3b057fcd0eea55480f0",
+      "source": "constellation/api:quarantine-protection-20261019-6e75baa",
+      "digest": "sha256:0c8acd57ce7bb0e87f6689db81e535fdacbea461753c090307e49d3dc0750c2a",
       "repository": "ghcr.io/alphabravo-oss/constellation/api",
-      "tag": "dev-78d710c6b3796ca5b0b9be005ad52fa31dc77785e412b3b057fcd0eea55480f0"
+      "tag": "dev-0c8acd57ce7bb0e87f6689db81e535fdacbea461753c090307e49d3dc0750c2a"
     },
     {
       "name": "discoverer",
@@ -115,7 +115,7 @@
     "api": {
       "image": {
         "repository": "ghcr.io/alphabravo-oss/constellation/api",
-        "digest": "sha256:78d710c6b3796ca5b0b9be005ad52fa31dc77785e412b3b057fcd0eea55480f0"
+        "digest": "sha256:0c8acd57ce7bb0e87f6689db81e535fdacbea461753c090307e49d3dc0750c2a"
       }
     },
     "discoverer": {
