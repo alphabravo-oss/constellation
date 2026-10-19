@@ -4,10 +4,10 @@
     {
       "name": "runtime-agent",
       "role": "runtimeAgent",
-      "source": "constellation/runtime-agent:session-protection-20261019-bf0ef0b",
-      "digest": "sha256:28ae4c759d9421e3d3b92e5aed7385acc06caa8b8c9b22323251b11d6a325366",
+      "source": "constellation/runtime-agent:inline-protection-20261019-7db832a",
+      "digest": "sha256:d8d0e4903abc6c291fb98e32806ac61ea11b562b0abfa62c60230e3fa5afaadf",
       "repository": "ghcr.io/alphabravo-oss/constellation/runtime-agent",
-      "tag": "dev-28ae4c759d9421e3d3b92e5aed7385acc06caa8b8c9b22323251b11d6a325366"
+      "tag": "dev-d8d0e4903abc6c291fb98e32806ac61ea11b562b0abfa62c60230e3fa5afaadf"
     },
     {
       "name": "admission",
@@ -103,7 +103,7 @@
     "runtimeAgent": {
       "image": {
         "repository": "ghcr.io/alphabravo-oss/constellation/runtime-agent",
-        "digest": "sha256:28ae4c759d9421e3d3b92e5aed7385acc06caa8b8c9b22323251b11d6a325366"
+        "digest": "sha256:d8d0e4903abc6c291fb98e32806ac61ea11b562b0abfa62c60230e3fa5afaadf"
       }
     },
     "admission": {
