@@ -116,6 +116,35 @@ def main():
             raise AssertionError('DNS metrics baseline is not reachable; this fixture requires its explicit positive control')
         env = dict(os.environ, CONSTELLATION_POLICY_PROOF_NAMESPACE=app, CONSTELLATION_POLICY_PROOF_FLAVOR=args.flavor,
                    CONSTELLATION_POLICY_PROOF_PROTECTED_NAMESPACE=system, CONSTELLATION_POLICY_PROOF_NONCE=nonce)
+        if args.flavor == 'cilium':
+            # A second pod with the same Cilium identity must not inherit the
+            # selectorless dependency's port. Refuse before creating a policy.
+            create(pod(app, 'shadow', 'ordinary'))
+            kubectl('wait', '-n', app, '--for=condition=Ready', 'pod/shadow', '--timeout=90s')
+            for _ in range(30):
+                status = kubectl('get', 'ciliumendpoint', 'shadow', '-n', app, '-o', 'json', check=False)
+                if status.returncode == 0 and json.loads(status.stdout).get('status', {}).get('identity', {}).get('id', 0) >= 256:
+                    break
+                time.sleep(1)
+            else:
+                raise AssertionError('shadow Cilium identity did not converge')
+            refused = subprocess.run([str(args.helper.resolve()), '-test.run', '^TestApplyNativeCommunicationLive$', '-test.v'],
+                                     env=env, text=True, capture_output=True, timeout=45)
+            (args.output/'shared-identity-refusal.log').write_text(refused.stdout + refused.stderr)
+            if refused.returncode == 0 or 'also selects unrelated endpoint' not in refused.stdout:
+                raise AssertionError('shared identity did not produce the expected explicit refusal')
+            existing = kubectl('get', policy_kind, 'communication-proof', '-n', app, '--ignore-not-found', '-o', 'json')
+            if existing.stdout.strip():
+                raise AssertionError('refused policy was written')
+            evidence['sharedIdentityRefusedBeforeWrite'] = True
+            kubectl('delete', 'pod', 'shadow', '-n', app, '--wait=true', '--timeout=60s')
+            for _ in range(30):
+                gone = kubectl('get', 'ciliumendpoint', 'shadow', '-n', app, '--ignore-not-found', '-o', 'json')
+                if not gone.stdout.strip():
+                    break
+                time.sleep(1)
+            else:
+                raise AssertionError('shadow Cilium endpoint was not removed')
         result = subprocess.run([str(args.helper.resolve()), '-test.run', '^TestApplyNativeCommunicationLive$', '-test.v'],
                                 env=env, text=True, capture_output=True, timeout=45)
         (args.output/'helper.log').write_text(result.stdout + result.stderr)

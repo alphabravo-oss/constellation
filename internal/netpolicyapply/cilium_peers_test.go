@@ -47,7 +47,7 @@ func TestCiliumBackendIdentityBoundary(t *testing.T) {
 		{name: "superset identity also matches", wantError: true, mutate: func(_ *DependencySnapshot, e, i *unstructured.Unstructured) []runtime.Object {
 			other := e.DeepCopy()
 			other.SetName("superset")
-			_ = unstructured.SetNestedInt64(other.Object, 301, "status", "identity", "id")
+			_ = unstructured.SetNestedField(other.Object, int64(301), "status", "identity", "id")
 			_ = unstructured.SetNestedSlice(other.Object, []any{map[string]any{"ipv4": "10.0.0.3"}}, "status", "networking", "addressing")
 			identity := i.DeepCopy()
 			identity.SetName("301")
