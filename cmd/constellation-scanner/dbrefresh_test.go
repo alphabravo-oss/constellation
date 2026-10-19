@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -155,4 +157,161 @@ func TestEngineDBRefreshSnapshotRace(t *testing.T) {
 		}()
 	}
 	group.Wait()
+}
+
+// The updater can exit zero while leaving a corrupt, already-current DB in place.
+func TestEngineDBRefreshRecoversOnlyVerifiedArchive(t *testing.T) {
+	for _, tc := range []struct {
+		name, archive             string
+		importFails, staysInvalid bool
+		wantSuccess               bool
+	}{
+		{name: "repaired", archive: "https://grype.example/db.tar.zst?checksum=sha256:" + strings.Repeat("a", 64), wantSuccess: true},
+		{name: "no checksum", archive: "https://grype.example/db.tar.zst"},
+		{name: "insecure URL", archive: "http://grype.example/db.tar.zst?checksum=sha256:" + strings.Repeat("a", 64)},
+		{name: "failed import", archive: "https://grype.example/db.tar.zst?checksum=sha256:" + strings.Repeat("a", 64), importFails: true},
+		{name: "invalid after import", archive: "https://grype.example/db.tar.zst?checksum=sha256:" + strings.Repeat("a", 64), staysInvalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w, _, statusPath := engineDBTestWorker(t)
+			w.engines["trivy"] = false
+			logger := &refreshTestLogger{}
+			w.logger = logger
+			initial, _ := json.Marshal(grypeDBStatus{Built: grypeDBRevision, From: tc.archive})
+			if err := os.WriteFile(statusPath, initial, 0600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("IMPORT_FAIL", fmt.Sprint(tc.importFails))
+			t.Setenv("STAYS_INVALID", fmt.Sprint(tc.staysInvalid))
+			marker := filepath.Join(t.TempDir(), "imported")
+			t.Setenv("IMPORT_MARKER", marker)
+			script := `#!/bin/sh
+if [ "$2" = status ]; then cat "$GRYPE_TEST_STATUS"; exit 1; fi
+if [ "$2" = update ]; then exit 0; fi
+if [ "$2" = import ]; then
+ touch "$IMPORT_MARKER"
+ if [ "$IMPORT_FAIL" = true ]; then exit 1; fi
+ if [ "$STAYS_INVALID" = true ]; then exit 0; fi
+ cp "$GRYPE_TEST_SOURCE" "$GRYPE_TEST_STATUS"
+fi
+`
+			// The status command exits nonzero only for invalid content.
+			script = strings.Replace(script, "cat \"$GRYPE_TEST_STATUS\"; exit 1", "cat \"$GRYPE_TEST_STATUS\"; if grep -q '\"valid\":true' \"$GRYPE_TEST_STATUS\"; then exit 0; else exit 1; fi", 1)
+			if err := os.WriteFile(filepath.Join(strings.Split(os.Getenv("PATH"), string(os.PathListSeparator))[0], "grype"), []byte(script), 0700); err != nil {
+				t.Fatal(err)
+			}
+			w.refreshVulnDBs(context.Background(), false)
+			if (w.engineDBDownloads["grype"] != "") != tc.wantSuccess || logger.success != tc.wantSuccess {
+				t.Fatalf("download=%q success log=%v", w.engineDBDownloads["grype"], logger.success)
+			}
+			if !tc.wantSuccess {
+				after, _ := os.ReadFile(statusPath)
+				if string(after) != string(initial) {
+					t.Fatal("failed recovery removed or changed original DB status")
+				}
+			}
+			if _, err := grypeRecoveryArchive(tc.archive); err != nil {
+				if _, err := os.Stat(marker); !os.IsNotExist(err) {
+					t.Fatal("unsafe archive imported")
+				}
+			}
+		})
+	}
+}
+
+type refreshTestLogger struct{ success bool }
+
+func (l *refreshTestLogger) Info(msg string, _ ...any) {
+	if msg == "vuln DB refreshed" {
+		l.success = true
+	}
+}
+func (*refreshTestLogger) Warn(string, ...any)  {}
+func (*refreshTestLogger) Error(string, ...any) {}
+
+func TestGrypeRecoveryArchiveRejectsMalformedChecksums(t *testing.T) {
+	for _, raw := range []string{"file:///tmp/db", "https://user:password@example.com/db?checksum=sha256:" + strings.Repeat("a", 64), "https://example.com/db?checksum=sha256:abc", "https://example.com/db?checksum=sha256:" + strings.Repeat("z", 64), "https://example.com/db?checksum=sha256:" + strings.Repeat("a", 64) + "&checksum=sha256:" + strings.Repeat("b", 64)} {
+		if _, err := grypeRecoveryArchive(raw); err == nil {
+			t.Fatal("accepted invalid archive URL")
+		}
+	}
+}
+
+func TestEngineDBRefreshDisabledDoesNotExecute(t *testing.T) {
+	w, cache, status := engineDBTestWorker(t)
+	w.engines = map[string]bool{}
+	w.refreshVulnDBs(context.Background(), false)
+	for _, p := range []string{filepath.Join(cache, "db", "metadata.json"), status} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Fatal("disabled engine executed")
+		}
+	}
+}
+
+// Opt-in real-tool acceptance: point GRYPE_RECOVERY_TEST_CACHE at an isolated
+// cache with invalid import metadata and a checksum-protected source URL.
+func TestGrypeRecoveryRealDatabase(t *testing.T) {
+	cache := os.Getenv("GRYPE_RECOVERY_TEST_CACHE")
+	if cache == "" {
+		t.Skip("set GRYPE_RECOVERY_TEST_CACHE to an isolated corrupt cache")
+	}
+	realBinary, err := exec.LookPath("grype")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GRYPE_REAL_BINARY", realBinary)
+	t.Setenv("GRYPE_DB_CACHE_DIR", cache)
+	// Reproduce the observed updater no-op while using the real engine for both
+	// checksum validation and archive import. This does not alter the live cache.
+	bin := t.TempDir()
+	script := `#!/bin/sh
+if [ "$1" = db ] && [ "$2" = update ]; then exit 0; fi
+exec "$GRYPE_REAL_BINARY" "$@"
+`
+	if err := os.WriteFile(filepath.Join(bin, "grype"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	w := &worker{engines: map[string]bool{"grype": true}, logger: nopLogger{}}
+	before, err := readGrypeDBStatus(context.Background())
+	if err != nil || before.Valid {
+		t.Fatalf("fixture must be corrupt: valid=%v err=%v", before.Valid, err)
+	}
+	w.refreshVulnDBs(context.Background(), false)
+	after := w.engineDBSnapshot(context.Background())["grype"]
+	if after.Status != "ready" || after.DownloadRevision == "" || after.DownloadRevision != after.AppliedRevision {
+		t.Fatalf("recovery failed: %+v", after)
+	}
+	t.Logf("real Grype recovered and verified database revision %s", after.AppliedRevision)
+}
+
+func TestGrypeStatusAllowsSlowChecksumAndCancellation(t *testing.T) {
+	w, _, _ := engineDBTestWorker(t)
+	bin := strings.Split(os.Getenv("PATH"), string(os.PathListSeparator))[0]
+	script := "#!/bin/sh\nsleep 6\ncat \"$GRYPE_TEST_SOURCE\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "grype"), []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, status := w.installedDBRevision(context.Background(), "grype"); status != "ready" {
+		t.Fatalf("slow checksum status=%s", status)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := readGrypeDBStatus(ctx); err == nil {
+		t.Fatal("ignored cancellation")
+	}
+}
+
+func TestEngineDBRefreshZeroExitInvalidMetadataIsFailure(t *testing.T) {
+	w, _, _ := engineDBTestWorker(t)
+	w.engines["grype"] = false
+	logger := &refreshTestLogger{}
+	w.logger = logger
+	if err := os.WriteFile(os.Getenv("TRIVY_TEST_SOURCE"), []byte(`{"UpdatedAt":"invalid"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	w.refreshVulnDBs(context.Background(), false)
+	if logger.success || w.engineDBDownloads["trivy"] != "" {
+		t.Fatal("zero exit with invalid metadata claimed refresh success")
+	}
 }

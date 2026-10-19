@@ -297,6 +297,7 @@ type worker struct {
 	engines               map[string]bool
 	cacheDirs             map[string]string
 	engineDBMu            sync.Mutex
+	dbRefreshMu           sync.Mutex
 	engineDBDownloads     map[string]string
 	lastErrMu             sync.Mutex
 	lastErr               string

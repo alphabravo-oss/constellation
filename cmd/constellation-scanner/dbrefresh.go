@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -95,30 +98,91 @@ func (w *worker) installedDBRevision(ctx context.Context, engine string) (string
 		}
 		return normalizedDBRevision(metadata.UpdatedAt)
 	case "grype":
-		commandCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		command := exec.CommandContext(commandCtx, "grype", "db", "status", "-o", "json", "-q")
-		command.Env = append(os.Environ(), "GRYPE_DB_AUTO_UPDATE=false")
-		var output limitedDBStatusOutput
-		command.Stdout = &output
-		command.Stderr = io.Discard
-		err := command.Run()
-		if err != nil && len(output.data) == 0 {
+		status, err := readGrypeDBStatus(ctx)
+		if err != nil {
 			return "", "unavailable"
 		}
-		var status struct {
-			Built string `json:"built"`
-			Valid bool   `json:"valid"`
-		}
-		if output.overflow || json.Unmarshal(output.data, &status) != nil {
-			return "", "invalid"
-		}
-		if !status.Valid || err != nil {
+		if !status.Valid {
 			return "", "invalid"
 		}
 		return normalizedDBRevision(status.Built)
 	}
 	return "", "unavailable"
+}
+
+// Validating a multi-GB database can exceed five seconds even with a warm cache.
+// Keep a bounded deadline, but allow checksum validation to finish on worker CPUs.
+const grypeDBStatusTimeout = time.Minute
+
+type grypeDBStatus struct {
+	Built string `json:"built"`
+	Valid bool   `json:"valid"`
+	From  string `json:"from"`
+}
+
+func readGrypeDBStatus(ctx context.Context) (grypeDBStatus, error) {
+	ctx, cancel := context.WithTimeout(ctx, grypeDBStatusTimeout)
+	defer cancel()
+	command := exec.CommandContext(ctx, "grype", "db", "status", "-o", "json", "-q")
+	command.Env = append(os.Environ(), "GRYPE_DB_AUTO_UPDATE=false")
+	var output limitedDBStatusOutput
+	command.Stdout = &output
+	command.Stderr = io.Discard
+	err := command.Run()
+	var status grypeDBStatus
+	if ctx.Err() != nil {
+		return status, ctx.Err()
+	}
+	if err != nil && len(output.data) == 0 {
+		return status, err
+	}
+	if output.overflow || json.Unmarshal(output.data, &status) != nil {
+		return grypeDBStatus{}, nil
+	}
+	// Grype returns a nonzero exit for an invalid DB, but its structured output
+	// still carries the recorded archive needed for non-destructive recovery.
+	if err != nil {
+		status.Valid = false
+	}
+	return status, nil
+}
+
+func grypeRecoveryArchive(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.Fragment != "" {
+		return "", fmt.Errorf("recovery requires an HTTPS archive URL")
+	}
+	checksums := u.Query()["checksum"]
+	if len(checksums) != 1 || !strings.HasPrefix(checksums[0], "sha256:") {
+		return "", fmt.Errorf("recovery requires one SHA256 archive checksum")
+	}
+	digest, err := hex.DecodeString(strings.TrimPrefix(checksums[0], "sha256:"))
+	if err != nil || len(digest) != 32 {
+		return "", fmt.Errorf("invalid archive checksum")
+	}
+	return u.String(), nil
+}
+
+func (w *worker) recoverGrypeDB(ctx context.Context) error {
+	status, err := readGrypeDBStatus(ctx)
+	if err != nil {
+		return err
+	}
+	if status.Valid {
+		return fmt.Errorf("database does not need corruption recovery")
+	}
+	archive, err := grypeRecoveryArchive(status.From)
+	if err != nil {
+		return err
+	}
+	// Import stages and validates the replacement. Never delete the active DB:
+	// download failure must leave its evidence available for diagnosis/retry.
+	command := exec.CommandContext(ctx, "grype", "db", "import", archive, "-q")
+	command.Env = os.Environ()
+	if err := command.Run(); err != nil {
+		return fmt.Errorf("Grype database recovery import failed")
+	}
+	return nil
 }
 
 func normalizedDBRevision(value string) (string, string) {
@@ -166,34 +230,49 @@ func (w *worker) refreshVulnDBs(ctx context.Context, offline bool) {
 	if offline {
 		return
 	}
+	w.dbRefreshMu.Lock()
+	defer w.dbRefreshMu.Unlock()
 	run := func(name string, args ...string) {
+		if w.engines != nil && !w.engines[name] {
+			return
+		}
 		if _, err := exec.LookPath(name); err != nil {
+			w.logger.Warn("vuln DB refresh failed", "engine", name, "reason", "executable unavailable")
 			return
 		}
-		c := exec.CommandContext(ctx, name, args...)
+		refreshCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+		defer cancel()
+		c := exec.CommandContext(refreshCtx, name, args...)
 		c.Env = os.Environ()
-		if err := c.Run(); err != nil {
-			w.logger.Warn("vuln DB refresh failed", "engine", name, "err", err.Error())
+		updateErr := c.Run()
+		revision, status := w.installedDBRevision(refreshCtx, name)
+		recovered := false
+		if name == "grype" && status == "invalid" && refreshCtx.Err() == nil {
+			w.logger.Warn("invalid Grype database; attempting verified archive recovery")
+			if err := w.recoverGrypeDB(refreshCtx); err != nil {
+				w.logger.Warn("vuln DB recovery failed", "engine", name, "err", err.Error())
+				return
+			}
+			revision, status = w.installedDBRevision(refreshCtx, name)
+			recovered = true
+		}
+		if status != "ready" || (updateErr != nil && !recovered) {
+			w.logger.Warn("vuln DB refresh failed", "engine", name, "status", status, "update_failed", updateErr != nil)
 			return
 		}
-		revision, status := w.installedDBRevision(ctx, name)
-		if status == "ready" {
-			w.engineDBMu.Lock()
-			if w.engineDBDownloads == nil {
-				w.engineDBDownloads = make(map[string]string, 2)
-			}
-			w.engineDBDownloads[name] = revision
-			w.engineDBMu.Unlock()
+		w.engineDBMu.Lock()
+		if w.engineDBDownloads == nil {
+			w.engineDBDownloads = make(map[string]string, 2)
 		}
-		w.logger.Info("vuln DB refreshed", "engine", name)
+		w.engineDBDownloads[name] = revision
+		w.engineDBMu.Unlock()
+		w.logger.Info("vuln DB refreshed", "engine", name, "revision", revision, "recovered", recovered)
 	}
 	run("trivy", "image", "--download-db-only", "--quiet")
 	run("grype", "db", "update", "-q")
-	// Grype's updater downloads each DB into a `grype-db-download<rand>` staging dir
-	// under the cache and, on some paths, leaves it behind after importing into the
-	// versioned dir (`6/`). Across many refreshes these pile up — ~50 dirs / 10GB was
-	// observed. Sweep them after every update; the active versioned DB is untouched.
-	w.pruneGrypeStaging()
+	if w.engines == nil || w.engines["grype"] {
+		w.pruneGrypeStaging()
+	}
 }
 
 // pruneGrypeStaging removes grype's abandoned download-staging dirs from the grype
