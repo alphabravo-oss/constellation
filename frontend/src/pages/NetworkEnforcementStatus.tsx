@@ -4,7 +4,7 @@ export function NetworkEnforcementStatus({ action }: { action: Pick<EnforcementA
   if (action.last_status === "error") {
     const protectedTarget = action.state === "active" && action.last_error?.startsWith("network policy refused: protected namespace ");
     const summary = action.state === "lifting" ? "Removal failed; policy may still be enforced"
-      : protectedTarget ? "Protected workload; policy not applied" : "Policy application failed";
+      : protectedTarget ? "Protected workload; policy application refused" : "Policy application failed";
     return <span role="status" className="text-[color:var(--color-severity-critical)]">{summary}{action.last_error ? `: ${action.last_error}` : ". No error details were reported."}</span>;
   }
   if (action.state === "lifting") return <span>Removal pending confirmation</span>;
