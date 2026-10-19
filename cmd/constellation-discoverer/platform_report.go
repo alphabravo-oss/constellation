@@ -18,6 +18,8 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/pager"
 )
 
 const defaultRuntimeTokenFile = "/var/run/constellation/runtime-agent-token/token"
@@ -56,7 +58,12 @@ func (r *reconciler) reportPlatformFacts(ctx context.Context) error {
 		return fmt.Errorf("server version: %w", err)
 	}
 
-	nodeCount, kubeletVersions, provider := r.nodePlatformFacts(ctx)
+	ctx, cancelCollection := context.WithTimeout(ctx, 20*time.Second)
+	defer cancelCollection()
+	nodeCount, kubeletVersions, provider, err := r.nodePlatformFacts(ctx)
+	if err != nil {
+		return err
+	}
 	components := []platformReportComponent{{
 		Name:      "kubernetes",
 		Version:   serverVersion.GitVersion,
@@ -74,7 +81,11 @@ func (r *reconciler) reportPlatformFacts(ctx context.Context) error {
 			Namespace: "k3s",
 		})
 	}
-	components = append(components, r.knownPlatformComponents(ctx)...)
+	known, err := r.knownPlatformComponents(ctx)
+	if err != nil {
+		return err
+	}
+	components = append(components, known...)
 
 	body := platformFactsReportBody{
 		ClusterID:            r.clusterID.String(),
@@ -115,27 +126,31 @@ func (r *reconciler) reportPlatformFacts(ctx context.Context) error {
 	return nil
 }
 
-func (r *reconciler) nodePlatformFacts(ctx context.Context) (int, map[string]int, string) {
-	nodes, err := r.cs.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
-	if err != nil {
-		r.log.Warn("platform nodes", slog.String("err", err.Error()))
-		return 0, map[string]int{}, ""
-	}
+func (r *reconciler) nodePlatformFacts(ctx context.Context) (int, map[string]int, string, error) {
 	kubeletVersions := map[string]int{}
 	providers := map[string]int{}
-	for i := range nodes.Items {
-		node := &nodes.Items[i]
+	count := 0
+	pages := pager.New(func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
+		return r.cs.CoreV1().Nodes().List(ctx, options)
+	})
+	err := pages.EachListItem(ctx, metav1.ListOptions{}, func(obj runtime.Object) error {
+		node := obj.(*corev1.Node)
+		count++
 		if version := strings.TrimSpace(node.Status.NodeInfo.KubeletVersion); version != "" {
 			kubeletVersions[version]++
 		}
 		if provider := providerFromNode(*node); provider != "" {
 			providers[provider]++
 		}
+		return nil
+	})
+	if err != nil {
+		return 0, nil, "", fmt.Errorf("platform nodes: %w", err)
 	}
-	return len(nodes.Items), kubeletVersions, dominantProvider(providers)
+	return count, kubeletVersions, dominantProvider(providers), nil
 }
 
-func (r *reconciler) knownPlatformComponents(ctx context.Context) []platformReportComponent {
+func (r *reconciler) knownPlatformComponents(ctx context.Context) ([]platformReportComponent, error) {
 	seen := map[string]bool{}
 	out := []platformReportComponent{}
 	add := func(component platformReportComponent) {
@@ -156,25 +171,30 @@ func (r *reconciler) knownPlatformComponents(ctx context.Context) []platformRepo
 		out = append(out, component)
 	}
 
-	if deployments, err := r.cs.AppsV1().Deployments("").List(ctx, metav1.ListOptions{}); err == nil {
-		for i := range deployments.Items {
-			for _, component := range componentsFromPodSpec(deployments.Items[i].Namespace, deployments.Items[i].Name, deployments.Items[i].Spec.Template.Spec, "deployment") {
-				add(component)
-			}
+	deployments := pager.New(func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
+		return r.cs.AppsV1().Deployments("").List(ctx, options)
+	})
+	if err := deployments.EachListItem(ctx, metav1.ListOptions{}, func(obj runtime.Object) error {
+		deployment := obj.(*appsv1.Deployment)
+		for _, component := range componentsFromPodSpec(deployment.Namespace, deployment.Name, deployment.Spec.Template.Spec, "deployment") {
+			add(component)
 		}
-	} else {
-		r.log.Warn("platform deployments", slog.String("err", err.Error()))
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("platform deployments: %w", err)
 	}
-	if daemonSets, err := r.cs.AppsV1().DaemonSets("").List(ctx, metav1.ListOptions{}); err == nil {
-		for i := range daemonSets.Items {
-			for _, component := range componentsFromDaemonSet(daemonSets.Items[i]) {
-				add(component)
-			}
+	daemonSets := pager.New(func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
+		return r.cs.AppsV1().DaemonSets("").List(ctx, options)
+	})
+	if err := daemonSets.EachListItem(ctx, metav1.ListOptions{}, func(obj runtime.Object) error {
+		for _, component := range componentsFromDaemonSet(*obj.(*appsv1.DaemonSet)) {
+			add(component)
 		}
-	} else {
-		r.log.Warn("platform daemonsets", slog.String("err", err.Error()))
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("platform daemonsets: %w", err)
 	}
-	return out
+	return out, nil
 }
 
 func componentsFromDaemonSet(ds appsv1.DaemonSet) []platformReportComponent {

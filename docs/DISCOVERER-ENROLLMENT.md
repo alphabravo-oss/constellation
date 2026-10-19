@@ -46,3 +46,13 @@ when supporting a new mirror. Tags provide reported version evidence; untagged,
 `latest`, and digest-only references do not supply a guessed version. Repository
 recognition is not image signature verification. Correcting current platform facts
 does not delete historical findings or assert that a vulnerability was remediated.
+
+## Complete platform snapshots
+
+Platform reporting reads every page of Nodes, Deployments, and DaemonSets before
+sending a report. A failed page, expired continuation, or collection timeout aborts
+that report; it does not overwrite the last complete facts or scan evidence with
+an empty or partial inventory. Collection has a shared 20-second deadline. The
+next reconciliation retries, and the existing observed timestamp remains unchanged
+until a complete report succeeds. This is a complete read of each resource list,
+not an atomic snapshot across Kubernetes resource types.
