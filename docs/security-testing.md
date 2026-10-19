@@ -2726,3 +2726,42 @@ Read-only image triage is recorded in the canonical plan. Historical pods and
 image findings must be separated from exact running digests before stating current
 critical/high totals. Image hardening adds one open acceptance row (66 checked /
 88 open). Existing lint/gosec/history debt remains unwaived.
+
+
+### Minimal API runtime qualification and Helm 89 (2026-10-19)
+
+Source 670f3b9 replaces the API's general Debian runtime with a signature-verified
+Distroless static-debian13 base pinned at
+`sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3`.
+CA roots, UID/GID 10001, account/home, API/CLI and timezone compatibility remain.
+Both actual binaries embed timetzdata and have no ELF interpreter. The runtime
+probe runs without network, with read-only root/all capabilities dropped; it is
+now included in the existing browser CI workflow. Shellcheck passes.
+
+Trivy 0.69.3 uses one DB updated 2026-10-19T00:45:30Z for both images: previous
+API 4 critical, 63 high, 103 medium, 87 low, 2 unknown; release API 0 critical,
+1 high, 2 medium, 0 low, 1 unknown. All 255 OS-package findings disappear; remaining
+Go-package findings are unchanged. OS package inventory changes 91 → 6; Go module
+inventories remain API 139 / CLI 56. Before/after CycloneDX SBOMs and raw reports
+are retained. These package findings do not prove exploitability or all-image
+security. Docker-reported size changes 1.98 GB → 136 MB.
+
+Both candidate and release start against fresh, isolated schema-180 PostgreSQL
+and pass schema-check, health/readiness 200 and protected anonymous 401 checks.
+The release's API-only upgrade completes as Helm 89, reusing the same-day completed
+Helm 88 backup and retaining the prior image for rollback. No schema, worker or
+enforcement configuration changes. All seven Deployments, runtime DaemonSet and
+intended StatefulSet replicas are ready. Live health/readiness and anonymous
+rejection pass. Running config digest 45cf86b1c8c9f58b8ce6669124eb5810c8163c3ecc19b7c860d432ae698de2e6
+matches the amd64 manifest reached from the built OCI index
+678bd8174dc95f0282b73d13c796ac997ce171a1cfc5239f460fe8ad29fe054a.
+An initial direct index-vs-config comparison failed because these identify different
+OCI objects; the corrected graph verification passes. Full hosted CI and authenticated
+main-browser acceptance remain pending/unverified respectively.
+
+Evidence root: `/root/constellation-image-hardening-20261019/`, with hashed
+`evidence-manifest.json`. The first DB download failed when the separate /tmp
+filesystem filled; the task's artifacts were moved to /root with symlinks retaining
+old paths, and a separate disk-backed download completed. Failed partial data/logs
+remain. This operation did not remove prior evidence or alter production scanner
+cache files. The original Helm 88 evidence now resolves through its /tmp symlink.

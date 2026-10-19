@@ -1,8 +1,8 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-19** (Helm 88 application rollout and schedule conflict
-qualification; container-image vulnerability reduction added to the backlog)
+Last reconciled: **2026-10-19** (Helm 89 minimal API runtime deployed; measured image vulnerability
+reduction, dependency and broader parity work remain active)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -19,6 +19,43 @@ first-class.
 
 
 ## Current deployment and next hardening work (2026-10-19)
+
+Latest deployment: **Helm 89 / schema 180**, API source **670f3b9**, frontend
+ace2a49, scanner/runtime ef0ca39 and migration 5b82b12. The API now uses a
+signature-verified, digest-pinned Distroless static runtime with the existing
+UID/GID/home and both API/CLI binaries. Embedded timezone data preserves legacy
+aliases. The shell, package manager and unused native libraries are absent.
+All seven Deployments and the runtime DaemonSet are ready; live API health and
+readiness return 200 and protected anonymous requests return 401. The exact OCI
+index → amd64 manifest → running configuration digest chain verifies.
+
+With Trivy 0.69.3 and the same database updated 2026-10-19T00:45:30Z, the previous
+API image has 4 critical / 63 high / 103 medium / 87 low / 2 unknown package
+findings. The new image has 0 critical / 1 high / 2 medium / 0 low / 1 unknown.
+OS package records fall from 91 to 6, with no OS findings in the candidate scan;
+Go dependency detection remains 139 API / 56 CLI records. Docker reports image
+size falling from 1.98 GB to 136 MB, also removing historical binary layers.
+This is exact-image evidence, not a claim about all deployed containers, all
+scanners, or reachable exploits. Before/after SBOMs and scan reports are retained.
+
+Runtime compatibility checks cover UID/GID/account/home, CA roots, modern and
+legacy zones, embedded timezone tags in both actual binaries, static ELF linkage,
+temporary storage and CLI/API startup. A fresh isolated schema-180 database
+confirms schema-init, startup and health/access-control checks with read-only root
+and all capabilities dropped. The probe is added to browser CI. Full hosted CI
+is pending. The API-only Helm upgrade reuses the completed same-day backup from
+Helm 88 and changes no schema or enforcement setting. Image rollback is retained.
+
+Remaining API package findings identify gRPC v1.83.1, go-ntlmssp v0.1.0,
+cel-go v0.28.0 and an x/crypto/openpgp advisory. Fix versions and reachable use
+require verification; notably the Go vulnerability database specifies cel-go
+v0.30.0 despite the scanner's older v0.29.0 suggestion. Scanner/native/supporting
+images, refreshed digest automation and release vulnerability gates remain open.
+Evidence: `/root/constellation-image-hardening-20261019/evidence-manifest.json`.
+No parent acceptance row closes: **66 checked / 88 open**.
+
+The preceding Helm 88 checkpoint follows.
+
 
 Main development runs **Helm 88 / schema 180**, API and frontend source
 **ace2a49**, after completed CNPG backup `20261019T024500`. Scanner and runtime
