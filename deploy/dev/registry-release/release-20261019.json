@@ -83,20 +83,20 @@
       "tag": "dev-9fc2f286b56ea7e028da288938c71c3fc11e7a796729116292e271eff61661a2"
     },
     {
-      "name": "api",
-      "role": "api",
-      "source": "constellation/api:platform-scan-status-20261019-8e47288",
-      "digest": "sha256:9f033dca758cc613d92aef67705e6da95419fe75555d96bd682dd9759a99526d",
-      "repository": "ghcr.io/alphabravo-oss/constellation/api",
-      "tag": "dev-9f033dca758cc613d92aef67705e6da95419fe75555d96bd682dd9759a99526d"
-    },
-    {
       "name": "migrate",
       "role": "migrate",
       "source": "constellation/migrate:platform-scan-status-20261019-8e47288",
       "digest": "sha256:6abc8c6581f88021124d263b17dd80219a906a8523e4ceb744cd4655192fd1d8",
       "repository": "ghcr.io/alphabravo-oss/constellation/migrate",
       "tag": "dev-6abc8c6581f88021124d263b17dd80219a906a8523e4ceb744cd4655192fd1d8"
+    },
+    {
+      "name": "api",
+      "role": "api",
+      "source": "constellation/api:scan-completion-20261019-442d9ba",
+      "digest": "sha256:e77c7c4d9b42d1d66a4a78bfcf1017df5cdd071aece6b937dabd83423227142b",
+      "repository": "ghcr.io/alphabravo-oss/constellation/api",
+      "tag": "dev-e77c7c4d9b42d1d66a4a78bfcf1017df5cdd071aece6b937dabd83423227142b"
     }
   ],
   "helm_values": {
@@ -174,7 +174,7 @@
     "api": {
       "image": {
         "repository": "ghcr.io/alphabravo-oss/constellation/api",
-        "digest": "sha256:9f033dca758cc613d92aef67705e6da95419fe75555d96bd682dd9759a99526d"
+        "digest": "sha256:e77c7c4d9b42d1d66a4a78bfcf1017df5cdd071aece6b937dabd83423227142b"
       }
     },
     "discoverer": {
