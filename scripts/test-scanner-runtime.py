@@ -29,7 +29,10 @@ with tempfile.TemporaryDirectory(prefix="scanner-runtime-") as temporary:
     directory.chmod(0o755)
     common = ["docker", "run", "--rm", "--network", "host", "--read-only", "--cap-drop", "ALL",
               "--security-opt", "no-new-privileges", "--tmpfs", "/tmp:rw,noexec,nosuid,size=512m",
-              "--tmpfs", "/home/constellation:rw,uid=10001,gid=10001,size=64m"]
+              "--tmpfs", "/var/lib/scanner-cache:rw,uid=10001,gid=10001,size=64m",
+              "-e", "XDG_CACHE_HOME=/var/lib/scanner-cache/.cache",
+              "-e", "SYFT_CACHE_DIR=/var/lib/scanner-cache/syft",
+              "-e", "TUF_ROOT=/var/lib/scanner-cache/sigstore/root"]
     if args.docker_config:
         common += bind(args.docker_config, "/docker-auth") + ["-e", "DOCKER_CONFIG=/docker-auth"]
     for package, test, extra in [

@@ -132,6 +132,9 @@ spec:
             # loop keeps them current on its own schedule, decoupled from the image.
             - name: XDG_CACHE_HOME
               value: /var/lib/scanner-cache/.cache
+            # Cosign must refresh trusted metadata without writing to read-only HOME.
+            - name: TUF_ROOT
+              value: /var/lib/scanner-cache/sigstore/root
             - name: SYFT_CACHE_DIR
               value: /var/lib/scanner-cache/syft
             - name: GRYPE_DB_CACHE_DIR
