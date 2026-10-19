@@ -38,6 +38,15 @@ packages retain their existing private visibility. Verify a private image pull
 with Kubernetes before rolling database workloads.
 
 Before infrastructure rollout, complete a CNPG plugin backup and verify its status.
+Complete real scans of the exact controller and sidecar digests before changing
+the database: connector connectivity alone does not establish tag discovery or
+scan freshness. A stale-scan denial must be resolved through fresh scan evidence.
+For coordinated operand changes, temporarily set the Cluster annotation
+`cnpg.io/reconcilePodSpec=disabled`, apply the matching Cluster and controller
+configuration, verify both controller rollouts, then remove that annotation.
+This limits pod-spec changes to one planned database restart. Do not leave the
+restart hold set after the rollout. Keep normal reconciliation and admission
+validation enabled. Single-instance development databases incur downtime.
 The development application release uses external database mode: its CNPG Cluster
 is managed separately. Apply `constellation-cnpg-postgres-patch.json` with
 `kubectl patch cluster constellation-cnpg-postgres --type=merge --patch-file ...`
@@ -61,3 +70,10 @@ Fresh OCI downloads of all twelve images (including every index member) passed
 SHA-256 verification on 2026-10-19. Kubernetes also pulled and successfully ran
 the private CNPG image with `imagePullPolicy: Always`. The fresh downloads used
 separate OCI directories; the Kubernetes test did not erase the node layer cache.
+
+The temporary restart hold is documented in [CNPG labels and annotations](https://cloudnative-pg.io/docs/1.25/labels_annotations/).
+It is an operational coordination measure, not a permanent configuration.
+Do not disable CNPG validation or Constellation admission enforcement to complete
+this rollout. If stale evidence blocks retirement of an old ReplicaSet, record
+that defect; scaling down only the retired replica set through the scale API
+preserves the existing admission checks on replacement pods.

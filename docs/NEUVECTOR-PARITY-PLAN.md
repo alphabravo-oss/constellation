@@ -1,7 +1,7 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-19** (Helm 95 application registry rollout verified; infrastructure migration in progress; broader parity remains active)
+Last reconciled: **2026-10-19** (Helm 98 registry migration, private scans, backup and final managed restart verified; broader parity remains active)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -16,6 +16,61 @@ understand the result, and prove that the control is enforced. Constellation's
 stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
 
+
+## Private registry scanning and infrastructure recovery (Helm 98)
+
+Latest application deployment: **Helm 98 / schema 181**, API source **3b39b75**,
+digest `sha256:9a1a2e04a18b872aefb88804422fbdef8f58a1645d7cff0455543127f4792517`.
+GHCR now exchanges GitHub credentials for repository-scoped registry tokens at
+the fixed GHCR issuer. It rejects credential redirects, propagates tag lookup
+failures and omits untagged packages instead of inventing `:latest`. Four bounded
+concurrent tag lookups keep the live 47-package connection test within its
+existing deadline. Registry package tests and race tests pass, including private
+tag/digest authentication, rejected redirects, failure propagation and concurrent
+tag association. The verified image is published and deployed; full CI is not
+claimed clean.
+
+Real queued private scans all completed with Syft, Grype and Trivy succeeded:
+
+| Image | Packages | Critical | High | Total findings |
+| --- | ---: | ---: | ---: | ---: |
+| CNPG operator | 192 | 0 | 0 | 0 |
+| Barman plugin | 136 | 0 | 6 | 56 |
+| Barman sidecar | 202 | 4 | 52 | 189 |
+
+These are scanner results, not assertions that every advisory is exploitable.
+The four sidecar critical occurrences report one Python CVE across four Debian
+packages. Supporting-image hardening and advisory verification remain open.
+Three erroneous `:latest` jobs from the former tag-discovery path were canceled;
+replacement jobs target the actual published digests. No finding was suppressed
+or scan timestamp fabricated to satisfy admission.
+
+Pre-rollout backup **20261019T043141** completed. This development database is an
+external, separately managed CNPG Cluster. CNPG requires a PostgreSQL version tag
+alongside the digest, so the release includes a verified `16.14-dev-...@sha256:...`
+alias. PostgreSQL and its init/sidecar now use registry references, and both CNPG
+and Barman controller Deployments are healthy on the reviewed registry digests.
+
+The rollout exposed two operational defects. Stale admission evidence blocked
+controller updates until the real scans completed, and it also rejected the
+controller's attempts to retire old ReplicaSets referencing local image tags.
+Scaling only those retired ReplicaSets to zero through Kubernetes' scale API
+completed the approved rollouts. Admission must be fixed to allow safe scale-down
+updates without accepting new images or scale-up on stale evidence.
+
+The single-instance database incurred roughly eight minutes of recovery interruption
+plus three minutes for the final managed restart: a missing local init reference failed to pull,
+and manually corrected pod image references initially caused CNPG drift restarts.
+A temporary `cnpg.io/reconcilePodSpec=disabled` hold stabilized the database while
+fresh scans and matching controller configuration were installed. Normal
+reconciliation and admission validation stayed enabled. Backup `constellation-post-registry-20261019` completed as **20261019T045915**.
+The hold was removed, CNPG completed its final managed restart, and the new pod
+is healthy without a deletion timestamp. Fourteen running/completed-init image
+IDs match the release lock. All nine application/infrastructure Deployments and
+the runtime DaemonSet are healthy; schema remains 181. Authenticated live UI
+checks pass with reconciled counts and no page errors. Node Ready is true and
+DiskPressure false. The runbook now requires
+fresh scan evidence and coordinated image configuration before the database restart.
 
 ## Registry recovery rollout (Helm 95)
 
