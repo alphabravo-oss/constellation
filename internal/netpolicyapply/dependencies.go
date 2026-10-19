@@ -185,7 +185,7 @@ func dependencyReader(client dynamic.Interface) DependencyReader {
 							}
 						}
 						if !owned {
-							continue
+							return empty, fmt.Errorf("network policy protection: protected service EndpointSlice ownership unavailable for %s/%s", slice.Namespace, slice.Name)
 						}
 						for _, endpoint := range slice.Endpoints {
 							for _, ip := range endpoint.Addresses {

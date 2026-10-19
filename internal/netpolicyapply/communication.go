@@ -305,6 +305,9 @@ func guardCiliumDeny(spec map[string]any, key, cidrKey string, addresses []netip
 			if err != nil {
 				return errors.New("network policy refused: invalid deny CIDR")
 			}
+			if prefix.Addr().Is4In6() {
+				return errors.New("network policy refused: ambiguous IPv4-mapped deny CIDR")
+			}
 			for _, ip := range addresses {
 				if prefix.Contains(ip) {
 					return errors.New("network policy refused: deny overlaps a protected system endpoint")

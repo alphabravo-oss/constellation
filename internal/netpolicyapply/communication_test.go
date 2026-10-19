@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -140,7 +141,7 @@ func TestCiliumDenyProtectionAndDefaultSemantics(t *testing.T) {
 	for _, tc := range []struct {
 		cidr   string
 		denied bool
-	}{{"10.43.0.1/32", true}, {"192.0.2.0/24", true}, {"2001:db8::/64", true}, {"0.0.0.0/0", true}, {"198.51.100.4/32", false}} {
+	}{{"10.43.0.1/32", true}, {"192.0.2.0/24", true}, {"2001:db8::/64", true}, {"0.0.0.0/0", true}, {"::ffff:10.43.0.1/128", true}, {"198.51.100.4/32", false}} {
 		spec := map[string]any{"egressDeny": []any{map[string]any{"toCIDR": []any{tc.cidr}}}}
 		if err := guardCiliumDeny(spec, "egressDeny", "toCIDR", ips.Addresses); (err != nil) != tc.denied {
 			t.Fatalf("%s: %v", tc.cidr, err)
@@ -279,6 +280,51 @@ func TestServiceExceptionsNeverPermitUnrelatedNodePorts(t *testing.T) {
 						t.Fatal("unrestricted node/IP exception")
 					}
 				}
+			}
+		}
+	}
+}
+
+func TestUnownedServiceSliceCannotGrantAnException(t *testing.T) {
+	p, _ := NewProtection("own", nil)
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = discoveryv1.AddToScheme(scheme)
+	port := int32(9443)
+	protocol := corev1.ProtocolTCP
+	service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "protected", Namespace: "own", UID: "service-uid"}, Spec: corev1.ServiceSpec{ClusterIP: "10.43.1.1", Ports: []corev1.ServicePort{{Port: 443, Protocol: protocol}}}}
+	apiService := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "kubernetes", Namespace: "default"}, Spec: corev1.ServiceSpec{ClusterIP: "10.43.0.1", Ports: []corev1.ServicePort{{Port: 443, Protocol: protocol}}}}
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node"}, Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "192.0.2.10"}}}}
+	endpoints := &corev1.Endpoints{ObjectMeta: metav1.ObjectMeta{Name: "kubernetes", Namespace: "default"}, Subsets: []corev1.EndpointSubset{{Addresses: []corev1.EndpointAddress{{IP: "192.0.2.10"}}, Ports: []corev1.EndpointPort{{Port: 6443, Protocol: protocol}}}}}
+	for _, owned := range []bool{false, true} {
+		slice := &discoveryv1.EndpointSlice{ObjectMeta: metav1.ObjectMeta{Name: "selected", Namespace: "own", Labels: map[string]string{discoveryv1.LabelServiceName: "protected"}}, AddressType: discoveryv1.AddressTypeIPv4, Ports: []discoveryv1.EndpointPort{{Port: &port, Protocol: &protocol}}, Endpoints: []discoveryv1.Endpoint{{Addresses: []string{"203.0.113.10"}}}}
+		if owned {
+			slice.OwnerReferences = []metav1.OwnerReference{{APIVersion: "v1", Kind: "Service", Name: service.Name, UID: service.UID}}
+		}
+		spoofed := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "customer", Labels: map[string]string{"app.kubernetes.io/part-of": "constellation"}}, Status: corev1.PodStatus{PodIP: "203.0.113.99"}}
+		dyn := fake.NewSimpleDynamicClient(scheme, service.DeepCopy(), apiService.DeepCopy(), node.DeepCopy(), endpoints.DeepCopy(), slice, spoofed)
+		snapshot, err := dependencyReader(dyn)(context.Background(), p)
+		if !owned {
+			if err == nil {
+				t.Fatal("service-name label alone granted an exception")
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, peer := range snapshot.Services {
+			if peer.Address.String() == "203.0.113.10" && peer.Port == 9443 {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("owned service endpoint missing")
+		}
+		for _, ip := range snapshot.Addresses {
+			if ip.String() == "203.0.113.99" {
+				t.Fatal("presentation label granted protection")
 			}
 		}
 	}
