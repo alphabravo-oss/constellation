@@ -1,7 +1,7 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-19** (Helm 124 scanner tool hardening; broader parity remains active)
+Last reconciled: **2026-10-19** (Helm 125 release image reference correction; broader parity remains active)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -16,6 +16,23 @@ understand the result, and prove that the control is enforced. Constellation's
 stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
 
+
+## Release image reference correction (Helm 125)
+
+Chart source `a208f28` aligns default application image tags with the release
+workflow's `v` prefix. The CNPG default follows the chart version instead of
+remaining hard-coded to v0.2.0, retaining the required `16.14-` prefix and optional
+explicit tag@digest override. Application tag overrides do not redirect CNPG to
+an unpublished development tag.
+
+Rendered-chart tests cover all 12 published roles, simulated version bumps,
+private registry defaults, explicit tags and digest precedence. The original
+chart fails the release-reference contract; the corrected chart passes. All 20
+image references rendered from live values are unchanged. Helm 125 is deployed;
+the migration job succeeded, all 14 running/completed-init container identities
+and pod names remain unchanged, and controllers/CNPG are healthy. This does not
+prove that a tagged release has been published. Evidence:
+`deploy/dev/registry-release/validation-release-references-20261019.json`.
 
 ## Scanner tool hardening and release gates (Helm 124)
 
