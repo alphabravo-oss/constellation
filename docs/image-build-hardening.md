@@ -125,3 +125,25 @@ Earlier six-finding live results used a different database vintage and are not t
 before/after comparison. New advisories for X11/Xpm became visible after refreshing
 Grype. Exact image digests, database metadata, package versions and validation are
 recorded in the development release evidence.
+
+## Static Kubernetes service runtimes
+
+Discoverer, admission, and operator use the same digest-pinned Distroless static
+Debian 13 base as the API. Their Go builds disable CGO and embed timezone data,
+including legacy location aliases. The operator image also carries the network
+policy applier and Kubernetes compliance collector; all three executables must
+remain static. CA roots come from the base image. Account files and an empty
+home are copied from the build stage, without shipping a shell, package manager,
+or account-management utilities.
+
+All three images run as UID/GID 10001, matching the chart's security context.
+Discoverer's standalone image previously used Debian's dynamically assigned
+system-account UID; external bind mounts relying on that UID must be adjusted.
+These images support in-cluster service-account authentication. Custom kubeconfig
+exec authentication requires a separately supplied executable; the minimal images
+do not bundle cloud-provider login utilities.
+
+Validate every executable and the affected Kubernetes workflows before rollout.
+The native runtime-agent needs networking tools and libraries and is not covered
+by this static-runtime conversion. Removing OS packages does not remove findings
+in embedded Go modules; retain those findings and rebuild with reviewed fixes.
