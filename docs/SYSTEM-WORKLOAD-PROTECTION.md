@@ -52,8 +52,12 @@ removing the Kubernetes policy and recording the outcome. A removal request wait
 for an in-flight apply. Appliers recheck the row state after acquiring the lock;
 a stale active snapshot cannot recreate a policy already marked removed. Status
 updates also require the expected state. Operations have a 30-second context bound.
-This locking change covers direct `network_enforcement_actions`; policy lifecycle
-reconciliation is a separate path.
+Learned-policy reconciliation also locks its lifecycle row and rereads current
+mode, approval, manifests, and candidate identity before acting. A polling snapshot
+cannot override a newer demotion, rollback, candidate replacement, or pending state.
+Its report is written in the same transaction as that locked read. These locks
+serialize normal operations; network timeouts can still leave an uncertain remote
+result that the next reconciliation must resolve.
 
 Requesting removal clears the old apply outcome. The UI distinguishes pending
 application, protected-target refusal, application failure, pending removal, and

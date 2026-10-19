@@ -180,11 +180,12 @@ func runOnce(ctx context.Context, pool *pgxpool.Pool, client netpolicyapply.Reso
 		return err
 	}
 	for _, state := range states {
-		result := netpolicyapply.ReconcileState(ctx, client, state, cfg.flavor)
-		if err := recordStatus(ctx, pool, state, cfg.flavor, result); err != nil {
-			logger.Warn("record apply status failed",
+		result, err := reconcileLifecycleState(ctx, pool, client, state, cfg.flavor)
+		if err != nil {
+			logger.Warn("policy reconcile failed",
 				slog.String("workload", state.Workload),
 				slog.String("err", err.Error()))
+			continue
 		}
 		attrs := []any{
 			slog.String("workload", state.Workload),
@@ -350,7 +351,44 @@ SELECT org_id::text, cluster_id::text, workload, namespace, current_mode, approv
 	return states, rows.Err()
 }
 
-func recordStatus(ctx context.Context, pool *pgxpool.Pool, state netpolicyapply.LifecycleState, flavor netpolicyapply.Flavor, result netpolicyapply.Result) error {
+// Re-read intent under its row lock rather than executing the polling snapshot.
+// Demotion, rollback, candidate replacement and concurrent appliers serialize with
+// the Kubernetes operation and its status write.
+func reconcileLifecycleState(ctx context.Context, pool *pgxpool.Pool, client netpolicyapply.ResourceClient, key netpolicyapply.LifecycleState, flavor netpolicyapply.Flavor) (netpolicyapply.Result, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	skipped := netpolicyapply.Result{Action: netpolicyapply.ActionSkip, Status: netpolicyapply.StatusSkipped}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return skipped, err
+	}
+	defer tx.Rollback(ctx)
+	var state netpolicyapply.LifecycleState
+	var raw []byte
+	err = tx.QueryRow(ctx, `SELECT org_id::text,cluster_id::text,workload,namespace,current_mode,approval_status,
+ COALESCE(candidate_hash,''),COALESCE(applied_ref,''),COALESCE(rollback_ref,''),preview_manifests
+ FROM network_policy_lifecycle_states WHERE org_id=$1 AND cluster_id=$2 AND workload=$3 FOR UPDATE`, key.OrgID, key.ClusterID, key.Workload).Scan(
+		&state.OrgID, &state.ClusterID, &state.Workload, &state.Namespace, &state.CurrentMode, &state.ApprovalStatus, &state.CandidateHash, &state.AppliedRef, &state.RollbackRef, &raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return skipped, nil
+	}
+	if err != nil {
+		return skipped, err
+	}
+	if netpolicyapply.DesiredAction(state) == netpolicyapply.ActionSkip {
+		return skipped, nil
+	}
+	if err := json.Unmarshal(raw, &state.Manifests); err != nil {
+		return skipped, fmt.Errorf("decode current policy manifests: %w", err)
+	}
+	result := netpolicyapply.ReconcileState(ctx, client, state, flavor)
+	if err := recordStatus(ctx, tx, state, flavor, result); err != nil {
+		return result, err
+	}
+	return result, tx.Commit(ctx)
+}
+
+func recordStatus(ctx context.Context, pool enforcementStatusWriter, state netpolicyapply.LifecycleState, flavor netpolicyapply.Flavor, result netpolicyapply.Result) error {
 	_, err := pool.Exec(ctx, `
 INSERT INTO network_policy_apply_status (
     org_id, cluster_id, workload, namespace, flavor, resource_ref, desired_mode, approval_status,
