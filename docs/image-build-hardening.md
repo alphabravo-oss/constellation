@@ -61,7 +61,9 @@ both image scans and inventory-based matching. The fixture must contain known
 vulnerabilities so an empty/broken result cannot pass. Use a disposable local
 registry containing an image signed and attested with a test key; provide a
 second public key for rejection checks. Cache paths must contain current DBs,
-with the Grype cache writable by UID 10001. No Docker socket is mounted.
+with the Grype cache writable by UID 10001. No Docker socket is mounted. `--docker-config` exercises a private registry using
+a caller-provided test credential directory. The home directory remains read-only;
+`TUF_ROOT` points into the same writable cache location used by the Helm chart.
 
 `BAKE_VULN_DB=1` now prepares optional air-gap databases in a build stage. A failed
 DB download fails that build instead of silently producing an unusable offline

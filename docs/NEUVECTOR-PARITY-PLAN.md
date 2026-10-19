@@ -1,7 +1,7 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-19** (Helm 90 API dependency fixes deployed; scanner and broader parity work remain active)
+Last reconciled: **2026-10-19** (Helm 91 scanner hardening and live cache repair verified; broader parity remains active)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -19,7 +19,57 @@ first-class.
 
 ## Current deployment and next hardening work (2026-10-19)
 
-Latest deployment: **Helm 90 / schema 180**, API source **0fcc16f**. Frontend
+Latest deployment: **Helm 91 / schema 180**, scanner image source **1d94b2d**,
+chart trust-cache fix **b26fd62**. API remains 0fcc16f, frontend ace2a49,
+runtime ef0ca39 and migration 5b82b12. The scanner now uses the same verified,
+digest-pinned static Distroless base as the API and updates Syft 1.54.1, Trivy
+0.76.0, Grype 0.120.1, Cosign 3.1.3 and ORAS 1.3.5. Both supported architecture
+checksums are pinned; this deployment and runtime acceptance cover amd64.
+
+With the same Trivy 0.69.3 database used for the baseline, scanner findings fall
+from **19 critical / 382 high / 439 medium / 183 low / 17 unknown** to
+**0 critical / 31 high / 45 medium / 3 low / 5 unknown**. OS package inventory
+falls 114 → 6 with no OS findings. All six executables remain detected. Remaining
+high findings reside in upstream Cosign, Grype and Syft binaries, including their
+Go standard libraries; rebuilding/updating these dependencies remains open.
+
+The restricted-container acceptance tests exercise actual tools against a private
+registry with known vulnerabilities, legacy Cosign signatures and attestations,
+and a keyless signature. Wrong keys/identities/predicates are rejected. Image and
+package matching pass for both engines. The full scanner CLI reports 201 packages,
+9 findings, a trusted signature and no engine errors. Acceptance exposed and fixed
+SLSA v1 being mapped to the older v0.2 alias, missing legacy in-toto v0.1 support,
+and single-envelope parsing. Cosign's TUF cache now uses the writable scanner
+volume with HOME kept read-only. Unit tests report 244 passes; the three opt-in
+integration checks skipped in that run were executed separately against real tools.
+Docker tool-stage build and Helm lint pass. Full hosted CI remains pending.
+
+The running scanner configuration digest matches its built OCI graph; seven
+Deployments and the runtime DaemonSet are ready, with scanner health/readiness
+200. The worker has completed live workload/image jobs after rollout. Initial
+live validation also found a bad checksum in the reused Grype cache. A checksum-
+verified reimport repaired it; Grype reports valid=true and the full live scanner
+command completed against registry.k8s.io/pause:3.10 (zero detected packages and
+findings). Live keyless verification passes with the read-only home. Automatic
+invalid-cache repair and truthful refresh-success logging remain open; a ready
+pod alone does not prove every engine database is healthy.
+
+Local-only development image tags are another open gap: registry-based jobs for
+node-imported API images fail remote resolution. Exact-image offline scans above
+do not prove automatic live rescanning for these tags. Resolve this through a
+registry-backed development release path or supported node-local image evidence;
+do not hide the failed jobs. Broader native/infrastructure hardening, arm64 and
+baked air-gap image acceptance, release gates and full parity remain open.
+
+Evidence: `/root/constellation-scanner-hardening-20261019/` contains exact-image
+scan/SBOM, before/after comparison, release runtime checks, CLI scan evidence,
+Docker/Helm logs and live digest validation. No parent acceptance row closes:
+**66 checked / 88 open**.
+
+## Previous API dependency checkpoint (Helm 90)
+
+
+Previous deployment: **Helm 90 / schema 180**, API source **0fcc16f**. Frontend
 ace2a49, scanner/runtime ef0ca39 and migration 5b82b12 remain deployed. Updates
 cover go-ntlmssp 0.1.1, cel-go 0.30.0, gRPC 1.83.2 and klauspost/compress 1.18.7.
 The exact API release image scans at **0 critical / 0 high / 0 medium / 0 low /
