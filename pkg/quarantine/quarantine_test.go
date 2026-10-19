@@ -3,6 +3,7 @@ package quarantine
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -284,5 +285,43 @@ func TestEntry_ActiveAcrossExpiry(t *testing.T) {
 	}
 	if (Entry{ExpiresAt: &past}.Active(t0)) {
 		t.Error("past-expiry entry must NOT be active")
+	}
+}
+
+func TestAutomaticScanImageRepositoryBoundaries(t *testing.T) {
+	digest := "sha256:" + strings.Repeat("a", 64)
+	for _, tc := range []struct {
+		key, image string
+		want       bool
+	}{
+		{"ghcr.io/acme/api", "ghcr.io/acme/api:1", true},
+		{"ghcr.io/acme/api", "ghcr.io/acme/api:2", true},
+		{"ghcr.io/acme/api", "ghcr.io/acme/api@" + digest, true},
+		{"ghcr.io/acme/api", "ghcr.io/acme/api-helper:1", false},
+		{"ghcr.io/acme/api", "ghcr.io/acme/api/worker:1", false},
+		{"ghcr.io/acme/api", "other.io/acme/api:1", false},
+		{"docker.io/library/nginx", "nginx:1.27", true},
+		{"nginx", "index.docker.io/library/nginx:1.27", true},
+		{"localhost:5000/team/api", "localhost:5000/team/api:1", true},
+		{"localhost:5000/team/api", "localhost:5001/team/api:1", false},
+		{"nginx:1", "nginx:10", false},
+		{"nginx:1", "docker.io/library/nginx:1", true},
+		{"nginx@" + digest, "docker.io/library/nginx@" + digest, true},
+		{"nginx@" + digest, "nginx@sha256:" + strings.Repeat("b", 64), false},
+		{"not a reference", "not a reference", false},
+	} {
+		t.Run(tc.key+"/"+tc.image, func(t *testing.T) {
+			cluster := uuid.New()
+			snapshot := BuildSnapshot(cluster, time.Now(), []Entry{{ClusterID: cluster, Scope: ScopeImage, MatchKey: tc.key, Origin: "auto", SourceKind: "scan"}})
+			hit := snapshot.Match(mkPod("payments", "api", "", "", tc.image))
+			if (hit != nil) != tc.want {
+				t.Fatalf("match=%v want=%v", hit, tc.want)
+			}
+		})
+	}
+	// A deliberate manual prefix keeps its established semantics.
+	e := Entry{MatchKey: "ghcr.io/acme/api", Origin: "manual", SourceKind: "scan"}
+	if !imageEntryMatches(e, "ghcr.io/acme/api-helper:1") {
+		t.Fatal("manual prefix semantics changed")
 	}
 }

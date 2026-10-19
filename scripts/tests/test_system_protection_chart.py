@@ -53,3 +53,10 @@ class SystemProtectionChartTests(unittest.TestCase):
         result=subprocess.run(['helm','template','protection',str(CHART),'--show-only','templates/api-deployment.yaml'],text=True,capture_output=True)
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertNotIn('CONSTELLATION_QUARANTINE_PROTECTED_NAMESPACES',result.stdout)
+
+    def test_default_webhook_covers_ephemeral_container_updates(self):
+        result=self.render({'protectedNamespaces':['cnpg-system']})
+        self.assertEqual(result.returncode,0,result.stderr)
+        webhook=next(d for d in yaml.safe_load_all(result.stdout) if d and d['kind']=='ValidatingWebhookConfiguration')['webhooks'][0]
+        self.assertTrue(any('pods/ephemeralcontainers' in rule['resources'] and 'UPDATE' in rule['operations'] and '' in rule['apiGroups'] for rule in webhook['rules']))
+        self.assertIn('cnpg-system',webhook['namespaceSelector']['matchExpressions'][0]['values'])

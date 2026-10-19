@@ -30,13 +30,15 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
 )
 
 // Scope is one of workload | image | namespace. The semantics live in the
 // migration's column comment; this package treats them as opaque strings
-// keyed on equal-prefix matching for image, equal-string for workload and
+// keyed on repository/reference matching for scan images, prefix matching for other
+// images, and equal-string matching for workload and
 // namespace.
 type Scope string
 
@@ -70,14 +72,14 @@ func (e Entry) Active(t time.Time) bool {
 
 // Snapshot is the immutable per-refresh view of all active entries for
 // one cluster. Lookups are O(1) for namespace and exact-workload, O(n)
-// over image-prefix entries (typically <100, so still microseconds).
+// over image entries (typically <100).
 type Snapshot struct {
 	clusterID uuid.UUID
 	at        time.Time
 	// Indexed views.
 	namespaces map[string]Entry // ns -> first matching entry
 	workloads  map[string]Entry // "ns/name" -> entry
-	images     []Entry          // scope=image; matched by HasPrefix
+	images     []Entry          // scope=image; scan repository/reference or legacy prefix matching
 }
 
 // Hit describes a quarantine match against a candidate pod.
@@ -110,12 +112,32 @@ func (s *Snapshot) Match(pod *corev1.Pod) *Hit {
 			if !e.Active(s.at) {
 				continue
 			}
-			if strings.HasPrefix(ctr.Image, e.MatchKey) {
+			if imageEntryMatches(e, ctr.Image) {
 				return &Hit{Entry: e, MatchKind: "image", MatchValue: ctr.Image}
 			}
 		}
 	}
 	return nil
+}
+
+// Automatic scan entries describe an image repository or a concrete image ref,
+// never an arbitrary string prefix. Keep manual and older non-scan prefix entries
+// compatible, including intentional registry-wide entries ending in '/'.
+func imageEntryMatches(e Entry, image string) bool {
+	if e.Origin != "auto" || e.SourceKind != "scan" {
+		return strings.HasPrefix(image, e.MatchKey)
+	}
+	candidate, err := name.ParseReference(image)
+	if err != nil {
+		return false
+	}
+	if repository, err := name.NewRepository(e.MatchKey); err == nil {
+		return candidate.Context().Name() == repository.Name()
+	}
+	// Historical scan fallbacks may contain a tag or digest instead of a repo.
+	// Honor that exact normalized reference rather than broadening its scope.
+	reference, err := name.ParseReference(e.MatchKey)
+	return err == nil && candidate.Name() == reference.Name()
 }
 
 // Stats reports the index size — useful for /metrics and for noticing
@@ -304,8 +326,11 @@ func workloadKeyForPod(pod *corev1.Pod) string {
 }
 
 func allContainers(pod *corev1.Pod) []corev1.Container {
-	out := make([]corev1.Container, 0, len(pod.Spec.Containers)+len(pod.Spec.InitContainers))
+	out := make([]corev1.Container, 0, len(pod.Spec.Containers)+len(pod.Spec.InitContainers)+len(pod.Spec.EphemeralContainers))
 	out = append(out, pod.Spec.Containers...)
 	out = append(out, pod.Spec.InitContainers...)
+	for _, c := range pod.Spec.EphemeralContainers {
+		out = append(out, corev1.Container{Name: c.Name, Image: c.Image})
+	}
 	return out
 }

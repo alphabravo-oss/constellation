@@ -2,6 +2,7 @@ package admission
 
 import (
 	"context"
+	admissionv1 "k8s.io/api/admission/v1"
 	"strings"
 	"testing"
 	"time"
@@ -142,5 +143,38 @@ func TestEvaluate_Quarantine_NilSourceIsNoop(t *testing.T) {
 	// Default rules will warn (monitor mode), not deny.
 	if !resp.Allowed {
 		t.Errorf("nil quarantine source should not affect existing rules; pod was denied: %+v", resp.Result)
+	}
+}
+
+func TestEvaluateAutomaticScanQuarantineRepositoryBoundary(t *testing.T) {
+	e := NewEngine()
+	e.SetQuarantine(newSourceWith(t, []quarantine.Entry{{ID: uuid.New(), Scope: quarantine.ScopeImage, MatchKey: "ghcr.io/acme/api", Origin: "auto", SourceKind: "scan", Reason: "scan finding"}}))
+	for _, tc := range []struct {
+		image   string
+		allowed bool
+	}{{"ghcr.io/acme/api:1", false}, {"ghcr.io/acme/api-helper:1", true}, {"ghcr.io/acme/api/worker:1", true}} {
+		for _, kind := range []string{"regular", "init", "ephemeral"} {
+			t.Run(kind+"/"+tc.image, func(t *testing.T) {
+				pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "payments", Name: "api"}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "safe", Image: "alpine:3"}}}}
+				switch kind {
+				case "regular":
+					pod.Spec.Containers = append(pod.Spec.Containers, corev1.Container{Name: "candidate", Image: tc.image})
+				case "init":
+					pod.Spec.InitContainers = []corev1.Container{{Name: "candidate", Image: tc.image}}
+				case "ephemeral":
+					pod.Spec.EphemeralContainers = []corev1.EphemeralContainer{{EphemeralContainerCommon: corev1.EphemeralContainerCommon{Name: "candidate", Image: tc.image}}}
+				}
+				request := reviewFor(pod)
+				if kind == "ephemeral" {
+					request.SubResource = "ephemeralcontainers"
+					request.Operation = admissionv1.Update
+					request.Resource = metav1.GroupVersionResource{Version: "v1", Resource: "pods"}
+				}
+				result := e.Evaluate(t.Context(), request)
+				if result.Allowed != tc.allowed {
+					t.Fatalf("Allowed=%v want=%v: %+v", result.Allowed, tc.allowed, result.Result)
+				}
+			})
+		}
 	}
 }

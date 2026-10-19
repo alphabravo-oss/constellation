@@ -442,7 +442,7 @@ admission:
       - apiGroups: [""]
         apiVersions: ["v1"]
         operations: ["CREATE", "UPDATE"]
-        resources: ["pods", "replicationcontrollers", "persistentvolumeclaims"]
+        resources: ["pods", "pods/ephemeralcontainers", "replicationcontrollers", "persistentvolumeclaims"]
         scope: "Namespaced"
       - apiGroups: ["apps"]
         apiVersions: ["v1"]

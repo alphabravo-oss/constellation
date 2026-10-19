@@ -148,5 +148,16 @@ namespaces remain excluded from admission validation.
 Scan-response audit payloads report `outcome: quarantine_recorded`,
 `enforced: not_verified`, and `recorded_clusters`. They do not claim that a deny-list
 entry proves a pod was blocked. Webhook coverage, namespace exclusions, and actual
-admission decisions determine effective blocking. Existing image-prefix matching
-semantics remain unchanged; exact image-reference scope needs separate review.
+admission decisions determine effective blocking. Automatic scan entries (`origin=auto`, `source_kind=scan`) match canonical repository
+names, covering tags and digests of that repository without matching similarly named
+repositories or child paths. Historical scan fallback keys containing a tag or digest
+match that exact normalized reference. Malformed automatic references do not match.
+Manual and older non-scan entries retain their explicit raw-prefix semantics.
+
+Quarantine checks regular, init, and ephemeral containers. Default webhook rules include
+`pods/ephemeralcontainers` UPDATE requests. Upgrades using `--reuse-values` must also
+update the stored webhook rules to include that subresource; the development release
+records this explicit rule update. Existing system namespace exclusions still apply.
+Automatic repository quarantine intentionally covers every tag in the repository;
+quarantining only the scanned digest while resolving tagged admissions requires further
+image-resolution work.
