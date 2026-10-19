@@ -217,7 +217,7 @@ func (h *Network) EnforcementLift(w http.ResponseWriter, r *http.Request) {
 	}
 	tag, err := h.db.Pool().Exec(r.Context(), `
 UPDATE network_enforcement_actions
-   SET state = 'lifting', updated_at = NOW()
+   SET state = 'lifting', last_status = '', last_error = '', updated_at = NOW()
  WHERE id = $1 AND org_id = $2 AND state = 'active'`, id, subj.OrgID)
 	if err != nil {
 		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

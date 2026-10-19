@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"k8s.io/client-go/dynamic"
@@ -230,35 +231,65 @@ SELECT id::text, manifest_flavor, manifest, state
 	}
 
 	for _, a := range actions {
-		resource, manifestJSON, perr := netpolicyapply.ParseManifest(netpolicyapply.Flavor(a.flavor), a.manifest)
-		if perr != nil {
-			updateEnforcementStatus(ctx, pool, a.id, "error", perr.Error(), "")
-			logger.Warn("enforcement parse failed", slog.String("id", a.id), slog.String("err", perr.Error()))
-			continue
+		if err := reconcileEnforcementAction(ctx, pool, client, a.id, a.flavor, a.manifest, a.state); err != nil {
+			logger.Warn("enforcement reconcile failed", slog.String("id", a.id), slog.String("err", err.Error()))
 		}
-		if a.state == "lifting" {
-			if derr := client.Delete(ctx, resource); derr != nil {
-				updateEnforcementStatus(ctx, pool, a.id, "error", derr.Error(), "")
-				continue
-			}
-			updateEnforcementStatus(ctx, pool, a.id, "ok", "", "removed")
-			logger.Info("enforcement removed", slog.String("id", a.id), slog.String("resource", resource.Ref()))
-			continue
-		}
-		if aerr := client.Apply(ctx, resource, manifestJSON); aerr != nil {
-			updateEnforcementStatus(ctx, pool, a.id, "error", aerr.Error(), "")
-			continue
-		}
-		updateEnforcementStatus(ctx, pool, a.id, "ok", "", "")
-		logger.Info("enforcement applied", slog.String("id", a.id), slog.String("resource", resource.Ref()))
 	}
 	return nil
 }
 
+// Lock the intent across the Kubernetes operation and its report. A lift waits
+// for an in-flight apply, and another applier must recheck state after acquiring
+// the lock, preventing stale snapshots from recreating a removed policy.
+func reconcileEnforcementAction(ctx context.Context, pool *pgxpool.Pool, client netpolicyapply.ResourceClient, id, flavor, manifest, expectedState string) error {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var current string
+	err = tx.QueryRow(ctx, `SELECT state FROM network_enforcement_actions WHERE id=$1 FOR UPDATE`, id).Scan(&current)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if current != expectedState || (current != "active" && current != "lifting") {
+		return nil
+	}
+	resource, manifestJSON, operationErr := netpolicyapply.ParseManifest(netpolicyapply.Flavor(flavor), manifest)
+	newState := ""
+	if operationErr == nil {
+		if current == "lifting" {
+			operationErr = client.Delete(ctx, resource)
+			if operationErr == nil {
+				newState = "removed"
+			}
+		} else {
+			operationErr = client.Apply(ctx, resource, manifestJSON)
+		}
+	}
+	status, message := "ok", ""
+	if operationErr != nil {
+		status, message = "error", operationErr.Error()
+	}
+	if err := updateEnforcementStatus(ctx, tx, id, current, status, message, newState); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+type enforcementStatusWriter interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}
+
 // updateEnforcementStatus records the reconcile outcome; newState (when non-empty)
 // transitions the row (e.g. lifting -> removed after a successful delete).
-func updateEnforcementStatus(ctx context.Context, pool *pgxpool.Pool, id, status, errMsg, newState string) {
-	_, _ = pool.Exec(ctx, `
+func updateEnforcementStatus(ctx context.Context, pool enforcementStatusWriter, id, expectedState, status, errMsg, newState string) error {
+	_, err := pool.Exec(ctx, `
 UPDATE network_enforcement_actions
    SET last_status = $2,
        last_error = $3,
@@ -266,7 +297,8 @@ UPDATE network_enforcement_actions
        last_applied_at = CASE WHEN $2 = 'ok' AND $4 = '' THEN NOW() ELSE last_applied_at END,
        last_deleted_at = CASE WHEN $2 = 'ok' AND $4 = 'removed' THEN NOW() ELSE last_deleted_at END,
        updated_at = NOW()
- WHERE id = $1`, id, status, errMsg, newState)
+ WHERE id = $1 AND state = $5`, id, status, errMsg, newState, expectedState)
+	return err
 }
 
 func resolveClusterID(ctx context.Context, pool *pgxpool.Pool, cfg config) (string, error) {

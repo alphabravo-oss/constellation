@@ -1,3 +1,4 @@
+import { NetworkEnforcementStatus } from "./NetworkEnforcementStatus";
 import { NetworkPeerEvidence } from "./NetworkPeerEvidence";
 import { StreamsTab, PcapWorkspaceTab, ThreatMaximum } from "./NetworkSecondaryInventory";
 export { StreamsTab, PcapWorkspaceTab } from "./NetworkSecondaryInventory";
@@ -2155,15 +2156,16 @@ function EnforcementCard({ clusterID }: { clusterID: string }) {
   });
   const lift = useMutation({
     mutationFn: (id: string) => network.enforcement.lift(id),
-    onSuccess: () => { toast.success("Lifting — policy removed within ~15s"); void queryClient.invalidateQueries({ queryKey: ["network-enforcement", clusterID] }); },
+    onSuccess: () => { toast.success("Removal requested. Waiting for the applier to confirm."); void queryClient.invalidateQueries({ queryKey: ["network-enforcement", clusterID] }); },
     onError: () => toast.error("Failed to lift"),
   });
   const actions = q.data ?? [];
+  if (q.isError) return <p role="alert" className="rounded border border-border bg-card p-3 text-sm">Enforcement status could not be loaded. Refresh before assuming policies have been removed.</p>;
   if (actions.length === 0) return null;
   return (
     <div className="rounded-md border border-border bg-card/95 p-3 shadow-[var(--elev-1)]" data-testid="network-enforcement-card">
       <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold">
-        <Ban className="h-3.5 w-3.5 text-[color:var(--color-severity-critical)]" /> Active enforcement ({actions.length})
+        <Ban className="h-3.5 w-3.5 text-[color:var(--color-severity-critical)]" /> Enforcement requests ({actions.length})
       </div>
       <ul className="max-h-56 space-y-1 overflow-auto pr-1">
         {actions.map((a) => (
@@ -2173,8 +2175,8 @@ function EnforcementCard({ clusterID }: { clusterID: string }) {
                 <span className="rounded bg-muted px-1 text-[9px] uppercase text-muted-foreground">{a.kind === "isolate" ? "isolate" : "block"}</span>
                 <span className="truncate text-mono font-medium">{a.kind === "isolate" ? shortName(a.target) : `${a.workload ? shortName(a.workload) + " ✕ " : ""}${a.target}`}</span>
               </div>
-              <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
-                {a.state === "lifting" ? "lifting…" : a.last_status === "error" ? <span className="text-[color:var(--color-severity-critical)]">error: {a.last_error}</span> : a.last_status === "ok" ? "applied" : "pending apply"}
+              <div className="mt-0.5 break-words text-[10px] text-muted-foreground">
+                <NetworkEnforcementStatus action={a} />
                 {a.reason ? ` · ${a.reason}` : ""}
               </div>
             </div>

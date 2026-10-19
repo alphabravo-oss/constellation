@@ -44,3 +44,18 @@ configuration across admission/runtime/network enforcement, and a complete audit
 all disruptive response paths. Calico selector transformation is tested at the client
 write boundary; live Calico/Cilium data-plane enforcement still requires their own
 cluster fixtures. The development cluster's native rollout does not prove those CNIs.
+
+## Direct enforcement status and removal
+
+Direct network enforcement actions hold their database row lock while applying or
+removing the Kubernetes policy and recording the outcome. A removal request waits
+for an in-flight apply. Appliers recheck the row state after acquiring the lock;
+a stale active snapshot cannot recreate a policy already marked removed. Status
+updates also require the expected state. Operations have a 30-second context bound.
+This locking change covers direct `network_enforcement_actions`; policy lifecycle
+reconciliation is a separate path.
+
+Requesting removal clears the old apply outcome. The UI distinguishes pending
+application, protected-target refusal, application failure, pending removal, and
+removal failure. It reports successful application as an applier report, not proof
+of CNI traffic enforcement, and does not promise removal within a fixed interval.

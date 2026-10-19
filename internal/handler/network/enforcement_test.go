@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
@@ -124,5 +125,41 @@ func TestEnforcementRejectsMissingWorkloadAndUnsupportedCNI(t *testing.T) {
 	var count int
 	if err := d.Pool().QueryRow(ctx, `SELECT count(*) FROM network_enforcement_actions WHERE org_id=$1`, org).Scan(&count); err != nil || count != 2 {
 		t.Errorf("queued actions=%d err=%v", count, err)
+	}
+}
+
+func TestEnforcementLiftClearsPreviousApplyOutcome(t *testing.T) {
+	d := openTestDB(t)
+	defer d.Close()
+	ctx := t.Context()
+	org, cluster, id := uuid.New(), uuid.New(), uuid.New()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := d.Pool().Exec(ctx, sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`INSERT INTO orgs(id,name,display_name) VALUES($1,$2,'lift')`, org, org.String())
+	defer func() {
+		_, _ = d.Pool().Exec(ctx, `DELETE FROM network_enforcement_actions WHERE org_id=$1`, org)
+		_, _ = d.Pool().Exec(ctx, `DELETE FROM orgs WHERE id=$1`, org)
+	}()
+	exec(`INSERT INTO clusters(id,org_id,name) VALUES($1,$2,'lift')`, cluster, org)
+	exec(`INSERT INTO network_enforcement_actions(id,org_id,cluster_id,kind,target,manifest_flavor,manifest,state,last_status,last_error) VALUES($1,$2,$3,'isolate','team/api','native','{}','active','error','old apply failure')`, id, org, cluster)
+	router := chi.NewRouter()
+	router.Delete("/{id}", NewNetwork(d).EnforcementLift)
+	req := httptest.NewRequest("DELETE", "/"+id.String(), nil)
+	req = req.WithContext(authctx.WithSubject(ctx, authctx.Subject{OrgID: org}))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	var state, status, message string
+	if err := d.Pool().QueryRow(ctx, `SELECT state,last_status,last_error FROM network_enforcement_actions WHERE id=$1`, id).Scan(&state, &status, &message); err != nil {
+		t.Fatal(err)
+	}
+	if state != "lifting" || status != "" || message != "" {
+		t.Fatalf("stale apply evidence retained: %s/%s/%s", state, status, message)
 	}
 }
