@@ -1,0 +1,2478 @@
+{
+  "date": "2026-10-19",
+  "run": "https://github.com/alphabravo-oss/constellation/actions/runs/39250010832",
+  "testRevision": "24a456115511847423daef683bbfd3f955ac2a6f",
+  "deployedProductionRevision": "bb2d19b4354da97a29419b91401f0f240b8b58e8",
+  "productionSourcesUnchanged": true,
+  "helmRevisionUnchanged": 131,
+  "liveDeployment": {
+    "helmRevision": 131,
+    "restartHoldRemoved": true,
+    "clusterHealthy": true,
+    "postBackupPhase": "completed",
+    "postBackupId": "20261019T054924",
+    "containers": [
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-admission-845b669bbc-9tpjk",
+        "container": "admission",
+        "image": "ghcr.io/alphabravo-oss/constellation/admission@sha256:b747fb3ab87c66eb04e687f48a0893bba2a9e5d06011fec103863261286a0c4c",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/admission@sha256:b747fb3ab87c66eb04e687f48a0893bba2a9e5d06011fec103863261286a0c4c"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-api-5b95979b98-72w4v",
+        "container": "wait-for-migrations",
+        "image": "ghcr.io/alphabravo-oss/constellation/api@sha256:7ca489d94f9e27cf00d8fd5f41e7bf4c8202fec344849846223fd4c1090a4f31",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/api@sha256:7ca489d94f9e27cf00d8fd5f41e7bf4c8202fec344849846223fd4c1090a4f31"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-api-5b95979b98-72w4v",
+        "container": "api",
+        "image": "ghcr.io/alphabravo-oss/constellation/api@sha256:7ca489d94f9e27cf00d8fd5f41e7bf4c8202fec344849846223fd4c1090a4f31",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/api@sha256:7ca489d94f9e27cf00d8fd5f41e7bf4c8202fec344849846223fd4c1090a4f31"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-cnpg-postgres-1",
+        "container": "bootstrap-controller",
+        "image": "ghcr.io/alphabravo-oss/constellation/cnpg-operator@sha256:cc61009ac3d2cdf0aa2ff7f44f85dbb7bdf85ab50425d41a71da2af6521cc1b9",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/cnpg-operator@sha256:cc61009ac3d2cdf0aa2ff7f44f85dbb7bdf85ab50425d41a71da2af6521cc1b9"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-cnpg-postgres-1",
+        "container": "plugin-barman-cloud",
+        "image": "ghcr.io/alphabravo-oss/constellation/barman-sidecar@sha256:5c6b5559b08b7b49c89937b6d823a37fbeb8e7b883d4b0da6278fe09de87d1f1",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/barman-sidecar@sha256:5c6b5559b08b7b49c89937b6d823a37fbeb8e7b883d4b0da6278fe09de87d1f1"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-cnpg-postgres-1",
+        "container": "postgres",
+        "image": "ghcr.io/alphabravo-oss/constellation/postgres:16.14-dev-98087f2e517416edda6e3649154c3be4a5a7b0ce2228c4fab3f4e2bed430d92a@sha256:98087f2e517416edda6e3649154c3be4a5a7b0ce2228c4fab3f4e2bed430d92a",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/postgres@sha256:98087f2e517416edda6e3649154c3be4a5a7b0ce2228c4fab3f4e2bed430d92a"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-discoverer-7859bdf8d6-cwtx6",
+        "container": "discoverer",
+        "image": "ghcr.io/alphabravo-oss/constellation/discoverer@sha256:ffb3150e112bce4d2a529d7b6e969edb145251cbb5745562e693fa7839fdabfa",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/discoverer@sha256:ffb3150e112bce4d2a529d7b6e969edb145251cbb5745562e693fa7839fdabfa"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-frontend-7465f554cb-hmm78",
+        "container": "nginx",
+        "image": "ghcr.io/alphabravo-oss/constellation/frontend@sha256:6d419115228f0942f4bbdde114acbb9454d00e2b83c7496e823b98b6af9f40d4",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/frontend@sha256:6d419115228f0942f4bbdde114acbb9454d00e2b83c7496e823b98b6af9f40d4"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-network-policy-applier-56649f4cd-5csff",
+        "container": "applier",
+        "image": "ghcr.io/alphabravo-oss/constellation/operator@sha256:8b027d505cf4946bdbd5afc92a7446f9305e92bbf4e0c15e67a7bd40237d8e3b",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/operator@sha256:8b027d505cf4946bdbd5afc92a7446f9305e92bbf4e0c15e67a7bd40237d8e3b"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-operator-7cbdd4c966-8bfxj",
+        "container": "operator",
+        "image": "ghcr.io/alphabravo-oss/constellation/operator@sha256:8b027d505cf4946bdbd5afc92a7446f9305e92bbf4e0c15e67a7bd40237d8e3b",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/operator@sha256:8b027d505cf4946bdbd5afc92a7446f9305e92bbf4e0c15e67a7bd40237d8e3b"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-runtime-agent-xm2pp",
+        "container": "agent",
+        "image": "ghcr.io/alphabravo-oss/constellation/runtime-agent@sha256:d8d0e4903abc6c291fb98e32806ac61ea11b562b0abfa62c60230e3fa5afaadf",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/runtime-agent@sha256:d8d0e4903abc6c291fb98e32806ac61ea11b562b0abfa62c60230e3fa5afaadf"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-scanner-b94d64457-2m44c",
+        "container": "scanner",
+        "image": "ghcr.io/alphabravo-oss/constellation/scanner@sha256:716b0300f3d1992a1e7d142a306f2255af7b09171989bf67c87a2e961e2a5823",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/scanner@sha256:716b0300f3d1992a1e7d142a306f2255af7b09171989bf67c87a2e961e2a5823"
+      },
+      {
+        "namespace": "cnpg-system",
+        "pod": "barman-cloud-669fcf8689-rqt4x",
+        "container": "barman-cloud",
+        "image": "ghcr.io/alphabravo-oss/constellation/barman-plugin@sha256:de96d9e4bf0f2f69f8d2b3c1a8bc953ea8235d613901ae19754600b55cb07590",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/barman-plugin@sha256:de96d9e4bf0f2f69f8d2b3c1a8bc953ea8235d613901ae19754600b55cb07590"
+      },
+      {
+        "namespace": "cnpg-system",
+        "pod": "cnpg-controller-manager-fb6948887-xwgx8",
+        "container": "manager",
+        "image": "ghcr.io/alphabravo-oss/constellation/cnpg-operator@sha256:cc61009ac3d2cdf0aa2ff7f44f85dbb7bdf85ab50425d41a71da2af6521cc1b9",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/cnpg-operator@sha256:cc61009ac3d2cdf0aa2ff7f44f85dbb7bdf85ab50425d41a71da2af6521cc1b9"
+      }
+    ]
+  },
+  "versions": {
+    "kind": "v0.33.0",
+    "kubernetes": "v1.35.8",
+    "cilium": "v1.20.3"
+  },
+  "totalTrafficChecks": 95,
+  "profiles": [
+    {
+      "profile": "multi-kubeproxy",
+      "nodeCount": 3,
+      "kubeProxyReplacement": false,
+      "ciliumRuntimeStatus": "KVStore:                Disabled   \nKubernetes:             Ok         1.35 (v1.35.8) [linux/amd64]\nKubernetes APIs:        [\"cilium/v2::CiliumCIDRGroup\", \"cilium/v2::CiliumClusterwideNetworkPolicy\", \"cilium/v2::CiliumEndpoint\", \"cilium/v2::CiliumNetworkPolicy\", \"cilium/v2::CiliumNode\", \"core/v1::Pods\", \"networking.k8s.io/v1::NetworkPolicy\"]\nKubeProxyReplacement:   False   \nHost firewall:          Disabled\nSRv6:                   Disabled\nCNI Chaining:           none\nCNI Config file:        successfully wrote CNI configuration file to /host/etc/cni/net.d/05-cilium.conflist\nCilium:                 Ok   1.20.3 (v1.20.3-bf1aba7b)\nNodeMonitor:            Listening for events on 4 CPUs with 64x4096 of shared memory\nCilium health daemon:   Ok   \nIPAM:                   IPv4: 2/254 allocated from 10.244.0.0/24, \nAllocated addresses:\n  10.244.0.250 (router)\n  10.244.0.66 (health)\nIPv4 BIG TCP:           Disabled\nIPv6 BIG TCP:           Disabled\nBandwidthManager:       Disabled\nRouting:                Network: Tunnel [vxlan]   Host: Legacy\nAttach Mode:            TCX\nDevice Mode:            veth\nMasquerading:           IPTables [IPv4: Enabled, IPv6: Disabled]\nClock Source for BPF:   ktime\nController Status:      13/13 healthy\n  Name                                  Last success   Last error   Count   Message\n  cilium-health-ep                      12s ago        never        0       no error   \n  ct-map-pressure                       13s ago        never        0       no error   \n  endpoint-3533-regeneration-recovery   never          never        0       no error   \n  endpoint-424-regeneration-recovery    never          never        0       no error   \n  endpoint-gc                           13s ago        never        0       no error   \n  endpoint-periodic-regeneration        9s ago         never        0       no error   \n  ipcache-inject-labels                 11s ago        never        0       no error   \n  k8s-heartbeat                         19s ago        never        0       no error   \n  resolve-identity-3533                 12s ago        never        0       no error   \n  resolve-identity-424                  13s ago        never        0       no error   \n  sync-policymap-3533                   8s ago         never        0       no error   \n  sync-policymap-424                    9s ago         never        0       no error   \n  write-cni-file                        14s ago        never        0       no error   \nProxy Status:            OK, ip 10.244.0.250, 0 redirects active on ports 10000-20000, Envoy: external\nGlobal Identity Range:   min 256, max 65535\nHubble:                  Ok   Current/Max Flows: 22/4095 (0.54%), Flows/s: 0.00   Metrics: Disabled\nKubeProxyReplacement Details:\n  Status:               False\n  Socket LB:            Disabled\n  Socket LB Tracing:    Disabled\n  Socket LB Coverage:   Full\n  Session Affinity:     Enabled\n  NAT46/64 Support:     Disabled\n  Services:\n  - ClusterIP:      Enabled\n  - NodePort:       Disabled \n  - LoadBalancer:   Disabled \n  - externalIPs:    Disabled \n  - HostPort:       Disabled\n  Annotations:      (n/a)\nBPF Maps:   dynamic sizing: on (ratio: 0.002500)\n  Name                          Size\n  Auth                          524288\n  Non-TCP connection tracking   73536\n  TCP connection tracking       147073\n  Endpoints                     65535\n  IP cache                      512000\n  IPv4 masquerading agent       16384\n  IPv6 masquerading agent       16384\n  IPv4 fragmentation            8192\n  IPv4 service                  65536\n  IPv6 service                  65536\n  IPv4 service backend          65536\n  IPv6 service backend          65536\n  IPv4 service reverse NAT      65536\n  IPv6 service reverse NAT      65536\n  Metrics                       1024\n  Ratelimit metrics             64\n  NAT                           147073\n  Neighbor table                147073\n  Endpoint policy               16384\n  Policy stats                  65536\n  Session affinity              65536\n  Sock reverse NAT              73536\nEncryption:       Disabled        \nCluster health:   0/0 reachable   (2026-10-19T12:12:23Z)   (Probe interval: 0s)\nName              IP              Node                     Endpoints\nModules Health:   Stopped(0) Degraded(0) OK(71)\n  agent\n  \u251c\u2500\u2500 controlplane\n  \u2502   \u251c\u2500\u2500 cilium-agent-dynamic-config\n  \u2502   \u2502   \u2514\u2500\u2500 job-k8s-reflector-cilium-configs-cm-cilium-config-kube-system      [OK] 162 upserted, 0 deleted, 162 total objects (13s, x1)\n  \u2502   \u251c\u2500\u2500 ciliumenvoyconfig\n  \u2502   \u2502   \u251c\u2500\u2500 job-node-labels                                     [OK] Running (14s, x1)\n  \u2502   \u2502   \u251c\u2500\u2500 job-reconcile                                       [OK] OK, 0 object(s) (14s, x2)\n  \u2502   \u2502   \u2514\u2500\u2500 job-refresh                                         [OK] Next refresh in 30m0s (14s, x1)\n  \u2502   \u251c\u2500\u2500 config-drift-checker\n  \u2502   \u2502   \u2514\u2500\u2500 job-drift-checker                                   [OK] Running (14s, x1)\n  \u2502   \u251c\u2500\u2500 daemonconfig\n  \u2502   \u2502   \u2514\u2500\u2500 timer-job-validate-unchanged-daemon-config          [OK] Primed (14s, x1)\n  \u2502   \u251c\u2500\u2500 dynamic-lifecycle-manager\n  \u2502   \u2502   \u251c\u2500\u2500 job-reconcile                                       [OK] OK, 0 object(s) (14s, x2)\n  \u2502   \u2502   \u2514\u2500\u2500 job-refresh                                         [OK] Next refresh in 30m0s (14s, x1)\n  \u2502   \u251c\u2500\u2500 endpoint-manager\n  \u2502   \u2502   \u251c\u2500\u2500 cilium-endpoint-3533 (/)\n  \u2502   \u2502   \u2502   \u251c\u2500\u2500 datapath-regenerate                             [OK] Endpoint regeneration successful (0s, x3)\n  \u2502   \u2502   \u2502   \u2514\u2500\u2500 policymap-sync                                  [OK] sync-policymap-3533 (8s, x1)\n  \u2502   \u2502   \u251c\u2500\u2500 cilium-endpoint-424 (/)\n  \u2502   \u2502   \u2502   \u251c\u2500\u2500 datapath-regenerate                             [OK] Endpoint regeneration successful (2s, x3)\n  \u2502   \u2502   \u2502   \u2514\u2500\u2500 policymap-sync                                  [OK] sync-policymap-424 (9s, x1)\n  \u2502   \u2502   \u251c\u2500\u2500 endpoint-gc                                         [OK] endpoint-gc (13s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 job-namespace-updater                               [OK] Running (14s, x1)\n  \u2502   \u251c\u2500\u2500 envoy-proxy\n  \u2502   \u2502   \u251c\u2500\u2500 job-accesslog-server                                [OK] Running (14s, x1)\n  \u2502   \u2502   \u251c\u2500\u2500 job-xds-server                                      [OK] Running (14s, x1)\n  \u2502   \u2502   \u251c\u2500\u2500 observer-job-k8s-secrets-resource-events-cilium-secrets      [OK] Primed (14s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 timer-job-version-check                             [OK] Primed (14s, x1)\n  \u2502   \u251c\u2500\u2500 ep-bpf-prog-watchdog\n  \u2502   \u2502   \u2514\u2500\u2500 timer-job-ep-bpf-prog-watchdog                      [OK] Primed (13s, x1)\n  \u2502   \u251c\u2500\u2500 fqdn\n  \u2502   \u2502   \u2514\u2500\u2500 namemanager\n  \u2502   \u2502       \u251c\u2500\u2500 observer-job-preallocate                        [OK] Primed (14s, x1)\n  \u2502   \u2502       \u2514\u2500\u2500 timer-job-dns-garbage-collector-job             [OK] Primed (13s, x1)\n  \u2502   \u251c\u2500\u2500 hostip-sync\n  \u2502   \u2502   \u2514\u2500\u2500 job-sync-hostips                                    [OK] Synchronized (13s, x3)\n  \u2502   \u251c\u2500\u2500 hubble\n  \u2502   \u2502   \u2514\u2500\u2500 timer-job-hubble-namespace-cleanup                  [OK] Primed (14s, x1)\n  \u2502   \u251c\u2500\u2500 identity-policy-computer\n  \u2502   \u2502   \u2514\u2500\u2500 job-policy-computation-loop                         [OK] Running (19s, x1)\n  \u2502   \u251c\u2500\u2500 ipam\n  \u2502   \u2502   \u2514\u2500\u2500 ipam-podippool-table\n  \u2502   \u2502       \u2514\u2500\u2500 job-k8s-reflector-podippools-daemon-k8s         [OK] 0 upserted, 0 deleted, 0 total objects (14s, x1)\n  \u2502   \u251c\u2500\u2500 ipcache\n  \u2502   \u2502   \u251c\u2500\u2500 job-api-server-backend-watcher                      [OK] Running (14s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 job-release-local-identities                        [OK] Running (14s, x1)\n  \u2502   \u251c\u2500\u2500 k8s-tables\n  \u2502   \u2502   \u251c\u2500\u2500 job-k8s-reflector-k8s-namespaces-daemon-k8s         [OK] 6 upserted, 0 deleted, 6 total objects (14s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 job-k8s-reflector-k8s-pods-daemon-k8s               [OK] 1 upserted, 0 deleted, 7 total objects (13s, x2)\n  \u2502   \u251c\u2500\u2500 l7-proxy\n  \u2502   \u2502   \u2514\u2500\u2500 timer-job-proxy-ports-checkpoint                    [OK] OK (447.395\u00b5s) (12s, x1)\n  \u2502   \u251c\u2500\u2500 loadbalancer-maps\n  \u2502   \u2502   \u2514\u2500\u2500 timer-job-pressure-metrics-reporter                 [OK] Primed (14s, x1)\n  \u2502   \u251c\u2500\u2500 loadbalancer-reconciler\n  \u2502   \u2502   \u251c\u2500\u2500 job-reconcile                                       [OK] OK, 5 object(s) (2s, x18)\n  \u2502   \u2502   \u2514\u2500\u2500 job-refresh                                         [OK] Next refresh in 30m0s (14s, x1)\n  \u2502   \u251c\u2500\u2500 loadbalancer-reflectors\n  \u2502   \u2502   \u2514\u2500\u2500 k8s-reflector\n  \u2502   \u2502       \u2514\u2500\u2500 job-reflect-services-endpoints                  [OK] Running (14s, x1)\n  \u2502   \u251c\u2500\u2500 loadbalancer-writer\n  \u2502   \u2502   \u251c\u2500\u2500 job-node-addr-reconciler                            [OK] Running (14s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 job-wildcard-addr-reconciler                        [OK] Running (14s, x1)\n  \u2502   \u251c\u2500\u2500 local-node-store\n  \u2502   \u2502   \u2514\u2500\u2500 job-sync-local-node                                 [OK] Running (14s, x1)\n  \u2502   \u251c\u2500\u2500 node-manager\n  \u2502   \u2502   \u251c\u2500\u2500 job-backgroundSync                                  [OK] Running (14s, x1)\n  \u2502   \u2502   \u251c\u2500\u2500 node-checkpoint-writer                              [OK] node checkpoint written (14s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 nodes-add                                           [OK] Node adds successful (13s, x3)\n  \u2502   \u251c\u2500\u2500 policy\n  \u2502   \u2502   \u251c\u2500\u2500 observer-job-policy-importer                        [OK] Primed (14s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 timer-job-id-alloc-update-policy-maps               [OK] OK (28.212\u00b5s) (12s, x1)\n  \u2502   \u251c\u2500\u2500 status\n  \u2502   \u2502   \u2514\u2500\u2500 job-probes                                          [OK] Running (14s, x1)\n  \u2502   \u2514\u2500\u2500 ztunnel\n  \u2502       \u2514\u2500\u2500 enrollment-reconciler\n  \u2502           \u2514\u2500\u2500 job-derive-desired-mtls-namespace-enrollments    [OK] Running (14s, x1)\n  \u251c\u2500\u2500 datapath\n  \u2502   \u251c\u2500\u2500 agent-liveness-updater\n  \u2502   \u2502   \u2514\u2500\u2500 timer-job-agent-liveness-updater                    [OK] OK (25.007\u00b5s) (0s, x1)\n  \u2502   \u251c\u2500\u2500 device-reconciler\n  \u2502   \u2502   \u251c\u2500\u2500 job-reconcile                                       [OK] OK, 0 object(s) (13s, x2)\n  \u2502   \u2502   \u2514\u2500\u2500 job-refresh                                         [OK] Next refresh in 30m0s (14s, x1)\n  \u2502   \u251c\u2500\u2500 iptables\n  \u2502   \u2502   \u251c\u2500\u2500 ipset\n  \u2502   \u2502   \u2502   \u251c\u2500\u2500 job-reconcile                                   [OK] OK, 0 object(s) (14s, x2)\n  \u2502   \u2502   \u2502   \u2514\u2500\u2500 job-refresh                                     [OK] Next refresh in 30m0s (14s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 job-iptables-reconciliation-loop                    [OK] iptables rules full reconciliation completed (12s, x1)\n  \u2502   \u251c\u2500\u2500 l2-responder\n  \u2502   \u2502   \u2514\u2500\u2500 job-l2-responder-reconciler                         [OK] Running (14s, x1)\n  \u2502   \u251c\u2500\u2500 link-cache\n  \u2502   \u2502   \u2514\u2500\u2500 timer-job-sync                                      [OK] Primed (14s, x1)\n  \u2502   \u251c\u2500\u2500 maps\n  \u2502   \u2502   \u251c\u2500\u2500 ct-nat-map-gc\n  \u2502   \u2502   \u2502   \u251c\u2500\u2500 observer-job-nat-map-next4                      [OK] Primed (14s, x1)\n  \u2502   \u2502   \u2502   \u2514\u2500\u2500 observer-job-nat-map-next6                      [OK] Primed (14s, x1)\n  \u2502   \u2502   \u251c\u2500\u2500 netdev-map\n  \u2502   \u2502   \u2502   \u2514\u2500\u2500 netdev-map-sync\n  \u2502   \u2502   \u2502       \u2514\u2500\u2500 job-netdev-map-sync                         [OK] Running (14s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 subnet-map\n  \u2502   \u2502       \u2514\u2500\u2500 timer-job-pressure-metric-subnet_map            [OK] Primed (14s, x1)\n  \u2502   \u251c\u2500\u2500 mtu\n  \u2502   \u2502   \u251c\u2500\u2500 job-endpoint-mtu-updater                            [OK] Endpoint MTU updated (14s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 job-mtu-updater                                     [OK] MTU updated (1500) (14s, x1)\n  \u2502   \u251c\u2500\u2500 node-address\n  \u2502   \u2502   \u2514\u2500\u2500 job-node-address-update                             [OK] 10.244.0.250 (primary), fe80::68e6:cff:fe2f:31a4 (13s, x1)\n  \u2502   \u251c\u2500\u2500 orchestrator\n  \u2502   \u2502   \u2514\u2500\u2500 job-reinitialize                                    [OK] OK (0s, x2)\n  \u2502   \u251c\u2500\u2500 route-reconciler\n  \u2502   \u2502   \u251c\u2500\u2500 job-desired-route-refresher                         [OK] Running (14s, x1)\n  \u2502   \u2502   \u251c\u2500\u2500 job-reconcile                                       [OK] OK, 1 object(s) (5s, x9)\n  \u2502   \u2502   \u2514\u2500\u2500 job-refresh                                         [OK] Next refresh in 30m0s (14s, x1)\n  \u2502   \u251c\u2500\u2500 sysctl\n  \u2502   \u2502   \u251c\u2500\u2500 job-reconcile                                       [OK] OK, 20 object(s) (7s, x10)\n  \u2502   \u2502   \u2514\u2500\u2500 job-refresh                                         [OK] Next refresh in 10m0s (14s, x1)\n  \u2502   \u2514\u2500\u2500 utime\n  \u2502       \u2514\u2500\u2500 timer-job-sync-userspace-and-datapath               [OK] OK (123.734\u00b5s) (14s, x1)\n  \u2514\u2500\u2500 infra\n      \u251c\u2500\u2500 agent-healthz\n      \u2502   \u2514\u2500\u2500 job-agent-healthz-server-ipv4                       [OK] Running (14s, x1)\n      \u251c\u2500\u2500 metrics\n      \u2502   \u251c\u2500\u2500 job-collect                                         [OK] Sampled 24 metrics in 8.11383ms, next collection at 2026-10-19 12:17:19.622479489 +0000 UTC m=+306.492994758 (14s, x1)\n      \u2502   \u2514\u2500\u2500 timer-job-cleanup                                   [OK] Primed (14s, x1)\n      \u2514\u2500\u2500 shell\n          \u2514\u2500\u2500 job-listener                                        [OK] Listening on /var/run/cilium/shell.sock (14s, x1)\n  health\n  \u2514\u2500\u2500 job-module-status-metrics                   [OK] Running (14s, x1)\n  \n\n",
+      "nodePlatforms": [
+        {
+          "name": "constellation-cilium-proof-control-plane",
+          "architecture": "amd64",
+          "bootID": "10e6e959-c2b6-4afc-b0bc-7eec81e27f02",
+          "containerRuntimeVersion": "containerd://2.3.4",
+          "kernelVersion": "6.17.0-1022-azure",
+          "kubeProxyVersion": "",
+          "kubeletVersion": "v1.35.8",
+          "machineID": "9a4b66d3da904d75a2b5cef95ae93037",
+          "operatingSystem": "linux",
+          "osImage": "Debian GNU/Linux 13 (trixie)",
+          "swap": {
+            "capacity": 3221221376
+          },
+          "systemUUID": "c8d23fcf-a238-4c1a-8fe0-aa309257ba6d"
+        },
+        {
+          "name": "constellation-cilium-proof-worker",
+          "architecture": "amd64",
+          "bootID": "10e6e959-c2b6-4afc-b0bc-7eec81e27f02",
+          "containerRuntimeVersion": "containerd://2.3.4",
+          "kernelVersion": "6.17.0-1022-azure",
+          "kubeProxyVersion": "",
+          "kubeletVersion": "v1.35.8",
+          "machineID": "5923df3e5bdf448a82154b4670c5a3fa",
+          "operatingSystem": "linux",
+          "osImage": "Debian GNU/Linux 13 (trixie)",
+          "swap": {
+            "capacity": 3221221376
+          },
+          "systemUUID": "833d5a04-76c6-4c6c-940b-7a394e2d88ac"
+        },
+        {
+          "name": "constellation-cilium-proof-worker2",
+          "architecture": "amd64",
+          "bootID": "10e6e959-c2b6-4afc-b0bc-7eec81e27f02",
+          "containerRuntimeVersion": "containerd://2.3.4",
+          "kernelVersion": "6.17.0-1022-azure",
+          "kubeProxyVersion": "",
+          "kubeletVersion": "v1.35.8",
+          "machineID": "083e05273b434fbdb3bebdaa290743be",
+          "operatingSystem": "linux",
+          "osImage": "Debian GNU/Linux 13 (trixie)",
+          "swap": {
+            "capacity": 3221221376
+          },
+          "systemUUID": "b53e056f-6a62-4b32-a58d-47a90b595af9"
+        }
+      ],
+      "proof": {
+        "nonce": "37bf01d5a5",
+        "namespaces": [
+          "constellation-policy-proof-app-37bf01d5a5",
+          "constellation-policy-proof-system-37bf01d5a5"
+        ],
+        "image": "ghcr.io/alphabravo-oss/constellation/migrate@sha256:604a275f6c7c11bfc8d80825ebe389a71e9a7a561b9a3aeba25f8fb66877fe56",
+        "flavor": "cilium",
+        "probes": [
+          {
+            "tag": "baseline-protectedPod",
+            "sourceNamespace": "constellation-policy-proof-app-37bf01d5a5",
+            "sourcePod": "client",
+            "target": "http://10.244.2.147:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-protectedService",
+            "sourceNamespace": "constellation-policy-proof-app-37bf01d5a5",
+            "sourcePod": "client",
+            "target": "http://10.96.179.219:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-sharedRequiredPort",
+            "sourceNamespace": "constellation-policy-proof-app-37bf01d5a5",
+            "sourcePod": "client",
+            "target": "http://10.244.2.153:18081/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-ordinaryPod",
+            "sourceNamespace": "constellation-policy-proof-app-37bf01d5a5",
+            "sourcePod": "client",
+            "target": "http://10.244.2.153:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-ordinaryNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-37bf01d5a5",
+            "sourcePod": "client",
+            "target": "http://172.18.0.3:31745/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-ordinaryRemoteNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-37bf01d5a5",
+            "sourcePod": "client",
+            "target": "http://172.18.0.4:31745/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-ordinary-ingress",
+            "sourceNamespace": "constellation-policy-proof-app-37bf01d5a5",
+            "sourcePod": "ordinary",
+            "target": "http://10.244.1.187:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-0-protectedPod",
+            "sourceNamespace": "constellation-policy-proof-app-37bf01d5a5",
+            "sourcePod": "client",
+            "target": "http://10.244.2.147:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-0-protectedService",
+            "sourceNamespace": "constellation-policy-proof-app-37bf01d5a5",
+            "sourcePod": "client",
+            "target": "http://10.96.179.219:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-0-sharedRequiredPort",
+            "sourceNamespace": "constellation-policy-proof-app-37bf01d5a5",
+            "sourcePod": "client",
+            "target": "http://10.244.2.153:18081/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-0-ordinaryPod",
+            "sourceNamespace": "constellation-policy-proof-app-37bf01d5a5",
+            "sourcePod": "client",
+            "target": "http://10.244.2.153:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-0-ordinaryNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-37bf01d5a5",
+            "sourcePod": "client",
+            "target": "http://172.18.0.3:31745/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-0-ordinaryRemoteNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-37bf01d5a5",
+            "sourcePod": "client",
+            "target": "http://172.18.0.4:31745/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-0-system-ingress",
+            "sourceNamespace": "constellation-policy-proof-system-37bf01d5a5",
+            "sourcePod": "protected",
+            "target": "http://10.244.1.187:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-0-ordinary-ingress",
+            "sourceNamespace": "constellation-policy-proof-app-37bf01d5a5",
+            "sourcePod": "ordinary",
+            "target": "http://10.244.1.187:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-1-protectedPod",
+            "sourceNamespace": "constellation-policy-proof-app-37bf01d5a5",
+            "sourcePod": "client",
+            "target": "http://10.244.2.147:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-1-protectedService",
+            "sourceNamespace": "constellation-policy-proof-app-37bf01d5a5",
+            "sourcePod": "client",
+            "target": "http://10.96.179.219:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-1-sharedRequiredPort",
+            "sourceNamespace": "constellation-policy-proof-app-37bf01d5a5",
+            "sourcePod": "client",
+            "target": "http://10.244.2.153:18081/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-1-ordinaryPod",
+            "sourceNamespace": "constellation-policy-proof-app-37bf01d5a5",
+            "sourcePod": "client",
+            "target": "http://10.244.2.153:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-1-ordinaryNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-37bf01d5a5",
+            "sourcePod": "client",
+            "target": "http://172.18.0.3:31745/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-1-ordinaryRemoteNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-37bf01d5a5",
+            "sourcePod": "client",
+            "target": "http://172.18.0.4:31745/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-1-system-ingress",
+            "sourceNamespace": "constellation-policy-proof-system-37bf01d5a5",
+            "sourcePod": "protected",
+            "target": "http://10.244.1.187:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-1-ordinary-ingress",
+            "sourceNamespace": "constellation-policy-proof-app-37bf01d5a5",
+            "sourcePod": "ordinary",
+            "target": "http://10.244.1.187:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-2-protectedPod",
+            "sourceNamespace": "constellation-policy-proof-app-37bf01d5a5",
+            "sourcePod": "client",
+            "target": "http://10.244.2.147:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-2-protectedService",
+            "sourceNamespace": "constellation-policy-proof-app-37bf01d5a5",
+            "sourcePod": "client",
+            "target": "http://10.96.179.219:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-2-sharedRequiredPort",
+            "sourceNamespace": "constellation-policy-proof-app-37bf01d5a5",
+            "sourcePod": "client",
+            "target": "http://10.244.2.153:18081/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-2-ordinaryPod",
+            "sourceNamespace": "constellation-policy-proof-app-37bf01d5a5",
+            "sourcePod": "client",
+            "target": "http://10.244.2.153:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-2-ordinaryNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-37bf01d5a5",
+            "sourcePod": "client",
+            "target": "http://172.18.0.3:31745/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-2-ordinaryRemoteNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-37bf01d5a5",
+            "sourcePod": "client",
+            "target": "http://172.18.0.4:31745/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-2-system-ingress",
+            "sourceNamespace": "constellation-policy-proof-system-37bf01d5a5",
+            "sourcePod": "protected",
+            "target": "http://10.244.1.187:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-2-ordinary-ingress",
+            "sourceNamespace": "constellation-policy-proof-app-37bf01d5a5",
+            "sourcePod": "ordinary",
+            "target": "http://10.244.1.187:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "recovery-ordinary-egress",
+            "sourceNamespace": "constellation-policy-proof-app-37bf01d5a5",
+            "sourcePod": "client",
+            "target": "http://10.244.2.153:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "recovery-ordinary-ingress",
+            "sourceNamespace": "constellation-policy-proof-app-37bf01d5a5",
+            "sourcePod": "ordinary",
+            "target": "http://10.244.1.187:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          }
+        ],
+        "placement": {
+          "client": {
+            "node": "constellation-cilium-proof-worker",
+            "ip": "10.244.1.187"
+          },
+          "ordinary": {
+            "node": "constellation-cilium-proof-worker2",
+            "ip": "10.244.2.153"
+          },
+          "protected": {
+            "node": "constellation-cilium-proof-worker2",
+            "ip": "10.244.2.147"
+          }
+        },
+        "crossNodeVerified": true,
+        "sharedIdentityRefusedBeforeWrite": true,
+        "effectivePolicy": {
+          "apiVersion": "cilium.io/v2",
+          "kind": "CiliumNetworkPolicy",
+          "metadata": {
+            "annotations": {
+              "constellation.alphabravo.io/communication-namespaces": "constellation-policy-proof-system-37bf01d5a5",
+              "constellation.alphabravo.io/protected-namespaces": "constellation-policy-proof-system-37bf01d5a5,kube-node-lease,kube-public,kube-system",
+              "constellation.alphabravo.io/system-communication": "preserved"
+            },
+            "creationTimestamp": "2026-10-19T12:12:46Z",
+            "generation": 1,
+            "name": "communication-proof",
+            "namespace": "constellation-policy-proof-app-37bf01d5a5",
+            "resourceVersion": "990",
+            "uid": "27300ec7-e74c-4a2d-8fdd-a4226fd441b0"
+          },
+          "spec": {
+            "egress": [
+              {
+                "toEndpoints": [
+                  {
+                    "matchExpressions": [
+                      {
+                        "key": "k8s:io.kubernetes.pod.namespace",
+                        "operator": "In",
+                        "values": [
+                          "constellation-policy-proof-system-37bf01d5a5"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toEndpoints": [
+                  {
+                    "matchLabels": {
+                      "gen:io.cilium.k8s.named-ports": "dns.UDP.53_dns-tcp.TCP.53_liveness-probe.TCP.8080",
+                      "gen:io.cilium.k8s.named-ports-1": "metrics.TCP.9153_readiness-probe.TCP.8181",
+                      "k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name": "kube-system",
+                      "k8s:io.cilium.k8s.policy.cluster": "default",
+                      "k8s:io.cilium.k8s.policy.serviceaccount": "coredns",
+                      "k8s:io.kubernetes.pod.namespace": "kube-system",
+                      "k8s:k8s-app": "kube-dns"
+                    }
+                  }
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toEndpoints": [
+                  {
+                    "matchLabels": {
+                      "gen:io.cilium.k8s.named-ports": "dns.UDP.53_dns-tcp.TCP.53_liveness-probe.TCP.8080",
+                      "gen:io.cilium.k8s.named-ports-1": "metrics.TCP.9153_readiness-probe.TCP.8181",
+                      "k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name": "kube-system",
+                      "k8s:io.cilium.k8s.policy.cluster": "default",
+                      "k8s:io.cilium.k8s.policy.serviceaccount": "coredns",
+                      "k8s:io.kubernetes.pod.namespace": "kube-system",
+                      "k8s:k8s-app": "kube-dns"
+                    }
+                  }
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "UDP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toEndpoints": [
+                  {
+                    "matchLabels": {
+                      "k8s:io.cilium.k8s.namespace.labels.constellation.alphabravo.io/protection-proof": "37bf01d5a5",
+                      "k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name": "constellation-policy-proof-system-37bf01d5a5",
+                      "k8s:io.cilium.k8s.policy.cluster": "default",
+                      "k8s:io.cilium.k8s.policy.serviceaccount": "default",
+                      "k8s:io.kubernetes.pod.namespace": "constellation-policy-proof-system-37bf01d5a5",
+                      "k8s:proof-role": "protected"
+                    }
+                  }
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "18080",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toEndpoints": [
+                  {
+                    "matchLabels": {
+                      "k8s:io.cilium.k8s.namespace.labels.constellation.alphabravo.io/protection-proof": "37bf01d5a5",
+                      "k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name": "constellation-policy-proof-app-37bf01d5a5",
+                      "k8s:io.cilium.k8s.policy.cluster": "default",
+                      "k8s:io.cilium.k8s.policy.serviceaccount": "default",
+                      "k8s:io.kubernetes.pod.namespace": "constellation-policy-proof-app-37bf01d5a5",
+                      "k8s:proof-role": "ordinary"
+                    }
+                  }
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "18081",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.96.0.1/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "443",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.96.0.10/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.96.0.10/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "UDP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.96.168.204/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "18081",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.96.179.219/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "18080",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.244.2.84/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.244.2.84/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "UDP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.244.2.147/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "18080",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.244.2.153/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "18081",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.244.2.245/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.244.2.245/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "UDP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "172.18.0.2/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "6443",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toEntities": [
+                  "host",
+                  "remote-node",
+                  "kube-apiserver"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "6443",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "enableDefaultDeny": {
+              "egress": true,
+              "ingress": true
+            },
+            "endpointSelector": {
+              "matchLabels": {
+                "proof-role": "client"
+              }
+            },
+            "ingress": [
+              {
+                "fromEndpoints": [
+                  {
+                    "matchExpressions": [
+                      {
+                        "key": "k8s:io.kubernetes.pod.namespace",
+                        "operator": "In",
+                        "values": [
+                          "constellation-policy-proof-system-37bf01d5a5"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "fromEntities": [
+                  "host",
+                  "remote-node",
+                  "kube-apiserver"
+                ]
+              }
+            ]
+          },
+          "status": {
+            "conditions": [
+              {
+                "lastTransitionTime": "2026-10-19T12:12:46Z",
+                "message": "Policy validation succeeded",
+                "status": "True",
+                "type": "Valid"
+              }
+            ]
+          }
+        },
+        "dnsSucceeded": true,
+        "coreMetricsBlockedWithDNSWorking": true,
+        "apiTransportSucceeded": true,
+        "passed": true,
+        "cleanupErrors": []
+      },
+      "artifactSHA256": {
+        "cilium-status.txt": "2688901146fdc63c595c7d6ae20053116ceb17ffbbabced51aa1bb4dad395271",
+        "cilium-values.json": "a7b4b8e3de498c15200cb651ff9cab76bb9f33c44f993e178d9c96b787d63ff2",
+        "cilium.log": "3382071f04fe79e1b91e5d724c2cb4e8f741d0c09cfaba711561e85d84db2983",
+        "cluster-pods.json": "ff548fc8224b8490a40cee375131ec60ff6b0d10ce90c7d1b5676543e1bcf3cd",
+        "daemonsets.json": "30e0c815a0579de60a9c8e806f61b769b797a543b43f1b77c7316b0a1de865ae",
+        "events.json": "ded22f2e142d84287ac5a4c77a52a33444fbfeaad80ca12d3057c63d1ec1ba04",
+        "kind.yaml": "f7bd184547b643f578a370796043b6bd753cdbeec0ae4ecaa8ecca2e0217c9b1",
+        "kubernetes-version.json": "478f2d63dc1ddcda39e49af45383aa5232f0278a890d1e214e19ba2bae48fc18",
+        "netpolicyapply.test": "3cef75ae239056c52a7e6787f7ed983dd1665d69bfb30978cb08e6e2ddfbcf02",
+        "nodes.json": "a13d7ff074336606fc19296586e86821b80a610365f2d8f58f062a11c836eaca",
+        "proof/evidence.json": "95e140286aeb634b61c412889db00cc50024d1c5c197074b6e07087c177ae9f2",
+        "proof/helper.log": "ffcb13baa4e4edac4256b1b080c8d985236e75fcced620cc850d7e4508576217",
+        "proof/shared-identity-refusal.log": "7f80a59dfe0ba346142c5c657ec46228246bbdbe76b9cd96ee3af44f060bb459"
+      }
+    },
+    {
+      "profile": "multi-replacement",
+      "nodeCount": 3,
+      "kubeProxyReplacement": true,
+      "ciliumRuntimeStatus": "KVStore:                Disabled   \nKubernetes:             Ok         1.35 (v1.35.8) [linux/amd64]\nKubernetes APIs:        [\"cilium/v2::CiliumCIDRGroup\", \"cilium/v2::CiliumClusterwideNetworkPolicy\", \"cilium/v2::CiliumEndpoint\", \"cilium/v2::CiliumNetworkPolicy\", \"cilium/v2::CiliumNode\", \"core/v1::Pods\", \"networking.k8s.io/v1::NetworkPolicy\"]\nKubeProxyReplacement:   True   [eth0    172.18.0.3 fc00:f853:ccd:e793::3 fe80::9065:15ff:fe2a:b948 (Direct Routing)]\nHost firewall:          Disabled\nSRv6:                   Disabled\nCNI Chaining:           none\nCNI Config file:        successfully wrote CNI configuration file to /host/etc/cni/net.d/05-cilium.conflist\nCilium:                 Ok   1.20.3 (v1.20.3-bf1aba7b)\nNodeMonitor:            Listening for events on 4 CPUs with 64x4096 of shared memory\nCilium health daemon:   Ok   \nIPAM:                   IPv4: 5/254 allocated from 10.244.0.0/24, \nAllocated addresses:\n  10.244.0.128 (kube-system/coredns-7d764666f9-vbl77)\n  10.244.0.212 (health)\n  10.244.0.240 (kube-system/coredns-7d764666f9-zlmqq)\n  10.244.0.3 (router)\n  10.244.0.79 (local-path-storage/local-path-provisioner-67b778fdf6-78bpj)\nIPv4 BIG TCP:           Disabled\nIPv6 BIG TCP:           Disabled\nBandwidthManager:       Disabled\nRouting:                Network: Tunnel [vxlan]   Host: Legacy\nAttach Mode:            TCX\nDevice Mode:            veth\nMasquerading:           IPTables [IPv4: Enabled, IPv6: Disabled]\nClock Source for BPF:   ktime\nController Status:      28/28 healthy\n  Name                                                                        Last success   Last error   Count   Message\n  cilium-health-ep                                                            16s ago        never        0       no error   \n  ct-map-pressure                                                             17s ago        never        0       no error   \n  endpoint-1100-regeneration-recovery                                         never          never        0       no error   \n  endpoint-1214-regeneration-recovery                                         never          never        0       no error   \n  endpoint-341-regeneration-recovery                                          never          never        0       no error   \n  endpoint-405-regeneration-recovery                                          never          never        0       no error   \n  endpoint-627-regeneration-recovery                                          never          never        0       no error   \n  endpoint-gc                                                                 17s ago        never        0       no error   \n  endpoint-periodic-regeneration                                              17s ago        never        0       no error   \n  ipcache-inject-labels                                                       3s ago         never        0       no error   \n  k8s-heartbeat                                                               17s ago        never        0       no error   \n  resolve-identity-1100                                                       11s ago        never        0       no error   \n  resolve-identity-1214                                                       11s ago        never        0       no error   \n  resolve-identity-341                                                        11s ago        never        0       no error   \n  resolve-identity-405                                                        16s ago        never        0       no error   \n  resolve-identity-627                                                        17s ago        never        0       no error   \n  resolve-labels-kube-system/coredns-7d764666f9-vbl77                         11s ago        never        0       no error   \n  resolve-labels-kube-system/coredns-7d764666f9-zlmqq                         11s ago        never        0       no error   \n  resolve-labels-local-path-storage/local-path-provisioner-67b778fdf6-78bpj   11s ago        never        0       no error   \n  sync-policymap-1100                                                         7s ago         never        0       no error   \n  sync-policymap-1214                                                         7s ago         never        0       no error   \n  sync-policymap-341                                                          6s ago         never        0       no error   \n  sync-policymap-405                                                          7s ago         never        0       no error   \n  sync-policymap-627                                                          6s ago         never        0       no error   \n  sync-to-k8s-ciliumendpoint (1100)                                           11s ago        never        0       no error   \n  sync-to-k8s-ciliumendpoint (1214)                                           11s ago        never        0       no error   \n  sync-to-k8s-ciliumendpoint (341)                                            11s ago        never        0       no error   \n  write-cni-file                                                              17s ago        never        0       no error   \nProxy Status:            OK, ip 10.244.0.3, 0 redirects active on ports 10000-20000, Envoy: external\nGlobal Identity Range:   min 256, max 65535\nHubble:                  Ok   Current/Max Flows: 98/4095 (2.39%), Flows/s: 4.66   Metrics: Disabled\nKubeProxyReplacement Details:\n  Status:               True\n  Socket LB:            Enabled\n  Socket LB Tracing:    Enabled\n  Socket LB Coverage:   Full\n  Devices:              eth0    172.18.0.3 fc00:f853:ccd:e793::3 fe80::9065:15ff:fe2a:b948 (Direct Routing)\n  Mode:                 SNAT\n  Backend Selection:    Random\n  Session Affinity:     Enabled\n  NAT46/64 Support:     Disabled\n  XDP Acceleration:     Disabled\n  Services:\n  - ClusterIP:      Enabled\n  - NodePort:       Enabled (Range: 30000-32767) \n  - LoadBalancer:   Enabled \n  - externalIPs:    Enabled \n  - HostPort:       Enabled\n  Annotations:\n  - service.cilium.io/node\n  - service.cilium.io/node-selector\n  - service.cilium.io/proxy-delegation\n  - service.cilium.io/src-ranges-policy\n  - service.cilium.io/type\nBPF Maps:   dynamic sizing: on (ratio: 0.002500)\n  Name                          Size\n  Auth                          524288\n  Non-TCP connection tracking   73536\n  TCP connection tracking       147073\n  Endpoints                     65535\n  IP cache                      512000\n  IPv4 masquerading agent       16384\n  IPv6 masquerading agent       16384\n  IPv4 fragmentation            8192\n  IPv4 service                  65536\n  IPv6 service                  65536\n  IPv4 service backend          65536\n  IPv6 service backend          65536\n  IPv4 service reverse NAT      65536\n  IPv6 service reverse NAT      65536\n  Metrics                       1024\n  Ratelimit metrics             64\n  NAT                           147073\n  Neighbor table                147073\n  Endpoint policy               16384\n  Policy stats                  65536\n  Session affinity              65536\n  Sock reverse NAT              73536\nEncryption:       Disabled        \nCluster health:   0/0 reachable   (2026-10-19T12:12:29Z)   (Probe interval: 0s)\nName              IP              Node                     Endpoints\nModules Health:   Stopped(0) Degraded(0) OK(85)\n  agent\n  \u251c\u2500\u2500 controlplane\n  \u2502   \u251c\u2500\u2500 cgroup-manager\n  \u2502   \u2502   \u2514\u2500\u2500 job-process-pod-events                              [OK] Running (17s, x1)\n  \u2502   \u251c\u2500\u2500 cilium-agent-dynamic-config\n  \u2502   \u2502   \u2514\u2500\u2500 job-k8s-reflector-cilium-configs-cm-cilium-config-kube-system      [OK] 163 upserted, 0 deleted, 163 total objects (17s, x1)\n  \u2502   \u251c\u2500\u2500 ciliumenvoyconfig\n  \u2502   \u2502   \u251c\u2500\u2500 job-node-labels                                     [OK] Running (17s, x1)\n  \u2502   \u2502   \u251c\u2500\u2500 job-reconcile                                       [OK] OK, 0 object(s) (17s, x2)\n  \u2502   \u2502   \u2514\u2500\u2500 job-refresh                                         [OK] Next refresh in 30m0s (17s, x1)\n  \u2502   \u251c\u2500\u2500 config-drift-checker\n  \u2502   \u2502   \u2514\u2500\u2500 job-drift-checker                                   [OK] Running (17s, x1)\n  \u2502   \u251c\u2500\u2500 daemonconfig\n  \u2502   \u2502   \u2514\u2500\u2500 timer-job-validate-unchanged-daemon-config          [OK] Primed (17s, x1)\n  \u2502   \u251c\u2500\u2500 dynamic-lifecycle-manager\n  \u2502   \u2502   \u251c\u2500\u2500 job-reconcile                                       [OK] OK, 0 object(s) (17s, x2)\n  \u2502   \u2502   \u2514\u2500\u2500 job-refresh                                         [OK] Next refresh in 30m0s (17s, x1)\n  \u2502   \u251c\u2500\u2500 endpoint-manager\n  \u2502   \u2502   \u251c\u2500\u2500 cilium-endpoint-1100 (local-path-storage/local-path-provisioner-67b778fdf6-78bpj)\n  \u2502   \u2502   \u2502   \u251c\u2500\u2500 cep-k8s-sync                                    [OK] sync-to-k8s-ciliumendpoint (1100) (1s, x3)\n  \u2502   \u2502   \u2502   \u251c\u2500\u2500 datapath-regenerate                             [OK] Endpoint regeneration successful (7s, x1)\n  \u2502   \u2502   \u2502   \u2514\u2500\u2500 policymap-sync                                  [OK] sync-policymap-1100 (7s, x1)\n  \u2502   \u2502   \u251c\u2500\u2500 cilium-endpoint-1214 (kube-system/coredns-7d764666f9-vbl77)\n  \u2502   \u2502   \u2502   \u251c\u2500\u2500 cep-k8s-sync                                    [OK] sync-to-k8s-ciliumendpoint (1214) (1s, x3)\n  \u2502   \u2502   \u2502   \u251c\u2500\u2500 datapath-regenerate                             [OK] Endpoint regeneration successful (7s, x1)\n  \u2502   \u2502   \u2502   \u2514\u2500\u2500 policymap-sync                                  [OK] sync-policymap-1214 (7s, x1)\n  \u2502   \u2502   \u251c\u2500\u2500 cilium-endpoint-341 (kube-system/coredns-7d764666f9-zlmqq)\n  \u2502   \u2502   \u2502   \u251c\u2500\u2500 cep-k8s-sync                                    [OK] sync-to-k8s-ciliumendpoint (341) (1s, x3)\n  \u2502   \u2502   \u2502   \u251c\u2500\u2500 datapath-regenerate                             [OK] Endpoint regeneration successful (6s, x1)\n  \u2502   \u2502   \u2502   \u2514\u2500\u2500 policymap-sync                                  [OK] sync-policymap-341 (6s, x1)\n  \u2502   \u2502   \u251c\u2500\u2500 cilium-endpoint-405 (/)\n  \u2502   \u2502   \u2502   \u251c\u2500\u2500 datapath-regenerate                             [OK] Endpoint regeneration successful (6s, x2)\n  \u2502   \u2502   \u2502   \u2514\u2500\u2500 policymap-sync                                  [OK] sync-policymap-405 (7s, x1)\n  \u2502   \u2502   \u251c\u2500\u2500 cilium-endpoint-627 (/)\n  \u2502   \u2502   \u2502   \u251c\u2500\u2500 datapath-regenerate                             [OK] Endpoint regeneration successful (4s, x2)\n  \u2502   \u2502   \u2502   \u2514\u2500\u2500 policymap-sync                                  [OK] sync-policymap-627 (6s, x1)\n  \u2502   \u2502   \u251c\u2500\u2500 endpoint-gc                                         [OK] endpoint-gc (17s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 job-namespace-updater                               [OK] Running (17s, x1)\n  \u2502   \u251c\u2500\u2500 envoy-proxy\n  \u2502   \u2502   \u251c\u2500\u2500 job-accesslog-server                                [OK] Running (17s, x1)\n  \u2502   \u2502   \u251c\u2500\u2500 job-xds-server                                      [OK] Running (17s, x1)\n  \u2502   \u2502   \u251c\u2500\u2500 observer-job-k8s-secrets-resource-events-cilium-secrets      [OK] Primed (17s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 timer-job-version-check                             [OK] Primed (17s, x1)\n  \u2502   \u251c\u2500\u2500 ep-bpf-prog-watchdog\n  \u2502   \u2502   \u2514\u2500\u2500 timer-job-ep-bpf-prog-watchdog                      [OK] Primed (17s, x1)\n  \u2502   \u251c\u2500\u2500 fqdn\n  \u2502   \u2502   \u2514\u2500\u2500 namemanager\n  \u2502   \u2502       \u251c\u2500\u2500 observer-job-preallocate                        [OK] Primed (17s, x1)\n  \u2502   \u2502       \u2514\u2500\u2500 timer-job-dns-garbage-collector-job             [OK] Primed (17s, x1)\n  \u2502   \u251c\u2500\u2500 hostip-sync\n  \u2502   \u2502   \u2514\u2500\u2500 job-sync-hostips                                    [OK] Synchronized (17s, x3)\n  \u2502   \u251c\u2500\u2500 hubble\n  \u2502   \u2502   \u2514\u2500\u2500 timer-job-hubble-namespace-cleanup                  [OK] Primed (17s, x1)\n  \u2502   \u251c\u2500\u2500 identity-policy-computer\n  \u2502   \u2502   \u2514\u2500\u2500 job-policy-computation-loop                         [OK] Running (17s, x1)\n  \u2502   \u251c\u2500\u2500 ipam\n  \u2502   \u2502   \u2514\u2500\u2500 ipam-podippool-table\n  \u2502   \u2502       \u2514\u2500\u2500 job-k8s-reflector-podippools-daemon-k8s         [OK] 0 upserted, 0 deleted, 0 total objects (17s, x1)\n  \u2502   \u251c\u2500\u2500 ipcache\n  \u2502   \u2502   \u251c\u2500\u2500 job-api-server-backend-watcher                      [OK] Running (17s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 job-release-local-identities                        [OK] Running (17s, x1)\n  \u2502   \u251c\u2500\u2500 k8s-tables\n  \u2502   \u2502   \u251c\u2500\u2500 job-k8s-reflector-k8s-namespaces-daemon-k8s         [OK] 6 upserted, 0 deleted, 6 total objects (17s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 job-k8s-reflector-k8s-pods-daemon-k8s               [OK] 3 upserted, 0 deleted, 9 total objects (3s, x1)\n  \u2502   \u251c\u2500\u2500 l7-proxy\n  \u2502   \u2502   \u2514\u2500\u2500 timer-job-proxy-ports-checkpoint                    [OK] OK (409.615\u00b5s) (17s, x1)\n  \u2502   \u251c\u2500\u2500 loadbalancer-healthserver\n  \u2502   \u2502   \u2514\u2500\u2500 job-control-loop                                    [OK] 0 health servers running (2s, x16)\n  \u2502   \u251c\u2500\u2500 loadbalancer-maps\n  \u2502   \u2502   \u2514\u2500\u2500 timer-job-pressure-metrics-reporter                 [OK] Primed (17s, x1)\n  \u2502   \u251c\u2500\u2500 loadbalancer-reconciler\n  \u2502   \u2502   \u251c\u2500\u2500 job-reconcile                                       [OK] OK, 5 object(s) (3s, x15)\n  \u2502   \u2502   \u251c\u2500\u2500 job-refresh                                         [OK] Next refresh in 30m0s (17s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 socket-termination\n  \u2502   \u2502       \u2514\u2500\u2500 job-socket-termination                          [OK] Running (17s, x1)\n  \u2502   \u251c\u2500\u2500 loadbalancer-reflectors\n  \u2502   \u2502   \u2514\u2500\u2500 k8s-reflector\n  \u2502   \u2502       \u251c\u2500\u2500 job-reflect-pods                                [OK] Running (17s, x1)\n  \u2502   \u2502       \u2514\u2500\u2500 job-reflect-services-endpoints                  [OK] Running (17s, x1)\n  \u2502   \u251c\u2500\u2500 loadbalancer-writer\n  \u2502   \u2502   \u251c\u2500\u2500 job-node-addr-reconciler                            [OK] Running (17s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 job-wildcard-addr-reconciler                        [OK] Running (17s, x1)\n  \u2502   \u251c\u2500\u2500 local-node-store\n  \u2502   \u2502   \u2514\u2500\u2500 job-sync-local-node                                 [OK] Running (17s, x1)\n  \u2502   \u251c\u2500\u2500 nat-stats\n  \u2502   \u2502   \u2514\u2500\u2500 timer-job-nat-stats                                 [OK] OK (588.518\u00b5s) (12s, x1)\n  \u2502   \u251c\u2500\u2500 node-manager\n  \u2502   \u2502   \u251c\u2500\u2500 job-backgroundSync                                  [OK] Running (17s, x1)\n  \u2502   \u2502   \u251c\u2500\u2500 node-checkpoint-writer                              [OK] node checkpoint written (17s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 nodes-add                                           [OK] Node adds successful (13s, x3)\n  \u2502   \u251c\u2500\u2500 policy\n  \u2502   \u2502   \u251c\u2500\u2500 observer-job-policy-importer                        [OK] Primed (17s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 timer-job-id-alloc-update-policy-maps               [OK] OK (27.155691ms) (11s, x1)\n  \u2502   \u251c\u2500\u2500 status\n  \u2502   \u2502   \u2514\u2500\u2500 job-probes                                          [OK] Running (17s, x1)\n  \u2502   \u2514\u2500\u2500 ztunnel\n  \u2502       \u2514\u2500\u2500 enrollment-reconciler\n  \u2502           \u2514\u2500\u2500 job-derive-desired-mtls-namespace-enrollments    [OK] Running (17s, x1)\n  \u251c\u2500\u2500 datapath\n  \u2502   \u251c\u2500\u2500 agent-liveness-updater\n  \u2502   \u2502   \u2514\u2500\u2500 timer-job-agent-liveness-updater                    [OK] OK (26.269\u00b5s) (0s, x1)\n  \u2502   \u251c\u2500\u2500 device-reconciler\n  \u2502   \u2502   \u251c\u2500\u2500 job-reconcile                                       [OK] OK, 0 object(s) (17s, x2)\n  \u2502   \u2502   \u2514\u2500\u2500 job-refresh                                         [OK] Next refresh in 30m0s (17s, x1)\n  \u2502   \u251c\u2500\u2500 iptables\n  \u2502   \u2502   \u251c\u2500\u2500 ipset\n  \u2502   \u2502   \u2502   \u251c\u2500\u2500 job-reconcile                                   [OK] OK, 0 object(s) (17s, x2)\n  \u2502   \u2502   \u2502   \u2514\u2500\u2500 job-refresh                                     [OK] Next refresh in 30m0s (17s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 job-iptables-reconciliation-loop                    [OK] iptables rules update completed (17s, x1)\n  \u2502   \u251c\u2500\u2500 l2-responder\n  \u2502   \u2502   \u2514\u2500\u2500 job-l2-responder-reconciler                         [OK] Running (17s, x1)\n  \u2502   \u251c\u2500\u2500 link-cache\n  \u2502   \u2502   \u2514\u2500\u2500 timer-job-sync                                      [OK] OK (381.402\u00b5s) (2s, x1)\n  \u2502   \u251c\u2500\u2500 maps\n  \u2502   \u2502   \u251c\u2500\u2500 ct-nat-map-gc\n  \u2502   \u2502   \u2502   \u251c\u2500\u2500 observer-job-nat-map-next4                      [OK] Primed (17s, x1)\n  \u2502   \u2502   \u2502   \u2514\u2500\u2500 observer-job-nat-map-next6                      [OK] Primed (17s, x1)\n  \u2502   \u2502   \u251c\u2500\u2500 netdev-map\n  \u2502   \u2502   \u2502   \u2514\u2500\u2500 netdev-map-sync\n  \u2502   \u2502   \u2502       \u2514\u2500\u2500 job-netdev-map-sync                         [OK] Running (17s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 subnet-map\n  \u2502   \u2502       \u2514\u2500\u2500 timer-job-pressure-metric-subnet_map            [OK] Primed (17s, x1)\n  \u2502   \u251c\u2500\u2500 mtu\n  \u2502   \u2502   \u251c\u2500\u2500 job-endpoint-mtu-updater                            [OK] Endpoint MTU updated (17s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 job-mtu-updater                                     [OK] MTU updated (1500) (17s, x1)\n  \u2502   \u251c\u2500\u2500 node-address\n  \u2502   \u2502   \u2514\u2500\u2500 job-node-address-update                             [OK] 10.244.0.3 (primary), fe80::cb0:ceff:fe98:cec (17s, x1)\n  \u2502   \u251c\u2500\u2500 orchestrator\n  \u2502   \u2502   \u2514\u2500\u2500 job-reinitialize                                    [OK] OK (4s, x1)\n  \u2502   \u251c\u2500\u2500 route-reconciler\n  \u2502   \u2502   \u251c\u2500\u2500 job-desired-route-refresher                         [OK] Running (17s, x1)\n  \u2502   \u2502   \u251c\u2500\u2500 job-reconcile                                       [OK] OK, 1 object(s) (13s, x6)\n  \u2502   \u2502   \u2514\u2500\u2500 job-refresh                                         [OK] Next refresh in 30m0s (17s, x1)\n  \u2502   \u251c\u2500\u2500 sysctl\n  \u2502   \u2502   \u251c\u2500\u2500 job-reconcile                                       [OK] OK, 20 object(s) (4s, x13)\n  \u2502   \u2502   \u2514\u2500\u2500 job-refresh                                         [OK] Next refresh in 10m0s (17s, x1)\n  \u2502   \u2514\u2500\u2500 utime\n  \u2502       \u2514\u2500\u2500 timer-job-sync-userspace-and-datapath               [OK] OK (133.98\u00b5s) (17s, x1)\n  \u2514\u2500\u2500 infra\n      \u251c\u2500\u2500 agent-healthz\n      \u2502   \u2514\u2500\u2500 job-agent-healthz-server-ipv4                       [OK] Running (17s, x1)\n      \u251c\u2500\u2500 metrics\n      \u2502   \u251c\u2500\u2500 job-collect                                         [OK] Sampled 24 metrics in 5.714153ms, next collection at 2026-10-19 12:17:18.400644981 +0000 UTC m=+301.061709417 (17s, x1)\n      \u2502   \u2514\u2500\u2500 timer-job-cleanup                                   [OK] Primed (17s, x1)\n      \u2514\u2500\u2500 shell\n          \u2514\u2500\u2500 job-listener                                        [OK] Listening on /var/run/cilium/shell.sock (17s, x1)\n  health\n  \u2514\u2500\u2500 job-module-status-metrics                   [OK] Running (17s, x1)\n  \n\n",
+      "nodePlatforms": [
+        {
+          "name": "constellation-cilium-proof-control-plane",
+          "architecture": "amd64",
+          "bootID": "2036b3ca-b2c1-46a1-9b73-b6b0093c8f4b",
+          "containerRuntimeVersion": "containerd://2.3.4",
+          "kernelVersion": "6.17.0-1022-azure",
+          "kubeProxyVersion": "",
+          "kubeletVersion": "v1.35.8",
+          "machineID": "53450b705ba9433ab2b6d9c70d190817",
+          "operatingSystem": "linux",
+          "osImage": "Debian GNU/Linux 13 (trixie)",
+          "swap": {
+            "capacity": 3221221376
+          },
+          "systemUUID": "b77d7843-c032-4320-9702-5e4ffaf9f2aa"
+        },
+        {
+          "name": "constellation-cilium-proof-worker",
+          "architecture": "amd64",
+          "bootID": "2036b3ca-b2c1-46a1-9b73-b6b0093c8f4b",
+          "containerRuntimeVersion": "containerd://2.3.4",
+          "kernelVersion": "6.17.0-1022-azure",
+          "kubeProxyVersion": "",
+          "kubeletVersion": "v1.35.8",
+          "machineID": "64f43990bdbd4fc094f5816183991d0b",
+          "operatingSystem": "linux",
+          "osImage": "Debian GNU/Linux 13 (trixie)",
+          "swap": {
+            "capacity": 3221221376
+          },
+          "systemUUID": "3e6e8fe2-fc34-4fa1-ae75-9afce156295f"
+        },
+        {
+          "name": "constellation-cilium-proof-worker2",
+          "architecture": "amd64",
+          "bootID": "2036b3ca-b2c1-46a1-9b73-b6b0093c8f4b",
+          "containerRuntimeVersion": "containerd://2.3.4",
+          "kernelVersion": "6.17.0-1022-azure",
+          "kubeProxyVersion": "",
+          "kubeletVersion": "v1.35.8",
+          "machineID": "c5ca6115db044f69bdf8b35479a7e058",
+          "operatingSystem": "linux",
+          "osImage": "Debian GNU/Linux 13 (trixie)",
+          "swap": {
+            "capacity": 3221221376
+          },
+          "systemUUID": "1eab416a-109f-449e-87d2-7965924e6dc3"
+        }
+      ],
+      "proof": {
+        "nonce": "140afc0e9c",
+        "namespaces": [
+          "constellation-policy-proof-app-140afc0e9c",
+          "constellation-policy-proof-system-140afc0e9c"
+        ],
+        "image": "ghcr.io/alphabravo-oss/constellation/migrate@sha256:604a275f6c7c11bfc8d80825ebe389a71e9a7a561b9a3aeba25f8fb66877fe56",
+        "flavor": "cilium",
+        "probes": [
+          {
+            "tag": "baseline-protectedPod",
+            "sourceNamespace": "constellation-policy-proof-app-140afc0e9c",
+            "sourcePod": "client",
+            "target": "http://10.244.2.168:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-protectedService",
+            "sourceNamespace": "constellation-policy-proof-app-140afc0e9c",
+            "sourcePod": "client",
+            "target": "http://10.96.53.113:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-sharedRequiredPort",
+            "sourceNamespace": "constellation-policy-proof-app-140afc0e9c",
+            "sourcePod": "client",
+            "target": "http://10.244.2.169:18081/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-ordinaryPod",
+            "sourceNamespace": "constellation-policy-proof-app-140afc0e9c",
+            "sourcePod": "client",
+            "target": "http://10.244.2.169:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-ordinaryNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-140afc0e9c",
+            "sourcePod": "client",
+            "target": "http://172.18.0.2:32254/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-ordinaryRemoteNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-140afc0e9c",
+            "sourcePod": "client",
+            "target": "http://172.18.0.4:32254/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-ordinary-ingress",
+            "sourceNamespace": "constellation-policy-proof-app-140afc0e9c",
+            "sourcePod": "ordinary",
+            "target": "http://10.244.1.77:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-0-protectedPod",
+            "sourceNamespace": "constellation-policy-proof-app-140afc0e9c",
+            "sourcePod": "client",
+            "target": "http://10.244.2.168:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-0-protectedService",
+            "sourceNamespace": "constellation-policy-proof-app-140afc0e9c",
+            "sourcePod": "client",
+            "target": "http://10.96.53.113:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-0-sharedRequiredPort",
+            "sourceNamespace": "constellation-policy-proof-app-140afc0e9c",
+            "sourcePod": "client",
+            "target": "http://10.244.2.169:18081/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-0-ordinaryPod",
+            "sourceNamespace": "constellation-policy-proof-app-140afc0e9c",
+            "sourcePod": "client",
+            "target": "http://10.244.2.169:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-0-ordinaryNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-140afc0e9c",
+            "sourcePod": "client",
+            "target": "http://172.18.0.2:32254/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-0-ordinaryRemoteNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-140afc0e9c",
+            "sourcePod": "client",
+            "target": "http://172.18.0.4:32254/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-0-system-ingress",
+            "sourceNamespace": "constellation-policy-proof-system-140afc0e9c",
+            "sourcePod": "protected",
+            "target": "http://10.244.1.77:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-0-ordinary-ingress",
+            "sourceNamespace": "constellation-policy-proof-app-140afc0e9c",
+            "sourcePod": "ordinary",
+            "target": "http://10.244.1.77:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-1-protectedPod",
+            "sourceNamespace": "constellation-policy-proof-app-140afc0e9c",
+            "sourcePod": "client",
+            "target": "http://10.244.2.168:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-1-protectedService",
+            "sourceNamespace": "constellation-policy-proof-app-140afc0e9c",
+            "sourcePod": "client",
+            "target": "http://10.96.53.113:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-1-sharedRequiredPort",
+            "sourceNamespace": "constellation-policy-proof-app-140afc0e9c",
+            "sourcePod": "client",
+            "target": "http://10.244.2.169:18081/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-1-ordinaryPod",
+            "sourceNamespace": "constellation-policy-proof-app-140afc0e9c",
+            "sourcePod": "client",
+            "target": "http://10.244.2.169:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-1-ordinaryNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-140afc0e9c",
+            "sourcePod": "client",
+            "target": "http://172.18.0.2:32254/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-1-ordinaryRemoteNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-140afc0e9c",
+            "sourcePod": "client",
+            "target": "http://172.18.0.4:32254/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-1-system-ingress",
+            "sourceNamespace": "constellation-policy-proof-system-140afc0e9c",
+            "sourcePod": "protected",
+            "target": "http://10.244.1.77:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-1-ordinary-ingress",
+            "sourceNamespace": "constellation-policy-proof-app-140afc0e9c",
+            "sourcePod": "ordinary",
+            "target": "http://10.244.1.77:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-2-protectedPod",
+            "sourceNamespace": "constellation-policy-proof-app-140afc0e9c",
+            "sourcePod": "client",
+            "target": "http://10.244.2.168:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-2-protectedService",
+            "sourceNamespace": "constellation-policy-proof-app-140afc0e9c",
+            "sourcePod": "client",
+            "target": "http://10.96.53.113:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-2-sharedRequiredPort",
+            "sourceNamespace": "constellation-policy-proof-app-140afc0e9c",
+            "sourcePod": "client",
+            "target": "http://10.244.2.169:18081/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-2-ordinaryPod",
+            "sourceNamespace": "constellation-policy-proof-app-140afc0e9c",
+            "sourcePod": "client",
+            "target": "http://10.244.2.169:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-2-ordinaryNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-140afc0e9c",
+            "sourcePod": "client",
+            "target": "http://172.18.0.2:32254/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-2-ordinaryRemoteNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-140afc0e9c",
+            "sourcePod": "client",
+            "target": "http://172.18.0.4:32254/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-2-system-ingress",
+            "sourceNamespace": "constellation-policy-proof-system-140afc0e9c",
+            "sourcePod": "protected",
+            "target": "http://10.244.1.77:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-2-ordinary-ingress",
+            "sourceNamespace": "constellation-policy-proof-app-140afc0e9c",
+            "sourcePod": "ordinary",
+            "target": "http://10.244.1.77:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "recovery-ordinary-egress",
+            "sourceNamespace": "constellation-policy-proof-app-140afc0e9c",
+            "sourcePod": "client",
+            "target": "http://10.244.2.169:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "recovery-ordinary-ingress",
+            "sourceNamespace": "constellation-policy-proof-app-140afc0e9c",
+            "sourcePod": "ordinary",
+            "target": "http://10.244.1.77:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          }
+        ],
+        "placement": {
+          "client": {
+            "node": "constellation-cilium-proof-worker",
+            "ip": "10.244.1.77"
+          },
+          "ordinary": {
+            "node": "constellation-cilium-proof-worker2",
+            "ip": "10.244.2.169"
+          },
+          "protected": {
+            "node": "constellation-cilium-proof-worker2",
+            "ip": "10.244.2.168"
+          }
+        },
+        "crossNodeVerified": true,
+        "sharedIdentityRefusedBeforeWrite": true,
+        "effectivePolicy": {
+          "apiVersion": "cilium.io/v2",
+          "kind": "CiliumNetworkPolicy",
+          "metadata": {
+            "annotations": {
+              "constellation.alphabravo.io/communication-namespaces": "constellation-policy-proof-system-140afc0e9c",
+              "constellation.alphabravo.io/protected-namespaces": "constellation-policy-proof-system-140afc0e9c,kube-node-lease,kube-public,kube-system",
+              "constellation.alphabravo.io/system-communication": "preserved"
+            },
+            "creationTimestamp": "2026-10-19T12:12:59Z",
+            "generation": 1,
+            "name": "communication-proof",
+            "namespace": "constellation-policy-proof-app-140afc0e9c",
+            "resourceVersion": "998",
+            "uid": "51ba5d18-e9a3-4cfd-8af6-490eaba57416"
+          },
+          "spec": {
+            "egress": [
+              {
+                "toEndpoints": [
+                  {
+                    "matchExpressions": [
+                      {
+                        "key": "k8s:io.kubernetes.pod.namespace",
+                        "operator": "In",
+                        "values": [
+                          "constellation-policy-proof-system-140afc0e9c"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toEndpoints": [
+                  {
+                    "matchLabels": {
+                      "gen:io.cilium.k8s.named-ports": "dns.UDP.53_dns-tcp.TCP.53_liveness-probe.TCP.8080",
+                      "gen:io.cilium.k8s.named-ports-1": "metrics.TCP.9153_readiness-probe.TCP.8181",
+                      "k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name": "kube-system",
+                      "k8s:io.cilium.k8s.policy.cluster": "default",
+                      "k8s:io.cilium.k8s.policy.serviceaccount": "coredns",
+                      "k8s:io.kubernetes.pod.namespace": "kube-system",
+                      "k8s:k8s-app": "kube-dns"
+                    }
+                  }
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toEndpoints": [
+                  {
+                    "matchLabels": {
+                      "gen:io.cilium.k8s.named-ports": "dns.UDP.53_dns-tcp.TCP.53_liveness-probe.TCP.8080",
+                      "gen:io.cilium.k8s.named-ports-1": "metrics.TCP.9153_readiness-probe.TCP.8181",
+                      "k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name": "kube-system",
+                      "k8s:io.cilium.k8s.policy.cluster": "default",
+                      "k8s:io.cilium.k8s.policy.serviceaccount": "coredns",
+                      "k8s:io.kubernetes.pod.namespace": "kube-system",
+                      "k8s:k8s-app": "kube-dns"
+                    }
+                  }
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "UDP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toEndpoints": [
+                  {
+                    "matchLabels": {
+                      "k8s:io.cilium.k8s.namespace.labels.constellation.alphabravo.io/protection-proof": "140afc0e9c",
+                      "k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name": "constellation-policy-proof-system-140afc0e9c",
+                      "k8s:io.cilium.k8s.policy.cluster": "default",
+                      "k8s:io.cilium.k8s.policy.serviceaccount": "default",
+                      "k8s:io.kubernetes.pod.namespace": "constellation-policy-proof-system-140afc0e9c",
+                      "k8s:proof-role": "protected"
+                    }
+                  }
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "18080",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toEndpoints": [
+                  {
+                    "matchLabels": {
+                      "k8s:io.cilium.k8s.namespace.labels.constellation.alphabravo.io/protection-proof": "140afc0e9c",
+                      "k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name": "constellation-policy-proof-app-140afc0e9c",
+                      "k8s:io.cilium.k8s.policy.cluster": "default",
+                      "k8s:io.cilium.k8s.policy.serviceaccount": "default",
+                      "k8s:io.kubernetes.pod.namespace": "constellation-policy-proof-app-140afc0e9c",
+                      "k8s:proof-role": "ordinary"
+                    }
+                  }
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "18081",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.96.0.1/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "443",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.96.0.10/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.96.0.10/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "UDP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.96.35.38/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "18081",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.96.53.113/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "18080",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.244.0.128/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.244.0.128/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "UDP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.244.0.240/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.244.0.240/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "UDP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.244.2.168/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "18080",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.244.2.169/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "18081",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "172.18.0.3/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "6443",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toEntities": [
+                  "host",
+                  "remote-node",
+                  "kube-apiserver"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "6443",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "enableDefaultDeny": {
+              "egress": true,
+              "ingress": true
+            },
+            "endpointSelector": {
+              "matchLabels": {
+                "proof-role": "client"
+              }
+            },
+            "ingress": [
+              {
+                "fromEndpoints": [
+                  {
+                    "matchExpressions": [
+                      {
+                        "key": "k8s:io.kubernetes.pod.namespace",
+                        "operator": "In",
+                        "values": [
+                          "constellation-policy-proof-system-140afc0e9c"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "fromEntities": [
+                  "host",
+                  "remote-node",
+                  "kube-apiserver"
+                ]
+              }
+            ]
+          },
+          "status": {
+            "conditions": [
+              {
+                "lastTransitionTime": "2026-10-19T12:12:59Z",
+                "message": "Policy validation succeeded",
+                "status": "True",
+                "type": "Valid"
+              }
+            ]
+          }
+        },
+        "dnsSucceeded": true,
+        "coreMetricsBlockedWithDNSWorking": true,
+        "apiTransportSucceeded": true,
+        "passed": true,
+        "cleanupErrors": []
+      },
+      "artifactSHA256": {
+        "cilium-status.txt": "81e50bc033a704ef8192b314eac8a332951cbdcd6799f5c2623f103be8cddf41",
+        "cilium-values.json": "f38778ba328565f4ad42a0ce34c9f5b3327531f2702cbe21c775fe98c5499daa",
+        "cilium.log": "2c0e4aafdc796e811a30d193cf694c735557efc91398a2c8447dfaa81880924c",
+        "cluster-pods.json": "ffde26f56b093b1ca09f37491e9c9f83767ee0c74e8c56c17ff78a1b9191d5e4",
+        "daemonsets.json": "e5d0af5fb249c85c26b1d3d086fd971e38efc210dd36ffdf8cbf88056aab791f",
+        "events.json": "e93dd13cca34d38a50d7e330ec3a5a61f19f4cd2184ea0af84d2e68133315d4d",
+        "kind.yaml": "05a0b34c6a8636e6d1e28f0dd56eda1f4e0fafb1a9f5e20533e6a4132d3304bc",
+        "kubernetes-version.json": "478f2d63dc1ddcda39e49af45383aa5232f0278a890d1e214e19ba2bae48fc18",
+        "netpolicyapply.test": "3cef75ae239056c52a7e6787f7ed983dd1665d69bfb30978cb08e6e2ddfbcf02",
+        "nodes.json": "e01d2d696456dbb8a701f49aaa6d6a821ff7034a003a52aae5a7aeba62710983",
+        "proof/evidence.json": "ab2cfb84e62ddf247a2da73f7c0e7f3460687f43501b2af452eb4c27eec3d135",
+        "proof/helper.log": "153cd4a8ad911437f6f77ce075ea2bedfa3c66a01e203f010f21fbc56b10deae",
+        "proof/shared-identity-refusal.log": "a039484f78c007dbf9c72572d005f3aba553dd7792c262468163031e822e61a9"
+      }
+    },
+    {
+      "profile": "single-kubeproxy",
+      "nodeCount": 1,
+      "kubeProxyReplacement": false,
+      "ciliumRuntimeStatus": "KVStore:                Disabled   \nKubernetes:             Ok         1.35 (v1.35.8) [linux/amd64]\nKubernetes APIs:        [\"cilium/v2::CiliumCIDRGroup\", \"cilium/v2::CiliumClusterwideNetworkPolicy\", \"cilium/v2::CiliumEndpoint\", \"cilium/v2::CiliumNetworkPolicy\", \"cilium/v2::CiliumNode\", \"core/v1::Pods\", \"networking.k8s.io/v1::NetworkPolicy\"]\nKubeProxyReplacement:   False   \nHost firewall:          Disabled\nSRv6:                   Disabled\nCNI Chaining:           none\nCNI Config file:        successfully wrote CNI configuration file to /host/etc/cni/net.d/05-cilium.conflist\nCilium:                 Ok   1.20.3 (v1.20.3-bf1aba7b)\nNodeMonitor:            Listening for events on 4 CPUs with 64x4096 of shared memory\nCilium health daemon:   Ok   \nIPAM:                   IPv4: 5/254 allocated from 10.244.0.0/24, \nAllocated addresses:\n  10.244.0.139 (kube-system/coredns-7d764666f9-p8q67)\n  10.244.0.244 (health)\n  10.244.0.40 (router)\n  10.244.0.75 (local-path-storage/local-path-provisioner-67b778fdf6-zts4j)\n  10.244.0.78 (kube-system/coredns-7d764666f9-k8ldz)\nIPv4 BIG TCP:           Disabled\nIPv6 BIG TCP:           Disabled\nBandwidthManager:       Disabled\nRouting:                Network: Tunnel [vxlan]   Host: Legacy\nAttach Mode:            TCX\nDevice Mode:            veth\nMasquerading:           IPTables [IPv4: Enabled, IPv6: Disabled]\nClock Source for BPF:   ktime\nController Status:      28/28 healthy\n  Name                                                                        Last success   Last error   Count   Message\n  cilium-health-ep                                                            4s ago         never        0       no error   \n  ct-map-pressure                                                             5s ago         never        0       no error   \n  endpoint-1659-regeneration-recovery                                         never          never        0       no error   \n  endpoint-3384-regeneration-recovery                                         never          never        0       no error   \n  endpoint-3528-regeneration-recovery                                         never          never        0       no error   \n  endpoint-586-regeneration-recovery                                          never          never        0       no error   \n  endpoint-892-regeneration-recovery                                          never          never        0       no error   \n  endpoint-gc                                                                 5s ago         never        0       no error   \n  endpoint-periodic-regeneration                                              5s ago         never        0       no error   \n  ipcache-inject-labels                                                       4s ago         never        0       no error   \n  k8s-heartbeat                                                               12s ago        never        0       no error   \n  resolve-identity-1659                                                       5s ago         never        0       no error   \n  resolve-identity-3384                                                       4s ago         never        0       no error   \n  resolve-identity-3528                                                       5s ago         never        0       no error   \n  resolve-identity-586                                                        5s ago         never        0       no error   \n  resolve-identity-892                                                        5s ago         never        0       no error   \n  resolve-labels-kube-system/coredns-7d764666f9-k8ldz                         5s ago         never        0       no error   \n  resolve-labels-kube-system/coredns-7d764666f9-p8q67                         5s ago         never        0       no error   \n  resolve-labels-local-path-storage/local-path-provisioner-67b778fdf6-zts4j   5s ago         never        0       no error   \n  sync-policymap-1659                                                         2s ago         never        0       no error   \n  sync-policymap-3384                                                         2s ago         never        0       no error   \n  sync-policymap-3528                                                         3s ago         never        0       no error   \n  sync-policymap-586                                                          2s ago         never        0       no error   \n  sync-policymap-892                                                          2s ago         never        0       no error   \n  sync-to-k8s-ciliumendpoint (1659)                                           4s ago         never        0       no error   \n  sync-to-k8s-ciliumendpoint (586)                                            4s ago         never        0       no error   \n  sync-to-k8s-ciliumendpoint (892)                                            4s ago         never        0       no error   \n  write-cni-file                                                              6s ago         never        0       no error   \nProxy Status:            OK, ip 10.244.0.40, 0 redirects active on ports 10000-20000, Envoy: external\nGlobal Identity Range:   min 256, max 65535\nHubble:                  Ok   Current/Max Flows: 21/4095 (0.51%), Flows/s: 0.00   Metrics: Disabled\nKubeProxyReplacement Details:\n  Status:               False\n  Socket LB:            Disabled\n  Socket LB Tracing:    Disabled\n  Socket LB Coverage:   Full\n  Session Affinity:     Enabled\n  NAT46/64 Support:     Disabled\n  Services:\n  - ClusterIP:      Enabled\n  - NodePort:       Disabled \n  - LoadBalancer:   Disabled \n  - externalIPs:    Disabled \n  - HostPort:       Disabled\n  Annotations:      (n/a)\nBPF Maps:   dynamic sizing: on (ratio: 0.002500)\n  Name                          Size\n  Auth                          524288\n  Non-TCP connection tracking   73536\n  TCP connection tracking       147073\n  Endpoints                     65535\n  IP cache                      512000\n  IPv4 masquerading agent       16384\n  IPv6 masquerading agent       16384\n  IPv4 fragmentation            8192\n  IPv4 service                  65536\n  IPv6 service                  65536\n  IPv4 service backend          65536\n  IPv6 service backend          65536\n  IPv4 service reverse NAT      65536\n  IPv6 service reverse NAT      65536\n  Metrics                       1024\n  Ratelimit metrics             64\n  NAT                           147073\n  Neighbor table                147073\n  Endpoint policy               16384\n  Policy stats                  65536\n  Session affinity              65536\n  Sock reverse NAT              73536\nEncryption:       Disabled        \nCluster health:   0/0 reachable   (2026-10-19T12:12:22Z)   (Probe interval: 0s)\nName              IP              Node                     Endpoints\nModules Health:   Stopped(0) Degraded(0) OK(80)\n  agent\n  \u251c\u2500\u2500 controlplane\n  \u2502   \u251c\u2500\u2500 cilium-agent-dynamic-config\n  \u2502   \u2502   \u2514\u2500\u2500 job-k8s-reflector-cilium-configs-cm-cilium-config-kube-system      [OK] 162 upserted, 0 deleted, 162 total objects (6s, x1)\n  \u2502   \u251c\u2500\u2500 ciliumenvoyconfig\n  \u2502   \u2502   \u251c\u2500\u2500 job-node-labels                                     [OK] Running (6s, x1)\n  \u2502   \u2502   \u251c\u2500\u2500 job-reconcile                                       [OK] OK, 0 object(s) (6s, x2)\n  \u2502   \u2502   \u2514\u2500\u2500 job-refresh                                         [OK] Next refresh in 30m0s (6s, x1)\n  \u2502   \u251c\u2500\u2500 config-drift-checker\n  \u2502   \u2502   \u2514\u2500\u2500 job-drift-checker                                   [OK] Running (6s, x1)\n  \u2502   \u251c\u2500\u2500 daemonconfig\n  \u2502   \u2502   \u2514\u2500\u2500 timer-job-validate-unchanged-daemon-config          [OK] Primed (6s, x1)\n  \u2502   \u251c\u2500\u2500 dynamic-lifecycle-manager\n  \u2502   \u2502   \u251c\u2500\u2500 job-reconcile                                       [OK] OK, 0 object(s) (6s, x2)\n  \u2502   \u2502   \u2514\u2500\u2500 job-refresh                                         [OK] Next refresh in 30m0s (6s, x1)\n  \u2502   \u251c\u2500\u2500 endpoint-manager\n  \u2502   \u2502   \u251c\u2500\u2500 cilium-endpoint-1659 (local-path-storage/local-path-provisioner-67b778fdf6-zts4j)\n  \u2502   \u2502   \u2502   \u251c\u2500\u2500 cep-k8s-sync                                    [OK] sync-to-k8s-ciliumendpoint (1659) (4s, x2)\n  \u2502   \u2502   \u2502   \u251c\u2500\u2500 datapath-regenerate                             [OK] Endpoint regeneration successful (0s, x3)\n  \u2502   \u2502   \u2502   \u2514\u2500\u2500 policymap-sync                                  [OK] sync-policymap-1659 (2s, x1)\n  \u2502   \u2502   \u251c\u2500\u2500 cilium-endpoint-3384 (/)\n  \u2502   \u2502   \u2502   \u251c\u2500\u2500 datapath-regenerate                             [OK] Endpoint regeneration successful (0s, x2)\n  \u2502   \u2502   \u2502   \u2514\u2500\u2500 policymap-sync                                  [OK] sync-policymap-3384 (2s, x1)\n  \u2502   \u2502   \u251c\u2500\u2500 cilium-endpoint-3528 (/)\n  \u2502   \u2502   \u2502   \u251c\u2500\u2500 datapath-regenerate                             [OK] Endpoint regeneration successful (0s, x3)\n  \u2502   \u2502   \u2502   \u2514\u2500\u2500 policymap-sync                                  [OK] sync-policymap-3528 (3s, x1)\n  \u2502   \u2502   \u251c\u2500\u2500 cilium-endpoint-586 (kube-system/coredns-7d764666f9-p8q67)\n  \u2502   \u2502   \u2502   \u251c\u2500\u2500 cep-k8s-sync                                    [OK] sync-to-k8s-ciliumendpoint (586) (4s, x2)\n  \u2502   \u2502   \u2502   \u251c\u2500\u2500 datapath-regenerate                             [OK] Endpoint regeneration successful (0s, x3)\n  \u2502   \u2502   \u2502   \u2514\u2500\u2500 policymap-sync                                  [OK] sync-policymap-586 (2s, x1)\n  \u2502   \u2502   \u251c\u2500\u2500 cilium-endpoint-892 (kube-system/coredns-7d764666f9-k8ldz)\n  \u2502   \u2502   \u2502   \u251c\u2500\u2500 cep-k8s-sync                                    [OK] sync-to-k8s-ciliumendpoint (892) (4s, x2)\n  \u2502   \u2502   \u2502   \u251c\u2500\u2500 datapath-regenerate                             [OK] Endpoint regeneration successful (0s, x3)\n  \u2502   \u2502   \u2502   \u2514\u2500\u2500 policymap-sync                                  [OK] sync-policymap-892 (2s, x1)\n  \u2502   \u2502   \u251c\u2500\u2500 endpoint-gc                                         [OK] endpoint-gc (5s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 job-namespace-updater                               [OK] Running (6s, x1)\n  \u2502   \u251c\u2500\u2500 envoy-proxy\n  \u2502   \u2502   \u251c\u2500\u2500 job-accesslog-server                                [OK] Running (6s, x1)\n  \u2502   \u2502   \u251c\u2500\u2500 job-xds-server                                      [OK] Running (6s, x1)\n  \u2502   \u2502   \u251c\u2500\u2500 observer-job-k8s-secrets-resource-events-cilium-secrets      [OK] Primed (6s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 timer-job-version-check                             [OK] Primed (6s, x1)\n  \u2502   \u251c\u2500\u2500 ep-bpf-prog-watchdog\n  \u2502   \u2502   \u2514\u2500\u2500 timer-job-ep-bpf-prog-watchdog                      [OK] Primed (5s, x1)\n  \u2502   \u251c\u2500\u2500 fqdn\n  \u2502   \u2502   \u2514\u2500\u2500 namemanager\n  \u2502   \u2502       \u251c\u2500\u2500 observer-job-preallocate                        [OK] Primed (6s, x1)\n  \u2502   \u2502       \u2514\u2500\u2500 timer-job-dns-garbage-collector-job             [OK] Primed (5s, x1)\n  \u2502   \u251c\u2500\u2500 hostip-sync\n  \u2502   \u2502   \u2514\u2500\u2500 job-sync-hostips                                    [OK] Synchronized (5s, x3)\n  \u2502   \u251c\u2500\u2500 hubble\n  \u2502   \u2502   \u2514\u2500\u2500 timer-job-hubble-namespace-cleanup                  [OK] Primed (6s, x1)\n  \u2502   \u251c\u2500\u2500 identity-policy-computer\n  \u2502   \u2502   \u2514\u2500\u2500 job-policy-computation-loop                         [OK] Running (12s, x1)\n  \u2502   \u251c\u2500\u2500 ipam\n  \u2502   \u2502   \u2514\u2500\u2500 ipam-podippool-table\n  \u2502   \u2502       \u2514\u2500\u2500 job-k8s-reflector-podippools-daemon-k8s         [OK] 0 upserted, 0 deleted, 0 total objects (5s, x1)\n  \u2502   \u251c\u2500\u2500 ipcache\n  \u2502   \u2502   \u251c\u2500\u2500 job-api-server-backend-watcher                      [OK] Running (6s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 job-release-local-identities                        [OK] Running (6s, x1)\n  \u2502   \u251c\u2500\u2500 k8s-tables\n  \u2502   \u2502   \u251c\u2500\u2500 job-k8s-reflector-k8s-namespaces-daemon-k8s         [OK] 6 upserted, 0 deleted, 6 total objects (6s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 job-k8s-reflector-k8s-pods-daemon-k8s               [OK] 3 upserted, 0 deleted, 11 total objects (0s, x1)\n  \u2502   \u251c\u2500\u2500 l7-proxy\n  \u2502   \u2502   \u2514\u2500\u2500 timer-job-proxy-ports-checkpoint                    [OK] OK (369.692\u00b5s) (6s, x1)\n  \u2502   \u251c\u2500\u2500 loadbalancer-maps\n  \u2502   \u2502   \u2514\u2500\u2500 timer-job-pressure-metrics-reporter                 [OK] Primed (6s, x1)\n  \u2502   \u251c\u2500\u2500 loadbalancer-reconciler\n  \u2502   \u2502   \u251c\u2500\u2500 job-reconcile                                       [OK] OK, 5 object(s) (0s, x10)\n  \u2502   \u2502   \u2514\u2500\u2500 job-refresh                                         [OK] Next refresh in 30m0s (6s, x1)\n  \u2502   \u251c\u2500\u2500 loadbalancer-reflectors\n  \u2502   \u2502   \u2514\u2500\u2500 k8s-reflector\n  \u2502   \u2502       \u2514\u2500\u2500 job-reflect-services-endpoints                  [OK] Running (6s, x1)\n  \u2502   \u251c\u2500\u2500 loadbalancer-writer\n  \u2502   \u2502   \u251c\u2500\u2500 job-node-addr-reconciler                            [OK] Running (6s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 job-wildcard-addr-reconciler                        [OK] Running (6s, x1)\n  \u2502   \u251c\u2500\u2500 local-node-store\n  \u2502   \u2502   \u2514\u2500\u2500 job-sync-local-node                                 [OK] Running (6s, x1)\n  \u2502   \u251c\u2500\u2500 node-manager\n  \u2502   \u2502   \u251c\u2500\u2500 job-backgroundSync                                  [OK] Running (6s, x1)\n  \u2502   \u2502   \u251c\u2500\u2500 node-checkpoint-writer                              [OK] node checkpoint written (6s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 nodes-add                                           [OK] Node adds successful (6s, x1)\n  \u2502   \u251c\u2500\u2500 policy\n  \u2502   \u2502   \u251c\u2500\u2500 observer-job-policy-importer                        [OK] Primed (6s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 timer-job-id-alloc-update-policy-maps               [OK] OK (36.675\u00b5s) (5s, x1)\n  \u2502   \u251c\u2500\u2500 status\n  \u2502   \u2502   \u2514\u2500\u2500 job-probes                                          [OK] Running (6s, x1)\n  \u2502   \u2514\u2500\u2500 ztunnel\n  \u2502       \u2514\u2500\u2500 enrollment-reconciler\n  \u2502           \u2514\u2500\u2500 job-derive-desired-mtls-namespace-enrollments    [OK] Running (6s, x1)\n  \u251c\u2500\u2500 datapath\n  \u2502   \u251c\u2500\u2500 agent-liveness-updater\n  \u2502   \u2502   \u2514\u2500\u2500 timer-job-agent-liveness-updater                    [OK] OK (27.581\u00b5s) (0s, x1)\n  \u2502   \u251c\u2500\u2500 device-reconciler\n  \u2502   \u2502   \u251c\u2500\u2500 job-reconcile                                       [OK] OK, 0 object(s) (6s, x2)\n  \u2502   \u2502   \u2514\u2500\u2500 job-refresh                                         [OK] Next refresh in 30m0s (6s, x1)\n  \u2502   \u251c\u2500\u2500 iptables\n  \u2502   \u2502   \u251c\u2500\u2500 ipset\n  \u2502   \u2502   \u2502   \u251c\u2500\u2500 job-reconcile                                   [OK] OK, 0 object(s) (6s, x2)\n  \u2502   \u2502   \u2502   \u2514\u2500\u2500 job-refresh                                     [OK] Next refresh in 30m0s (6s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 job-iptables-reconciliation-loop                    [OK] iptables rules full reconciliation completed (5s, x1)\n  \u2502   \u251c\u2500\u2500 l2-responder\n  \u2502   \u2502   \u2514\u2500\u2500 job-l2-responder-reconciler                         [OK] Running (6s, x1)\n  \u2502   \u251c\u2500\u2500 link-cache\n  \u2502   \u2502   \u2514\u2500\u2500 timer-job-sync                                      [OK] Primed (6s, x1)\n  \u2502   \u251c\u2500\u2500 maps\n  \u2502   \u2502   \u251c\u2500\u2500 ct-nat-map-gc\n  \u2502   \u2502   \u2502   \u251c\u2500\u2500 observer-job-nat-map-next4                      [OK] Primed (6s, x1)\n  \u2502   \u2502   \u2502   \u2514\u2500\u2500 observer-job-nat-map-next6                      [OK] Primed (6s, x1)\n  \u2502   \u2502   \u251c\u2500\u2500 netdev-map\n  \u2502   \u2502   \u2502   \u2514\u2500\u2500 netdev-map-sync\n  \u2502   \u2502   \u2502       \u2514\u2500\u2500 job-netdev-map-sync                         [OK] Running (6s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 subnet-map\n  \u2502   \u2502       \u2514\u2500\u2500 timer-job-pressure-metric-subnet_map            [OK] Primed (6s, x1)\n  \u2502   \u251c\u2500\u2500 mtu\n  \u2502   \u2502   \u251c\u2500\u2500 job-endpoint-mtu-updater                            [OK] Endpoint MTU updated (6s, x1)\n  \u2502   \u2502   \u2514\u2500\u2500 job-mtu-updater                                     [OK] MTU updated (1500) (6s, x1)\n  \u2502   \u251c\u2500\u2500 node-address\n  \u2502   \u2502   \u2514\u2500\u2500 job-node-address-update                             [OK] 10.244.0.40 (primary), fe80::40e2:69ff:fe07:9f29 (5s, x1)\n  \u2502   \u251c\u2500\u2500 orchestrator\n  \u2502   \u2502   \u2514\u2500\u2500 job-reinitialize                                    [OK] OK (0s, x3)\n  \u2502   \u251c\u2500\u2500 route-reconciler\n  \u2502   \u2502   \u251c\u2500\u2500 job-desired-route-refresher                         [OK] Running (6s, x1)\n  \u2502   \u2502   \u251c\u2500\u2500 job-reconcile                                       [OK] OK, 1 object(s) (0s, x13)\n  \u2502   \u2502   \u2514\u2500\u2500 job-refresh                                         [OK] Next refresh in 30m0s (6s, x1)\n  \u2502   \u251c\u2500\u2500 sysctl\n  \u2502   \u2502   \u251c\u2500\u2500 job-reconcile                                       [OK] OK, 20 object(s) (2s, x11)\n  \u2502   \u2502   \u2514\u2500\u2500 job-refresh                                         [OK] Next refresh in 10m0s (6s, x1)\n  \u2502   \u2514\u2500\u2500 utime\n  \u2502       \u2514\u2500\u2500 timer-job-sync-userspace-and-datapath               [OK] OK (7.286657ms) (6s, x1)\n  \u2514\u2500\u2500 infra\n      \u251c\u2500\u2500 agent-healthz\n      \u2502   \u2514\u2500\u2500 job-agent-healthz-server-ipv4                       [OK] Running (6s, x1)\n      \u251c\u2500\u2500 metrics\n      \u2502   \u251c\u2500\u2500 job-collect                                         [OK] Sampled 24 metrics in 2.67046ms, next collection at 2026-10-19 12:17:19.714385483 +0000 UTC m=+306.675126410 (6s, x1)\n      \u2502   \u2514\u2500\u2500 timer-job-cleanup                                   [OK] Primed (6s, x1)\n      \u2514\u2500\u2500 shell\n          \u2514\u2500\u2500 job-listener                                        [OK] Listening on /var/run/cilium/shell.sock (6s, x1)\n  health\n  \u2514\u2500\u2500 job-module-status-metrics                   [OK] Running (6s, x1)\n  \n\n",
+      "nodePlatforms": [
+        {
+          "name": "constellation-cilium-proof-control-plane",
+          "architecture": "amd64",
+          "bootID": "5b85233d-49d2-4f35-aa74-1f5c8a3c865c",
+          "containerRuntimeVersion": "containerd://2.3.4",
+          "kernelVersion": "6.17.0-1022-azure",
+          "kubeProxyVersion": "",
+          "kubeletVersion": "v1.35.8",
+          "machineID": "32742a45a90047c3b53bce7eb763bbca",
+          "operatingSystem": "linux",
+          "osImage": "Debian GNU/Linux 13 (trixie)",
+          "swap": {
+            "capacity": 3221221376
+          },
+          "systemUUID": "18d1b3d3-45be-457e-b36d-53f3222780b8"
+        }
+      ],
+      "proof": {
+        "nonce": "6ed575051f",
+        "namespaces": [
+          "constellation-policy-proof-app-6ed575051f",
+          "constellation-policy-proof-system-6ed575051f"
+        ],
+        "image": "ghcr.io/alphabravo-oss/constellation/migrate@sha256:604a275f6c7c11bfc8d80825ebe389a71e9a7a561b9a3aeba25f8fb66877fe56",
+        "flavor": "cilium",
+        "probes": [
+          {
+            "tag": "baseline-protectedPod",
+            "sourceNamespace": "constellation-policy-proof-app-6ed575051f",
+            "sourcePod": "client",
+            "target": "http://10.244.0.236:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-protectedService",
+            "sourceNamespace": "constellation-policy-proof-app-6ed575051f",
+            "sourcePod": "client",
+            "target": "http://10.96.64.116:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-sharedRequiredPort",
+            "sourceNamespace": "constellation-policy-proof-app-6ed575051f",
+            "sourcePod": "client",
+            "target": "http://10.244.0.20:18081/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-ordinaryPod",
+            "sourceNamespace": "constellation-policy-proof-app-6ed575051f",
+            "sourcePod": "client",
+            "target": "http://10.244.0.20:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-ordinaryNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-6ed575051f",
+            "sourcePod": "client",
+            "target": "http://172.18.0.2:30484/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "baseline-ordinary-ingress",
+            "sourceNamespace": "constellation-policy-proof-app-6ed575051f",
+            "sourcePod": "ordinary",
+            "target": "http://10.244.0.13:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-0-protectedPod",
+            "sourceNamespace": "constellation-policy-proof-app-6ed575051f",
+            "sourcePod": "client",
+            "target": "http://10.244.0.236:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-0-protectedService",
+            "sourceNamespace": "constellation-policy-proof-app-6ed575051f",
+            "sourcePod": "client",
+            "target": "http://10.96.64.116:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-0-sharedRequiredPort",
+            "sourceNamespace": "constellation-policy-proof-app-6ed575051f",
+            "sourcePod": "client",
+            "target": "http://10.244.0.20:18081/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-0-ordinaryPod",
+            "sourceNamespace": "constellation-policy-proof-app-6ed575051f",
+            "sourcePod": "client",
+            "target": "http://10.244.0.20:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-0-ordinaryNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-6ed575051f",
+            "sourcePod": "client",
+            "target": "http://172.18.0.2:30484/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-0-system-ingress",
+            "sourceNamespace": "constellation-policy-proof-system-6ed575051f",
+            "sourcePod": "protected",
+            "target": "http://10.244.0.13:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-0-ordinary-ingress",
+            "sourceNamespace": "constellation-policy-proof-app-6ed575051f",
+            "sourcePod": "ordinary",
+            "target": "http://10.244.0.13:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-1-protectedPod",
+            "sourceNamespace": "constellation-policy-proof-app-6ed575051f",
+            "sourcePod": "client",
+            "target": "http://10.244.0.236:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-1-protectedService",
+            "sourceNamespace": "constellation-policy-proof-app-6ed575051f",
+            "sourcePod": "client",
+            "target": "http://10.96.64.116:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-1-sharedRequiredPort",
+            "sourceNamespace": "constellation-policy-proof-app-6ed575051f",
+            "sourcePod": "client",
+            "target": "http://10.244.0.20:18081/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-1-ordinaryPod",
+            "sourceNamespace": "constellation-policy-proof-app-6ed575051f",
+            "sourcePod": "client",
+            "target": "http://10.244.0.20:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-1-ordinaryNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-6ed575051f",
+            "sourcePod": "client",
+            "target": "http://172.18.0.2:30484/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-1-system-ingress",
+            "sourceNamespace": "constellation-policy-proof-system-6ed575051f",
+            "sourcePod": "protected",
+            "target": "http://10.244.0.13:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-1-ordinary-ingress",
+            "sourceNamespace": "constellation-policy-proof-app-6ed575051f",
+            "sourcePod": "ordinary",
+            "target": "http://10.244.0.13:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-2-protectedPod",
+            "sourceNamespace": "constellation-policy-proof-app-6ed575051f",
+            "sourcePod": "client",
+            "target": "http://10.244.0.236:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-2-protectedService",
+            "sourceNamespace": "constellation-policy-proof-app-6ed575051f",
+            "sourcePod": "client",
+            "target": "http://10.96.64.116:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-2-sharedRequiredPort",
+            "sourceNamespace": "constellation-policy-proof-app-6ed575051f",
+            "sourcePod": "client",
+            "target": "http://10.244.0.20:18081/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-2-ordinaryPod",
+            "sourceNamespace": "constellation-policy-proof-app-6ed575051f",
+            "sourcePod": "client",
+            "target": "http://10.244.0.20:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-2-ordinaryNodePort",
+            "sourceNamespace": "constellation-policy-proof-app-6ed575051f",
+            "sourcePod": "client",
+            "target": "http://172.18.0.2:30484/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "protected-2-system-ingress",
+            "sourceNamespace": "constellation-policy-proof-system-6ed575051f",
+            "sourcePod": "protected",
+            "target": "http://10.244.0.13:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "protected-2-ordinary-ingress",
+            "sourceNamespace": "constellation-policy-proof-app-6ed575051f",
+            "sourcePod": "ordinary",
+            "target": "http://10.244.0.13:18080/",
+            "expectedAllowed": false,
+            "allowed": false,
+            "exitCode": 1,
+            "stderr": "wget: download timed out\ncommand terminated with exit code 1\n"
+          },
+          {
+            "tag": "recovery-ordinary-egress",
+            "sourceNamespace": "constellation-policy-proof-app-6ed575051f",
+            "sourcePod": "client",
+            "target": "http://10.244.0.20:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          },
+          {
+            "tag": "recovery-ordinary-ingress",
+            "sourceNamespace": "constellation-policy-proof-app-6ed575051f",
+            "sourcePod": "ordinary",
+            "target": "http://10.244.0.13:18080/",
+            "expectedAllowed": true,
+            "allowed": true,
+            "exitCode": 0,
+            "stderr": ""
+          }
+        ],
+        "placement": {
+          "client": {
+            "node": "constellation-cilium-proof-control-plane",
+            "ip": "10.244.0.13"
+          },
+          "ordinary": {
+            "node": "constellation-cilium-proof-control-plane",
+            "ip": "10.244.0.20"
+          },
+          "protected": {
+            "node": "constellation-cilium-proof-control-plane",
+            "ip": "10.244.0.236"
+          }
+        },
+        "sharedIdentityRefusedBeforeWrite": true,
+        "effectivePolicy": {
+          "apiVersion": "cilium.io/v2",
+          "kind": "CiliumNetworkPolicy",
+          "metadata": {
+            "annotations": {
+              "constellation.alphabravo.io/communication-namespaces": "constellation-policy-proof-system-6ed575051f",
+              "constellation.alphabravo.io/protected-namespaces": "constellation-policy-proof-system-6ed575051f,kube-node-lease,kube-public,kube-system",
+              "constellation.alphabravo.io/system-communication": "preserved"
+            },
+            "creationTimestamp": "2026-10-19T12:12:38Z",
+            "generation": 1,
+            "name": "communication-proof",
+            "namespace": "constellation-policy-proof-app-6ed575051f",
+            "resourceVersion": "750",
+            "uid": "675d8572-5c9f-43a9-8fcc-442024bac1e8"
+          },
+          "spec": {
+            "egress": [
+              {
+                "toEndpoints": [
+                  {
+                    "matchExpressions": [
+                      {
+                        "key": "k8s:io.kubernetes.pod.namespace",
+                        "operator": "In",
+                        "values": [
+                          "constellation-policy-proof-system-6ed575051f"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toEndpoints": [
+                  {
+                    "matchLabels": {
+                      "k8s:io.cilium.k8s.namespace.labels.constellation.alphabravo.io/protection-proof": "6ed575051f",
+                      "k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name": "constellation-policy-proof-app-6ed575051f",
+                      "k8s:io.cilium.k8s.policy.cluster": "default",
+                      "k8s:io.cilium.k8s.policy.serviceaccount": "default",
+                      "k8s:io.kubernetes.pod.namespace": "constellation-policy-proof-app-6ed575051f",
+                      "k8s:proof-role": "ordinary"
+                    }
+                  }
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "18081",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toEndpoints": [
+                  {
+                    "matchLabels": {
+                      "gen:io.cilium.k8s.named-ports": "dns.UDP.53_dns-tcp.TCP.53_liveness-probe.TCP.8080",
+                      "gen:io.cilium.k8s.named-ports-1": "metrics.TCP.9153_readiness-probe.TCP.8181",
+                      "k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name": "kube-system",
+                      "k8s:io.cilium.k8s.policy.cluster": "default",
+                      "k8s:io.cilium.k8s.policy.serviceaccount": "coredns",
+                      "k8s:io.kubernetes.pod.namespace": "kube-system",
+                      "k8s:k8s-app": "kube-dns"
+                    }
+                  }
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toEndpoints": [
+                  {
+                    "matchLabels": {
+                      "gen:io.cilium.k8s.named-ports": "dns.UDP.53_dns-tcp.TCP.53_liveness-probe.TCP.8080",
+                      "gen:io.cilium.k8s.named-ports-1": "metrics.TCP.9153_readiness-probe.TCP.8181",
+                      "k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name": "kube-system",
+                      "k8s:io.cilium.k8s.policy.cluster": "default",
+                      "k8s:io.cilium.k8s.policy.serviceaccount": "coredns",
+                      "k8s:io.kubernetes.pod.namespace": "kube-system",
+                      "k8s:k8s-app": "kube-dns"
+                    }
+                  }
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "UDP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toEndpoints": [
+                  {
+                    "matchLabels": {
+                      "k8s:io.cilium.k8s.namespace.labels.constellation.alphabravo.io/protection-proof": "6ed575051f",
+                      "k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name": "constellation-policy-proof-system-6ed575051f",
+                      "k8s:io.cilium.k8s.policy.cluster": "default",
+                      "k8s:io.cilium.k8s.policy.serviceaccount": "default",
+                      "k8s:io.kubernetes.pod.namespace": "constellation-policy-proof-system-6ed575051f",
+                      "k8s:proof-role": "protected"
+                    }
+                  }
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "18080",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.96.0.1/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "443",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.96.0.10/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.96.0.10/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "UDP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.96.64.116/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "18080",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.96.153.155/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "18081",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.244.0.20/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "18081",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.244.0.78/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.244.0.78/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "UDP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.244.0.139/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.244.0.139/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "53",
+                        "protocol": "UDP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "10.244.0.236/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "18080",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toCIDR": [
+                  "172.18.0.2/32"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "6443",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "toEntities": [
+                  "host",
+                  "remote-node",
+                  "kube-apiserver"
+                ],
+                "toPorts": [
+                  {
+                    "ports": [
+                      {
+                        "port": "6443",
+                        "protocol": "TCP"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "enableDefaultDeny": {
+              "egress": true,
+              "ingress": true
+            },
+            "endpointSelector": {
+              "matchLabels": {
+                "proof-role": "client"
+              }
+            },
+            "ingress": [
+              {
+                "fromEndpoints": [
+                  {
+                    "matchExpressions": [
+                      {
+                        "key": "k8s:io.kubernetes.pod.namespace",
+                        "operator": "In",
+                        "values": [
+                          "constellation-policy-proof-system-6ed575051f"
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "fromEntities": [
+                  "host",
+                  "remote-node",
+                  "kube-apiserver"
+                ]
+              }
+            ]
+          },
+          "status": {
+            "conditions": [
+              {
+                "lastTransitionTime": "2026-10-19T12:12:38Z",
+                "message": "Policy validation succeeded",
+                "status": "True",
+                "type": "Valid"
+              }
+            ]
+          }
+        },
+        "dnsSucceeded": true,
+        "coreMetricsBlockedWithDNSWorking": true,
+        "apiTransportSucceeded": true,
+        "passed": true,
+        "cleanupErrors": []
+      },
+      "artifactSHA256": {
+        "cilium-status.txt": "964d8fa744fda3ef034e64812cf294a67b096a40c2c4b8db4a8adc1cfc55fcc9",
+        "cilium-values.json": "a7b4b8e3de498c15200cb651ff9cab76bb9f33c44f993e178d9c96b787d63ff2",
+        "cilium.log": "aa57cf640504dbcb3ebf51838a10da132ec6a18290fd29f13ad75bd16a754018",
+        "cluster-pods.json": "a1688dab927cd20aaba189cc0c1479f449ec4fb5c81abd435e97474fdbdeb0b5",
+        "daemonsets.json": "665374ebf3f3327f9d852d2202aadd25a8d9d48757fb887bae9207157e365f4b",
+        "events.json": "58f47bf976d134c0e115146f42180a37602c3234428542a8b3c88e1d715942d9",
+        "kind.yaml": "5054521e583a4c6f7a86977911524e0fc56c6a959b803995bdebd099aa5da437",
+        "kubernetes-version.json": "478f2d63dc1ddcda39e49af45383aa5232f0278a890d1e214e19ba2bae48fc18",
+        "netpolicyapply.test": "3cef75ae239056c52a7e6787f7ed983dd1665d69bfb30978cb08e6e2ddfbcf02",
+        "nodes.json": "ae87e12854403788592e1ddcbd3715acd3fb1eb4387abbc852612b3dfc03223e",
+        "proof/evidence.json": "8c36381e821d3927435a5715eb9ad7307b31b28b76be09af84ea0448e011cfff",
+        "proof/helper.log": "e74b211839ed0d703a405a2ebb14a275b2a331f9ecb30bb9cf329d320ebc0e59",
+        "proof/shared-identity-refusal.log": "61c584ca040db1f7c691f419030c518c133bc3989f0eb7816e8c95b5360e1366"
+      }
+    }
+  ],
+  "scope": "IPv4 VXLAN network-policy applier communication protection in isolated kind clusters; no runtime DPI/IPS or performance qualification",
+  "remaining": [
+    "IPv6 and dual-stack policy behavior",
+    "Calico live policy qualification",
+    "Cloud and bare-metal topology validation, scale, rolling upgrades and failure recovery",
+    "Cilium identity churn after snapshot and preexisting/third-party unsafe policies"
+  ]
+}

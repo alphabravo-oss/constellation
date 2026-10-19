@@ -23,6 +23,27 @@ this priority order until it finds one with a non-empty config:
 To pin to a non-standard path, set `runtimeAgent.dp.cniDir=<path>` in the
 chart values (auto-discovery is skipped when this is non-empty).
 
+## Network-policy applier communication evidence (2026-10-19)
+
+This evidence concerns CNI policy objects written by the applier. It does not
+establish runtime-agent NFQUEUE/DPI interception or full CNI compatibility.
+The [hosted Cilium run](https://github.com/alphabravo-oss/constellation/actions/runs/39250010832)
+uses unchanged Helm 131 applier sources and default CIDR matching:
+
+| Cilium 1.20.3 profile | Nodes | Traffic checks passed | Additional checks |
+| --- | ---: | ---: | --- |
+| kube-proxy enabled | 1 | 29 | Shared-identity refusal, DNS/API, blocked DNS metrics |
+| kube-proxy enabled, cross-node | 3 | 33 | Verified peer placement, both node NodePorts, same checks |
+| kube-proxy replacement, cross-node | 3 | 33 | No kube-proxy, runtime replacement enabled, same checks |
+
+The clusters use kind 0.33.0 / Kubernetes 1.35.8, IPv4 VXLAN and legacy host routing.
+All disposable namespaces and clusters were removed. IPv6, cloud/bare-metal,
+native routing and scale remain unqualified by these runs. The live installation
+continues using native policy on its existing CNI. See
+`docs/network-policy-self-protection.md` for the contract and
+`deploy/dev/registry-release/validation-cilium-topology-20261019.json` for probes,
+node placement, runtime status and artifact hashes.
+
 ## Tested CNI permutations
 
 | CNI                            | Detection | NFQUEUE Enforce | Cilium-Native Export | Test cluster | Notes |

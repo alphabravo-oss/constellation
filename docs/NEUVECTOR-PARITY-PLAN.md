@@ -1,7 +1,7 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-19** (Helm 131 default-Cilium identity-aware communication protection; broader parity remains active)
+Last reconciled: **2026-10-19** (Helm 131 Cilium cross-node and kube-proxy replacement qualification; broader parity remains active)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -16,6 +16,27 @@ understand the result, and prove that the control is enforced. Constellation's
 stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
 
+
+## Cilium cross-node and kube-proxy replacement qualification
+
+The expanded hosted [dataplane run](https://github.com/alphabravo-oss/constellation/actions/runs/39250010832)
+passed all three profiles using unchanged Helm 131 production sources: single-node
+Cilium (29 traffic checks), three-node Cilium with kube-proxy (33), and three-node
+Cilium with kube-proxy replacement (33). The cross-node fixture pins and verifies
+the client and peers on distinct workers and probes NodePorts through both nodes.
+All profiles also passed shared-identity refusal before a policy write, DNS/API
+transport and blocked DNS metrics. Cleanup completed for every fixture namespace
+and kind cluster. Runtime status confirms replacement mode; kube-proxy is absent
+in that profile. Total: 95 traffic checks plus the explicit safety/transport checks.
+
+This qualifies Cilium 1.20.3 / Kubernetes 1.35.8 / kind 0.33.0 under IPv4 VXLAN
+with legacy host routing and default CIDR matching. It does not qualify IPv6,
+cloud or bare-metal deployment, large-cluster performance, native routing,
+runtime DPI/IPS, Calico, or inventory churn/third-party policy interactions.
+The live deployment stays at Helm 131 with all 14 container identities healthy.
+No broad parity checkbox is closed. Detailed evidence is in
+`deploy/dev/registry-release/validation-cilium-topology-20261019.json` and the
+contract remains `docs/network-policy-self-protection.md`.
 
 ## Default-Cilium backend identity protection (Helm 131)
 
@@ -38,8 +59,9 @@ the rollout. Six authorization reviews verified cluster-wide inventory reads and
 refusal of Cilium inventory mutation, secret reads and service deletion.
 
 The live installation remains on native CNI. Cilium CRD publication is required;
-identity churn is not an atomic transaction, and multi-node, IPv6, kube-proxy
-replacement, Calico and existing unsafe/third-party denies remain open. No broad
+identity churn is not an atomic transaction. The topology qualification above
+adds cross-node and replacement coverage; IPv6, Calico and existing
+unsafe/third-party denies remain open. No broad
 parity checkbox is closed. See `docs/network-policy-self-protection.md` and
 `deploy/dev/registry-release/validation-cilium-identities-20261019.json` for the
 full evidence, source/build distinction, test runs and artifact hashes.

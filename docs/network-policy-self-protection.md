@@ -144,7 +144,34 @@ unresolvable identities cause refusal and retry, not a wider exception. Cilium
 security identities remain a label-based trust boundary: an endpoint introduced
 after the snapshot can join an identity. Kubernetes and Cilium reads are not an
 atomic transaction; inventory churn, alternate identity backends without these
-CRDs, multi-node, IPv6 and kube-proxy replacement need separate qualification.
+CRDs and IPv6 need separate qualification. Cross-node and kube-proxy replacement
+coverage is scoped below.
+
+### Cross-node and kube-proxy replacement qualification
+
+[Run 39250010832](https://github.com/alphabravo-oss/constellation/actions/runs/39250010832)
+uses the same production applier sources as Helm 131 and Cilium 1.20.3 with
+default CIDR matching. All three isolated kind profiles passed:
+
+| Profile | Nodes | Traffic checks | Kube-proxy |
+| --- | ---: | ---: | --- |
+| Single node | 1 | 29 | Present |
+| Cross-node | 3 | 33 | Present |
+| Cross-node Cilium replacement | 3 | 33 | Absent; Cilium reports replacement enabled |
+
+The cross-node fixture explicitly pins the client and peers to different workers
+and verifies their actual placement. It adds NodePort checks through both the
+client and backend nodes. Every profile additionally passes the shared-identity
+refusal before a write, DNS/API transport and DNS-metrics isolation checks.
+Namespace and kind cluster cleanup completed in all profiles. Cilium runtime
+status reports IPv4 VXLAN with legacy host routing; this is not a claim about
+native routing, cloud CNIs, IPv6, runtime DPI/IPS or large-cluster performance.
+
+Source/build compatibility, node platform details, runtime status, every probe
+and artifact hashes are retained in
+`deploy/dev/registry-release/validation-cilium-topology-20261019.json`.
+The live cluster remains on Helm 131 and native CNI; this test-only expansion
+requires no deployment change.
 
 Third-party policies, CNI configuration, external firewall rules and availability failures can still
 block communication. Address-based exceptions trust the declared network endpoint;
