@@ -92,7 +92,7 @@ SELECT c.id, c.name, c.distro, COALESCE(c.cloud_provider,''), COALESCE(c.region,
 	// These are fixed SQL fragments, never request expressions. Scope every
 	// finding/workload rollup while keeping cluster health and connectivity intact.
 	query = strings.ReplaceAll(query, "f.org_id = c.org_id AND f.cluster_id = c.id", "f.org_id = c.org_id AND f.cluster_id = c.id AND ("+findingScope+")")
-	query = strings.ReplaceAll(query, "d.org_id = c.org_id AND d.cluster_id = c.id", "d.org_id = c.org_id AND d.cluster_id = c.id AND ("+deploymentScope+")")
+	query = strings.ReplaceAll(query, "d.org_id = c.org_id AND d.cluster_id = c.id", "d.org_id = c.org_id AND d.cluster_id = c.id AND ("+deploymentScope+") AND ("+inventorypresence.WorkloadStatusSQL("d")+")<>'absent'")
 	rows, err := h.db.Pool().Query(r.Context(), query, subj.OrgID, expectedClusterComponents)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

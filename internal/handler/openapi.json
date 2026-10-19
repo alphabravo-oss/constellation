@@ -18741,6 +18741,24 @@
                 "protect"
               ]
             }
+          },
+          {
+            "name": "presence",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "current",
+                "all",
+                "present",
+                "scaled_to_zero",
+                "absent",
+                "unverified"
+              ],
+              "default": "current"
+            },
+            "description": "Current includes present, scaled-to-zero and unverified workloads; excludes only confirmed absence from a fresh complete controller snapshot. All includes absent historical rows. Missing/stale snapshots cannot establish absence. Applied equally to rows, counts and CSV."
           }
         ]
       }
@@ -18832,6 +18850,24 @@
                 "protect"
               ]
             }
+          },
+          {
+            "name": "presence",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "current",
+                "all",
+                "present",
+                "scaled_to_zero",
+                "absent",
+                "unverified"
+              ],
+              "default": "current"
+            },
+            "description": "Current includes present, scaled-to-zero and unverified workloads; excludes only confirmed absence from a fresh complete controller snapshot. All includes absent historical rows. Missing/stale snapshots cannot establish absence. Applied equally to rows, counts and CSV."
           }
         ],
         "responses": {

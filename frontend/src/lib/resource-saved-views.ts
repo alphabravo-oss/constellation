@@ -17,6 +17,7 @@ const defaults: Record<ResourceViewKind, Record<string, string>> = {
     order: "desc",
   },
   deployments: {
+    presence: "current",
     q: "",
     namespace: "",
     group_mode: "",
@@ -106,6 +107,7 @@ export function resourceFiltersValid(
     );
   if (kind === "deployments")
     return (
+      member(filters.presence ?? "current", ["current", "all", "present", "scaled_to_zero", "absent", "unverified"]) &&
       member(filters.group_mode, ["", "discover", "monitor", "protect"]) &&
       member(filters.risk_fact, [
         "",

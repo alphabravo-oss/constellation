@@ -46,8 +46,9 @@ export function DeploymentsPage() {
   const hidePlatformComponents = visibility === null ? preferredHidden : ["true", "1", "t"].includes(normalizedVisibility!);
   const [pendingExport, setPendingExport] = useState<string | null>(null);
   const [exportError, setExportError] = useState<{context:string;error:unknown} | null>(null);
-  const filters = { q: search.trim() || undefined, namespace: namespace || undefined, cluster_id: clusterId, hide_platform: hidePlatformComponents, platform_role: platformRole === "all" ? undefined : platformRole, ...(groupMode ? { group_mode: groupMode } : {}), ...(riskFact ? { risk_fact: riskFact } : {}) };
-  const inventoryKey = ["deployments", owner, clusterId, search.trim(), namespace, platformRole, groupMode, riskFact, hidePlatformComponents, visibility, page];
+  const presence = searchParams.get("presence") || "current";
+  const filters = { presence, q: search.trim() || undefined, namespace: namespace || undefined, cluster_id: clusterId, hide_platform: hidePlatformComponents, platform_role: platformRole === "all" ? undefined : platformRole, ...(groupMode ? { group_mode: groupMode } : {}), ...(riskFact ? { risk_fact: riskFact } : {}) };
+  const inventoryKey = ["deployments", owner, clusterId, search.trim(), namespace, platformRole, groupMode, riskFact, hidePlatformComponents, visibility, presence, page];
   const q = useQuery({
     queryKey: inventoryKey,
     queryFn: async () => {
@@ -92,6 +93,7 @@ export function DeploymentsPage() {
   // The server fixes order by risk, last seen, then ID. No client comparators
   // are supplied, so a sortable header cannot reorder only the current page.
   const columns: Column<Deployment>[] = [
+    {id:"presence",header:"Presence",kind:"status",cell:d=>d.inventory_presence === "scaled_to_zero" ? "Scaled to zero" : d.inventory_presence === "absent" ? "Absent from fresh inventory" : d.inventory_presence === "present" ? "Present" : "Unverified",exportValue:d=>d.inventory_presence || "unverified"},
     {
       id: "risk", kind: "count", size: 88, numeric: true,
       header: "Risk",
@@ -169,7 +171,7 @@ export function DeploymentsPage() {
         detail="Search, visibility, counts, paging and CSV use the same source filters. Platform visibility does not change collection or protection."
       />
 
-      <ResourceSavedViewsControl inventory="deployments" clusterId={clusterId} ready={scopeReady && q.isSuccess && !q.isFetching} overrides={{hide_platform:String(hidePlatformComponents)}}/>
+      <ResourceSavedViewsControl inventory="deployments" clusterId={clusterId} ready={scopeReady && q.isSuccess && !q.isFetching} overrides={{hide_platform:String(hidePlatformComponents),presence}}/>
       <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card p-3">
         <label className="min-w-48 flex-1 space-y-1 text-xs"><span className="text-muted-foreground">Search</span><input type="search" value={search} onChange={(event) => updateFilter("q", event.target.value)} placeholder="Deployment name or namespace/name" className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm" data-testid="deployment-search" /></label>
         <label className="space-y-1 text-xs"><span className="text-muted-foreground">Namespace</span><input value={namespace} onChange={(event) => updateFilter("namespace", event.target.value)} placeholder="All namespaces" className="block rounded-md border border-border bg-background px-3 py-2 text-sm" data-testid="namespace-filter" /></label>
@@ -184,6 +186,9 @@ export function DeploymentsPage() {
         }} className="block rounded-md border border-border bg-background px-3 py-2 text-sm" data-testid="deployment-role-filter"><option value="all">All types</option><option value="none">Customer deployments</option><option value="core">Platform deployments</option></select></label>
         <label className="space-y-1 text-xs"><span className="text-muted-foreground">Strongest group mode</span><select aria-label="Strongest group mode" value={groupMode} onChange={(event) => updateFilter("group_mode", event.target.value)} className="block rounded-md border border-border bg-background px-3 py-2 text-sm"><option value="">Any group mode</option><option value="discover">Discover</option><option value="monitor">Monitor</option><option value="protect">Protect</option>{groupMode && !["discover", "monitor", "protect"].includes(groupMode) && <option value={groupMode}>Invalid mode: {groupMode}</option>}</select></label>
         <label className="space-y-1 text-xs"><span className="text-muted-foreground">Recorded risk fact</span><select aria-label="Recorded risk fact" value={riskFact} onChange={(event) => updateFilter("risk_fact", event.target.value)} className="block rounded-md border border-border bg-background px-3 py-2 text-sm"><option value="">Any fact</option><option value="privileged">Privileged</option><option value="run_as_root">Runs as root</option><option value="net_exposure">Network exposure</option><option value="host_network">Host network</option>{riskFact && !["privileged", "run_as_root", "net_exposure", "host_network"].includes(riskFact) && <option value={riskFact}>Invalid fact: {riskFact}</option>}</select></label>
+        <label className="space-y-1 text-xs"><span className="text-muted-foreground">Presence</span><select aria-label="Workload presence" value={presence} onChange={event=>updateFilter("presence",event.target.value)} className="block rounded border border-border bg-background px-3 py-2">
+          <option value="current">Current and unverified</option><option value="all">Include absent workloads</option><option value="absent">Absent from fresh inventory</option><option value="scaled_to_zero">Scaled to zero</option><option value="unverified">Unverified</option>
+        </select></label>
         <PlatformVisibilityToggle hidden={hidePlatformComponents} onHiddenChange={(hidden) => { setPreferredHidden(hidden); updateFilter("hide_platform", String(hidden)); }} hiddenCount={platformCount} />
         <Button variant="outline" disabled={!scopeReady || q.isFetching} onClick={() => void q.refetch()}><RefreshCw className="h-4 w-4" />Refresh</Button>
         <Button variant="outline" disabled={!scopeReady || q.isPending || q.isFetching || q.isError || !total || exporting} onClick={() => void exportMatching()}>{exporting ? "Exporting…" : "Export CSV"}</Button>

@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/handler/sqlx"
+	"github.com/alphabravocompany/constellation/internal/inventorypresence"
 )
 
 type deploymentListFilter struct {
@@ -30,6 +31,16 @@ func deploymentListFilters(r *http.Request, orgID uuid.UUID) (deploymentListFilt
 		return "$" + strconv.Itoa(len(filter.args))
 	}
 	parts := []string{"d.org_id=$1"}
+	presence := inventorypresence.WorkloadStatusSQL("d")
+	switch values.Get("presence") {
+	case "", "current":
+		parts = append(parts, "("+presence+")<>'absent'")
+	case "all":
+	case "present", "scaled_to_zero", "absent", "unverified":
+		parts = append(parts, "("+presence+")="+bind(values.Get("presence")))
+	default:
+		return filter, fmt.Errorf("invalid presence")
+	}
 	cluster, err := parseClusterIDParam(r)
 	if err != nil {
 		return filter, err
@@ -68,7 +79,7 @@ func deploymentListFilters(r *http.Request, orgID uuid.UUID) (deploymentListFilt
 	if mode != 0 {
 		parts = append(parts, "EXISTS (SELECT 1 FROM ("+sqlx.GroupModesSQL("d.org_id", "d.cluster_id")+") mode_group WHERE mode_group.cluster_id IS NOT DISTINCT FROM d.cluster_id AND mode_group.workload_id=d.namespace||'/'||d.name AND mode_group.rank="+bind(mode)+")")
 	}
-	filter.base = "WITH classified AS (SELECT d.*, " + platformRoleSQL("d.namespace", "d.labels") + " AS platform_role FROM deployments d WHERE " + strings.Join(parts, " AND ") + ") "
+	filter.base = "WITH classified AS (SELECT d.*, " + platformRoleSQL("d.namespace", "d.labels") + " AS platform_role, " + presence + " AS inventory_presence FROM deployments d WHERE " + strings.Join(parts, " AND ") + ") "
 	filter.role = "true"
 	switch role := values.Get("platform_role"); role {
 	case "", "all":
@@ -99,30 +110,31 @@ func deploymentListFilters(r *http.Request, orgID uuid.UUID) (deploymentListFilt
 	return filter, nil
 }
 
-const deploymentListColumns = `id,cluster_id,namespace,name,kind,COALESCE(labels,'{}'::jsonb),platform_role,risk_score,COALESCE(risk_factors,'{}'::jsonb),finding_count,critical_count,high_count,first_seen_at,last_seen_at`
+const deploymentListColumns = `id,cluster_id,namespace,name,kind,COALESCE(labels,'{}'::jsonb),platform_role,risk_score,COALESCE(risk_factors,'{}'::jsonb),finding_count,critical_count,high_count,first_seen_at,last_seen_at,inventory_presence`
 const deploymentListOrder = `risk_score DESC,last_seen_at DESC,id ASC`
 
 type deploymentListRow struct {
-	ID            uuid.UUID       `json:"id"`
-	ClusterID     *uuid.UUID      `json:"cluster_id,omitempty"`
-	Namespace     string          `json:"namespace"`
-	Name          string          `json:"name"`
-	Kind          string          `json:"kind"`
-	Labels        json.RawMessage `json:"labels"`
-	PlatformRole  string          `json:"platform_role,omitempty"`
-	RiskScore     int             `json:"risk_score"`
-	RiskFactors   json.RawMessage `json:"risk_factors"`
-	FindingCount  int             `json:"finding_count"`
-	CriticalCount int             `json:"critical_count"`
-	HighCount     int             `json:"high_count"`
-	FirstSeen     string          `json:"first_seen_at"`
-	LastSeen      string          `json:"last_seen_at"`
+	InventoryPresence string          `json:"inventory_presence"`
+	ID                uuid.UUID       `json:"id"`
+	ClusterID         *uuid.UUID      `json:"cluster_id,omitempty"`
+	Namespace         string          `json:"namespace"`
+	Name              string          `json:"name"`
+	Kind              string          `json:"kind"`
+	Labels            json.RawMessage `json:"labels"`
+	PlatformRole      string          `json:"platform_role,omitempty"`
+	RiskScore         int             `json:"risk_score"`
+	RiskFactors       json.RawMessage `json:"risk_factors"`
+	FindingCount      int             `json:"finding_count"`
+	CriticalCount     int             `json:"critical_count"`
+	HighCount         int             `json:"high_count"`
+	FirstSeen         string          `json:"first_seen_at"`
+	LastSeen          string          `json:"last_seen_at"`
 }
 
 func scanDeploymentListRow(rows pgx.Rows) (deploymentListRow, error) {
 	var row deploymentListRow
 	var first, last time.Time
-	err := rows.Scan(&row.ID, &row.ClusterID, &row.Namespace, &row.Name, &row.Kind, &row.Labels, &row.PlatformRole, &row.RiskScore, &row.RiskFactors, &row.FindingCount, &row.CriticalCount, &row.HighCount, &first, &last)
+	err := rows.Scan(&row.ID, &row.ClusterID, &row.Namespace, &row.Name, &row.Kind, &row.Labels, &row.PlatformRole, &row.RiskScore, &row.RiskFactors, &row.FindingCount, &row.CriticalCount, &row.HighCount, &first, &last, &row.InventoryPresence)
 	row.FirstSeen = first.UTC().Format(time.RFC3339)
 	row.LastSeen = last.UTC().Format(time.RFC3339)
 	return row, err
@@ -213,7 +225,7 @@ func (h *Deployments) ExportCSV(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="constellation-workloads.csv"`)
 	writer := csv.NewWriter(w)
-	if err := writer.Write([]string{"Namespace", "Platform Role", "Name", "Kind", "Risk", "Findings", "Critical", "High", "Privileged", "RunAsRoot", "HostNetwork", "LastSeen"}); err != nil {
+	if err := writer.Write([]string{"Namespace", "Platform Role", "Name", "Kind", "Risk", "Findings", "Critical", "High", "Privileged", "RunAsRoot", "HostNetwork", "LastSeen", "Presence"}); err != nil {
 		panic(http.ErrAbortHandler)
 	}
 	for rows.Next() {
@@ -221,7 +233,7 @@ func (h *Deployments) ExportCSV(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			panic(http.ErrAbortHandler)
 		}
-		if err := writer.Write([]string{row.Namespace, row.PlatformRole, row.Name, row.Kind, strconv.Itoa(row.RiskScore), strconv.Itoa(row.FindingCount), strconv.Itoa(row.CriticalCount), strconv.Itoa(row.HighCount), deploymentRiskFlag(row.RiskFactors, "privileged"), deploymentRiskFlag(row.RiskFactors, "run_as_root"), deploymentRiskFlag(row.RiskFactors, "host_network"), row.LastSeen}); err != nil {
+		if err := writer.Write([]string{row.Namespace, row.PlatformRole, row.Name, row.Kind, strconv.Itoa(row.RiskScore), strconv.Itoa(row.FindingCount), strconv.Itoa(row.CriticalCount), strconv.Itoa(row.HighCount), deploymentRiskFlag(row.RiskFactors, "privileged"), deploymentRiskFlag(row.RiskFactors, "run_as_root"), deploymentRiskFlag(row.RiskFactors, "host_network"), row.LastSeen, row.InventoryPresence}); err != nil {
 			panic(http.ErrAbortHandler)
 		}
 	}

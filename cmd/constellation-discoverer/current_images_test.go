@@ -101,3 +101,37 @@ func TestRuntimeImageReferenceFallbackUsesContainerNameAndFamily(t *testing.T) {
 		}
 	}
 }
+
+func TestWorkloadInventoryRejectsIncompleteLists(t *testing.T) {
+	paths := map[string]string{"/apis/apps/v1/deployments": "DeploymentList", "/apis/apps/v1/statefulsets": "StatefulSetList", "/apis/apps/v1/daemonsets": "DaemonSetList", "/apis/apps/v1/replicasets": "ReplicaSetList", "/api/v1/pods": "PodList"}
+	for incomplete := range paths {
+		t.Run(incomplete, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				kind, ok := paths[req.URL.Path]
+				if !ok {
+					http.NotFound(w, req)
+					return
+				}
+				version := "apps/v1"
+				if kind == "PodList" {
+					version = "v1"
+				}
+				metadata := map[string]string{}
+				if req.URL.Path == incomplete {
+					metadata["continue"] = "next-page"
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{"apiVersion": version, "kind": kind, "metadata": metadata, "items": []any{}})
+			}))
+			defer server.Close()
+			client, err := kubernetes.NewForConfig(&rest.Config{Host: server.URL})
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := &reconciler{cs: client}
+			if _, err := r.list(context.Background()); err == nil {
+				t.Fatal("partial list could establish false absence")
+			}
+		})
+	}
+}

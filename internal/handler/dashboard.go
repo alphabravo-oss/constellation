@@ -12,6 +12,7 @@ import (
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler/platformrole"
 	"github.com/alphabravocompany/constellation/internal/handler/sqlx"
+	"github.com/alphabravocompany/constellation/internal/inventorypresence"
 )
 
 // Dashboard aggregates a one-shot summary the home page renders: severity counts,
@@ -65,13 +66,14 @@ type dashboardPostureDTO struct {
 }
 
 type topVulnerableWorkloadDTO struct {
-	ID           string     `json:"id"`
-	ClusterID    *uuid.UUID `json:"cluster_id"`
-	PlatformRole string     `json:"platform_role"`
-	Namespace    string     `json:"namespace"`
-	Name         string     `json:"name"`
-	Critical     int        `json:"critical"`
-	High         int        `json:"high"`
+	InventoryPresence string     `json:"inventory_presence"`
+	ID                string     `json:"id"`
+	ClusterID         *uuid.UUID `json:"cluster_id"`
+	PlatformRole      string     `json:"platform_role"`
+	Namespace         string     `json:"namespace"`
+	Name              string     `json:"name"`
+	Critical          int        `json:"critical"`
+	High              int        `json:"high"`
 }
 
 type dashboardEventDT struct {
@@ -315,7 +317,7 @@ SELECT COUNT(*)::int,
        COUNT(*) FILTER (WHERE risk_factors ? 'run_as_root')::int,
        COUNT(*) FILTER (WHERE risk_factors ? 'net_exposure')::int
   FROM deployments
- WHERE org_id = $1
+ WHERE (`+inventorypresence.WorkloadStatusSQL("deployments")+`)<>'absent' AND org_id = $1
    AND ($2::uuid IS NULL OR cluster_id = $2)`, orgID, clusterArg).
 		Scan(&wl, &priv, &hostNet, &root, &exposed); err != nil {
 		return fmt.Errorf("hardening rollup: %w", err)
@@ -390,7 +392,7 @@ SELECT
   COUNT(*) FILTER (WHERE m.rank = 3)::int
   FROM deployments d
   LEFT JOIN wl_mode m ON m.org_id=d.org_id AND m.cluster_id IS NOT DISTINCT FROM d.cluster_id AND m.workload_id=d.namespace || '/' || d.name
- WHERE d.org_id = $1 AND d.risk_factors ? 'net_exposure'
+ WHERE (`+inventorypresence.WorkloadStatusSQL("d")+`)<>'absent' AND d.org_id = $1 AND d.risk_factors ? 'net_exposure'
    AND ($2::uuid IS NULL OR d.cluster_id = $2)`,
 		orgID, clusterArg).Scan(&eDiscover, &eMonitor, &eProtect); err != nil {
 		return fmt.Errorf("exposed-by-mode rollup: %w", err)
@@ -472,9 +474,9 @@ SELECT COUNT(*) FILTER (WHERE enabled AND engine = 'constellation-admission')::i
 	// Top vulnerable workloads (NV "Top Vulnerable Assets"): highest critical+high CVE
 	// workloads in the cluster.
 	twRows, err := h.db.Pool().Query(ctx, `
-SELECT id::text, cluster_id, `+platformRoleSQL("namespace", "labels")+`, namespace, name, COALESCE(critical_count,0)::int, COALESCE(high_count,0)::int
+SELECT id::text, cluster_id, `+platformRoleSQL("namespace", "labels")+`, namespace, name, COALESCE(critical_count,0)::int, COALESCE(high_count,0)::int, `+inventorypresence.WorkloadStatusSQL("deployments")+`
   FROM deployments
- WHERE (`+deploymentScope+`) AND org_id = $1
+ WHERE (`+inventorypresence.WorkloadStatusSQL("deployments")+`)<>'absent' AND (`+deploymentScope+`) AND org_id = $1
    AND ($2::uuid IS NULL OR cluster_id = $2)
    AND (COALESCE(critical_count,0) > 0 OR COALESCE(high_count,0) > 0)
  ORDER BY critical_count DESC, high_count DESC, id
@@ -485,7 +487,7 @@ SELECT id::text, cluster_id, `+platformRoleSQL("namespace", "labels")+`, namespa
 	defer twRows.Close()
 	for twRows.Next() {
 		var t topVulnerableWorkloadDTO
-		if err := twRows.Scan(&t.ID, &t.ClusterID, &t.PlatformRole, &t.Namespace, &t.Name, &t.Critical, &t.High); err != nil {
+		if err := twRows.Scan(&t.ID, &t.ClusterID, &t.PlatformRole, &t.Namespace, &t.Name, &t.Critical, &t.High, &t.InventoryPresence); err != nil {
 			return err
 		}
 		p.TopVulnerable = append(p.TopVulnerable, t)

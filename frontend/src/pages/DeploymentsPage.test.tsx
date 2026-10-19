@@ -38,7 +38,7 @@ const button = (label: string) => Array.from(host.querySelectorAll("button")).fi
 
 it("sends URL search/namespace/visibility/page to the server and uses matching totals", async () => {
  await render("/clusters/cluster/deployments?q=customer-0605&namespace=payments&hide_platform=false&page=3"); await settled();
- expect(deployments.list).toHaveBeenLastCalledWith({ cluster_id: "cluster", q: "customer-0605", namespace: "payments", hide_platform: false, platform_role: undefined, limit: 100, offset: 200 });
+ expect(deployments.list).toHaveBeenLastCalledWith({ presence: "current", cluster_id: "cluster", q: "customer-0605", namespace: "payments", hide_platform: false, platform_role: undefined, limit: 100, offset: 200 });
  expect(host.querySelector('[data-testid="deployment-page-scope"]')?.textContent).toContain("201–201 of 251");
  expect(host.querySelector('[data-testid="deployments-summary"]')?.textContent).toContain("251");
  expect(host.querySelectorAll('[data-testid="deployment-row"]')).toHaveLength(1);
@@ -71,7 +71,7 @@ it("exports all matching filters without carrying the displayed page offset", as
  vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:export"); vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {}); vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
  await render("/clusters/cluster/deployments?q=customer&namespace=payments&hide_platform=false&platform_role=none&page=2"); await settled();
  await act(async () => button("Export CSV").click());
- expect(deployments.exportCsv).toHaveBeenCalledWith({ cluster_id: "cluster", q: "customer", namespace: "payments", hide_platform: false, platform_role: "none" });
+ expect(deployments.exportCsv).toHaveBeenCalledWith({ presence: "current", cluster_id: "cluster", q: "customer", namespace: "payments", hide_platform: false, platform_role: "none" });
  expect(URL.createObjectURL).toHaveBeenCalled();
 });
 
@@ -128,4 +128,15 @@ it("discards a pending export after filters change instead of downloading the ol
 });
 it("isolates owner cache and suppresses an old owner's late export feedback",async()=>{
  let reject:(error:Error)=>void=()=>{};vi.mocked(deployments.exportCsv).mockImplementation(()=>new Promise((_resolve,fail)=>{reject=fail;}));await render("/clusters/cluster/deployments?hide_platform=false");await settled();await act(async()=>button("Export CSV").click());identity={org_id:"other",user_id:"other"};await act(async()=>root!.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={identity}><TestRouter history={history}><DeploymentsPage/></TestRouter></TablePreferencesProvider></QueryClientProvider>));await vi.waitFor(()=>expect(client.getQueryCache().findAll({queryKey:["deployments","other:other"]})).toHaveLength(1));await act(async()=>reject(new Error("private old owner failure")));expect(host.textContent).not.toContain("Deployment export failed");expect(host.textContent).not.toContain("private old owner failure");expect(client.getQueryCache().findAll({queryKey:["deployments","org:user"]})).toHaveLength(1);
+});
+
+it("preserves workload presence in filtering and distinguishes scaled-to-zero controllers", async () => {
+ vi.mocked(deployments.list).mockResolvedValue(response([{...row("dormant"),inventory_presence:"scaled_to_zero"}]));
+ await render("/clusters/cluster/deployments?presence=scaled_to_zero");
+ expect(deployments.list).toHaveBeenCalledWith(expect.objectContaining({presence:"scaled_to_zero"}));
+ await vi.waitFor(()=>expect(host.textContent).toContain("Scaled to zero"));
+ const select=host.querySelector<HTMLSelectElement>('select[aria-label="Workload presence"]')!;
+ expect(select.value).toBe("scaled_to_zero");
+ await act(async()=>{select.value="all";select.dispatchEvent(new Event("change",{bubbles:true}));});
+ await vi.waitFor(()=>expect(deployments.list).toHaveBeenLastCalledWith(expect.objectContaining({presence:"all",offset:0})));
 });

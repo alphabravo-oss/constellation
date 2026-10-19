@@ -66,3 +66,20 @@ Requesting removal clears the old apply outcome. The UI distinguishes pending
 application, protected-target refusal, application failure, pending removal, and
 removal failure. It reports successful application as an applier report, not proof
 of CNI traffic enforcement, and does not promise removal within a fixed interval.
+
+## Controller presence and history
+
+Discovery stores a complete controller snapshot separately from pod presence.
+Deployment and StatefulSet replicas set to zero are `scaled_to_zero`, not absent.
+DaemonSets remain present regardless of current scheduling count. Controller keys
+include namespace, kind and name. A fresh snapshot may establish `absent` only
+for supported controller kinds and inventory rows observed no later than that
+snapshot. Missing, expired, or unsupported evidence is `unverified`. Older
+snapshots cannot replace newer ones; incomplete Kubernetes lists are refused.
+
+Workload lists, their summaries and CSV, dashboard hardening/top workloads, and
+cluster workload counts exclude only confirmed-absent rows by default. The
+presence filter can reopen those retained rows. Zero-replica workloads remain
+visible and are labeled. This changes inventory classification, not finding
+lifecycle: absence does not mean vulnerabilities were fixed. Previously stored
+findings and workload identities remain available for investigation.

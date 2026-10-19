@@ -380,15 +380,16 @@ func (r *reconciler) getDeploymentIDs() map[workloadKey]uuid.UUID {
 }
 
 type workload struct {
-	namespace string
-	name      string
-	kind      string
-	labels    map[string]string
-	hostNet   bool
-	priv      bool
-	rootRisk  bool
-	aiFlag    bool
-	images    []string // container + init container image refs, deduped
+	scaledToZero bool
+	namespace    string
+	name         string
+	kind         string
+	labels       map[string]string
+	hostNet      bool
+	priv         bool
+	rootRisk     bool
+	aiFlag       bool
+	images       []string // container + init container image refs, deduped
 	// imageDigests maps a running image ref (the spec/status image, e.g.
 	// "nginx:1.25") to the runtime-resolved content digest ("sha256:<hex>")
 	// extracted from pod status.containerStatuses[].imageID. Spec refs carry a
@@ -419,9 +420,13 @@ type workloadKey struct {
 }
 
 func (r *reconciler) reconcile(ctx context.Context) error {
+	observedAt := time.Now().UTC()
 	wls, err := r.list(ctx)
 	if err != nil {
 		return err
+	}
+	if err := r.storeWorkloadPresence(ctx, observedAt, wls); err != nil {
+		return fmt.Errorf("store workload presence: %w", err)
 	}
 	upserted := 0
 	for _, w := range wls {
@@ -489,19 +494,23 @@ func (r *reconciler) list(ctx context.Context) ([]workload, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list deployments: %w", err)
 	}
+	if deps.Continue != "" {
+		return nil, fmt.Errorf("refusing incomplete deployments inventory")
+	}
 	for i := range deps.Items {
 		d := &deps.Items[i]
 		ps := d.Spec.Template.Spec
 		addWorkload(workload{
-			namespace: d.Namespace,
-			name:      d.Name,
-			kind:      "Deployment",
-			labels:    d.Labels,
-			hostNet:   ps.HostNetwork,
-			priv:      anyPrivileged(ps.Containers) || anyPrivileged(ps.InitContainers),
-			rootRisk:  runsAsRoot(ps),
-			images:    collectImages(ps),
-			aiFlag:    labelTrue(d.Labels, "ai-workload"),
+			namespace:    d.Namespace,
+			name:         d.Name,
+			kind:         "Deployment",
+			scaledToZero: d.Spec.Replicas != nil && *d.Spec.Replicas == 0,
+			labels:       d.Labels,
+			hostNet:      ps.HostNetwork,
+			priv:         anyPrivileged(ps.Containers) || anyPrivileged(ps.InitContainers),
+			rootRisk:     runsAsRoot(ps),
+			images:       collectImages(ps),
+			aiFlag:       labelTrue(d.Labels, "ai-workload"),
 		})
 	}
 
@@ -509,25 +518,32 @@ func (r *reconciler) list(ctx context.Context) ([]workload, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list statefulsets: %w", err)
 	}
+	if sts.Continue != "" {
+		return nil, fmt.Errorf("refusing incomplete statefulsets inventory")
+	}
 	for i := range sts.Items {
 		s := &sts.Items[i]
 		ps := s.Spec.Template.Spec
 		addWorkload(workload{
-			namespace: s.Namespace,
-			name:      s.Name,
-			kind:      "StatefulSet",
-			labels:    s.Labels,
-			hostNet:   ps.HostNetwork,
-			priv:      anyPrivileged(ps.Containers) || anyPrivileged(ps.InitContainers),
-			rootRisk:  runsAsRoot(ps),
-			images:    collectImages(ps),
-			aiFlag:    labelTrue(s.Labels, "ai-workload"),
+			namespace:    s.Namespace,
+			name:         s.Name,
+			kind:         "StatefulSet",
+			scaledToZero: s.Spec.Replicas != nil && *s.Spec.Replicas == 0,
+			labels:       s.Labels,
+			hostNet:      ps.HostNetwork,
+			priv:         anyPrivileged(ps.Containers) || anyPrivileged(ps.InitContainers),
+			rootRisk:     runsAsRoot(ps),
+			images:       collectImages(ps),
+			aiFlag:       labelTrue(s.Labels, "ai-workload"),
 		})
 	}
 
 	dsets, err := r.cs.AppsV1().DaemonSets("").List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("list daemonsets: %w", err)
+	}
+	if dsets.Continue != "" {
+		return nil, fmt.Errorf("refusing incomplete daemonsets inventory")
 	}
 	for i := range dsets.Items {
 		d := &dsets.Items[i]
@@ -558,6 +574,9 @@ func (r *reconciler) mergePodStatusImages(ctx context.Context, out []workload, b
 	pods, err := r.cs.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return fmt.Errorf("list pods for image ids: %w", err)
+	}
+	if pods.Continue != "" {
+		return fmt.Errorf("refusing incomplete pod image inventory")
 	}
 	for i := range pods.Items {
 		pod := &pods.Items[i]
@@ -591,6 +610,9 @@ func (r *reconciler) replicaSetOwners(ctx context.Context) (map[string]workloadK
 		return nil, fmt.Errorf("list replicasets for image ids: %w", err)
 	}
 	out := map[string]workloadKey{}
+	if sets.Continue != "" {
+		return nil, fmt.Errorf("refusing incomplete replicaset inventory")
+	}
 	for i := range sets.Items {
 		rs := &sets.Items[i]
 		for _, owner := range rs.OwnerReferences {

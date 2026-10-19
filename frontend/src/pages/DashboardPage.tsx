@@ -582,7 +582,7 @@ export function DashboardPage() {
                   <a href={t.id ? clusterPath(`/deployments/${encodeURIComponent(t.id)}`) : clusterPath(`/deployments?q=${encodeURIComponent(t.name)}&namespace=${encodeURIComponent(t.namespace)}&hide_platform=false`)} className="flex items-center gap-2 px-3 py-2 hover:bg-muted/40 transition-colors">
                     <div className="min-w-0 flex-1">
                       <div className="text-xs font-medium truncate">{t.name}</div>
-                      <div className="text-[10px] text-muted-foreground truncate">{t.namespace}{!t.id && " · namespace + name search"}</div>
+                      <div className="text-[10px] text-muted-foreground truncate">{t.namespace}{t.inventory_presence === "scaled_to_zero" ? " · scaled to zero" : t.inventory_presence === "unverified" ? " · presence unverified" : ""}{!t.id && " · namespace + name search"}</div>
                     </div>
                     {t.critical > 0 && <span className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white" style={{ background: "var(--color-severity-critical)" }}>{t.critical}C</span>}
                     {t.high > 0 && <span className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white" style={{ background: "var(--color-severity-high)" }}>{t.high}H</span>}

@@ -883,6 +883,7 @@ export const compliance = {
 };
 
 export interface Deployment {
+  inventory_presence?: "present" | "scaled_to_zero" | "absent" | "unverified";
   id: string;
   cluster_id?: string;
   namespace: string;
@@ -1228,9 +1229,9 @@ export const deployments = {
     api.get<DeploymentFindingsResponse>(`/deployments/${encodeURIComponent(id)}/findings`, { params }).then(r => r.data),
   findingsCSV: (id: string, params: DeploymentFindingsParams, shouldDownload?: ScanInventoryDownloadGuard) =>
     downloadScanInventoryCSV(`/deployments/${encodeURIComponent(id)}/findings.csv`, params, `deployment-${id}-findings.csv`, shouldDownload),
-  list: (params: { q?: string; name?: string; namespace?: string; cluster_id?: string; hide_platform?: boolean; platform_role?: string; risk_fact?: string; group_mode?: string; limit?: number; offset?: number } = {}) =>
+  list: (params: { q?: string; name?: string; namespace?: string; cluster_id?: string; hide_platform?: boolean; platform_role?: string; presence?: string; risk_fact?: string; group_mode?: string; limit?: number; offset?: number } = {}) =>
     api.get<{ deployments: Deployment[]; total: number; limit: number; offset: number; has_more: boolean; platform_count: number; summary: { total: number; at_risk: number; finding_count: number; critical_count: number; high_count: number } }>("/deployments", { params }).then((r) => r.data),
-  exportCsv: (params: { q?: string; name?: string; namespace?: string; cluster_id?: string; hide_platform?: boolean; platform_role?: string; risk_fact?: string } = {}) =>
+  exportCsv: (params: { q?: string; name?: string; namespace?: string; cluster_id?: string; hide_platform?: boolean; platform_role?: string; presence?: string; risk_fact?: string } = {}) =>
     api.get<Blob>("/deployments.csv", { params, responseType: "blob" }).then((r) => r.data),
   get: (id: string) =>
     api.get<DeploymentDetail>(`/deployments/${id}`).then((r) => r.data),
@@ -5270,7 +5271,7 @@ export interface DashboardSummary {
     exposed_by_mode: Record<string, number>;    // net-exposed workloads by group mode (discover/monitor/protect)
     new_service_policy_mode: string;            // NV NewServiceMode: mode new service groups start in (network)
     new_service_profile_mode: string;           // NV NewServiceProfileMode: process/file mode for new groups
-    top_vulnerable: Array<{ id?: string; cluster_id?: string | null; platform_role?: string; namespace: string; name: string; critical: number; high: number }>;
+    top_vulnerable: Array<{ inventory_presence?: string; id?: string; cluster_id?: string | null; platform_role?: string; namespace: string; name: string; critical: number; high: number }>;
   };
 }
 

@@ -35,3 +35,19 @@ func (r *reconciler) storeInventoryPresence(ctx context.Context, observed time.T
 	}
 	return inventorypresence.Store(ctx, r.pool, r.orgID, r.clusterID, observed, observed.Add(ttl), podInventoryPresence(pods))
 }
+
+func (r *reconciler) storeWorkloadPresence(ctx context.Context, observed time.Time, workloads []workload) error {
+	ttl := 3 * r.staleAfter
+	if ttl < 5*time.Minute {
+		ttl = 5 * time.Minute
+	}
+	states := map[string]string{}
+	for _, w := range workloads {
+		state := "present"
+		if w.scaledToZero {
+			state = "scaled_to_zero"
+		}
+		states[w.namespace+"/"+w.kind+"/"+w.name] = state
+	}
+	return inventorypresence.StoreWorkloads(ctx, r.pool, r.orgID, r.clusterID, observed, observed.Add(ttl), states)
+}
