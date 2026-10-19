@@ -2765,3 +2765,50 @@ filesystem filled; the task's artifacts were moved to /root with symlinks retain
 old paths, and a separate disk-backed download completed. Failed partial data/logs
 remain. This operation did not remove prior evidence or alter production scanner
 cache files. The original Helm 88 evidence now resolves through its /tmp symlink.
+
+
+## Current exposure reporting (Helm 92, 2026-10-19)
+
+Latest deployment: **Helm 92 / schema 181**. API source **b7c72f6**;
+discoverer, frontend and migration source **ab83212**. Scanner remains 1d94b2d
+and runtime ef0ca39. Fresh CNPG backup `20261019T034312` completed before rollout.
+All seven Deployments and the runtime DaemonSet are ready. API, discoverer and
+frontend running configuration digests match their built OCI graphs.
+
+The reported constellation-system totals **583 critical / 3,804 high** were open
+vulnerability occurrences across assets, including retired pods and repeated
+vulnerability IDs. The cluster tile now separates distinct current critical/high
+vulnerability IDs from historical pod occurrences and unverified occurrences.
+A complete cluster-wide pod LIST supplies an expiring inventory snapshot. Failed
+or partial LISTs do not replace it; stale/missing inventory displays an unknown
+current total. Newer findings than a snapshot remain unverified rather than being
+classified historical. Findings remain open; this does not resolve vulnerabilities.
+
+Authenticated live acceptance shows **34 current critical / 166 current high**.
+The original 4,387 occurrences reconcile as **810 current + 1,898 historical +
+1,679 unverified**. Current counts are explicitly incomplete while unverified
+findings remain. Exact runtime image digest matches can establish current image
+presence; unmatched images remain unverified. Workload matching uses namespace
+and pod name because legacy assets lack pod UID, so replacement generations with
+the same name can overstate current exposure. Inventory presence also does not
+prove that a fresh scan of every current container has completed.
+
+Validation: isolated PostgreSQL classification/tenant/freshness tests, discoverer
+failed/partial inventory tests, API/schema checks, four frontend tests, TypeScript
+and production build pass. Production browser fixtures cover fresh and stale
+inventory. A fresh database migrates through 181 and the API starts read-only with
+all capabilities dropped; health/readiness return 200 and protected anonymous
+requests 401. Authenticated live browser validation confirms the new card, API
+counts and reconciliation with no JavaScript errors. T3 preview is unavailable
+because of the host browser sandbox; Playwright was used after that explicit error.
+The exact rebuilt API still scans at **0 critical/high/medium/low and 1 unknown**
+with the earlier Trivy database. This reporting change does not claim an additional
+vulnerability reduction. Discoverer platform-facts reporting still logs a cluster
+scope 403 and remains a separate validation gap.
+
+Evidence: `/root/constellation-presence-20261019/` (selected test logs,
+`live-result.json`, `live-exposure.png`, `live-digests.json`, API scan and migration
+smoke results). Private browser session state is excluded from published evidence.
+No parent acceptance row closes: **66 checked / 88 open**. Remaining image,
+registry-resolution and scanner-cache work below stays open.
+
