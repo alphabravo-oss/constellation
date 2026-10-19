@@ -54,6 +54,7 @@ import (
 	"github.com/alphabravocompany/constellation/internal/registry"
 	"github.com/alphabravocompany/constellation/internal/scanner"
 	"github.com/alphabravocompany/constellation/pkg/observability"
+	"github.com/alphabravocompany/constellation/pkg/scanlease"
 	"github.com/alphabravocompany/constellation/pkg/sigverify"
 	"github.com/alphabravocompany/constellation/pkg/version"
 )
@@ -71,6 +72,7 @@ func main() {
 		jobTimeout            = flag.Duration("job-timeout", 15*time.Minute, "Per-job timeout")
 		leaseRenewInterval    = flag.Duration("lease-renew-interval", 5*time.Minute, "How often to renew claimed job leases")
 		oneShotRef            = flag.String("ref", "", "If set: run a single scan against this image ref and exit (CLI mode)")
+		oneShotLeaseID        = flag.String("lease-id", "", "CLI mode: lease_id returned when claiming --job-id")
 		oneShotJobID          = flag.String("job-id", "", "CLI mode: job currently leased to this token and --instance-id for registry credentials")
 		oneShotRegistryID     = flag.String("registry-id", "", "CLI mode: configured registry ID; requires --control-plane, --token, and --job-id")
 		oneShotSARIF          = flag.String("sarif", "", "CLI mode: write SARIF to this path")
@@ -126,12 +128,13 @@ func main() {
 	// One-shot CLI mode.
 	if *oneShotRef != "" {
 		oneShotWorker := &worker{
-			credentialJobID: *oneShotJobID,
-			instanceID:      strings.TrimSpace(*instanceID),
-			controlPlane:    strings.TrimRight(*controlPlaneURL, "/"),
-			token:           *token,
-			agg:             agg,
-			logger:          logger,
+			credentialJobID:   *oneShotJobID,
+			credentialLeaseID: *oneShotLeaseID,
+			instanceID:        strings.TrimSpace(*instanceID),
+			controlPlane:      strings.TrimRight(*controlPlaneURL, "/"),
+			token:             *token,
+			agg:               agg,
+			logger:            logger,
 		}
 		res, regAuth, cleanup, err := oneShotWorker.scanOneShot(ctx, *oneShotRef, *oneShotRegistryID, scanner.ScanOptions{Timeout: *jobTimeout, GoReachability: *goReachabilityEnabled})
 		if err != nil {
@@ -264,7 +267,7 @@ func (w *worker) scanOneShot(ctx context.Context, imageRef, registryID string, o
 			return nil, auth, cleanup, errors.New("--registry-id requires a nonempty ID, --control-plane, --token, and a leased --job-id")
 		}
 		var err error
-		auth, cleanup, err = w.resolveRegistryAuth(ctx, &scanJob{ID: w.credentialJobID, RegistryID: &registryID}, imageRef)
+		auth, cleanup, err = w.resolveRegistryAuth(scanlease.WithContext(ctx, w.credentialLeaseID), &scanJob{ID: w.credentialJobID, RegistryID: &registryID}, imageRef)
 		if err != nil {
 			return nil, registryAuth{}, cleanup, fmt.Errorf("one-shot registry credentials: %w", err)
 		}
@@ -284,6 +287,7 @@ func (w *worker) scanOneShot(ctx context.Context, imageRef, registryID string, o
 // worker polls the control plane for jobs and runs them on a bounded goroutine pool.
 type worker struct {
 	credentialJobID       string
+	credentialLeaseID     string
 	controlPlane          string
 	token                 string
 	instanceID            string
@@ -365,7 +369,7 @@ func (w *worker) run(ctx context.Context, interval time.Duration) {
 					w.releaseTarget(j.TargetType)
 					<-sem
 				}()
-				jobCtx, timeoutCancel := context.WithTimeout(ctx, w.jobTimeout)
+				jobCtx, timeoutCancel := context.WithTimeout(scanlease.WithContext(ctx, j.LeaseID), w.jobTimeout)
 				jobCtx, cancel := context.WithCancel(jobCtx)
 				defer timeoutCancel()
 				defer cancel()
@@ -395,6 +399,7 @@ type scanJob struct {
 	InventoryHash   string  `json:"inventory_hash,omitempty"`
 	EvidenceID      *string `json:"evidence_id,omitempty"`
 	LeaseExpiresAt  string  `json:"lease_expires_at,omitempty"`
+	LeaseID         string  `json:"lease_id,omitempty"`
 	AttemptCount    int     `json:"attempt_count,omitempty"`
 	MaxAttempts     int     `json:"max_attempts,omitempty"`
 	// SignatureRoots are this job's org's DB-managed sigstore roots-of-trust, delivered on the
@@ -569,6 +574,7 @@ func (w *worker) lastError() string {
 }
 
 func (w *worker) executeJob(ctx context.Context, j *scanJob) {
+	ctx = scanlease.WithContext(ctx, j.LeaseID)
 	// TargetRef can itself be a presigned serverless URL; log stable identities.
 	w.logger.Info("scan start", "job_id", j.ID, "target_id", j.TargetID, "target_type", j.TargetType)
 	var (
@@ -1592,6 +1598,7 @@ func (w *worker) renewOnce(ctx context.Context, jobID string) error {
 }
 
 func (w *worker) setScannerHeaders(req *http.Request) {
+	scanlease.Attach(req)
 	if w.instanceID != "" {
 		req.Header.Set("X-Constellation-Scanner-Instance", w.instanceID)
 	}

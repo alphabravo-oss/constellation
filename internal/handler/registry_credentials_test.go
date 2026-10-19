@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/alphabravocompany/constellation/pkg/audit"
+	"github.com/alphabravocompany/constellation/pkg/scanlease"
 )
 
 // TestRegistryCredentialsGetIsOrgScoped exercises the credential release boundary
@@ -59,10 +60,12 @@ VALUES ($1, $2, 'privreg', 'ghcr', 'ghcr.io', 'static', $3)`,
 	}
 	h := NewRegistryCredentials(d, audit.New(pool))
 
+	leaseHeader := ""
 	call := func(handler *RegistryCredentials, orgID uuid.UUID, registryID string) *httptest.ResponseRecorder {
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scanner/registry-credentials?registry_id="+registryID+"&job_id="+jobID.String(), nil)
 		tok := &ScannerToken{ID: tokenID, OrgID: orgID, Name: "test-scanner"}
 		req.Header.Set("X-Constellation-Scanner-Instance", "worker-1")
+		req.Header.Set(scanlease.Header, leaseHeader)
 		req = req.WithContext(context.WithValue(req.Context(), scannerTokenKey{}, tok))
 		rr := httptest.NewRecorder()
 		handler.Get(rr, req)
@@ -113,6 +116,27 @@ VALUES ($1, $2, 'privreg', 'ghcr', 'ghcr.io', 'static', $3)`,
 	}
 
 	// Each invalid ownership edge and lease state must deny without issuing credentials.
+
+	// A new claim requires its exact identity, even for the same scanner instance.
+	leaseID := uuid.NewString()
+	if _, err := pool.Exec(ctx, `UPDATE scan_jobs SET lease_id=$2 WHERE id=$1`, jobID, leaseID); err != nil {
+		t.Fatal(err)
+	}
+	for _, stale := range []string{"", uuid.NewString()} {
+		leaseHeader = stale
+		if rec := call(h, orgA, regID.String()); rec.Code != http.StatusNotFound {
+			t.Fatalf("stale lease credential status %d", rec.Code)
+		}
+	}
+	leaseHeader = leaseID
+	if rec := call(h, orgA, regID.String()); rec.Code != http.StatusOK {
+		t.Fatalf("current lease credential status %d", rec.Code)
+	}
+	leaseHeader = ""
+	if _, err := pool.Exec(ctx, `UPDATE scan_jobs SET lease_id=NULL WHERE id=$1`, jobID); err != nil {
+		t.Fatal(err)
+	}
+
 	for _, tc := range []struct {
 		name, query string
 		args        []any

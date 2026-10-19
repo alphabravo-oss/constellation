@@ -35,7 +35,7 @@ func TestScanJobClaimPersistsInventoryAndRefreshesOnRetry(t *testing.T) {
 		req := httptest.NewRequestWithContext(ctx, http.MethodPost, "/api/v1/scan-jobs/claim", nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 		rec := httptest.NewRecorder()
-		handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(NewScanJobs(d, nil).Claim)).ServeHTTP(rec, req)
+		handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(NewScanJobs(d, nil).Claim)).ServeHTTP(rec, currentScanLeaseRequest(t, pool, req))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("claim %d %s", rec.Code, rec.Body.String())
 		}

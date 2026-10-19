@@ -10,6 +10,7 @@ import (
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/pkg/audit"
+	"github.com/alphabravocompany/constellation/pkg/scanlease"
 )
 
 // RegistryCredentialsDTO is the decrypted-credential envelope returned to a
@@ -66,6 +67,11 @@ func (h *RegistryCredentials) Get(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "valid job_id required")
 		return
 	}
+	leaseID, leaseErr := scanlease.FromRequest(r)
+	if leaseErr != nil {
+		jsonError(w, http.StatusBadRequest, leaseErr.Error())
+		return
+	}
 	workerID := ScannerWorkerIDFromRequest(tok, r)
 	var kind, endpoint, authKind string
 	var sealed []byte
@@ -78,8 +84,9 @@ SELECT reg.kind, reg.endpoint, reg.auth_kind, reg.auth_secret
   JOIN scan_jobs sj ON sj.target_id = st.id AND sj.org_id = st.org_id
  WHERE reg.id = $1 AND reg.org_id = $2 AND sj.id = $3
    AND st.type = 'image' AND sj.status = 'running'
-   AND sj.worker_id = $4 AND sj.lease_expires_at > NOW()`,
-		id, tok.OrgID, jobID, workerID).Scan(&kind, &endpoint, &authKind, &sealed)
+   AND sj.worker_id = $4 AND sj.lease_expires_at > clock_timestamp()
+ AND sj.lease_id IS NOT DISTINCT FROM $5::uuid`,
+		id, tok.OrgID, jobID, workerID, leaseID).Scan(&kind, &endpoint, &authKind, &sealed)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			jsonError(w, http.StatusNotFound, "registry not found")

@@ -112,7 +112,7 @@ VALUES ($1, $2, $3, 'running', $4, NOW(), 1)`, jobID, orgID, targetID, workerID)
 			route.URLParams.Add("id", jobID.String())
 			request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, route))
 			response := httptest.NewRecorder()
-			handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(jobs.Complete)).ServeHTTP(response, request)
+			handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(jobs.Complete)).ServeHTTP(response, currentScanLeaseRequest(t, pool, request))
 			if response.Code != http.StatusOK {
 				t.Fatalf("complete status=%d body=%s", response.Code, response.Body.String())
 			}

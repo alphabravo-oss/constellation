@@ -122,7 +122,7 @@ func TestScanJobs_RejectsJobWithForeignOrgTarget(t *testing.T) {
 		route.URLParams.Add("id", jobID.String())
 		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, route))
 		rec := httptest.NewRecorder()
-		handler.ScannerTokenMiddleware(pool)(endpoint).ServeHTTP(rec, req)
+		handler.ScannerTokenMiddleware(pool)(endpoint).ServeHTTP(rec, currentScanLeaseRequest(t, pool, req))
 		return rec
 	}
 	if rec := request(http.MethodPost, "/api/v1/scan-jobs/claim", nil, h.Claim); rec.Code != http.StatusNoContent {
@@ -207,7 +207,7 @@ func TestScanJobs_ClaimIgnoresEvidenceLinkedToForeignOrgTarget(t *testing.T) {
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/claim", nil)
 	req.Header.Set("Authorization", "Bearer "+rawToken)
 	rec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(NewScanJobs(database, nil).Claim)).ServeHTTP(rec, req)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(NewScanJobs(database, nil).Claim)).ServeHTTP(rec, currentScanLeaseRequest(t, pool, req))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("claim: status=%d body=%s", rec.Code, rec.Body.String())
 	}

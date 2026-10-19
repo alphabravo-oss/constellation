@@ -239,7 +239,7 @@ SELECT target_type, package_count
 	claimReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/claim", nil)
 	claimReq.Header.Set("Authorization", "Bearer "+rawToken)
 	claimRec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(NewScanJobs(d, audit.New(pool)).Claim)).ServeHTTP(claimRec, claimReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(NewScanJobs(d, audit.New(pool)).Claim)).ServeHTTP(claimRec, currentScanLeaseRequest(t, pool, claimReq))
 	if claimRec.Code != http.StatusOK {
 		t.Fatalf("claim status: %d body: %s", claimRec.Code, claimRec.Body.String())
 	}

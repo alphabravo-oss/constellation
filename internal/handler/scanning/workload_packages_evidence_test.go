@@ -206,7 +206,7 @@ INSERT INTO image_workload_links (
 		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/claim", nil)
 		req.Header.Set("Authorization", "Bearer "+scannerToken)
 		rec = httptest.NewRecorder()
-		handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(jobs.Claim)).ServeHTTP(rec, req)
+		handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(jobs.Claim)).ServeHTTP(rec, currentScanLeaseRequest(t, pool, req))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("claim %d status: %d body: %s", i, rec.Code, rec.Body.String())
 		}
@@ -239,7 +239,7 @@ INSERT INTO image_workload_links (
 	rctx.URLParams.Add("id", report.ScanEvidenceID.String())
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 	rec = httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(evidence.Get)).ServeHTTP(rec, req)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(evidence.Get)).ServeHTTP(rec, currentScanLeaseRequest(t, pool, req))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("evidence status: %d body: %s", rec.Code, rec.Body.String())
 	}
@@ -276,7 +276,7 @@ INSERT INTO image_workload_links (
 	rctx.URLParams.Add("id", report.ImageScanTargets[0].ScanEvidenceID.String())
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 	rec = httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(evidence.Get)).ServeHTTP(rec, req)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(evidence.Get)).ServeHTTP(rec, currentScanLeaseRequest(t, pool, req))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("image evidence status: %d body: %s", rec.Code, rec.Body.String())
 	}

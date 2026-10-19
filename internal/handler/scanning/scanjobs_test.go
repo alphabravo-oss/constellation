@@ -339,7 +339,7 @@ func TestScanJobs_QueueLifecycle(t *testing.T) {
 	r.Header.Set("Authorization", "Bearer "+rawToken)
 	// Wrap with the scanner-token middleware to populate context.
 	w = httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(w, r)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(w, currentScanLeaseRequest(t, pool, r))
 	if w.Code != 200 {
 		t.Fatalf("claim status: %d body: %s", w.Code, w.Body.String())
 	}
@@ -391,7 +391,7 @@ func TestScanJobs_QueueLifecycle(t *testing.T) {
 	rctx.URLParams.Add("id", enqRes.ID.String())
 	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
 	w = httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Complete)).ServeHTTP(w, r)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Complete)).ServeHTTP(w, currentScanLeaseRequest(t, pool, r))
 	if w.Code != 200 {
 		t.Fatalf("complete status: %d body: %s", w.Code, w.Body.String())
 	}
@@ -401,7 +401,7 @@ func TestScanJobs_QueueLifecycle(t *testing.T) {
 	rctx.URLParams.Add("id", enqRes.ID.String())
 	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
 	replay := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Complete)).ServeHTTP(replay, r)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Complete)).ServeHTTP(replay, currentScanLeaseRequest(t, pool, r))
 	if replay.Code != 200 {
 		t.Fatalf("replay complete status: %d body: %s", replay.Code, replay.Body.String())
 	}
@@ -507,7 +507,7 @@ func TestScanJobs_ClaimReclaimsExpiredLeaseAndFailureRequiresWorker(t *testing.T
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/claim", nil)
 	req.Header.Set("Authorization", "Bearer "+newRawToken)
 	rec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(rec, req)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(rec, currentScanLeaseRequest(t, pool, req))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("claim status: %d body: %s", rec.Code, rec.Body.String())
 	}
@@ -541,7 +541,7 @@ func TestScanJobs_ClaimReclaimsExpiredLeaseAndFailureRequiresWorker(t *testing.T
 	rctx.URLParams.Add("id", jobID.String())
 	failReq = failReq.WithContext(context.WithValue(failReq.Context(), chi.RouteCtxKey, rctx))
 	failRec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Fail)).ServeHTTP(failRec, failReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Fail)).ServeHTTP(failRec, currentScanLeaseRequest(t, pool, failReq))
 	if failRec.Code != http.StatusConflict {
 		t.Fatalf("old worker fail status: %d body: %s", failRec.Code, failRec.Body.String())
 	}
@@ -558,7 +558,7 @@ func TestScanJobs_ClaimReclaimsExpiredLeaseAndFailureRequiresWorker(t *testing.T
 	rctx.URLParams.Add("id", jobID.String())
 	failReq = failReq.WithContext(context.WithValue(failReq.Context(), chi.RouteCtxKey, rctx))
 	failRec = httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Fail)).ServeHTTP(failRec, failReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Fail)).ServeHTTP(failRec, currentScanLeaseRequest(t, pool, failReq))
 	if failRec.Code != http.StatusOK {
 		t.Fatalf("new worker fail status: %d body: %s", failRec.Code, failRec.Body.String())
 	}
@@ -609,7 +609,7 @@ func TestScanJobs_RenewRequiresSameScannerInstance(t *testing.T) {
 	claimReq.Header.Set("Authorization", "Bearer "+rawToken)
 	claimReq.Header.Set("X-Constellation-Scanner-Instance", "scanner-a")
 	claimRec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(claimRec, claimReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(claimRec, currentScanLeaseRequest(t, pool, claimReq))
 	if claimRec.Code != http.StatusOK {
 		t.Fatalf("claim status: %d body: %s", claimRec.Code, claimRec.Body.String())
 	}
@@ -621,7 +621,7 @@ func TestScanJobs_RenewRequiresSameScannerInstance(t *testing.T) {
 	rctx.URLParams.Add("id", jobID.String())
 	renewReq = renewReq.WithContext(context.WithValue(renewReq.Context(), chi.RouteCtxKey, rctx))
 	renewRec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.RenewLease)).ServeHTTP(renewRec, renewReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.RenewLease)).ServeHTTP(renewRec, currentScanLeaseRequest(t, pool, renewReq))
 	if renewRec.Code != http.StatusConflict {
 		t.Fatalf("different instance renew status: %d body: %s", renewRec.Code, renewRec.Body.String())
 	}
@@ -641,7 +641,7 @@ func TestScanJobs_RenewRequiresSameScannerInstance(t *testing.T) {
 	rctx.URLParams.Add("id", jobID.String())
 	renewReq = renewReq.WithContext(context.WithValue(renewReq.Context(), chi.RouteCtxKey, rctx))
 	renewRec = httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.RenewLease)).ServeHTTP(renewRec, renewReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.RenewLease)).ServeHTTP(renewRec, currentScanLeaseRequest(t, pool, renewReq))
 	if renewRec.Code != http.StatusOK {
 		t.Fatalf("same instance renew status: %d body: %s", renewRec.Code, renewRec.Body.String())
 	}
@@ -660,7 +660,7 @@ func TestScanJobs_RenewRequiresSameScannerInstance(t *testing.T) {
 	rctx.URLParams.Add("id", jobID.String())
 	completeReq = completeReq.WithContext(context.WithValue(completeReq.Context(), chi.RouteCtxKey, rctx))
 	completeRec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Complete)).ServeHTTP(completeRec, completeReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Complete)).ServeHTTP(completeRec, currentScanLeaseRequest(t, pool, completeReq))
 	if completeRec.Code != http.StatusConflict {
 		t.Fatalf("different instance complete status: %d body: %s", completeRec.Code, completeRec.Body.String())
 	}
@@ -715,7 +715,7 @@ func TestScanJobs_RetryBackoffAndMaxAttempts(t *testing.T) {
 	rctx.URLParams.Add("id", jobID.String())
 	failReq = failReq.WithContext(context.WithValue(failReq.Context(), chi.RouteCtxKey, rctx))
 	failRec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Fail)).ServeHTTP(failRec, failReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Fail)).ServeHTTP(failRec, currentScanLeaseRequest(t, pool, failReq))
 	if failRec.Code != http.StatusOK {
 		t.Fatalf("retryable fail status: %d body: %s", failRec.Code, failRec.Body.String())
 	}
@@ -744,7 +744,7 @@ SELECT status, COALESCE(error, ''), finished_at, next_attempt_at
 	claimReq.Header.Set("Authorization", "Bearer "+rawToken)
 	claimReq.Header.Set("X-Constellation-Scanner-Instance", "retry-a")
 	claimRec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(claimRec, claimReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(claimRec, currentScanLeaseRequest(t, pool, claimReq))
 	if claimRec.Code != http.StatusNoContent {
 		t.Fatalf("delayed retry claim status: %d body: %s", claimRec.Code, claimRec.Body.String())
 	}
@@ -756,7 +756,7 @@ SELECT status, COALESCE(error, ''), finished_at, next_attempt_at
 	claimReq.Header.Set("Authorization", "Bearer "+rawToken)
 	claimReq.Header.Set("X-Constellation-Scanner-Instance", "retry-a")
 	claimRec = httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(claimRec, claimReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(claimRec, currentScanLeaseRequest(t, pool, claimReq))
 	if claimRec.Code != http.StatusOK {
 		t.Fatalf("eligible retry claim status: %d body: %s", claimRec.Code, claimRec.Body.String())
 	}
@@ -809,7 +809,7 @@ SELECT status, COALESCE(worker_id, ''), lease_expires_at
 	rctx.URLParams.Add("id", terminalJobID.String())
 	failReq = failReq.WithContext(context.WithValue(failReq.Context(), chi.RouteCtxKey, rctx))
 	failRec = httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Fail)).ServeHTTP(failRec, failReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Fail)).ServeHTTP(failRec, currentScanLeaseRequest(t, pool, failReq))
 	if failRec.Code != http.StatusOK {
 		t.Fatalf("terminal fail status: %d body: %s", failRec.Code, failRec.Body.String())
 	}
@@ -888,7 +888,7 @@ func TestScanJobs_ClaimFiltersTargetTypes(t *testing.T) {
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/claim?target_type=host", nil)
 	req.Header.Set("Authorization", "Bearer "+rawToken)
 	rec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(rec, req)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(rec, currentScanLeaseRequest(t, pool, req))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("host claim status: %d body: %s", rec.Code, rec.Body.String())
 	}
@@ -906,7 +906,7 @@ func TestScanJobs_ClaimFiltersTargetTypes(t *testing.T) {
 	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/claim?target_type=repository", nil)
 	req.Header.Set("Authorization", "Bearer "+rawToken)
 	rec = httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(rec, req)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(rec, currentScanLeaseRequest(t, pool, req))
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("repository claim status: %d body: %s", rec.Code, rec.Body.String())
 	}
@@ -996,7 +996,7 @@ INSERT INTO image_workload_links (
 	r = httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/scan-jobs/claim", nil)
 	r.Header.Set("Authorization", "Bearer "+rawToken)
 	w = httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(w, r)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(w, currentScanLeaseRequest(t, pool, r))
 	if w.Code != 200 {
 		t.Fatalf("claim status: %d body: %s", w.Code, w.Body.String())
 	}
@@ -1024,7 +1024,7 @@ INSERT INTO image_workload_links (
 	rctx.URLParams.Add("id", enqRes.ID.String())
 	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
 	w = httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Complete)).ServeHTTP(w, r)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Complete)).ServeHTTP(w, currentScanLeaseRequest(t, pool, r))
 	if w.Code != 200 {
 		t.Fatalf("complete status: %d body: %s", w.Code, w.Body.String())
 	}
@@ -1244,7 +1244,7 @@ SELECT EXISTS (
 	claimReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/claim", nil)
 	claimReq.Header.Set("Authorization", "Bearer "+rawToken)
 	claimRec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(claimRec, claimReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(claimRec, currentScanLeaseRequest(t, pool, claimReq))
 	if claimRec.Code != http.StatusOK {
 		t.Fatalf("claim status: %d body: %s", claimRec.Code, claimRec.Body.String())
 	}
@@ -1348,7 +1348,7 @@ SELECT EXISTS (
 	rctx.URLParams.Add("id", enqRes.ID.String())
 	completeReq = completeReq.WithContext(context.WithValue(completeReq.Context(), chi.RouteCtxKey, rctx))
 	completeRec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Complete)).ServeHTTP(completeRec, completeReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Complete)).ServeHTTP(completeRec, currentScanLeaseRequest(t, pool, completeReq))
 	if completeRec.Code != http.StatusOK {
 		t.Fatalf("complete status: %d body: %s", completeRec.Code, completeRec.Body.String())
 	}
@@ -1977,7 +1977,7 @@ func TestScanJobs_RepositorySourceImageScanPreservesProvenance(t *testing.T) {
 	claimReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/claim", nil)
 	claimReq.Header.Set("Authorization", "Bearer "+rawToken)
 	claimRec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(claimRec, claimReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(claimRec, currentScanLeaseRequest(t, pool, claimReq))
 	if claimRec.Code != http.StatusOK {
 		t.Fatalf("claim status: %d body: %s", claimRec.Code, claimRec.Body.String())
 	}
@@ -2019,7 +2019,7 @@ func TestScanJobs_RepositorySourceImageScanPreservesProvenance(t *testing.T) {
 	rctx.URLParams.Add("id", enqRes.ID.String())
 	completeReq = completeReq.WithContext(context.WithValue(completeReq.Context(), chi.RouteCtxKey, rctx))
 	completeRec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Complete)).ServeHTTP(completeRec, completeReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Complete)).ServeHTTP(completeRec, currentScanLeaseRequest(t, pool, completeReq))
 	if completeRec.Code != http.StatusOK {
 		t.Fatalf("complete status: %d body: %s", completeRec.Code, completeRec.Body.String())
 	}
@@ -2540,7 +2540,7 @@ VALUES ($1, $2, $3, 'canceled', $4, NOW() - INTERVAL '5 minutes', NOW() - INTERV
 	rctx.URLParams.Add("id", completeJobID.String())
 	completeReq = completeReq.WithContext(context.WithValue(completeReq.Context(), chi.RouteCtxKey, rctx))
 	completeRec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Complete)).ServeHTTP(completeRec, completeReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Complete)).ServeHTTP(completeRec, currentScanLeaseRequest(t, pool, completeReq))
 	if completeRec.Code != http.StatusOK {
 		t.Fatalf("complete canceled status: %d body: %s", completeRec.Code, completeRec.Body.String())
 	}
@@ -2555,7 +2555,7 @@ VALUES ($1, $2, $3, 'canceled', $4, NOW() - INTERVAL '5 minutes', NOW() - INTERV
 	rctx.URLParams.Add("id", failJobID.String())
 	failReq = failReq.WithContext(context.WithValue(failReq.Context(), chi.RouteCtxKey, rctx))
 	failRec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Fail)).ServeHTTP(failRec, failReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Fail)).ServeHTTP(failRec, currentScanLeaseRequest(t, pool, failReq))
 	if failRec.Code != http.StatusOK {
 		t.Fatalf("fail canceled status: %d body: %s", failRec.Code, failRec.Body.String())
 	}

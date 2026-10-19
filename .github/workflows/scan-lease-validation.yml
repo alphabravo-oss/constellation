@@ -1,0 +1,41 @@
+name: Scan lease validation
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, 'implement/**']
+    paths:
+      - .github/workflows/scan-lease-validation.yml
+      - pkg/scanlease/**
+      - cmd/constellation-scanner/**
+      - internal/handler/scanning/**
+      - internal/handler/registry_credentials*
+      - internal/db/schema.go
+      - db/migrations/184_scan_job_lease_identity.sql
+permissions:
+  contents: read
+concurrency:
+  group: scan-lease-validation-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      GOMAXPROCS: '2'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - run: bash scripts/install-ci-tools.sh goose gotestsum
+      - name: Database-backed lease and worker regression suite
+        run: |
+          bash scripts/test-go.sh integration ./internal/handler/scanning ./internal/handler ./cmd/constellation-scanner ./pkg/scanlease ./internal/db
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: scan-lease-regression-${{ github.sha }}
+          path: artifacts/
+          retention-days: 7

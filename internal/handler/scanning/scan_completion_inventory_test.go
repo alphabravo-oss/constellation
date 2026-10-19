@@ -49,7 +49,7 @@ func TestScanCompletionPreservesClaimProvenanceAcrossTargetUpdates(t *testing.T)
 				req.Header.Set("Authorization", "Bearer "+token)
 				req = withRouteParam(req, "id", job.String())
 				rec := httptest.NewRecorder()
-				handler.ScannerTokenMiddleware(pool)(fn).ServeHTTP(rec, req)
+				handler.ScannerTokenMiddleware(pool)(fn).ServeHTTP(rec, currentScanLeaseRequest(t, pool, req))
 				return rec
 			}
 			rec := request("/claim", nil, h.Claim)

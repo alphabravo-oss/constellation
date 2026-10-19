@@ -40,6 +40,7 @@ import (
 	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/responserule"
 	"github.com/alphabravocompany/constellation/pkg/sbom"
+	"github.com/alphabravocompany/constellation/pkg/scanlease"
 	"github.com/alphabravocompany/constellation/pkg/vulnprofile"
 )
 
@@ -479,6 +480,7 @@ func (h *ScanJobs) Claim(w http.ResponseWriter, r *http.Request) {
 		orgID           uuid.UUID
 		targetID        uuid.UUID
 		leaseExpiresAt  time.Time
+		leaseID         uuid.UUID
 		attemptCount    int
 		maxAttempts     int
 		platform        string
@@ -496,6 +498,7 @@ func (h *ScanJobs) Claim(w http.ResponseWriter, r *http.Request) {
 WITH claimed AS (
 UPDATE scan_jobs sj
    SET status           = 'running',
+ lease_id = gen_random_uuid(),
        worker_id        = $1,
        claimed_at       = NOW(),
        claimed_inventory_hash = (SELECT st.inventory_hash FROM scan_targets st WHERE st.id = sj.target_id AND st.org_id = sj.org_id),
@@ -546,7 +549,7 @@ attempt AS (
         lease_expires_at = EXCLUDED.lease_expires_at
  RETURNING job_id
 )
-SELECT c.id, c.org_id, st.id, c.lease_expires_at,
+SELECT c.id, c.org_id, st.id, c.lease_expires_at, c.lease_id,
        COALESCE(c.attempt_count, 0), COALESCE(c.max_attempts, 3),
        COALESCE(st.platform, ''),
        st.type, st.ref, st.cluster_id, st.registry_id,
@@ -581,7 +584,7 @@ SELECT c.id, c.org_id, st.id, c.lease_expires_at,
   ) ev ON st.type IN ('host', 'workload', 'platform', 'serverless', 'repository')
       OR st.type = 'image'`,
 		workerID, token.OrgID, handler.ScannerJobLeaseInterval, targetTypes)
-	if err := row.Scan(&id, &orgID, &targetID, &leaseExpiresAt, &attemptCount, &maxAttempts, &platform, &targetType, &targetRef, &targetClusterID, &registryID, &sourceType, &sourceRef, &imageDigest, &inventoryHash, &evidenceID); err != nil {
+	if err := row.Scan(&id, &orgID, &targetID, &leaseExpiresAt, &leaseID, &attemptCount, &maxAttempts, &platform, &targetType, &targetRef, &targetClusterID, &registryID, &sourceType, &sourceRef, &imageDigest, &inventoryHash, &evidenceID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -593,7 +596,7 @@ SELECT c.id, c.org_id, st.id, c.lease_expires_at,
 		"id": id, "org_id": orgID, "target_id": targetID, "platform": platform,
 		"target_type": targetType, "target_ref": targetRef, "target_cluster_id": targetClusterID,
 		"source_type": sourceType, "source_ref": sourceRef, "image_digest": imageDigest, "inventory_hash": inventoryHash,
-		"evidence_id": evidenceID, "lease_expires_at": leaseExpiresAt,
+		"evidence_id": evidenceID, "lease_expires_at": leaseExpiresAt, "lease_id": leaseID,
 		"attempt_count": attemptCount, "max_attempts": maxAttempts,
 		"registry_id": registryID,
 	}
@@ -619,6 +622,11 @@ func (h *ScanJobs) RenewLease(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "invalid job id")
 		return
 	}
+	requestLeaseID, leaseErr := scanlease.FromRequest(r)
+	if leaseErr != nil {
+		jsonError(w, http.StatusBadRequest, leaseErr.Error())
+		return
+	}
 	workerID := handler.ScannerWorkerIDFromRequest(token, r)
 	var (
 		leaseExpiresAt time.Time
@@ -626,15 +634,19 @@ func (h *ScanJobs) RenewLease(w http.ResponseWriter, r *http.Request) {
 		maxAttempts    int
 	)
 	if err := h.db.Pool().QueryRow(r.Context(), `
-UPDATE scan_jobs
-   SET lease_expires_at = NOW() + $4::interval
- WHERE id = $1
-   AND org_id = $2
-   AND status = 'running'
-   AND worker_id = $3
-   AND EXISTS (SELECT 1 FROM scan_targets st WHERE st.id = scan_jobs.target_id AND st.org_id = scan_jobs.org_id)
- RETURNING lease_expires_at, COALESCE(attempt_count, 0), COALESCE(max_attempts, 3)`,
-		id, token.OrgID, workerID, handler.ScannerJobLeaseInterval).Scan(&leaseExpiresAt, &attemptCount, &maxAttempts); err != nil {
+WITH owned AS MATERIALIZED (
+ SELECT id, lease_id, COALESCE(lease_expires_at, claimed_at + $4::interval) AS expires_at
+ FROM scan_jobs
+ WHERE id = $1 AND org_id = $2 AND status = 'running' AND worker_id = $3
+ AND EXISTS (SELECT 1 FROM scan_targets st WHERE st.id = scan_jobs.target_id AND st.org_id = scan_jobs.org_id)
+ FOR UPDATE
+)
+UPDATE scan_jobs sj SET lease_expires_at = clock_timestamp() + $4::interval
+ FROM owned WHERE sj.id = owned.id
+ AND owned.lease_id IS NOT DISTINCT FROM $5::uuid
+ AND owned.expires_at > clock_timestamp()
+ RETURNING sj.lease_expires_at, COALESCE(sj.attempt_count, 0), COALESCE(sj.max_attempts, 3)`,
+		id, token.OrgID, workerID, handler.ScannerJobLeaseInterval, requestLeaseID).Scan(&leaseExpiresAt, &attemptCount, &maxAttempts); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			jsonError(w, http.StatusConflict, "job must be running and claimed by this worker before renewal")
 			return
@@ -656,6 +668,11 @@ func (h *ScanJobs) Complete(w http.ResponseWriter, r *http.Request) {
 	token, ok := handler.ScannerTokenFrom(r.Context())
 	if !ok {
 		jsonError(w, http.StatusUnauthorized, "scanner token required")
+		return
+	}
+	requestLeaseID, leaseErr := scanlease.FromRequest(r)
+	if leaseErr != nil {
+		jsonError(w, http.StatusBadRequest, leaseErr.Error())
 		return
 	}
 	requestWorkerID := handler.ScannerWorkerIDFromRequest(token, r)
@@ -749,6 +766,21 @@ func (h *ScanJobs) Complete(w http.ResponseWriter, r *http.Request) {
 	}
 	if workerID != requestWorkerID {
 		jsonError(w, http.StatusConflict, "job claimed by different worker")
+		return
+	}
+
+	// The job and target rows are locked above. Check the database clock after
+	// acquiring those locks so a request delayed by a lock cannot revive a lease.
+	var ownsLease bool
+	if err := tx.QueryRow(r.Context(), `SELECT COALESCE(
+   lease_id IS NOT DISTINCT FROM $2::uuid AND
+   COALESCE(lease_expires_at, claimed_at + $3::interval) > clock_timestamp(), false)
+   FROM scan_jobs WHERE id=$1`, id, requestLeaseID, handler.ScannerJobLeaseInterval).Scan(&ownsLease); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !ownsLease {
+		jsonError(w, http.StatusConflict, "scan lease expired or superseded")
 		return
 	}
 
@@ -2238,6 +2270,11 @@ func (h *ScanJobs) Fail(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusUnauthorized, "scanner token required")
 		return
 	}
+	requestLeaseID, leaseErr := scanlease.FromRequest(r)
+	if leaseErr != nil {
+		jsonError(w, http.StatusBadRequest, leaseErr.Error())
+		return
+	}
 	workerID := handler.ScannerWorkerIDFromRequest(token, r)
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
@@ -2258,8 +2295,8 @@ func (h *ScanJobs) Fail(w http.ResponseWriter, r *http.Request) {
 		nextAttemptAt *time.Time
 	)
 	if err := h.db.Pool().QueryRow(r.Context(), `
-WITH current_job AS (
-	SELECT id, claimed_at, COALESCE(attempt_count, 0) AS attempt_count, COALESCE(max_attempts, 3) AS max_attempts
+WITH current_job AS MATERIALIZED (
+	SELECT id, claimed_at, lease_id, COALESCE(lease_expires_at, claimed_at + $9::interval) AS expires_at, COALESCE(attempt_count, 0) AS attempt_count, COALESCE(max_attempts, 3) AS max_attempts
 	  FROM scan_jobs
 	 WHERE id = $2
 	   AND org_id = $3
@@ -2287,6 +2324,8 @@ updated AS (
 	       END
 	  FROM current_job
 	 WHERE scan_jobs.id = current_job.id
+ AND current_job.lease_id IS NOT DISTINCT FROM $8::uuid
+ AND current_job.expires_at > clock_timestamp()
 	 RETURNING scan_jobs.id, scan_jobs.status, scan_jobs.attempt_count, scan_jobs.max_attempts, scan_jobs.next_attempt_at
 ),
 attempt AS (
@@ -2307,7 +2346,7 @@ attempt AS (
 )
 SELECT id, status, attempt_count, max_attempts, next_attempt_at
   FROM updated
-  JOIN attempt ON attempt.job_id = updated.id`, body.Error, id, token.OrgID, workerID, body.Retryable, int(scannerJobBaseRetryDelay/time.Second), int(scannerJobMaxRetryDelay/time.Second)).Scan(&updatedID, &status, &attemptCount, &maxAttempts, &nextAttemptAt); err != nil {
+  JOIN attempt ON attempt.job_id = updated.id`, body.Error, id, token.OrgID, workerID, body.Retryable, int(scannerJobBaseRetryDelay/time.Second), int(scannerJobMaxRetryDelay/time.Second), requestLeaseID, handler.ScannerJobLeaseInterval).Scan(&updatedID, &status, &attemptCount, &maxAttempts, &nextAttemptAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			if scanJobWasCanceledByOperator(r.Context(), h.db.Pool(), id, token.OrgID, workerID) {
 				httpx.WriteJSON(w, 200, map[string]any{
