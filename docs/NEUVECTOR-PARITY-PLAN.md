@@ -1,7 +1,7 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-19** (Helm 98 registry migration, private scans, backup and final managed restart verified; broader parity remains active)
+Last reconciled: **2026-10-19** (Helm 99 admission replica-retirement fix deployed and live before/after decisions verified; broader parity remains active)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -17,9 +17,44 @@ stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
 
 
+## Admission replica retirement (Helm 99)
+
+Latest deployment: **Helm 99 / schema 181**, admission source **00429af**, image
+`ghcr.io/alphabravo-oss/constellation/admission@sha256:79a6826c8af496f9b5ec1e004974e38105d4e66641ceaf2c0485347d6948ccad`.
+The API remains 3b39b75. All fourteen running/completed-init registry image
+identities match the updated lock, workloads remain healthy, and authenticated
+cluster-page checks pass with reconciled counts and no page errors.
+Built-in pod-template checks now permit a full-object
+UPDATE of a known apps/v1 Deployment, ReplicaSet or StatefulSet only when the
+controller identity is unchanged, replicas strictly decrease, and every other
+spec field is identical. This fixes the stale-image retirement denial found in
+the Helm 98 infrastructure rollout. Unknown spec fields and large JSON integers
+remain part of the comparison. Create, scale-up, same-count and changed-template
+requests retain normal checks; Pods are admitted independently.
+
+The policy chain still evaluates custom Rego/CEL rules on reductions. Rego now
+receives operation, namespace, resource, subresource, actor, dry-run and old-object
+context; a custom rule can explicitly deny the update. Package/webhook tests and
+the admission package race suite pass, including custom Rego/CEL denials and
+malformed/identity/selector/template/number boundary cases. The release image
+starts read-only with all capabilities dropped, and registry digest verification
+passed before deployment.
+
+Live AdmissionReviews against the deployed TLS endpoint reproduced the prior
+stale-image denial, then verified that only unchanged-spec scale-down became
+allowed. Scale-up, same-count, changed-image and CREATE remained denied by the
+existing policy. Reviews used a fixture name and dryRun=true; they did not change
+production replica counts. This is direct webhook acceptance evidence, not a
+claim that every Kubernetes controller update sequence was tested. See
+`deploy/dev/registry-release/validation-retirement-20261019.json`.
+
+Supporting-image hardening remains open: the prior real Barman sidecar scan
+reported four critical and 52 high occurrences; its plugin reported six high.
+Full hosted CI and broader parity acceptance remain open.
+
 ## Private registry scanning and infrastructure recovery (Helm 98)
 
-Latest application deployment: **Helm 98 / schema 181**, API source **3b39b75**,
+Previous application deployment: **Helm 98 / schema 181**, API source **3b39b75**,
 digest `sha256:9a1a2e04a18b872aefb88804422fbdef8f58a1645d7cff0455543127f4792517`.
 GHCR now exchanges GitHub credentials for repository-scoped registry tokens at
 the fixed GHCR issuer. It rejects credential redirects, propagates tag lookup

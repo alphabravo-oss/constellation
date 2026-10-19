@@ -134,3 +134,20 @@ saved policies are not silently rewritten. Deploy migration 172, the updated API
 and updated admission controller before applying this new YAML field; older
 controllers do not understand it. Retired-bundle rules need explicit conversion
 and fresh scans as part of their deployment review.
+
+## Retiring controller replicas
+
+Built-in pod-template checks permit an `apps/v1` Deployment, ReplicaSet or
+StatefulSet full-object UPDATE that only reduces `spec.replicas`. The old and
+new objects must identify the same controller, and every other spec field,
+including the entire pod template and selector, must remain unchanged. Kubernetes
+controller metadata updates may accompany the reduction. This lets operators
+retire existing workloads even when their image evidence has become stale.
+
+Create, scale-up, same-count updates, template changes and other spec changes
+still receive the normal checks. Newly created Pods are checked independently.
+Custom Rego and CEL policies continue to run on reductions and may explicitly
+deny them. Rego receives operation, namespace, resource, actor, dry-run and old
+object context in `input.request`, alongside its existing kind and object fields.
+The reduction path does not grant Kubernetes authorization or exempt arbitrary
+custom-resource kinds or subresource requests.

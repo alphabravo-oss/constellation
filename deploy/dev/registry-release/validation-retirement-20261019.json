@@ -1,0 +1,74 @@
+{
+  "helmRevision": 99,
+  "schema": 181,
+  "sourceCommit": "00429af",
+  "publishedImage": {
+    "name": "admission",
+    "role": "admission",
+    "source": "constellation/admission:retirement-20261019-00429af",
+    "digest": "sha256:79a6826c8af496f9b5ec1e004974e38105d4e66641ceaf2c0485347d6948ccad",
+    "repository": "ghcr.io/alphabravo-oss/constellation/admission",
+    "tag": "dev-79a6826c8af496f9b5ec1e004974e38105d4e66641ceaf2c0485347d6948ccad"
+  },
+  "before": [
+    {
+      "case": "scale-down",
+      "allowed": false,
+      "reason": "denied by constellation policy \"e2e-block-critical-vulndb\": container \"manager\" image \"constellation/cnpg-operator:1.30.1-go1.27.2\" scan result is stale: last scanned 168h9m54s ago, max age 24h0m0s"
+    },
+    {
+      "case": "scale-up",
+      "allowed": false,
+      "reason": "denied by constellation policy \"e2e-block-critical-vulndb\": container \"manager\" image \"constellation/cnpg-operator:1.30.1-go1.27.2\" scan result is stale: last scanned 168h9m54s ago, max age 24h0m0s"
+    },
+    {
+      "case": "same-count",
+      "allowed": false,
+      "reason": "denied by constellation policy \"e2e-block-critical-vulndb\": container \"manager\" image \"constellation/cnpg-operator:1.30.1-go1.27.2\" scan result is stale: last scanned 168h9m54s ago, max age 24h0m0s"
+    },
+    {
+      "case": "changed-image",
+      "allowed": false,
+      "reason": "denied by constellation policy \"e2e-block-critical-vulndb\": container \"manager\" image \"registry.invalid/not-reviewed:v2\" has no known Constellation scan result"
+    },
+    {
+      "case": "create",
+      "allowed": false,
+      "reason": "denied by constellation policy \"e2e-block-critical-vulndb\": container \"manager\" image \"constellation/cnpg-operator:1.30.1-go1.27.2\" scan result is stale: last scanned 168h9m54s ago, max age 24h0m0s"
+    }
+  ],
+  "after": [
+    {
+      "case": "scale-down",
+      "allowed": true,
+      "reason": ""
+    },
+    {
+      "case": "scale-up",
+      "allowed": false,
+      "reason": "denied by constellation policy \"e2e-block-critical-vulndb\": container \"manager\" image \"constellation/cnpg-operator:1.30.1-go1.27.2\" scan result is stale: last scanned 168h18m1s ago, max age 24h0m0s"
+    },
+    {
+      "case": "same-count",
+      "allowed": false,
+      "reason": "denied by constellation policy \"e2e-block-critical-vulndb\": container \"manager\" image \"constellation/cnpg-operator:1.30.1-go1.27.2\" scan result is stale: last scanned 168h18m1s ago, max age 24h0m0s"
+    },
+    {
+      "case": "changed-image",
+      "allowed": false,
+      "reason": "denied by constellation policy \"e2e-block-critical-vulndb\": container \"manager\" image \"registry.invalid/not-reviewed:v2\" has no known Constellation scan result"
+    },
+    {
+      "case": "create",
+      "allowed": false,
+      "reason": "denied by constellation policy \"e2e-block-critical-vulndb\": container \"manager\" image \"constellation/cnpg-operator:1.30.1-go1.27.2\" scan result is stale: last scanned 168h18m1s ago, max age 24h0m0s"
+    }
+  ],
+  "checks": {
+    "admissionPackage": "passed",
+    "webhookPackage": "passed",
+    "admissionRace": "passed",
+    "readOnlyDroppedCapabilitiesStartup": "passed"
+  },
+  "scope": "Direct TLS AdmissionReview fixtures with dryRun=true; no production replica mutation."
+}

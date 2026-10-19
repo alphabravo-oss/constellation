@@ -74,6 +74,7 @@ separate OCI directories; the Kubernetes test did not erase the node layer cache
 The temporary restart hold is documented in [CNPG labels and annotations](https://cloudnative-pg.io/docs/1.25/labels_annotations/).
 It is an operational coordination measure, not a permanent configuration.
 Do not disable CNPG validation or Constellation admission enforcement to complete
-this rollout. If stale evidence blocks retirement of an old ReplicaSet, record
-that defect; scaling down only the retired replica set through the scale API
-preserves the existing admission checks on replacement pods.
+this rollout. Admission source `00429af` (Helm 99) permits unchanged-spec replica
+reductions while preserving checks on replacement Pods and custom Rego/CEL
+policies. Earlier versions required scaling only retired ReplicaSets through
+the Kubernetes scale API when stale evidence blocked their retirement updates.
