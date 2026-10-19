@@ -6,6 +6,7 @@ on:
     paths:
       - .github/workflows/scan-lease-validation.yml
       - pkg/scanlease/**
+      - internal/scanner/**
       - cmd/constellation-scanner/**
       - internal/handler/scanning/**
       - internal/handler/registry_credentials*
@@ -32,7 +33,9 @@ jobs:
       - run: bash scripts/install-ci-tools.sh goose gotestsum
       - name: Database-backed lease and worker regression suite
         run: |
-          bash scripts/test-go.sh integration ./internal/handler/scanning ./internal/handler ./cmd/constellation-scanner ./pkg/scanlease ./internal/db
+          bash scripts/test-go.sh integration ./internal/handler/scanning ./internal/handler ./cmd/constellation-scanner ./pkg/scanlease ./internal/db ./internal/scanner
+      - name: Compile actual-tool acceptance helper
+        run: GOWORK=off go test -c -o artifacts/scanner.test ./internal/scanner
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

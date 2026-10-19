@@ -29,6 +29,8 @@ type TrivyPackageMatcher struct {
 
 func (m *TrivyPackageMatcher) Name() string { return "trivy" }
 
+func (m *TrivyPackageMatcher) ImageEngineName() string { return m.Name() }
+
 func (m *TrivyPackageMatcher) MatchPackages(ctx context.Context, ref string, packages []Package, opts ScanOptions) (*EngineResult, error) {
 	start := time.Now()
 	bin := m.Binary

@@ -54,7 +54,7 @@ func NewDefaultWithConfig(cfg AggregatorConfig) *Aggregator {
 		a.Engines = append(a.Engines, &GrypeEngine{})
 	}
 	// Package matcher — required by the host/platform scan path (ScanPackages),
-	// and used as the canonical matcher for image SBOMs. The removed constellation-
+	// and as fallback when its image engine is absent or fails. The removed constellation-
 	// vulndb bundle used to own this slot; Grype's live DB now fills it so
 	// host/platform scans still get vulnerability data (sourced from Grype's
 	// maintained upstream feeds) without a static bundle.
@@ -95,6 +95,7 @@ func (a *Aggregator) Scan(ctx context.Context, ref string, opts ScanOptions) (*S
 
 	out := &ScanResult{ImageRef: ref, StartedAt: start}
 
+	successfulImageEngines := map[string]bool{}
 	var firstFatal error
 	for i, ro := range results {
 		if ro.err != nil {
@@ -110,16 +111,21 @@ func (a *Aggregator) Scan(ctx context.Context, ref string, opts ScanOptions) (*S
 			}
 			continue
 		}
+		successfulImageEngines[a.Engines[i].Name()] = ro.res.Error == ""
 		out.Engines = append(out.Engines, *ro.res)
 		if out.BundleMetadata == nil && ro.res.BundleMetadata != nil {
 			out.BundleMetadata = ro.res.BundleMetadata
 		}
 	}
 
+	var nativeSBOM []byte
 	// SBOM comes from syft (the only engine with authoritative package data).
 	for _, r := range out.Engines {
 		if r.Engine == "syft" {
 			out.Packages = r.Packages
+			if r.Error == "" {
+				nativeSBOM = r.Raw
+			}
 			break
 		}
 	}
@@ -132,9 +138,20 @@ func (a *Aggregator) Scan(ctx context.Context, ref string, opts ScanOptions) (*S
 	vulnDBMatcherRan := false
 	if !opts.SBOMOnly && len(out.Packages) > 0 {
 		for _, matcher := range a.PackageMatchers {
+			if fallback, ok := matcher.(ImageFallbackMatcher); ok && successfulImageEngines[fallback.ImageEngineName()] {
+				// A clean image result is authoritative too. Re-running the same engine
+				// against normalized packages would discard binary-level negative evidence.
+				continue
+			}
 			isVulnDB := isVulnDBSource(matcher.Name())
 			matcherStart := time.Now()
-			res, err := matcher.MatchPackages(ctx, ref, out.Packages, opts)
+			var res *EngineResult
+			var err error
+			if native, ok := matcher.(SBOMMatcher); ok && len(nativeSBOM) > 0 {
+				res, err = native.MatchSBOM(ctx, ref, nativeSBOM, opts)
+			} else {
+				res, err = matcher.MatchPackages(ctx, ref, out.Packages, opts)
+			}
 			if isVulnDB {
 				// The matcher executed against a non-empty inventory (the loop only
 				// runs when len(out.Packages) > 0); record that so the require-vulndb

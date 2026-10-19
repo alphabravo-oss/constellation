@@ -26,6 +26,8 @@ type GrypePackageMatcher struct {
 
 func (m *GrypePackageMatcher) Name() string { return "grype" }
 
+func (m *GrypePackageMatcher) ImageEngineName() string { return m.Name() }
+
 // scannerOfflineDB reports air-gapped mode (CONSTELLATION_SCANNER_OFFLINE_DB): in
 // it, Trivy/Grype must not pull DBs from the internet — operators pre-load them.
 func scannerOfflineDB() bool {
@@ -47,21 +49,29 @@ func grypeEnv(opts ScanOptions) []string {
 }
 
 func (m *GrypePackageMatcher) MatchPackages(ctx context.Context, ref string, packages []Package, opts ScanOptions) (*EngineResult, error) {
+	if len(packages) == 0 {
+		return &EngineResult{Engine: m.Name(), ImageRef: ref, Confidence: 0.85}, nil
+	}
+	sbom, err := cycloneDXFromPackages(packages)
+	if err != nil {
+		return nil, fmt.Errorf("grype-matcher: build sbom: %w", err)
+	}
+	return m.MatchSBOM(ctx, ref, sbom, opts)
+}
+
+// MatchSBOM passes the original document to Grype. In particular, do not rebuild
+// native Syft JSON as a minimal CycloneDX document: that discards Go symbols.
+func (m *GrypePackageMatcher) MatchSBOM(ctx context.Context, ref string, sbom []byte, opts ScanOptions) (*EngineResult, error) {
 	start := time.Now()
+	if !json.Valid(sbom) {
+		return nil, fmt.Errorf("grype-matcher: invalid SBOM JSON")
+	}
 	bin := m.Binary
 	if bin == "" {
 		bin = "grype"
 	}
-	if len(packages) == 0 {
-		return &EngineResult{Engine: m.Name(), ImageRef: ref, Confidence: 0.85, Duration: time.Since(start)}, nil
-	}
 	if _, err := exec.LookPath(bin); err != nil {
 		return nil, fmt.Errorf("grype-matcher: binary not in PATH: %w", err)
-	}
-
-	sbom, err := cycloneDXFromPackages(packages)
-	if err != nil {
-		return nil, fmt.Errorf("grype-matcher: build sbom: %w", err)
 	}
 	f, err := os.CreateTemp("", "constellation-sbom-*.json")
 	if err != nil {

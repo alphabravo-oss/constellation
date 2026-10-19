@@ -45,7 +45,9 @@ func (s *SyftEngine) Scan(ctx context.Context, ref string, opts ScanOptions) (*E
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	cmd.Env = RegistryEnvironment(opts)
+	// Keep binary-level evidence available to native SBOM consumers. Missing
+	// symbols remain unknown; the matching tools must not infer absence from that.
+	cmd.Env = append(RegistryEnvironment(opts), "SYFT_GOLANG_CAPTURE_SYMBOLS=all")
 
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("syft: %w (stderr=%s)", err, strings.TrimSpace(stderr.String()))
