@@ -1,6 +1,12 @@
 name: Cilium communication validation
 on:
   workflow_dispatch:
+    inputs:
+      cidr_mode:
+        description: Cilium CIDR matching profile to qualify
+        type: choice
+        options: [default, pods]
+        default: default
   push:
     branches: ['implement/**']
     paths:
@@ -18,6 +24,7 @@ jobs:
     timeout-minutes: 35
     env:
       GOMAXPROCS: '2'
+      CIDR_MODE: ${{ inputs.cidr_mode || 'default' }}
       KUBECONFIG: /tmp/constellation-cilium-proof.kubeconfig
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -48,7 +55,9 @@ jobs:
           CONFIG
           kind create cluster --name constellation-cilium-proof --config artifacts/kind.yaml --image kindest/node:v1.35.8@sha256:07b2536e30b803ed61d1677a79df6115f798ce64c80f9e22f6ed45afd09323c0
           helm repo add cilium https://helm.cilium.io/
-          helm install cilium cilium/cilium --version 1.20.3 --namespace kube-system --set ipam.mode=kubernetes --set operator.replicas=1 --set kubeProxyReplacement=false --wait --timeout 5m
+          cilium_options=()
+          if [[ "$CIDR_MODE" == pods ]]; then cilium_options+=(--set 'policyCIDRMatchMode[0]=pods'); fi
+          helm install cilium cilium/cilium --version 1.20.3 --namespace kube-system --set ipam.mode=kubernetes --set operator.replicas=1 --set kubeProxyReplacement=false --wait --timeout 5m "${cilium_options[@]}"
           kubectl wait nodes --all --for=condition=Ready --timeout=120s
           kubectl -n kube-system rollout status deployment/coredns --timeout=120s
           helm get values cilium -n kube-system --all -o json > artifacts/cilium-values.json
@@ -66,6 +75,6 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
-          name: cilium-communication-${{ github.sha }}
+          name: cilium-communication-${{ github.sha }}-${{ env.CIDR_MODE }}
           path: artifacts/
           retention-days: 14
