@@ -68,6 +68,11 @@ func TestPresenceScopeFreshnessAndHistory(t *testing.T) {
 	if c.CurrentCritical != 1 || c.CurrentOccurrences != 2 || c.HistoricalOccurrences != 2 || c.UnverifiedOccurrences != 1 {
 		t.Fatalf("fresh classification: %+v", c)
 	}
+	exec(`UPDATE findings SET last_seen_at=$2 WHERE org_id=$1 AND external_id='CVE-B'`, org, now.Add(time.Minute))
+	if c := read(); c.HistoricalOccurrences != 1 || c.UnverifiedOccurrences != 2 {
+		t.Fatalf("finding newer than inventory treated as retired: %+v", c)
+	}
+	exec(`UPDATE findings SET last_seen_at=$2 WHERE org_id=$1 AND external_id='CVE-B'`, org, now.Add(-time.Minute))
 	// A late older snapshot must not resurrect historical exposure or replace current inventory.
 	if err := Store(ctx, pool, org, cluster, now.Add(-time.Minute), now.Add(time.Hour), Snapshot{Pods: map[string]string{}, ImageDigests: map[string]bool{}}); err != nil {
 		t.Fatal(err)

@@ -50,7 +50,8 @@ const countsSQL = `WITH classified AS (
  COALESCE(NULLIF(f.external_id,''),f.id::text) AS external_id,f.severity,
  CASE WHEN s.expires_at IS NULL OR s.expires_at<=NOW() OR a.cluster_id IS DISTINCT FROM c.id THEN 'unverified'
  WHEN a.kind='workload' AND a.name ~ '^[^/]+/pod/[^/]+$' THEN
-   CASE WHEN s.pods->>a.name IN ('Running','Pending','Unknown','') THEN 'current' ELSE 'historical' END
+   CASE WHEN s.pods->>a.name IN ('Running','Pending','Unknown','') THEN 'current'
+   WHEN f.last_seen_at>s.observed_at THEN 'unverified' ELSE 'historical' END
  WHEN a.kind='image' AND s.image_digests ? COALESCE(NULLIF(a.digest,''),a.name) THEN 'current'
  ELSE 'unverified' END AS presence
  FROM clusters c
