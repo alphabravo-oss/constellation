@@ -1,10 +1,15 @@
 package registry
 
 import (
+	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestGHCRPrivateTagsAndDigestUseScopedToken(t *testing.T) {
@@ -99,5 +104,58 @@ func TestGHCRTokenExchangeDoesNotFollowRedirect(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "secret-sentinel") {
 		t.Fatal("token leaked")
+	}
+}
+
+func TestGHCRMultiPackageLookupIsBoundedAndKeepsTagsAssociated(t *testing.T) {
+	var active, peak atomic.Int32
+	var ready sync.Once
+	gate := make(chan struct{})
+	client := &http.Client{Transport: registryPageTransport(func(r *http.Request) (*http.Response, error) {
+		body := ""
+		if r.URL.Host == "api.github.com" {
+			rows := []string{}
+			for i := 0; i < 12; i++ {
+				rows = append(rows, fmt.Sprintf(`{"name":"app%d"}`, i))
+			}
+			body = "[" + strings.Join(rows, ",") + "]"
+		} else {
+			n := active.Add(1)
+			defer active.Add(-1)
+			for old := peak.Load(); n > old; old = peak.Load() {
+				if peak.CompareAndSwap(old, n) {
+					break
+				}
+			}
+			if n >= 4 {
+				ready.Do(func() { close(gate) })
+			}
+			select {
+			case <-gate:
+			case <-r.Context().Done():
+				return nil, r.Context().Err()
+			}
+			if r.URL.Path == "/token" {
+				body = `{"token":"scoped"}`
+			} else {
+				parts := strings.Split(r.URL.Path, "/")
+				body = fmt.Sprintf(`{"tags":[%q]}`, parts[3]+"-tag")
+			}
+		}
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+	})}
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	images, err := NewGHCR(Config{Username: "owner", Token: "secret", HTTPClient: client}).ListImages(ctx)
+	if err != nil || len(images) != 12 {
+		t.Fatalf("discovery: count=%d error=%v", len(images), err)
+	}
+	if peak.Load() != 4 {
+		t.Fatalf("unbounded or serial requests: %d", peak.Load())
+	}
+	for i, im := range images {
+		if len(im.Tags) != 1 || im.Tags[0] != fmt.Sprintf("app%d-tag", i) {
+			t.Fatalf("tags crossed repository boundary: %#v", im)
+		}
 	}
 }

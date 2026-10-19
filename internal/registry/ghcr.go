@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 )
 
 // GHCR is the ghcr.io connector. Public reads work without auth; private reads use a
@@ -67,17 +69,27 @@ func (g *GHCR) ListImages(ctx context.Context) ([]Image, error) {
 			PushedAt:   p.UpdatedAt.UTC().Format(time.RFC3339),
 		})
 	}
+	group, tagCtx := errgroup.WithContext(ctx)
+	// Bound registry traffic while keeping multi-package discovery within the
+	// interactive connection-test deadline. Each worker writes one image slot.
+	group.SetLimit(4)
 	for i := range out {
-		token, err := g.pullToken(ctx, out[i].Repository)
-		if err != nil {
-			return nil, err
-		}
-		tags, err := listTagsViaV2(ctx, g.client, out[i].Repository, token)
-		if err != nil {
-			return nil, fmt.Errorf("ghcr: enumerate tags: %w", err)
-		}
-		// An untagged package must not become an invented :latest scan target.
-		out[i].Tags = tags
+		group.Go(func() error {
+			token, err := g.pullToken(tagCtx, out[i].Repository)
+			if err != nil {
+				return err
+			}
+			tags, err := listTagsViaV2(tagCtx, g.client, out[i].Repository, token)
+			if err != nil {
+				return fmt.Errorf("ghcr: enumerate tags: %w", err)
+			}
+			// An untagged package must not become an invented :latest target.
+			out[i].Tags = tags
+			return nil
+		})
+	}
+	if err := group.Wait(); err != nil {
+		return nil, err
 	}
 	filtered := out[:0]
 	for _, im := range out {
