@@ -28,10 +28,10 @@
     {
       "name": "discoverer",
       "role": "discoverer",
-      "source": "constellation/discoverer:current-images-20261019-88d4587",
-      "digest": "sha256:3d26a37fef55eb89cd5e6b6774cf93660eb2738230dc0a465a74f32dde07767a",
+      "source": "constellation/discoverer:runtime-image-ref-20261019-da33314",
+      "digest": "sha256:b80cae410ccebe5645f2cf4e9509087a0a49b8edb12cc0a7a5f2313b9ace053b",
       "repository": "ghcr.io/alphabravo-oss/constellation/discoverer",
-      "tag": "dev-3d26a37fef55eb89cd5e6b6774cf93660eb2738230dc0a465a74f32dde07767a"
+      "tag": "dev-b80cae410ccebe5645f2cf4e9509087a0a49b8edb12cc0a7a5f2313b9ace053b"
     },
     {
       "name": "frontend",
