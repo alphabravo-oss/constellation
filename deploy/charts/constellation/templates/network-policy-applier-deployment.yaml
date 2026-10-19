@@ -104,6 +104,9 @@ kind: ClusterRole
 metadata:
   name: {{ include "constellation.fullname" . }}-network-policy-applier
 rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "nodes"]
+    verbs: ["list"]
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]

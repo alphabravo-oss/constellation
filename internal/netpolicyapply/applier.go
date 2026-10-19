@@ -85,6 +85,7 @@ type KubernetesResourceClient struct {
 	Client       dynamic.Interface
 	FieldManager string
 	Protection   *Protection
+	Dependencies DependencyReader
 }
 
 func (c KubernetesResourceClient) Apply(ctx context.Context, resource ManifestResource, manifestJSON []byte) error {
@@ -93,6 +94,18 @@ func (c KubernetesResourceClient) Apply(ctx context.Context, resource ManifestRe
 	}
 	var err error
 	manifestJSON, err = c.Protection.Guard(resource, manifestJSON)
+	if err != nil {
+		return err
+	}
+	reader := c.Dependencies
+	if reader == nil {
+		reader = dependencyReader(c.Client)
+	}
+	addresses, err := reader(ctx, c.Protection)
+	if err != nil {
+		return err
+	}
+	manifestJSON, err = c.Protection.preserveCommunication(resource, manifestJSON, addresses)
 	if err != nil {
 		return err
 	}

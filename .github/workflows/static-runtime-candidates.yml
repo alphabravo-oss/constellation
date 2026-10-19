@@ -2,10 +2,15 @@ name: Static runtime candidates
 
 on:
   workflow_dispatch:
+    inputs:
+      role:
+        description: Image role to build
+        type: choice
+        default: all
+        options: [all, discoverer, admission, operator]
   push:
     branches: [main, 'implement/**']
     paths:
-      - .github/workflows/static-runtime-candidates.yml
       - deploy/docker/Dockerfile.discoverer
       - deploy/docker/Dockerfile.admission
       - deploy/docker/Dockerfile.operator
@@ -26,12 +31,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        role: [discoverer, admission, operator]
+        role: ${{ inputs.role == 'operator' && fromJSON('["operator"]') || inputs.role == 'admission' && fromJSON('["admission"]') || inputs.role == 'discoverer' && fromJSON('["discoverer"]') || fromJSON('["discoverer","admission","operator"]') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Record build time
+        id: time
+        run: echo "value=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
       - name: Build source-stamped OCI candidate
         id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
@@ -44,6 +52,7 @@ jobs:
           build-args: |
             VERSION=dev-${{ github.sha }}
             COMMIT=${{ github.sha }}
+            BUILD_TIME=${{ steps.time.outputs.value }}
           provenance: mode=max
           sbom: true
       - name: Record build identity

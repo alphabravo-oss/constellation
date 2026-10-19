@@ -1,0 +1,40 @@
+name: System communication validation
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, 'implement/**']
+    paths:
+      - .github/workflows/system-communication-validation.yml
+      - internal/netpolicyapply/**
+      - cmd/constellation-netpolicy-applier/**
+      - pkg/netpolicy/**
+permissions:
+  contents: read
+concurrency:
+  group: system-communication-validation-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      GOMAXPROCS: '2'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - run: bash scripts/install-ci-tools.sh goose gotestsum
+      - name: Database-backed network policy regression suite
+        run: |
+          bash scripts/test-go.sh integration ./internal/netpolicyapply ./cmd/constellation-netpolicy-applier ./pkg/netpolicy ./internal/handler/network
+      - name: Compile opt-in live fixture helper without local-node compilation
+        run: CGO_ENABLED=0 go test -c -o artifacts/netpolicyapply.test ./internal/netpolicyapply
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: system-communication-regression-${{ github.sha }}
+          path: artifacts/
+          retention-days: 7

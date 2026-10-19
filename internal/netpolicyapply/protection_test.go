@@ -3,6 +3,7 @@ package netpolicyapply
 import (
 	"context"
 	"encoding/json"
+	"net/netip"
 	"strings"
 	"testing"
 
@@ -35,7 +36,7 @@ func TestProtectionAtKubernetesWriteBoundary(t *testing.T) {
 					return true, &unstructured.Unstructured{}, nil
 				})
 				dyn.PrependReactor("delete", "*", func(a ktesting.Action) (bool, runtime.Object, error) { deletes++; return true, nil, nil })
-				client := KubernetesResourceClient{Client: dyn, Protection: protection}
+				client := KubernetesResourceClient{Client: dyn, Protection: protection, Dependencies: fixtureDependencies}
 				err = client.Apply(context.Background(), resource, data)
 				if ns == "customer" {
 					if err != nil || patches != 1 {
@@ -92,7 +93,7 @@ func TestGlobalPolicyProtectionPreservesApplicationSelector(t *testing.T) {
 			}
 			return true, &unstructured.Unstructured{}, nil
 		})
-		if err := (KubernetesResourceClient{Client: dyn, Protection: p}).Apply(context.Background(), resource, data); err != nil || writes != 1 {
+		if err := (KubernetesResourceClient{Client: dyn, Protection: p, Dependencies: fixtureDependencies}).Apply(context.Background(), resource, data); err != nil || writes != 1 {
 			t.Fatalf("global write: %v count %d", err, writes)
 		}
 	}
@@ -126,4 +127,8 @@ func TestGlobalPolicySelectorCannotEscapeProtection(t *testing.T) {
 			t.Fatalf("accepted selector escape %q", selector)
 		}
 	}
+}
+
+func fixtureDependencies(context.Context, *Protection) ([]netip.Addr, error) {
+	return []netip.Addr{netip.MustParseAddr("10.43.0.1"), netip.MustParseAddr("192.0.2.10"), netip.MustParseAddr("2001:db8::10")}, nil
 }
