@@ -48,6 +48,11 @@ production replica counts. This is direct webhook acceptance evidence, not a
 claim that every Kubernetes controller update sequence was tested. See
 `deploy/dev/registry-release/validation-retirement-20261019.json`.
 
+The new admission image's queued scan completed with 91 packages and 36 findings:
+0 critical, 9 high, 10 medium, 3 low and 14 info. Reported engines are
+package-evidence, Grype and Trivy, all succeeded; this is not a same-database
+before/after vulnerability reduction claim.
+
 Supporting-image hardening remains open: the prior real Barman sidecar scan
 reported four critical and 52 high occurrences; its plugin reported six high.
 Full hosted CI and broader parity acceptance remain open.

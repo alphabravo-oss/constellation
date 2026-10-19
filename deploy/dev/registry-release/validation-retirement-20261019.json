@@ -70,5 +70,23 @@
     "admissionRace": "passed",
     "readOnlyDroppedCapabilitiesStartup": "passed"
   },
-  "scope": "Direct TLS AdmissionReview fixtures with dryRun=true; no production replica mutation."
+  "scope": "Direct TLS AdmissionReview fixtures with dryRun=true; no production replica mutation.",
+  "queuedScan": {
+    "jobId": "cbf50776-5952-47d5-9a56-dbdc1a714aba",
+    "status": "completed",
+    "packages": 91,
+    "findings": 36,
+    "severities": {
+      "critical": 0,
+      "high": 9,
+      "medium": 10,
+      "low": 3,
+      "info": 14
+    },
+    "engines": {
+      "package-evidence": "succeeded",
+      "grype": "succeeded",
+      "trivy": "succeeded"
+    }
+  }
 }
