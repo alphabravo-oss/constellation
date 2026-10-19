@@ -98,7 +98,7 @@
   "scanner": {
     "image": {
       "repository": "ghcr.io/alphabravo-oss/constellation/scanner",
-      "digest": "sha256:fd574a4169f963300acb6a57a66a416f38134a1d979956f3249a149ae21bcd39"
+      "digest": "sha256:16dcaa6e161a88635643171af046dda104ee62b1f1e347cb459ca8a678e305e0"
     }
   },
   "migrate": {

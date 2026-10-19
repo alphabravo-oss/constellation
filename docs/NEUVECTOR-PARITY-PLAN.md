@@ -1,7 +1,7 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-19** (Helm 125 release image reference correction; broader parity remains active)
+Last reconciled: **2026-10-19** (Helm 126 scanner finding identity correction; broader parity remains active)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -16,6 +16,28 @@ understand the result, and prove that the control is enforced. Constellation's
 stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
 
+
+## Scanner finding identity correction (Helm 126)
+
+Scanner source `3e67b51` normalizes Trivy's gobinary/gomod labels with Go module
+packages and carries Grype's declared individual advisory identities into the
+existing reconciliation logic. Merged findings retain every source primary ID
+and accepted alias, engine provenance, and severity/fix evidence. Grouped vendor
+advisories and ambiguous related-ID sets within a Grype record are kept out of
+alias-based merging; package names, versions and ecosystems remain boundaries.
+
+The same immutable scanner image and 1,337 packages produce 8 records instead of
+13 after this fix: 3 High / 2 Medium / 3 Info, previously 5 High / 4 Medium / 4
+Info. Coverage checks prove each original advisory is represented exactly once
+by a primary ID or retained alias with its severity, fix and engine evidence
+preserved. The lower count reflects consolidated evidence on unchanged image
+contents. Existing stored results receive the correction when rescanned.
+
+The original-code regression fails; scanner/worker unit and race suites and
+actual bundled-tool acceptance pass. Helm 126 is deployed, all fourteen runtime
+identities match the release lock, and the current image's scan also completed
+with all three engines successful. Evidence:
+`deploy/dev/registry-release/validation-finding-aliases-20261019.json`.
 
 ## Release image reference correction (Helm 125)
 
