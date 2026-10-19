@@ -20,26 +20,26 @@
     {
       "name": "api",
       "role": "api",
-      "source": "constellation/api:dashboard-scope-20261019-66b6321",
-      "digest": "sha256:4024f280fc862f8d87fb91d9f418325cd461baeb32ee785b02c59f953e5e8abe",
+      "source": "constellation/api:workload-presence-20261019-5cf9e2d",
+      "digest": "sha256:78d710c6b3796ca5b0b9be005ad52fa31dc77785e412b3b057fcd0eea55480f0",
       "repository": "ghcr.io/alphabravo-oss/constellation/api",
-      "tag": "dev-4024f280fc862f8d87fb91d9f418325cd461baeb32ee785b02c59f953e5e8abe"
+      "tag": "dev-78d710c6b3796ca5b0b9be005ad52fa31dc77785e412b3b057fcd0eea55480f0"
     },
     {
       "name": "discoverer",
       "role": "discoverer",
-      "source": "constellation/discoverer:runtime-image-ref-20261019-da33314",
-      "digest": "sha256:b80cae410ccebe5645f2cf4e9509087a0a49b8edb12cc0a7a5f2313b9ace053b",
+      "source": "constellation/discoverer:workload-presence-20261019-5cf9e2d",
+      "digest": "sha256:e249a9f8f2ac31fc34fd5bc64aaa4b27f9346a099038e511cd86926d736f8173",
       "repository": "ghcr.io/alphabravo-oss/constellation/discoverer",
-      "tag": "dev-b80cae410ccebe5645f2cf4e9509087a0a49b8edb12cc0a7a5f2313b9ace053b"
+      "tag": "dev-e249a9f8f2ac31fc34fd5bc64aaa4b27f9346a099038e511cd86926d736f8173"
     },
     {
       "name": "frontend",
       "role": "frontend",
-      "source": "constellation/frontend:dashboard-scope-20261019-66b6321",
-      "digest": "sha256:5bd3dbb03d4a14ea9ec60abf157eb46c011e19bf091392b7548e390da259b922",
+      "source": "constellation/frontend:workload-presence-20261019-5cf9e2d",
+      "digest": "sha256:633c723b1221bd7f44eaa804ce44b6fd6201aa2021e1914e76b2e0da8c9b90f5",
       "repository": "ghcr.io/alphabravo-oss/constellation/frontend",
-      "tag": "dev-5bd3dbb03d4a14ea9ec60abf157eb46c011e19bf091392b7548e390da259b922"
+      "tag": "dev-633c723b1221bd7f44eaa804ce44b6fd6201aa2021e1914e76b2e0da8c9b90f5"
     },
     {
       "name": "operator",
@@ -60,10 +60,10 @@
     {
       "name": "migrate",
       "role": "migrate",
-      "source": "constellation/migrate:presence-20261019-ab83212",
-      "digest": "sha256:d8f0975552412ace65a4c9fc21085524e57fb99a2e5e5a80069e21c1afa2c5c8",
+      "source": "constellation/migrate:workload-presence-20261019-5cf9e2d",
+      "digest": "sha256:b33345caf0d31cf518f1b6138abc57b679d608db120e82badd08c04dd9ec53c5",
       "repository": "ghcr.io/alphabravo-oss/constellation/migrate",
-      "tag": "dev-d8f0975552412ace65a4c9fc21085524e57fb99a2e5e5a80069e21c1afa2c5c8"
+      "tag": "dev-b33345caf0d31cf518f1b6138abc57b679d608db120e82badd08c04dd9ec53c5"
     },
     {
       "name": "postgres",
@@ -115,19 +115,19 @@
     "api": {
       "image": {
         "repository": "ghcr.io/alphabravo-oss/constellation/api",
-        "digest": "sha256:621bfd8d364ee7de13fdf23e1384d4372d8c47f4bd8e438f5eb819a2b01206be"
+        "digest": "sha256:78d710c6b3796ca5b0b9be005ad52fa31dc77785e412b3b057fcd0eea55480f0"
       }
     },
     "discoverer": {
       "image": {
         "repository": "ghcr.io/alphabravo-oss/constellation/discoverer",
-        "digest": "sha256:3d26a37fef55eb89cd5e6b6774cf93660eb2738230dc0a465a74f32dde07767a"
+        "digest": "sha256:e249a9f8f2ac31fc34fd5bc64aaa4b27f9346a099038e511cd86926d736f8173"
       }
     },
     "frontend": {
       "image": {
         "repository": "ghcr.io/alphabravo-oss/constellation/frontend",
-        "digest": "sha256:09974bc3a96a794e6423e5477756e5d8fc91275666c678c9d2888d078313846a"
+        "digest": "sha256:633c723b1221bd7f44eaa804ce44b6fd6201aa2021e1914e76b2e0da8c9b90f5"
       }
     },
     "operator": {
@@ -145,7 +145,7 @@
     "migrate": {
       "image": {
         "repository": "ghcr.io/alphabravo-oss/constellation/migrate",
-        "digest": "sha256:d8f0975552412ace65a4c9fc21085524e57fb99a2e5e5a80069e21c1afa2c5c8"
+        "digest": "sha256:b33345caf0d31cf518f1b6138abc57b679d608db120e82badd08c04dd9ec53c5"
       }
     }
   }

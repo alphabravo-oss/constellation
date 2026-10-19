@@ -14,19 +14,19 @@
   "api": {
     "image": {
       "repository": "ghcr.io/alphabravo-oss/constellation/api",
-      "digest": "sha256:4024f280fc862f8d87fb91d9f418325cd461baeb32ee785b02c59f953e5e8abe"
+      "digest": "sha256:78d710c6b3796ca5b0b9be005ad52fa31dc77785e412b3b057fcd0eea55480f0"
     }
   },
   "discoverer": {
     "image": {
       "repository": "ghcr.io/alphabravo-oss/constellation/discoverer",
-      "digest": "sha256:b80cae410ccebe5645f2cf4e9509087a0a49b8edb12cc0a7a5f2313b9ace053b"
+      "digest": "sha256:e249a9f8f2ac31fc34fd5bc64aaa4b27f9346a099038e511cd86926d736f8173"
     }
   },
   "frontend": {
     "image": {
       "repository": "ghcr.io/alphabravo-oss/constellation/frontend",
-      "digest": "sha256:5bd3dbb03d4a14ea9ec60abf157eb46c011e19bf091392b7548e390da259b922"
+      "digest": "sha256:633c723b1221bd7f44eaa804ce44b6fd6201aa2021e1914e76b2e0da8c9b90f5"
     }
   },
   "operator": {
@@ -44,7 +44,7 @@
   "migrate": {
     "image": {
       "repository": "ghcr.io/alphabravo-oss/constellation/migrate",
-      "digest": "sha256:d8f0975552412ace65a4c9fc21085524e57fb99a2e5e5a80069e21c1afa2c5c8"
+      "digest": "sha256:b33345caf0d31cf518f1b6138abc57b679d608db120e82badd08c04dd9ec53c5"
     }
   },
   "networkPolicyApplier": {

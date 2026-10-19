@@ -1,0 +1,317 @@
+{
+  "sourceCommit": "5cf9e2d",
+  "validatedAt": "2026-10-19T07:17:48.444839+00:00",
+  "helmRevision": 108,
+  "deployed": true,
+  "schemaVersion": 182,
+  "migrationJob": {
+    "name": "constellation-migrate-108",
+    "uid": "52b5157c-6836-440f-9103-26334de182f0",
+    "succeeded": 1
+  },
+  "validation": {
+    "backend": "PostgreSQL integration coverage for missing/stale/fresh presence, tenant boundaries, list/CSV/dashboard parity; discoverer and inventorypresence race tests passed",
+    "frontend": "74 tests passed across deployments, dashboard, and saved views; TypeScript and Vite build passed",
+    "live": {
+      "current": {
+        "total": 16,
+        "rows": [
+          {
+            "name": "constellation-postgres",
+            "presence": "scaled_to_zero"
+          },
+          {
+            "name": "ingress-nginx-controller",
+            "presence": "present"
+          },
+          {
+            "name": "constellation-scanner",
+            "presence": "present"
+          },
+          {
+            "name": "constellation-operator",
+            "presence": "present"
+          },
+          {
+            "name": "constellation-network-policy-applier",
+            "presence": "present"
+          },
+          {
+            "name": "constellation-frontend",
+            "presence": "present"
+          },
+          {
+            "name": "constellation-discoverer",
+            "presence": "present"
+          },
+          {
+            "name": "cert-manager-webhook",
+            "presence": "present"
+          },
+          {
+            "name": "cert-manager-cainjector",
+            "presence": "present"
+          },
+          {
+            "name": "cert-manager",
+            "presence": "present"
+          },
+          {
+            "name": "barman-cloud",
+            "presence": "present"
+          },
+          {
+            "name": "constellation-runtime-agent",
+            "presence": "present"
+          },
+          {
+            "name": "constellation-admission",
+            "presence": "present"
+          },
+          {
+            "name": "rustfs",
+            "presence": "present"
+          },
+          {
+            "name": "constellation-api",
+            "presence": "present"
+          },
+          {
+            "name": "cnpg-controller-manager",
+            "presence": "present"
+          }
+        ]
+      },
+      "all": {
+        "total": 19,
+        "rows": [
+          {
+            "name": "constellation-postgres",
+            "presence": "scaled_to_zero"
+          },
+          {
+            "name": "ingress-nginx-controller",
+            "presence": "present"
+          },
+          {
+            "name": "constellation-scanner",
+            "presence": "present"
+          },
+          {
+            "name": "constellation-operator",
+            "presence": "present"
+          },
+          {
+            "name": "constellation-network-policy-applier",
+            "presence": "present"
+          },
+          {
+            "name": "constellation-frontend",
+            "presence": "present"
+          },
+          {
+            "name": "constellation-discoverer",
+            "presence": "present"
+          },
+          {
+            "name": "cert-manager-webhook",
+            "presence": "present"
+          },
+          {
+            "name": "cert-manager-cainjector",
+            "presence": "present"
+          },
+          {
+            "name": "cert-manager",
+            "presence": "present"
+          },
+          {
+            "name": "barman-cloud",
+            "presence": "present"
+          },
+          {
+            "name": "constellation-runtime-agent",
+            "presence": "present"
+          },
+          {
+            "name": "constellation-admission",
+            "presence": "present"
+          },
+          {
+            "name": "orbit-proof-api",
+            "presence": "absent"
+          },
+          {
+            "name": "constellation-recovery-check-api",
+            "presence": "absent"
+          },
+          {
+            "name": "rustfs",
+            "presence": "present"
+          },
+          {
+            "name": "orbit-proof-frontend",
+            "presence": "absent"
+          },
+          {
+            "name": "constellation-api",
+            "presence": "present"
+          },
+          {
+            "name": "cnpg-controller-manager",
+            "presence": "present"
+          }
+        ]
+      },
+      "absent": {
+        "total": 3,
+        "rows": [
+          {
+            "name": "orbit-proof-api",
+            "presence": "absent"
+          },
+          {
+            "name": "constellation-recovery-check-api",
+            "presence": "absent"
+          },
+          {
+            "name": "orbit-proof-frontend",
+            "presence": "absent"
+          }
+        ]
+      },
+      "scaled_to_zero": {
+        "total": 1,
+        "rows": [
+          {
+            "name": "constellation-postgres",
+            "presence": "scaled_to_zero"
+          }
+        ]
+      },
+      "browser": {
+        "zeroReplicaLabel": true,
+        "absentHistoryVisible": true,
+        "urlPresence": true,
+        "pageErrors": []
+      },
+      "dashboard": {
+        "hardeningWorkloads": 16,
+        "zeroReplicaTopLabel": "scaled_to_zero"
+      }
+    },
+    "rollout": {
+      "helmRevision": 108,
+      "restartHoldRemoved": true,
+      "clusterHealthy": true,
+      "postBackupPhase": "completed",
+      "postBackupId": "20261019T054924",
+      "containers": [
+        {
+          "namespace": "constellation-system",
+          "pod": "constellation-admission-5d646bb47c-tpx7n",
+          "container": "admission",
+          "image": "ghcr.io/alphabravo-oss/constellation/admission@sha256:79a6826c8af496f9b5ec1e004974e38105d4e66641ceaf2c0485347d6948ccad",
+          "imageID": "ghcr.io/alphabravo-oss/constellation/admission@sha256:79a6826c8af496f9b5ec1e004974e38105d4e66641ceaf2c0485347d6948ccad"
+        },
+        {
+          "namespace": "constellation-system",
+          "pod": "constellation-api-bb7dc9b74-pbtmb",
+          "container": "wait-for-migrations",
+          "image": "ghcr.io/alphabravo-oss/constellation/api@sha256:78d710c6b3796ca5b0b9be005ad52fa31dc77785e412b3b057fcd0eea55480f0",
+          "imageID": "ghcr.io/alphabravo-oss/constellation/api@sha256:78d710c6b3796ca5b0b9be005ad52fa31dc77785e412b3b057fcd0eea55480f0"
+        },
+        {
+          "namespace": "constellation-system",
+          "pod": "constellation-api-bb7dc9b74-pbtmb",
+          "container": "api",
+          "image": "ghcr.io/alphabravo-oss/constellation/api@sha256:78d710c6b3796ca5b0b9be005ad52fa31dc77785e412b3b057fcd0eea55480f0",
+          "imageID": "ghcr.io/alphabravo-oss/constellation/api@sha256:78d710c6b3796ca5b0b9be005ad52fa31dc77785e412b3b057fcd0eea55480f0"
+        },
+        {
+          "namespace": "constellation-system",
+          "pod": "constellation-cnpg-postgres-1",
+          "container": "bootstrap-controller",
+          "image": "ghcr.io/alphabravo-oss/constellation/cnpg-operator@sha256:cc61009ac3d2cdf0aa2ff7f44f85dbb7bdf85ab50425d41a71da2af6521cc1b9",
+          "imageID": "ghcr.io/alphabravo-oss/constellation/cnpg-operator@sha256:cc61009ac3d2cdf0aa2ff7f44f85dbb7bdf85ab50425d41a71da2af6521cc1b9"
+        },
+        {
+          "namespace": "constellation-system",
+          "pod": "constellation-cnpg-postgres-1",
+          "container": "plugin-barman-cloud",
+          "image": "ghcr.io/alphabravo-oss/constellation/barman-sidecar@sha256:5c6b5559b08b7b49c89937b6d823a37fbeb8e7b883d4b0da6278fe09de87d1f1",
+          "imageID": "ghcr.io/alphabravo-oss/constellation/barman-sidecar@sha256:5c6b5559b08b7b49c89937b6d823a37fbeb8e7b883d4b0da6278fe09de87d1f1"
+        },
+        {
+          "namespace": "constellation-system",
+          "pod": "constellation-cnpg-postgres-1",
+          "container": "postgres",
+          "image": "ghcr.io/alphabravo-oss/constellation/postgres:16.14-dev-98087f2e517416edda6e3649154c3be4a5a7b0ce2228c4fab3f4e2bed430d92a@sha256:98087f2e517416edda6e3649154c3be4a5a7b0ce2228c4fab3f4e2bed430d92a",
+          "imageID": "ghcr.io/alphabravo-oss/constellation/postgres@sha256:98087f2e517416edda6e3649154c3be4a5a7b0ce2228c4fab3f4e2bed430d92a"
+        },
+        {
+          "namespace": "constellation-system",
+          "pod": "constellation-discoverer-9cdbc644f-vqs4g",
+          "container": "discoverer",
+          "image": "ghcr.io/alphabravo-oss/constellation/discoverer@sha256:e249a9f8f2ac31fc34fd5bc64aaa4b27f9346a099038e511cd86926d736f8173",
+          "imageID": "ghcr.io/alphabravo-oss/constellation/discoverer@sha256:e249a9f8f2ac31fc34fd5bc64aaa4b27f9346a099038e511cd86926d736f8173"
+        },
+        {
+          "namespace": "constellation-system",
+          "pod": "constellation-frontend-769bf6dc8-b92kz",
+          "container": "nginx",
+          "image": "ghcr.io/alphabravo-oss/constellation/frontend@sha256:633c723b1221bd7f44eaa804ce44b6fd6201aa2021e1914e76b2e0da8c9b90f5",
+          "imageID": "ghcr.io/alphabravo-oss/constellation/frontend@sha256:633c723b1221bd7f44eaa804ce44b6fd6201aa2021e1914e76b2e0da8c9b90f5"
+        },
+        {
+          "namespace": "constellation-system",
+          "pod": "constellation-network-policy-applier-6bb4b95c97-654xd",
+          "container": "applier",
+          "image": "ghcr.io/alphabravo-oss/constellation/operator@sha256:1e4e345666f9b1f6aa4bfbeb97925c7f378552b1d54d7717121684e2636aa47d",
+          "imageID": "ghcr.io/alphabravo-oss/constellation/operator@sha256:1e4e345666f9b1f6aa4bfbeb97925c7f378552b1d54d7717121684e2636aa47d"
+        },
+        {
+          "namespace": "constellation-system",
+          "pod": "constellation-operator-69df9946c5-rcssw",
+          "container": "operator",
+          "image": "ghcr.io/alphabravo-oss/constellation/operator@sha256:1e4e345666f9b1f6aa4bfbeb97925c7f378552b1d54d7717121684e2636aa47d",
+          "imageID": "ghcr.io/alphabravo-oss/constellation/operator@sha256:1e4e345666f9b1f6aa4bfbeb97925c7f378552b1d54d7717121684e2636aa47d"
+        },
+        {
+          "namespace": "constellation-system",
+          "pod": "constellation-runtime-agent-ctb5t",
+          "container": "agent",
+          "image": "ghcr.io/alphabravo-oss/constellation/runtime-agent@sha256:28ae4c759d9421e3d3b92e5aed7385acc06caa8b8c9b22323251b11d6a325366",
+          "imageID": "ghcr.io/alphabravo-oss/constellation/runtime-agent@sha256:28ae4c759d9421e3d3b92e5aed7385acc06caa8b8c9b22323251b11d6a325366"
+        },
+        {
+          "namespace": "constellation-system",
+          "pod": "constellation-scanner-d97b5d4dc-t5btw",
+          "container": "scanner",
+          "image": "ghcr.io/alphabravo-oss/constellation/scanner@sha256:f6c1c072de953e5031331c5ab556158ff05fd75e33859be5a7ab7ef68156e629",
+          "imageID": "ghcr.io/alphabravo-oss/constellation/scanner@sha256:f6c1c072de953e5031331c5ab556158ff05fd75e33859be5a7ab7ef68156e629"
+        },
+        {
+          "namespace": "cnpg-system",
+          "pod": "barman-cloud-669fcf8689-47ssk",
+          "container": "barman-cloud",
+          "image": "ghcr.io/alphabravo-oss/constellation/barman-plugin@sha256:de96d9e4bf0f2f69f8d2b3c1a8bc953ea8235d613901ae19754600b55cb07590",
+          "imageID": "ghcr.io/alphabravo-oss/constellation/barman-plugin@sha256:de96d9e4bf0f2f69f8d2b3c1a8bc953ea8235d613901ae19754600b55cb07590"
+        },
+        {
+          "namespace": "cnpg-system",
+          "pod": "cnpg-controller-manager-fb6948887-whhm5",
+          "container": "manager",
+          "image": "ghcr.io/alphabravo-oss/constellation/cnpg-operator@sha256:cc61009ac3d2cdf0aa2ff7f44f85dbb7bdf85ab50425d41a71da2af6521cc1b9",
+          "imageID": "ghcr.io/alphabravo-oss/constellation/cnpg-operator@sha256:cc61009ac3d2cdf0aa2ff7f44f85dbb7bdf85ab50425d41a71da2af6521cc1b9"
+        }
+      ]
+    }
+  },
+  "limitations": [
+    "Presence filtering does not resolve or delete historical findings.",
+    "Only complete fresh snapshots establish absence; missing or stale evidence stays unverified.",
+    "Discoverer first reconcile preceded migration completion; next scheduled reconcile recovered and produced the verified fresh snapshot.",
+    "Separately managed dependency ownership and full disruptive-response protection audit remain open."
+  ]
+}
