@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { ArrowLeft, Eye, Save } from "lucide-react";
 import { responseRules, type ResponseRule, type ResponseRuleMode } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
+import { useEditorVisit } from "@/hooks/useEditorVisit";
 import { useRouteSearchParams } from "@/lib/route-search";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -18,16 +19,17 @@ type OverrideDraft = { mode: ResponseRuleMode; enabled: boolean; reason: string 
 export function ResponseCatalogOverrideFormPage() {
   const { clusterId, cluster, isLoading } = useCluster();
   const { ruleId } = useParams({ strict: false });
+  const { visit } = useEditorVisit(["response-catalog-override", clusterId, ruleId]);
   const [search] = useRouteSearchParams();
   const backTo = clusterId ? `/clusters/${clusterId}/response${search.size ? `?${search}` : ""}` : "/clusters";
   return <div className="space-y-6" data-testid="response-catalog-override-form-page">
     <PageHeader title="Edit response catalog override" description="Change the mode or enabled state of a built-in response rule. This override is shared across every cluster in the organization."
       backLink={<Link to="." href={backTo} className="inline-flex items-center gap-2 hover:text-foreground"><ArrowLeft className="h-4 w-4" /> Response Catalog</Link>} />
-    {isLoading ? <LoadingState label="Loading cluster…" /> : !clusterId || !cluster ? <ErrorState title="The selected cluster could not be loaded. Return to the cluster list and try again." /> : !ruleId ? <ErrorState title="Choose a built-in rule from Response Catalog before editing an override." /> : <OverrideScope key={`${clusterId}:${ruleId}`} ruleId={ruleId} backTo={backTo} />}
+    {isLoading ? <LoadingState label="Loading cluster…" /> : !clusterId || !cluster ? <ErrorState title="The selected cluster could not be loaded. Return to the cluster list and try again." /> : !ruleId ? <ErrorState title="Choose a built-in rule from Response Catalog before editing an override." /> : <OverrideScope key={visit.context} editorContext={visit.context} ruleId={ruleId} backTo={backTo} />}
   </div>;
 }
 
-function OverrideScope({ ruleId, backTo }: { ruleId: string; backTo: string }) {
+function OverrideScope({ editorContext, ruleId, backTo }: { editorContext: string; ruleId: string; backTo: string }) {
   const q = useQuery({ queryKey: ["response-rules"], queryFn: () => responseRules.list() });
   const loaded = q.data?.rules.find((rule) => rule.id === ruleId);
   const [initial, setInitial] = useState<ResponseRule | null>(null);
@@ -38,11 +40,12 @@ function OverrideScope({ ruleId, backTo }: { ruleId: string; backTo: string }) {
   }
   return <>
     {(q.isError || !loaded) && <ErrorState title="Could not refresh this built-in rule. Your draft is preserved. Refresh before previewing or saving." action={<Button onClick={() => void q.refetch()}>Retry</Button>} />}
-    <OverrideEditor initial={initial} current={loaded ?? initial} canAct={q.isSuccess && !!loaded && !q.isFetching} backTo={backTo} />
+    <OverrideEditor editorContext={editorContext} initial={initial} current={loaded ?? initial} canAct={q.isSuccess && !!loaded && !q.isFetching} backTo={backTo} />
   </>;
 }
 
-function OverrideEditor({ initial, current, canAct, backTo }: { initial: ResponseRule; current: ResponseRule; canAct: boolean; backTo: string }) {
+function OverrideEditor({ editorContext, initial, current, canAct, backTo }: { editorContext: string; initial: ResponseRule; current: ResponseRule; canAct: boolean; backTo: string }) {
+  const { isCurrent } = useEditorVisit([editorContext]);
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [draft, setDraft] = useState<OverrideDraft>(() => ({ mode: initial.mode, enabled: initial.enabled, reason: initial.override_reason ?? "" }));
@@ -55,7 +58,7 @@ function OverrideEditor({ initial, current, canAct, backTo }: { initial: Respons
   const matchingPreview = preview.isSuccess && preview.data.key === inputKey ? preview.data.preview : undefined;
   const save = useMutation({
     mutationFn: (input: OverrideDraft) => responseRules.update(initial.id, { ...input, reason: input.reason.trim() }),
-    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["response-rules"] }); void navigate({ href: backTo }); },
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["response-rules"] }); if (isCurrent()) void navigate({ href: backTo }); },
   });
   const busy = preview.isPending || save.isPending;
   const canPreview = canAct && !busy && !!draft.reason.trim();

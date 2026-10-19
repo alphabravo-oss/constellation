@@ -48,8 +48,16 @@ it("pushes source/status filters and sorting while preserving unrelated control 
  await select("#evidence-scope", "node"); await settle(() => expect(compliance.evidence).toHaveBeenLastCalledWith(expect.objectContaining({ scope: "node", offset: 0 })));
  expect(new URLSearchParams(history.location.search).getAll("context")).toEqual(["a", "b"]); expect(history.location.search).toContain("status=graded"); expect(history.location.hash).toBe("#evidence");
  await select("#evidence-status", "exempted"); await settle(() => expect(compliance.evidence).toHaveBeenLastCalledWith(expect.objectContaining({ scope: "node", status: "exempted" })));
- await act(async () => history.back()); await settle(() => expect(host.querySelector<HTMLSelectElement>("#evidence-status")!.value).toBe(""));
- await act(async () => host.querySelector<HTMLButtonElement>('th[aria-sort="descending"] button')!.click()); await settle(() => expect(compliance.evidence).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "observed", order: "asc" })));
+ await act(async () => history.back());
+ const observedSortSelector = '[data-testid="compliance-source-evidence-table"] th[data-column-id="observed"][aria-sort="descending"] .app-table-header-button';
+ await settle(() => {
+  expect(host.querySelector<HTMLSelectElement>("#evidence-status")!.value).toBe("");
+  expect(rows()).toHaveLength(100);
+  const observedSort = host.querySelector<HTMLButtonElement>(observedSortSelector);
+  expect(observedSort?.textContent?.trim()).toBe("Observed");
+  expect(observedSort?.disabled).toBe(false);
+ });
+ await act(async () => host.querySelector<HTMLButtonElement>(observedSortSelector)!.click()); await settle(() => expect(compliance.evidence).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "observed", order: "asc" })));
 });
 it("replaces search keystrokes with a debounced literal request rather than creating history entries", async () => {
  await render(); await settle(() => expect(rows()).toHaveLength(100));

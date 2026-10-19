@@ -23,9 +23,17 @@ async function renderForm(page: ReactNode = <RegistryFormPage />) {
     expect(host.querySelector("form")).not.toBeNull();
   });
 }
+function registryFixture(id = "registry", name = "Private registry", imageGlobs = ["team/*"]): RegistryDTO {
+  return {
+    id, org_id: "org", name, kind: "generic-v2", endpoint: "https://registry.example.test",
+    auth_kind: "static", has_secret: true, scan_cadence: "daily", image_globs: imageGlobs,
+    scan_policy: { include_repos: imageGlobs, exclude_repos: [], tag_selection: "all", block_promotion_threshold: "critical" },
+    images_seen: 0, created_at: "2026-10-19T00:00:00Z", updated_at: "2026-10-19T00:00:00Z",
+  };
+}
 function savedRegistry() {
   route.regId = "registry";
-  vi.mocked(registries.get).mockResolvedValue({ id: "registry", name: "Private registry", kind: "generic-v2", endpoint: "https://registry.example.test", auth_kind: "static", has_secret: true, scan_cadence: "daily", image_globs: ["team/*"] } as RegistryDTO);
+  vi.mocked(registries.get).mockResolvedValue(registryFixture());
 }
 it("opens a dedicated new form with advanced disclosure and cancels without saving", async () => {
   await renderForm();
@@ -78,7 +86,7 @@ async function editRegistryName(value: string) {
 
 it.each(["registry", "owner"])("preserves a fresh registry draft after a pending save leaves and returns to its %s", async context => {
   savedRegistry();
-  vi.mocked(registries.get).mockImplementation(async id => ({ id, name: `Registry ${id}`, kind: "generic-v2", endpoint: "https://registry.example.test", auth_kind: "static", has_secret: true, scan_cadence: "daily", image_globs: [] } as RegistryDTO));
+  vi.mocked(registries.get).mockImplementation(async id => registryFixture(id, `Registry ${id}`, []));
   let complete!: () => void;
   vi.mocked(registries.update).mockImplementation(() => new Promise<void>(resolve => { complete = resolve; }));
   await renderForm(ownedRegistryForm()); await editRegistryName("Original pending edit");

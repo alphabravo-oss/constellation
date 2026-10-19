@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { baselines, fileProfiles, network, quarantine, type BaselineDetail, type BaselineMode, type DeploymentDetail, type FileProfileDetail, type FileProfileBundle } from "@/api/client";
+import { useEditorVisit } from "@/hooks/useEditorVisit";
 import { useRouteSearchParams } from "@/lib/route-search";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -69,14 +70,16 @@ export function DeploymentActionFormPage() {
   const info = selectedAction ? ACTIONS[selectedAction] : undefined;
   const resource = selectedAction === "file-rule-delete" ? params.get("rule") ?? "" : params.get("exception") ?? "";
   const desired = params.get("mode") ?? "";
+  const { visit } = useEditorVisit(["deployment-action", context.clusterId, context.did, selectedAction, resource, desired]);
   const backTo = context.clusterId && context.did ? `/clusters/${context.clusterId}/deployments/${encodeURIComponent(context.did)}?tab=${info?.tab ?? "overview"}` : "/clusters";
   return <div className="space-y-5" data-testid="deployment-action-form-page">
     <PageHeader title={info?.title ?? "Deployment action"} description={info?.effect ?? "Choose a supported action from an exact deployment."} backLink={<a href={backTo} className="text-sm hover:underline">Back to deployment</a>} />
-    {!selectedAction || !context.clusterId || !context.did ? <ErrorState title="Select a supported deployment action." /> : <DeploymentActionScope key={`${context.clusterId}/${context.did}/${selectedAction}/${resource}/${desired}`} context={context} action={selectedAction} resource={resource} desired={desired} backTo={backTo} />}
+    {!selectedAction || !context.clusterId || !context.did ? <ErrorState title="Select a supported deployment action." /> : <DeploymentActionScope key={visit.context} editorContext={visit.context} context={context} action={selectedAction} resource={resource} desired={desired} backTo={backTo} />}
   </div>;
 }
 
-function DeploymentActionScope({ context, action, resource, desired, backTo }: { context: ReturnType<typeof useDeploymentContext>; action: Action; resource: string; desired: string; backTo: string }) {
+function DeploymentActionScope({ editorContext, context, action, resource, desired, backTo }: { editorContext: string; context: ReturnType<typeof useDeploymentContext>; action: Action; resource: string; desired: string; backTo: string }) {
+  const { isCurrent } = useEditorVisit([editorContext]);
   const { clusterId, did, detail, q, qc, scopeReady, ready } = context;
   const navigate = useNavigate();
   const usesProfile = action === "process-mode" || action.startsWith("file-");
@@ -134,7 +137,7 @@ function DeploymentActionScope({ context, action, resource, desired, backTo }: {
     const bundle = parseBundle(bundleText);
     if (!confirmed) throw new Error("Review the file profile bundle and confirm replacement.");
     return fileProfiles.importBundle(target, { bundle, reason: bodyReason, replace: true }, { cluster_id: clusterId });
-  }, onSuccess: () => { void qc.invalidateQueries({ queryKey: ["deployment"] }); void qc.invalidateQueries({ queryKey: ["file-monitor-detail"] }); void qc.invalidateQueries({ queryKey: ["file-monitor-profiles"] }); void qc.invalidateQueries({ queryKey: ["baseline"] }); void qc.invalidateQueries({ queryKey: ["network-policy-lifecycle"] }); void navigate({ href: backTo }); } });
+  }, onSuccess: () => { void qc.invalidateQueries({ queryKey: ["deployment"] }); void qc.invalidateQueries({ queryKey: ["file-monitor-detail"] }); void qc.invalidateQueries({ queryKey: ["file-monitor-profiles"] }); void qc.invalidateQueries({ queryKey: ["baseline"] }); void qc.invalidateQueries({ queryKey: ["network-policy-lifecycle"] }); if (isCurrent()) void navigate({ href: backTo }); } });
   const retry = () => { if (scopeReady) { void q.refetch(); if (usesProfile && control) void profileQ.refetch(); } else { void qc.invalidateQueries({ queryKey: ["clusters"] }); void qc.invalidateQueries({ queryKey: ["cluster", clusterId] }); } };
   if (!initial) return context.clusterError ? <ErrorState title="The selected cluster is unavailable." action={<Button onClick={retry}>Retry</Button>} /> : sourceReady ? <LoadingState label="Preparing reviewed target…" /> : !scopeReady && !context.clusterError ? <LoadingState label="Resolving cluster…" /> : q.isPending || usesProfile && profileQ.isPending && !q.isError && !!detail ? <LoadingState label="Loading deployment and runtime profile…" /> : <ErrorState title="This action is not available for the exact deployment and current reported state." action={<Button onClick={retry}>Retry</Button>} />;
   const targetResource = action === "file-rule-delete" ? fileProfile?.rules.find(rule => rule.id === resource) : action === "file-exception-delete" ? fileProfile?.exceptions.find(exception => exception.id === resource) : undefined;

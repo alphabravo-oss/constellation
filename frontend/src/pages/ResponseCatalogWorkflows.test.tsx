@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { responseRules, responseRulesV2, type ResponseRule, type ResponseRulePreview } from "@/api/client";
+import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
 import { ResponsePage } from "./ResponsePage";
 import { ResponseRulesPage } from "./ResponseRulesPage";
 import { ResponseCatalogOverrideFormPage } from "./ResponseCatalogOverrideFormPage";
@@ -16,13 +17,15 @@ vi.mock("@tanstack/react-router", () => ({ useParams: () => ({ ruleId: route.rul
 const rule: ResponseRule = { id: "rule", name: "Shell started", description: "Watch for shells", event_type: "process", match: "process.name=shell", actions: ["alert"], mode: "monitor", enabled: false, default_mode: "monitor", default_enabled: true, severity: "high", source: "Built-in", override_reason: "Approved audit reason", managed: true, drifted: true };
 const preview: ResponseRulePreview = { rule_id: "rule", current_mode: "monitor", next_mode: "monitor", current_enabled: false, next_enabled: false, actions: ["alert"], persists: false, requires_privileged_agent: true, impact: "No runtime behavior change.", warnings: ["Agent required"] };
 const catalog = { rules: [rule], summary: { total: 1, enabled: 0, monitor: 1, enforce: 0, disabled: 1, managed: 1 } };
+let owner = { org_id: "org", user_id: "user" };
 let root: Root; let host: HTMLDivElement; let client: QueryClient;
-beforeEach(() => { route.clusterId = "cluster"; route.cluster = { id: "cluster" }; route.loading = false; route.ruleId = "rule"; route.search = ""; vi.mocked(responseRules.list).mockResolvedValue(catalog); vi.mocked(responseRulesV2.list).mockResolvedValue({ rules: [] }); vi.mocked(responseRules.preview).mockResolvedValue({ preview }); });
+beforeEach(() => { owner = { org_id: "org", user_id: "user" }; route.clusterId = "cluster"; route.cluster = { id: "cluster" }; route.loading = false; route.ruleId = "rule"; route.search = ""; vi.mocked(responseRules.list).mockResolvedValue(catalog); vi.mocked(responseRulesV2.list).mockResolvedValue({ rules: [] }); vi.mocked(responseRules.preview).mockResolvedValue({ preview }); });
 afterEach(() => { act(() => root?.unmount()); client?.clear(); host?.remove(); vi.resetAllMocks(); localStorage.clear(); });
 async function renderPage(page = "form") {
   host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host); client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  await act(async () => root.render(<QueryClientProvider client={client}>{page === "form" ? <ResponseCatalogOverrideFormPage /> : page === "v2" ? <ResponseRulesPage /> : <ResponsePage />}</QueryClientProvider>));
+  await rerenderPage(page);
 }
+async function rerenderPage(page = "form") { await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{ ...owner }}>{page === "outside" ? <p>Outside response override</p> : page === "form" ? <ResponseCatalogOverrideFormPage /> : page === "v2" ? <ResponseRulesPage /> : <ResponsePage />}</TablePreferencesProvider></QueryClientProvider>)); }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
 function button(label: string) { return [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === label)!; }
 async function click(label: string) { await act(async () => button(label).click()); }
@@ -84,4 +87,57 @@ it("does not treat a failed catalog load as an empty successful list", async () 
 });
 it("disables V2 authoring and import actions after a list failure", async () => {
   vi.mocked(responseRulesV2.list).mockRejectedValue(new Error("private transport")); await renderPage("v2"); await settled(() => expect(host.textContent).toContain("Could not load response rules")); expect(responseRulesV2.list).toHaveBeenCalledWith({ cluster_id: "cluster" }); expect(button("New rule").disabled).toBe(true); expect(button("Import").closest("fieldset")?.disabled).toBe(true); expect(host.textContent).not.toContain("private transport");
+});
+
+async function beginHeldOverrideWrite() {
+  let complete!: () => void;
+  vi.mocked(responseRules.list).mockResolvedValue({ ...catalog, rules: [rule, { ...rule, id: "other-rule", name: "Other built-in rule", override_reason: "Other rule reason" }], summary: { ...catalog.summary, total: 2 } });
+  vi.mocked(responseRules.update).mockImplementation(() => new Promise(resolve => { complete = () => resolve({ rule, preview: { ...preview, persists: true } }); }));
+  await renderPage(); await ready(); await change("textarea", "Original held reason"); await runPreview(); await click("Save");
+  await settled(() => { expect(responseRules.update).toHaveBeenCalledTimes(1); expect(client.isMutating()).toBe(1); });
+  expect(responseRules.update).toHaveBeenCalledWith("rule", { mode: "monitor", enabled: false, reason: "Original held reason" });
+  return complete;
+}
+async function finishOverrideWrite(complete: () => void) {
+  await act(async () => complete());
+  await settled(() => expect(client.isMutating()).toBe(0));
+}
+async function laterOverrideDraft(reason: string) {
+  await ready();
+  expect(host.querySelector("textarea")?.value).toBe("Approved audit reason");
+  await change("textarea", reason);
+  expect(button("Save").disabled).toBe(true);
+}
+
+it("keeps a later override draft after a held save completes across a rule roundtrip", async () => {
+  const complete = await beginHeldOverrideWrite();
+  route.ruleId = "other-rule"; await rerenderPage(); await ready();
+  expect(host.querySelector("textarea")?.value).toBe("Other rule reason");
+  route.ruleId = "rule"; await rerenderPage(); await laterOverrideDraft("Later rule visit reason");
+  await finishOverrideWrite(complete);
+  expect(route.navigate).not.toHaveBeenCalled();
+  expect(host.querySelector("textarea")?.value).toBe("Later rule visit reason");
+  expect(responseRules.update).toHaveBeenCalledTimes(1);
+  expect(host.querySelector('[data-testid="response-rule-preview-card"]')).toBeNull();
+});
+
+it("keeps a later override draft after a held save completes across an owner roundtrip", async () => {
+  const complete = await beginHeldOverrideWrite();
+  owner = { org_id: "other-org", user_id: "other-user" }; await rerenderPage(); await ready();
+  expect(host.querySelector("textarea")?.value).toBe("Approved audit reason");
+  owner = { org_id: "org", user_id: "user" }; await rerenderPage(); await laterOverrideDraft("Later owner visit reason");
+  await finishOverrideWrite(complete);
+  expect(route.navigate).not.toHaveBeenCalled();
+  expect(host.querySelector("textarea")?.value).toBe("Later owner visit reason");
+  expect(responseRules.update).toHaveBeenCalledTimes(1);
+  expect(host.querySelector('[data-testid="response-rule-preview-card"]')).toBeNull();
+});
+
+it("does not navigate after leaving a pending override and retains catalog invalidation", async () => {
+  const complete = await beginHeldOverrideWrite();
+  const invalidate = vi.spyOn(client, "invalidateQueries");
+  await rerenderPage("outside"); await finishOverrideWrite(complete);
+  expect(host.textContent).toBe("Outside response override");
+  expect(route.navigate).not.toHaveBeenCalled();
+  expect(invalidate).toHaveBeenCalledWith({ queryKey: ["response-rules"] });
 });

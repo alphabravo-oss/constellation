@@ -2639,3 +2639,53 @@ new inventory records to match their reference and disclosure/CSV assertions.
 The inherited fixture otherwise supplied sha256:0. No product behavior, case
 identity, timeout or expected suite total changes; the sealed private proposal
 remains unchanged and does not qualify the corrected source.
+
+
+### Evidence-table exports and remaining editor lifetimes (2026-10-19)
+
+The exact ea20f7d attempt records 2,417 frontend passes / two failures out of
+2,419, with no skipped/todo cases. All eight expected full-file identity Counters
+match; 290 of 291 focused cases pass. The new package/file-risk case fails at an
+absent Export CSV control. The other failure is the unchanged compliance evidence
+test clicking a temporarily absent sort button after Back. Unit records 3,469
+passes / 750 skips; all fourteen SMTP nodes pass once. Integration completion is
+not claimed here. Lint 1,449, gosec 136 and history 11 remain unchanged with zero
+count-aware additions/removals against029. Partial results do not qualify this
+attempt or the following source.
+
+The actual browser build artifact reports TS2352 at RegistryFormPage.test.tsx81:
+its directly asserted RegistryDTO fixture omits required fields. The frontend
+build fails before Playwright starts; there is no browser-case acceptance.
+The exact 6,172-byte artifact supplies only the selected 8,664-byte frontend
+build log, SHA256
+`9a86b1e4d253ab58460528ff9f6cde737c79ed14b7afa8dbf314241c03ee5ed1`.
+Two earlier bounded frontend-log requests stop at their 1 MiB retention and
+4 MiB response limits; their failures and owned-process cleanup remain retained.
+No video, trace, screenshot or browser HTML was extracted.
+
+Three finite reviewed proposals compose eight frontend paths. Package and
+file-risk evidence now expose the shared table CSV control. React-rendered
+package, path and risk cells provide explicit values; layer digests/indexes,
+paths, versions/ecosystems, reasons, risk types and zero UID/GID values are
+covered by complete filename/header/row assertions in the existing case.
+Compliance evidence waits for the same empty-status value, 100 rendered rows and
+the actual enabled descending Observed control before the original ascending
+sort click. Registry fixtures return a complete RegistryDTO without assertions
+or relaxed types; existing credentials, payload and lifetime checks remain.
+
+Response Catalog and Deployment Action editors also reuse useEditorVisit,
+including owner/target scope keys and inner mounted lifetime checks. Only late
+navigation is conditional; safe invalidation, response preview, deployment
+revision/current-cache checks, duplicate submission guards and payloads remain.
+All 58 existing cases are retained, with six held-save roundtrip/unmount cases
+added. The four-path proposal based ona4 has exact unchanged preimages onea20;
+root verified all fifteen checksum records and all four Git/current bytes.
+The two CSV paths have ten verified records; the two test-repair paths have
+eight. Source/import receipt is
+`/root/constellation-console-followup-root-import-v2.json`, SHA256
+`2249aba2d9877fd7248b1f2d74726b596ca21518c8d5940c9a883384f2eef47f`.
+No local application test, compiler or build is invoked below the retained startup
+reserve. Forecasts are 2,425 global frontend cases, 371 cases in eleven affected
+files, unchanged Timeline30 and 285 browser cases. Hosted qualification is
+required; none of these forecasts receives pass credit. No Go source, deployed
+payload, scheduler state or canonical acceptance count changes.

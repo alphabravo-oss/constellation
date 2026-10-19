@@ -176,13 +176,13 @@ it("keeps package, file-risk and image-layer hashes collapsed while preserving l
   const first = `sha256:${"a".repeat(64)}`, second = `sha256:${"b".repeat(64)}`, diff = `sha256:${"c".repeat(64)}`;
   vi.mocked(imageScanResults.get).mockResolvedValue({ image_scan_result: { ...result, package_count: 3, file_risk_count: 3, layer_count: 2 }, findings: [], impacted_workloads: [] });
   vi.mocked(imageScanResults.packages).mockResolvedValue({ image_scan_result_id: "result", package_layers: [
-    { layer_index: 0, layer_digest: first, package_count: 1, packages: [{ name: "owned-package-zero" }] },
-    { layer_digest: second, package_count: 1, packages: [{ name: "owned-package-unknown" }] },
-    { layer_index: 7, package_count: 1, packages: [{ name: "owned-package-seven" }] },
+    { layer_index: 0, layer_digest: first, package_count: 1, packages: [{ name: "owned-package-zero", version: "1.2.3", ecosystem: "apk", locations: [{ path: "/not-selected", layer_digest: second }, { path: "/owned/package-zero", layer_digest: first }] }] },
+    { layer_digest: second, package_count: 1, packages: [{ name: "owned-package-unknown", ecosystem: "deb", locations: [{ real_path: "/owned/package-unknown" }] }] },
+    { layer_index: 7, package_count: 1, packages: [{ name: "owned-package-seven", locations: [{ access_path: "/owned/package-seven" }] }] },
   ], layer_package_count: 3 } as Awaited<ReturnType<typeof imageScanResults.packages>>);
   vi.mocked(imageScanResults.fileRisks).mockResolvedValue({ image_scan_result_id: "result", file_risk: { findings: [
-    { path: "/owned/zero", layer_index: 0, layer_digest: first },
-    { path: "/owned/unknown", layer_digest: second },
+    { path: "/owned/zero", reason: "Unexpected privilege", severity: "high", risk_types: ["setuid", "owner"], mode: "4755", uid: 0, gid: 0, layer_index: 0, layer_digest: first },
+    { path: "/owned/unknown", type: "file", severity: "low", risk_types: ["writable"], mode: "0644", uid: 1000, gid: 1001, layer_digest: second },
     { path: "/owned/seven", layer_index: 7 },
   ] } } as Awaited<ReturnType<typeof imageScanResults.fileRisks>>);
   vi.mocked(imageScanResults.layers).mockResolvedValue({ image_scan_result_id: "result", layer_metadata: { layers: [
@@ -196,12 +196,20 @@ it("keeps package, file-risk and image-layer hashes collapsed while preserving l
   expect(host.textContent).toContain("Layer 7");
   await revealStoredDigests(host.querySelector('[data-testid="image-scan-artifact-evidence"]')!, [first, second]);
   await act(async () => button("Export CSV").click());
-  expect(vi.mocked(downloadCsv).mock.calls.at(-1)![2].map(row => row[0])).toEqual([first, second, "7"]);
+  expect(downloadCsv).toHaveBeenLastCalledWith("image-package-provenance", ["Layer", "Package", "Evidence path"], [
+    [first, "owned-package-zero · 1.2.3", "/owned/package-zero"],
+    [second, "owned-package-unknown · deb", "/owned/package-unknown"],
+    ["7", "owned-package-seven · -", "/owned/package-seven"],
+  ]);
   await tab("File risks");
   await settled(() => expect(host.textContent).toContain("/owned/seven"));
   await revealStoredDigests(host.querySelector('[data-testid="image-scan-artifact-evidence"]')!, [first, second]);
   await act(async () => button("Export CSV").click());
-  expect(vi.mocked(downloadCsv).mock.calls.at(-1)![2].map(row => row[3])).toEqual([first, second, "7"]);
+  expect(downloadCsv).toHaveBeenLastCalledWith("image-file-risk-evidence", ["Path", "Risk", "Mode", "Layer"], [
+    ["/owned/zero · Unexpected privilege", "high · setuid, owner", "4755 · 0:0", first],
+    ["/owned/unknown · file", "low · writable", "0644 · 1000:1001", second],
+    ["/owned/seven · -", "info · -", "- · -:-", "7"],
+  ]);
   await tab("Layers");
   await settled(() => expect(host.textContent).toContain("RUN apk add curl"));
   const layers = host.querySelector('[data-testid="image-scan-artifact-evidence"]')!;

@@ -1,23 +1,28 @@
 /* global HTMLSelectElement */
-import { act } from "react";
+import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { createMemoryHistory, type RouterHistory } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { deployments, baselines, fileProfiles, network, quarantine, type QuarantineEntry } from "@/api/client";
+import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
 import { TestRouter } from "@/test/router";
 import { DeploymentActionFormPage } from "./DeploymentActionFormPage";
 import { fixtureDeployment, fixtureFile, fixtureProcess, fixturePolicy } from "./deployment-detail/test-fixtures";
 const scope = vi.hoisted(() => ({ clusterId: "cluster" as string | undefined, cluster: { id: "cluster" } as { id: string } | undefined, isLoading: false, error: null as Error | null }));
 vi.mock("@/hooks/useCluster", () => ({ useCluster: () => scope }));
 vi.mock("@/api/client", () => ({ deployments: { get: vi.fn() }, baselines: { get: vi.fn(), setMode: vi.fn() }, fileProfiles: { get: vi.fn(), setMode: vi.fn(), createException: vi.fn(), deleteException: vi.fn(), deleteRule: vi.fn(), importBundle: vi.fn() }, network: { policyAction: vi.fn(), rollbackPolicy: vi.fn() }, quarantine: { lift: vi.fn() } }));
+let owner = { org_id: "org", user_id: "user" };
+let routerView: ReactNode;
 let root: Root | undefined; let host: HTMLDivElement; let client: QueryClient; let history: RouterHistory;
-beforeEach(() => { (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true; Object.assign(scope, { clusterId: "cluster", cluster: { id: "cluster" }, isLoading: false, error: null }); const d = fixtureDeployment(); d.network_policy = fixturePolicy(); d.quarantine = { id: "quarantine", cluster_id: "cluster", scope: "workload", match_key: "payments/app", reason: "original", expires_at: "2026-10-13T00:00:00Z" } as QuarantineEntry; vi.mocked(deployments.get).mockResolvedValue(d); vi.mocked(fileProfiles.get).mockResolvedValue(fixtureFile()); vi.mocked(baselines.get).mockResolvedValue(fixtureProcess()); for (const fn of [baselines.setMode, fileProfiles.setMode, fileProfiles.createException, fileProfiles.deleteException, fileProfiles.deleteRule, fileProfiles.importBundle, network.policyAction, network.rollbackPolicy, quarantine.lift]) vi.mocked(fn).mockResolvedValue({} as never); });
+beforeEach(() => { owner = { org_id: "org", user_id: "user" }; (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true; Object.assign(scope, { clusterId: "cluster", cluster: { id: "cluster" }, isLoading: false, error: null }); const d = fixtureDeployment(); d.network_policy = fixturePolicy(); d.quarantine = { id: "quarantine", cluster_id: "cluster", scope: "workload", match_key: "payments/app", reason: "original", expires_at: "2026-10-13T00:00:00Z" } as QuarantineEntry; vi.mocked(deployments.get).mockResolvedValue(d); vi.mocked(fileProfiles.get).mockResolvedValue(fixtureFile()); vi.mocked(baselines.get).mockResolvedValue(fixtureProcess()); for (const fn of [baselines.setMode, fileProfiles.setMode, fileProfiles.createException, fileProfiles.deleteException, fileProfiles.deleteRule, fileProfiles.importBundle, network.policyAction, network.rollbackPolicy, quarantine.lift]) vi.mocked(fn).mockResolvedValue({} as never); });
 afterEach(() => { act(() => root?.unmount()); root = undefined; client?.clear(); host?.remove(); vi.resetAllMocks(); });
 async function render(action = "process-mode", search = "?mode=monitor") {
  host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host); client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); history = createMemoryHistory({ initialEntries: [`/clusters/cluster/deployments/deployment/actions/${action}${search}`] });
- await act(async () => root!.render(<QueryClientProvider client={client}><TestRouter history={history} path="/clusters/$clusterId/deployments/$did/actions/$action" next={{ path: "/clusters/$clusterId/deployments/$did", element: <p data-testid="returned-deployment">Returned deployment</p> }}><DeploymentActionFormPage /></TestRouter></QueryClientProvider>));
+ routerView = <TestRouter history={history} path="/clusters/$clusterId/deployments/$did/actions/$action" next={{ path: "/clusters/$clusterId/deployments/$did", element: <p data-testid="returned-deployment">Returned deployment</p> }}><DeploymentActionFormPage /></TestRouter>;
+ await rerenderOwner();
 }
+async function rerenderOwner() { await act(async () => root!.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{ ...owner }}>{routerView}</TablePreferencesProvider></QueryClientProvider>)); }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
 async function editor() { await settled(() => expect(host.querySelector("form")).not.toBeNull()); }
 function field(label: string): HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement { return [...host.querySelectorAll("label")].find(item => item.querySelector("span")?.textContent?.startsWith(label))!.querySelector("input,textarea,select")!; }
@@ -92,4 +97,58 @@ it("makes empty-bundle replacement and portable retargeting explicit while prese
 });
 it("prevents duplicate synchronous submissions", async () => {
  let done!: () => void; vi.mocked(baselines.setMode).mockImplementation(() => new Promise(resolve => { done = () => resolve(fixtureProcess()); })); await render(); await editor(); await input("Reason", "once"); await act(async () => { const form = host.querySelector("form")!; form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); }); await settled(() => expect(baselines.setMode).toHaveBeenCalledTimes(1)); await settled(() => expect(button("Submitting…")?.disabled).toBe(true)); await act(async () => done());
+});
+
+async function beginHeldDeploymentWrite() {
+ let complete!: () => void;
+ vi.mocked(baselines.setMode).mockImplementation(() => new Promise(resolve => { complete = () => resolve(fixtureProcess()); }));
+ await render(); await editor(); await input("Reason", "Original held action"); await submit();
+ await settled(() => { expect(baselines.setMode).toHaveBeenCalledTimes(1); expect(client.isMutating()).toBe(1); });
+ expect(baselines.setMode).toHaveBeenCalledWith("payments/app", { mode: "monitor", reason: "Original held action" }, { cluster_id: "cluster" });
+ return complete;
+}
+async function finishDeploymentWrite(complete: () => void) {
+ await act(async () => complete());
+ await settled(() => expect(client.isMutating()).toBe(0));
+}
+async function laterDeploymentDraft(reason: string) {
+ await editor(); await settled(() => expect(field("Reason").value).toBe(""));
+ await input("Reason", reason);
+ expect(button("Save mode").disabled).toBe(false);
+}
+
+it("keeps a later deployment action draft after a held write completes across an action roundtrip", async () => {
+ const complete = await beginHeldDeploymentWrite();
+ await act(async () => history.push("/clusters/cluster/deployments/deployment/actions/file-mode?mode=monitor"));
+ await settled(() => expect(host.querySelector("h1")?.textContent).toBe("Change file profile mode"));
+ await editor(); await settled(() => expect(field("Reason").value).toBe(""));
+ await act(async () => history.push("/clusters/cluster/deployments/deployment/actions/process-mode?mode=monitor"));
+ await settled(() => expect(host.querySelector("h1")?.textContent).toBe("Change process baseline mode"));
+ await laterDeploymentDraft("Later action visit reason"); await finishDeploymentWrite(complete);
+ expect(history.location.pathname).toBe("/clusters/cluster/deployments/deployment/actions/process-mode");
+ expect(field("Reason").value).toBe("Later action visit reason");
+ expect(baselines.setMode).toHaveBeenCalledTimes(1); expect(fileProfiles.setMode).not.toHaveBeenCalled();
+});
+
+it("keeps a later deployment action draft after a held write completes across an owner roundtrip", async () => {
+ const complete = await beginHeldDeploymentWrite();
+ owner = { org_id: "other-org", user_id: "other-user" }; await rerenderOwner();
+ await editor(); await settled(() => expect(field("Reason").value).toBe(""));
+ owner = { org_id: "org", user_id: "user" }; await rerenderOwner();
+ await laterDeploymentDraft("Later action owner reason"); await finishDeploymentWrite(complete);
+ expect(history.location.pathname).toBe("/clusters/cluster/deployments/deployment/actions/process-mode");
+ expect(field("Reason").value).toBe("Later action owner reason");
+ expect(baselines.setMode).toHaveBeenCalledTimes(1);
+});
+
+it("does not navigate after leaving a pending deployment action and retains its invalidations", async () => {
+ const complete = await beginHeldDeploymentWrite();
+ const invalidate = vi.spyOn(client, "invalidateQueries");
+ await act(async () => history.push("/clusters/cluster/deployments/elsewhere?tab=files"));
+ await settled(() => expect(host.querySelector('[data-testid="returned-deployment"]')).not.toBeNull());
+ await finishDeploymentWrite(complete);
+ expect(history.location.pathname).toBe("/clusters/cluster/deployments/elsewhere");
+ expect(history.location.search).toBe("?tab=files");
+ for (const key of ["deployment", "file-monitor-detail", "file-monitor-profiles", "baseline", "network-policy-lifecycle"]) expect(invalidate).toHaveBeenCalledWith({ queryKey: [key] });
+ expect(baselines.setMode).toHaveBeenCalledTimes(1);
 });

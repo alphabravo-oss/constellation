@@ -238,12 +238,13 @@ function PackagesEvidenceCard({
         <DataTable
           className="rounded-none border-0"
           preferencesKey="image-package-provenance"
+          exportFileName="image-package-provenance"
           rows={rows}
           rowKey={(row) => row.key}
           emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">{unattributedPackageCount > 0 ? "Package inventory is present, but no layer attribution was captured." : "No package inventory recorded."}</div>}
           columns={[
             { id: "layer", header: "Layer", kind: "text", wrap: true, exportValue: ({ layer }) => layer.layer_digest || `${layer.layer_index ?? "-"}`, cell: ({ layer }) => <LayerIdentity index={layer.layer_index} digest={layer.layer_digest} /> },
-            { id: "package", header: "Package", kind: "name", code: true, cell: ({ pkg }) => <><div>{pkg.name || "-"}</div><div className="mt-1 text-xs text-muted-foreground">{pkg.version || pkg.ecosystem || "-"}</div></> },
+            { id: "package", header: "Package", kind: "name", code: true, exportValue: ({ pkg }) => `${pkg.name || "-"} · ${pkg.version || pkg.ecosystem || "-"}`, cell: ({ pkg }) => <><div>{pkg.name || "-"}</div><div className="mt-1 text-xs text-muted-foreground">{pkg.version || pkg.ecosystem || "-"}</div></> },
             { id: "path", header: "Evidence path", kind: "id", size: 260, maxSize: 360, grow: true, cell: ({ location }) => location?.path || location?.real_path || location?.access_path || "-" },
           ]}
         />
@@ -415,12 +416,13 @@ function FileRisksEvidenceCard({ loading, findings, count }: { loading: boolean;
         <DataTable
           className="rounded-none border-0"
           preferencesKey="image-file-risk-evidence"
+          exportFileName="image-file-risk-evidence"
           rows={findings.map((finding, index) => ({ ...finding, rowKey: `${finding.path}:${finding.layer_digest || ""}:${index}` }))}
           rowKey={(finding) => finding.rowKey}
           emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">No file risk evidence recorded.</div>}
           columns={[
-            { id: "path", header: "Path", kind: "name", cell: (finding) => <><div className="truncate font-mono" title={finding.path}>{finding.path}</div><div className="mt-1 text-xs text-muted-foreground">{finding.reason || finding.type || "-"}</div></> },
-            { id: "risk", header: "Risk", kind: "text", wrap: true, cell: (finding) => <><SeverityPill severity={finding.severity || "info"} /><div className="mt-1 text-xs text-muted-foreground">{(finding.risk_types ?? []).join(", ") || "-"}</div></> },
+            { id: "path", header: "Path", kind: "name", exportValue: (finding) => `${finding.path} · ${finding.reason || finding.type || "-"}`, cell: (finding) => <><div className="truncate font-mono" title={finding.path}>{finding.path}</div><div className="mt-1 text-xs text-muted-foreground">{finding.reason || finding.type || "-"}</div></> },
+            { id: "risk", header: "Risk", kind: "text", wrap: true, exportValue: (finding) => `${finding.severity || "info"} · ${(finding.risk_types ?? []).join(", ") || "-"}`, cell: (finding) => <><SeverityPill severity={finding.severity || "info"} /><div className="mt-1 text-xs text-muted-foreground">{(finding.risk_types ?? []).join(", ") || "-"}</div></> },
             { id: "mode", header: "Mode", kind: "id", cell: (finding) => `${finding.mode || "-"} · ${finding.uid ?? "-"}:${finding.gid ?? "-"}` },
             { id: "layer", header: "Layer", kind: "text", wrap: true, exportValue: (finding) => finding.layer_digest || `${finding.layer_index ?? "-"}`, cell: (finding) => <LayerIdentity index={finding.layer_index} digest={finding.layer_digest} /> },
           ]}

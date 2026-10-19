@@ -1,8 +1,8 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-18** (selected console scope complete; security and
-release-readiness continuation active, qualification evidence remains dated)
+Last reconciled: **2026-10-19** (selected console contract has dated qualification;
+current follow-up awaits hosted verification, security and release work remains active)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -76,8 +76,9 @@ Visit-specific ownership prevents an older save from redirecting after leaving
 and returning to the same context. Observed conflicts retain the draft and
 explain how to copy edits before canceling and reopening the schedule.
 
-The next source follow-up extends the shared editor-visit guard to Registry,
-Groups, Exemptions, schedule creation, Policy and Admission Settings. Older
+Source follow-ups extend the shared editor-visit guard to Registry, Groups,
+Exemptions, schedule creation, Policy, Admission Settings, Response Catalog and
+Deployment Actions. Older
 successful writes retain safe cache invalidation but cannot redirect a later
 editor visit. Images use shared readable naming and digest disclosure throughout
 inventory, previews, identity, workload references, layer evidence and bundle
@@ -86,6 +87,15 @@ with the shell's “by Alphabravo.” New tests and browser fixtures are authore
 not yet accepted: local startup capacity was below the retained reserve, so no
 local test, typecheck or build was invoked. Exact-head hosted verification is
 required before qualification. No checklist item closes.
+
+The ea20f7d hosted attempt records 2,417 frontend passes and two failures: a new
+CSV case requests an unexposed evidence-table export and an unchanged compliance
+test clicks before its refreshed table appears. Its TypeScript build also rejects
+an incomplete RegistryDTO fixture, preventing Playwright from starting. Source
+corrections expose standard package/file-risk CSV controls with meaningful cell
+values, await the rendered compliance sort control, and use complete typed
+registry fixtures. Full hosted verification is still required; expected counts
+are 2,425 frontend and 285 browser cases, not accepted results.
 
 Both original host scanner-cache trees are restored: five files totaling
 4,701,282,746 bytes match their original hashes and restorable metadata. Recovery
