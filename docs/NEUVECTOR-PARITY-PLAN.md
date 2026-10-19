@@ -1,7 +1,7 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-19** (Helm 99 admission replica-retirement fix deployed and live before/after decisions verified; broader parity remains active)
+Last reconciled: **2026-10-19** (Helm 100 completed-pod inventory correction deployed; application-first findings and self-protection requested; broader parity remains active)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -16,6 +16,50 @@ understand the result, and prove that the control is enforced. Constellation's
 stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
 
+
+## Completed-pod current inventory correction (Helm 100)
+
+Discoverer source `88d4587` now excludes Succeeded/Failed pod status images from
+current workload image references and digest mappings. Desired template images
+and nonterminal pods remain included. The presence snapshot still includes
+terminal pod phases for historical findings. The regression test fails against
+the prior source; the full discoverer unit and race suites pass after the fix.
+
+Helm 100 is deployed. Live before/after evidence confirms the October 12 retired
+admission reference disappears from the current deployment inventory while the
+completed Kubernetes pods remain. Fourteen running/completed-init image identities
+match the updated lock, controllers are healthy, and authenticated UI checks pass.
+See `deploy/dev/registry-release/validation-current-images-20261019.json`.
+
+Remaining findings: bare config-ID values in Kubernetes `status.Image` still enter
+current references; they must be normalized without losing spec-ref/digest mapping.
+Discoverer platform-facts reporting also returns `agent token cannot report this
+cluster` (403); inventory reconciliation succeeds, but that separate registration
+binding issue is open. The system findings toggle and self-protection audit below
+are not implemented by this inventory correction.
+
+## Application-first findings and Constellation self-protection (requested 2026-10-19)
+
+The user requested application findings by default, an explicit toggle to include
+Constellation findings, and protection against Constellation blocking itself.
+Implementation and end-to-end verification remain open:
+
+- Default findings views to application scope; provide an explicit include-system
+  toggle and a visible indication that Constellation findings are excluded.
+- Apply the same server-side scope to counts, pagination, CVE rollups and exports.
+  Preserve system findings, scans, alerts and their separate visibility.
+- Classify Constellation specifically: the existing `platformrole` Core category
+  also includes Kubernetes and Astronomer and cannot stand in for this toggle.
+  Shared images or uncertain ownership must not hide application exposure.
+- Audit admission, automatic quarantine, runtime blocking and network policy for
+  essential control-plane availability. The chart already excludes the release
+  namespace from admission. Other paths need explicit verification; do not claim
+  immunity based on that webhook selector alone.
+- Identify protected components through trusted installation/workload identity;
+  do not turn a user-supplied label into an enforcement bypass. Customer workloads
+  sharing a namespace do not automatically inherit the control-plane protection.
+- Show the protection and reason in policy outcomes; retain detection and audit
+  evidence even when automatic disruptive action is prevented.
 
 ## Barman Expat rollout (2026-10-19)
 

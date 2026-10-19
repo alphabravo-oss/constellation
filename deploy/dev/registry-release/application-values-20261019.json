@@ -20,7 +20,7 @@
   "discoverer": {
     "image": {
       "repository": "ghcr.io/alphabravo-oss/constellation/discoverer",
-      "digest": "sha256:b0b873fd618893ddfde183c439229a0930e9e3d6dfe9646b97ac27399a4f6232"
+      "digest": "sha256:3d26a37fef55eb89cd5e6b6774cf93660eb2738230dc0a465a74f32dde07767a"
     }
   },
   "frontend": {
