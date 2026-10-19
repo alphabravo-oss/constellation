@@ -116,5 +116,28 @@
     "protectedNamespaces": [
       "cnpg-system"
     ]
+  },
+  "complianceScheduler": {
+    "enabled": true,
+    "image": {
+      "repository": "ghcr.io/alphabravo-oss/constellation/compliance-scheduler",
+      "digest": "sha256:f795c2bccccdfa55df19eefa0a9370fd4ef74593c7d8fc3a085a7080b741f2ad"
+    },
+    "interval": "30s",
+    "storage": {
+      "existingClaim": "constellation-compliance-reports",
+      "accessMode": "ReadWriteOnce"
+    },
+    "signingSecret": "constellation-compliance-report-signing",
+    "resources": {
+      "requests": {
+        "cpu": "100m",
+        "memory": "128Mi"
+      },
+      "limits": {
+        "cpu": "1",
+        "memory": "512Mi"
+      }
+    }
   }
 }

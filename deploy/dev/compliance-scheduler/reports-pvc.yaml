@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: constellation-compliance-reports
+  namespace: constellation-system
+  labels:
+    app.kubernetes.io/name: constellation
+    app.kubernetes.io/component: compliance-scheduler
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 5Gi

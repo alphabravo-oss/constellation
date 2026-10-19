@@ -97,6 +97,14 @@
       "digest": "sha256:ba43ada1e1182ab1ff0bb8cde358f9aec70486543a0ffade5ec7ce29c418c8da",
       "repository": "ghcr.io/alphabravo-oss/constellation/frontend",
       "tag": "dev-ba43ada1e1182ab1ff0bb8cde358f9aec70486543a0ffade5ec7ce29c418c8da"
+    },
+    {
+      "name": "compliance-scheduler",
+      "role": "complianceScheduler",
+      "source": "constellation/compliance-scheduler:candidate-d2082dc7c63c7f003075bd2a583850300ba5c14f",
+      "digest": "sha256:f795c2bccccdfa55df19eefa0a9370fd4ef74593c7d8fc3a085a7080b741f2ad",
+      "repository": "ghcr.io/alphabravo-oss/constellation/compliance-scheduler",
+      "tag": "dev-f795c2bccccdfa55df19eefa0a9370fd4ef74593c7d8fc3a085a7080b741f2ad"
     }
   ],
   "helm_values": {
@@ -212,6 +220,12 @@
       "protectedNamespaces": [
         "cnpg-system"
       ]
+    },
+    "complianceScheduler": {
+      "image": {
+        "repository": "ghcr.io/alphabravo-oss/constellation/compliance-scheduler",
+        "digest": "sha256:f795c2bccccdfa55df19eefa0a9370fd4ef74593c7d8fc3a085a7080b741f2ad"
+      }
     }
   }
 }

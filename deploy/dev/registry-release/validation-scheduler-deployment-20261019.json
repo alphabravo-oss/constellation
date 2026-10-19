@@ -1,0 +1,249 @@
+{
+  "date": "2026-10-19",
+  "sourceCommit": "d2082dc7c63c7f003075bd2a583850300ba5c14f",
+  "helmRevision": 134,
+  "schemaVersion": 184,
+  "hostedRun": "https://github.com/alphabravo-oss/constellation/actions/runs/39257410030",
+  "conclusion": "success",
+  "regression": {
+    "race": true,
+    "shuffle": true,
+    "repetitions": 2,
+    "passedExecutions": 172,
+    "skippedExecutions": 4,
+    "skips": [
+      "Root-only ownership check: two repetitions",
+      "Actual-tool test requires pinned image: two repetitions; subsequently passed in offline container"
+    ],
+    "reportSha256": "4f10f88fde813b03f2222bdfb1c1a9d100db03e6c092227a0ec6715a9461bba8",
+    "actualCosignOfflineProof": "=== RUN   TestCosignActualToolRoundTrip\n--- PASS: TestCosignActualToolRoundTrip (0.36s)\nPASS\n"
+  },
+  "beforeFix": {
+    "pinnedCosignCommand": "sign-blob --yes --key <key> <report>",
+    "exitCode": 1,
+    "error": "must specify --bundle with --new-bundle-format",
+    "scope": "Observed against the same pinned Cosign tool before changing the scheduler command."
+  },
+  "imageGate": {
+    "image": "ghcr.io/alphabravo-oss/constellation/compliance-scheduler@sha256:f795c2bccccdfa55df19eefa0a9370fd4ef74593c7d8fc3a085a7080b741f2ad",
+    "runtime_manifest": "sha256:f684edc10ec916100d82ef31fec8e5ca5cf01e7aa7b9bdb276a994fa52b67a7f",
+    "configuration": "sha256:b5a53b8af279eb71db4a1ccede7da6d4e0579d53a4a9f8ac876a4da338a472f6",
+    "passed": true,
+    "policy": "no-fixable-critical-or-high",
+    "scanner_version": "0.120.1-constellation.1",
+    "database": {
+      "schemaVersion": "v6.1.10",
+      "from": "https://grype.anchore.io/databases/v6/vulnerability-db_v6.1.10_2026-10-19T00:32:50Z_1792391955.tar.zst?checksum=sha256%3A13a192236b248579678bbf06cefb2a07a5dcbd00da110cfb5c3e26eb68a7ce58",
+      "built": "2026-10-19T06:39:15Z",
+      "path": "/root/.cache/grype/db/6/vulnerability.db",
+      "valid": true
+    },
+    "counts": {
+      "unknown": 2
+    },
+    "blockers": [],
+    "evaluated_at": "2026-10-19T13:14:43.982181+00:00",
+    "report_sha256": "9026a503fef2c014e29e7aa75cac035a8283474b38798c0ac3b435aab636750d"
+  },
+  "unknownSeverityAdvisories": [
+    {
+      "id": "GO-2026-6225",
+      "package": "github.com/chrismellard/docker-credential-acr-env",
+      "version": "v0.0.0-20230304212654-82a0ddb27589",
+      "fix": {
+        "versions": [],
+        "state": ""
+      }
+    },
+    {
+      "id": "GO-2026-5932",
+      "package": "golang.org/x/crypto",
+      "version": "v0.57.0",
+      "fix": {
+        "versions": [],
+        "state": ""
+      }
+    }
+  ],
+  "deployment": {
+    "helmRevision": 134,
+    "restartHoldRemoved": true,
+    "clusterHealthy": true,
+    "postBackupPhase": "completed",
+    "postBackupId": "20261019T054924",
+    "containers": [
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-admission-845b669bbc-9tpjk",
+        "container": "admission",
+        "image": "ghcr.io/alphabravo-oss/constellation/admission@sha256:b747fb3ab87c66eb04e687f48a0893bba2a9e5d06011fec103863261286a0c4c",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/admission@sha256:b747fb3ab87c66eb04e687f48a0893bba2a9e5d06011fec103863261286a0c4c"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-api-5884467fb4-5rm7b",
+        "container": "wait-for-migrations",
+        "image": "ghcr.io/alphabravo-oss/constellation/api@sha256:7ca489d94f9e27cf00d8fd5f41e7bf4c8202fec344849846223fd4c1090a4f31",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/api@sha256:7ca489d94f9e27cf00d8fd5f41e7bf4c8202fec344849846223fd4c1090a4f31"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-api-5884467fb4-5rm7b",
+        "container": "api",
+        "image": "ghcr.io/alphabravo-oss/constellation/api@sha256:7ca489d94f9e27cf00d8fd5f41e7bf4c8202fec344849846223fd4c1090a4f31",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/api@sha256:7ca489d94f9e27cf00d8fd5f41e7bf4c8202fec344849846223fd4c1090a4f31"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-cnpg-postgres-1",
+        "container": "bootstrap-controller",
+        "image": "ghcr.io/alphabravo-oss/constellation/cnpg-operator@sha256:cc61009ac3d2cdf0aa2ff7f44f85dbb7bdf85ab50425d41a71da2af6521cc1b9",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/cnpg-operator@sha256:cc61009ac3d2cdf0aa2ff7f44f85dbb7bdf85ab50425d41a71da2af6521cc1b9"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-cnpg-postgres-1",
+        "container": "plugin-barman-cloud",
+        "image": "ghcr.io/alphabravo-oss/constellation/barman-sidecar@sha256:5c6b5559b08b7b49c89937b6d823a37fbeb8e7b883d4b0da6278fe09de87d1f1",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/barman-sidecar@sha256:5c6b5559b08b7b49c89937b6d823a37fbeb8e7b883d4b0da6278fe09de87d1f1"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-cnpg-postgres-1",
+        "container": "postgres",
+        "image": "ghcr.io/alphabravo-oss/constellation/postgres:16.14-dev-98087f2e517416edda6e3649154c3be4a5a7b0ce2228c4fab3f4e2bed430d92a@sha256:98087f2e517416edda6e3649154c3be4a5a7b0ce2228c4fab3f4e2bed430d92a",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/postgres@sha256:98087f2e517416edda6e3649154c3be4a5a7b0ce2228c4fab3f4e2bed430d92a"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-compliance-scheduler-b56b77944-kh8d9",
+        "container": "compliance-scheduler",
+        "image": "ghcr.io/alphabravo-oss/constellation/compliance-scheduler@sha256:f795c2bccccdfa55df19eefa0a9370fd4ef74593c7d8fc3a085a7080b741f2ad",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/compliance-scheduler@sha256:f795c2bccccdfa55df19eefa0a9370fd4ef74593c7d8fc3a085a7080b741f2ad"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-discoverer-7859bdf8d6-cwtx6",
+        "container": "discoverer",
+        "image": "ghcr.io/alphabravo-oss/constellation/discoverer@sha256:ffb3150e112bce4d2a529d7b6e969edb145251cbb5745562e693fa7839fdabfa",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/discoverer@sha256:ffb3150e112bce4d2a529d7b6e969edb145251cbb5745562e693fa7839fdabfa"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-frontend-54c8c65656-jznhl",
+        "container": "nginx",
+        "image": "ghcr.io/alphabravo-oss/constellation/frontend@sha256:ba43ada1e1182ab1ff0bb8cde358f9aec70486543a0ffade5ec7ce29c418c8da",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/frontend@sha256:ba43ada1e1182ab1ff0bb8cde358f9aec70486543a0ffade5ec7ce29c418c8da"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-network-policy-applier-56649f4cd-5csff",
+        "container": "applier",
+        "image": "ghcr.io/alphabravo-oss/constellation/operator@sha256:8b027d505cf4946bdbd5afc92a7446f9305e92bbf4e0c15e67a7bd40237d8e3b",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/operator@sha256:8b027d505cf4946bdbd5afc92a7446f9305e92bbf4e0c15e67a7bd40237d8e3b"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-operator-7cbdd4c966-8bfxj",
+        "container": "operator",
+        "image": "ghcr.io/alphabravo-oss/constellation/operator@sha256:8b027d505cf4946bdbd5afc92a7446f9305e92bbf4e0c15e67a7bd40237d8e3b",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/operator@sha256:8b027d505cf4946bdbd5afc92a7446f9305e92bbf4e0c15e67a7bd40237d8e3b"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-runtime-agent-xm2pp",
+        "container": "agent",
+        "image": "ghcr.io/alphabravo-oss/constellation/runtime-agent@sha256:d8d0e4903abc6c291fb98e32806ac61ea11b562b0abfa62c60230e3fa5afaadf",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/runtime-agent@sha256:d8d0e4903abc6c291fb98e32806ac61ea11b562b0abfa62c60230e3fa5afaadf"
+      },
+      {
+        "namespace": "constellation-system",
+        "pod": "constellation-scanner-b94d64457-2m44c",
+        "container": "scanner",
+        "image": "ghcr.io/alphabravo-oss/constellation/scanner@sha256:716b0300f3d1992a1e7d142a306f2255af7b09171989bf67c87a2e961e2a5823",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/scanner@sha256:716b0300f3d1992a1e7d142a306f2255af7b09171989bf67c87a2e961e2a5823"
+      },
+      {
+        "namespace": "cnpg-system",
+        "pod": "barman-cloud-669fcf8689-rqt4x",
+        "container": "barman-cloud",
+        "image": "ghcr.io/alphabravo-oss/constellation/barman-plugin@sha256:de96d9e4bf0f2f69f8d2b3c1a8bc953ea8235d613901ae19754600b55cb07590",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/barman-plugin@sha256:de96d9e4bf0f2f69f8d2b3c1a8bc953ea8235d613901ae19754600b55cb07590"
+      },
+      {
+        "namespace": "cnpg-system",
+        "pod": "cnpg-controller-manager-fb6948887-xwgx8",
+        "container": "manager",
+        "image": "ghcr.io/alphabravo-oss/constellation/cnpg-operator@sha256:cc61009ac3d2cdf0aa2ff7f44f85dbb7bdf85ab50425d41a71da2af6521cc1b9",
+        "imageID": "ghcr.io/alphabravo-oss/constellation/cnpg-operator@sha256:cc61009ac3d2cdf0aa2ff7f44f85dbb7bdf85ab50425d41a71da2af6521cc1b9"
+      }
+    ]
+  },
+  "liveReport": {
+    "scheduleId": "6133ed1f-69ef-4eb5-ad99-c6830d24c199",
+    "run": {
+      "id": "2b638eca-ae0f-4d47-ac31-e7a2e2095460",
+      "org_id": "a4a151bc-9190-463e-9dc3-170d7370ea20",
+      "cluster_id": "2a46e2a1-9485-4bd6-a622-b1fcd6ee4130",
+      "schedule_id": "6133ed1f-69ef-4eb5-ad99-c6830d24c199",
+      "framework": "cis-k8s-1.9",
+      "started_at": "2026-10-19T13:15:49.201327Z",
+      "completed_at": "2026-10-19T13:15:50.186935Z",
+      "status": "succeeded",
+      "summary": {
+        "exempted": 0,
+        "fail": 33,
+        "manual": 0,
+        "not_applicable": 0,
+        "pass": 0,
+        "returned": 33,
+        "total": 33
+      },
+      "artifact_uri": "file:///var/lib/constellation-reports/reports/Scheduler_deployment_validation_2026-10-19-cis-k8s-1.9-20261019T131549Z-2b638eca-ae0f-4d47-ac31-e7a2e2095460.json",
+      "artifact_format": "json",
+      "artifact_media_type": "application/json",
+      "artifact_filename": "Scheduler_deployment_validation_2026-10-19-cis-k8s-1.9-20261019T131549Z-2b638eca-ae0f-4d47-ac31-e7a2e2095460.json",
+      "artifact_metadata_known": true,
+      "artifact_signature": "MEYCIQDNEEoY8PoyKLZoRl18NSzFcmeHYCFgKmkEHUWMAnGiSQIhAJ1sY+mhLYALfwP3vL+iWTemHB3X/lluQss8Rpi7tFNq",
+      "artifact_size_bytes": 18867,
+      "triggered_by": "schedule"
+    },
+    "downloadStatus": 200,
+    "contentType": "application/json",
+    "sha256": "e6cd1e7a1b0d53ba7fa12722e8e54cc0d7f465d2037abf9b46ef78677c7abd64",
+    "independentSignatureVerified": true,
+    "tamperedReportRejected": true,
+    "externalDestinations": []
+  },
+  "cleanup": {
+    "scheduleId": "6133ed1f-69ef-4eb5-ad99-c6830d24c199",
+    "scheduleDeleted": true
+  },
+  "persistence": {
+    "runId": "2b638eca-ae0f-4d47-ac31-e7a2e2095460",
+    "downloadStatus": 200,
+    "sha256": "e6cd1e7a1b0d53ba7fa12722e8e54cc0d7f465d2037abf9b46ef78677c7abd64",
+    "persistedAfterSchedulerRestart": true,
+    "signatureVerified": true
+  },
+  "signingPublicKeySha256": "253ea79224d214e7cdffa7a326acdcdbd2bf870ea1bcc1bf6c89e012bb3fdbc0",
+  "api": {
+    "refresh": 200,
+    "authenticatedClusters": 200
+  },
+  "storage": {
+    "claim": "constellation-compliance-reports",
+    "accessMode": "ReadWriteOnce",
+    "phase": "Bound",
+    "apiReadOnly": true,
+    "schedulerColocatedWithAPI": true
+  },
+  "limits": [
+    "No PDF renderer in this image; existing explicit HTML fallback retained.",
+    "No external email/S3/webhook delivery performed.",
+    "Single worker and ReadWriteOnce locality do not establish HA or recovery under node loss.",
+    "Signing Secret/report PVC require recovery coverage beyond database backups.",
+    "Two unknown-severity, no-listed-fix advisories remain unsuppressed.",
+    "Broader quality/security CI gates and NeuVector parity remain open."
+  ]
+}

@@ -1,7 +1,7 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-19** (Helm 133 live; compliance signer cancellation bounds verified in source; broader parity remains active)
+Last reconciled: **2026-10-19** (Helm 134 scheduled signed reports deployed and verified; broader parity remains active)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -16,6 +16,49 @@ understand the result, and prove that the control is enforced. Constellation's
 stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
 
+
+## Scheduled signed reports deployed (Helm 134)
+
+The standalone compliance scheduler is now packaged and deployed. The chart
+requires durable report storage and a signing Secret before enabling it. The
+scheduler receives the encrypted private key; the API receives only a read-only
+report mount. ReadWriteOnce storage colocates the worker with the API and uses
+Recreate API rollouts. No existing schedules were present before enabling it.
+
+Real-tool qualification found that the old `cosign sign-blob` invocation failed
+under pinned Cosign 3 with `must specify --bundle with --new-bundle-format`.
+The scheduler now requests a modern bundle with an explicit signing configuration
+containing no external services, checks its format/signature encoding/report
+SHA-256 digest, and retains the detached signature required by the report API.
+The hosted proof runs Cosign with Docker networking disabled and independently
+verifies the signature with Go crypto, including rejection of altered bytes.
+
+[Run 39257410030](https://github.com/alphabravo-oss/constellation/actions/runs/39257410030)
+passed 172 race/shuffle executions and built source
+`d2082dc7c63c7f003075bd2a583850300ba5c14f`. Four executions skipped: two root-only
+ownership checks and two opt-in real-tool checks, the latter subsequently passing
+inside the pinned offline container. Local chart/publishing checks passed all
+17 tests. Scheduler image
+`sha256:f795c2bccccdfa55df19eefa0a9370fd4ef74593c7d8fc3a085a7080b741f2ad`
+passed the unsuppressed image gate with no critical/high findings and two unknown
+severity advisories without listed fixes (GO-2026-6225 and GO-2026-5932).
+
+Helm 134 preserves schema 184 and existing image digests; all 15 container
+identities and controllers are healthy. An authenticated schedule create/run-now
+produced run `2b638eca-ae0f-4d47-ac31-e7a2e2095460` with 33 retained compliance
+checks (33 failing controls, not a validation failure). The report downloaded
+with HTTP 200, its asymmetric signature verified independently, and altered bytes
+failed verification. After restarting the scheduler, the same artifact hash and
+signature remained valid. The validation schedule was deleted; no schedules or
+external delivery destinations remain from this proof.
+
+This closes the previously missing worker launch/shared-storage integration for
+this single-node deployment, not full scheduled-report parity. PDF still uses the
+explicit HTML fallback; external deliveries, HA/node-loss recovery, signing-key
+and report-volume backup coverage remain open. Broader security/quality gates and
+the two unknown image advisories remain open. **66 checked / 88 open** is unchanged.
+See `docs/compliance-scheduler-deployment.md` and
+`deploy/dev/registry-release/validation-scheduler-deployment-20261019.json`.
 
 ## Compliance signer cancellation bounds (source verified)
 
@@ -35,9 +78,10 @@ No security alerts were suppressed. The existing explicit checksum fallback when
 bootstrap cannot configure a signer is unchanged; failure of an already configured
 signer still prevents delivery of that report.
 
-This standalone scheduler is not installed in the live cluster or packaged by
-the current Helm chart. Helm 133 remains deployed; source evidence does not close
-scheduler launch, shared storage, signing or live delivery requirements. The
+At this earlier checkpoint the standalone scheduler was not installed or
+packaged by the Helm chart. Helm 133 remained deployed; those source tests alone
+did not close scheduler launch, shared storage, signing or live delivery.
+The Helm 134 checkpoint above subsequently verifies deployment and local download. The
 broader security/quality gates remain open and parity remains **66 checked / 88
 open**. Evidence: `deploy/dev/registry-release/validation-compliance-signing-20261019.json`.
 
