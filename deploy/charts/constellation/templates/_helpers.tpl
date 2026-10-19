@@ -70,6 +70,7 @@ The role name used in the default path is the kebab-case form of the key.
 {{- /* Kebab-case role name for the default image path. */ -}}
 {{- $rolePath := $role -}}
 {{- if eq $role "runtimeAgent" -}}{{- $rolePath = "runtime-agent" -}}{{- end -}}
+{{- if eq $role "complianceScheduler" -}}{{- $rolePath = "compliance-scheduler" -}}{{- end -}}
 {{- if eq $role "auditArchiver" -}}{{- $rolePath = "audit-archiver" -}}{{- end -}}
 {{- $registry := $ctx.Values.image.registry | default "ghcr.io/alphabravo-oss/constellation" -}}
 {{- if $ctx.Values.fips.enabled -}}{{- $registry = $ctx.Values.fips.registry -}}{{- end -}}

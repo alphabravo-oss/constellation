@@ -1,0 +1,83 @@
+{{- if .Values.complianceScheduler.enabled }}
+{{- if not .Values.api.enabled }}
+{{- fail "complianceScheduler requires api.enabled for report downloads" }}
+{{- end }}
+{{- $claim := required "complianceScheduler.storage.existingClaim is required" .Values.complianceScheduler.storage.existingClaim }}
+{{- $signing := required "complianceScheduler.signingSecret is required" .Values.complianceScheduler.signingSecret }}
+{{- if not (has .Values.complianceScheduler.storage.accessMode (list "ReadWriteOnce" "ReadWriteMany")) }}
+{{- fail "complianceScheduler.storage.accessMode must be ReadWriteOnce or ReadWriteMany" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "constellation.fullname" . }}-compliance-scheduler
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: compliance-scheduler
+spec:
+  replicas: 1
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
+  strategy: {type: Recreate}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: compliance-scheduler
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "constellation.name" . }}
+        app.kubernetes.io/component: compliance-scheduler
+    spec:
+      {{- include "constellation.pullSecrets" . | nindent 6 }}
+      {{- include "constellation.podSecurityContext" . | nindent 6 }}
+      automountServiceAccountToken: false
+{{- if eq .Values.complianceScheduler.storage.accessMode "ReadWriteOnce" }}
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: {{ include "constellation.name" . }}
+                  app.kubernetes.io/component: api
+              topologyKey: kubernetes.io/hostname
+{{- end }}
+      containers:
+        - name: compliance-scheduler
+          image: {{ include "constellation.roleImage" (dict "ctx" . "role" "complianceScheduler") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- include "constellation.containerSecurityContext" . | nindent 10 }}
+          args: ["--interval={{ .Values.complianceScheduler.interval }}"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "constellation.dsnSecret" . }}
+                  key: {{ include "constellation.dsnSecretKey" . }}
+            - name: REPORT_OUT_DIR
+              value: /var/lib/constellation-reports/reports
+            - name: COSIGN_KEY
+              value: /var/run/constellation/report-signing/cosign.key
+            - name: COSIGN_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: {{ $signing | quote }}, key: password}
+            - name: HOME
+              value: /tmp
+          resources: {{- toYaml .Values.complianceScheduler.resources | nindent 12 }}
+          volumeMounts:
+            - name: reports
+              mountPath: /var/lib/constellation-reports
+            - name: signing
+              mountPath: /var/run/constellation/report-signing
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: reports
+          persistentVolumeClaim: {claimName: {{ $claim | quote }}}
+        - name: signing
+          secret:
+            secretName: {{ $signing | quote }}
+            defaultMode: 0440
+            items: [{key: cosign.key, path: cosign.key}]
+        - name: tmp
+          emptyDir: {}
+{{- end }}

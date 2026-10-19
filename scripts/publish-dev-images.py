@@ -15,7 +15,7 @@ import tempfile
 DIGEST = re.compile(r"sha256:[a-f0-9]{64}\Z")
 NAME = re.compile(r"[a-z0-9]+(?:[._-][a-z0-9]+)*\Z")
 ROLES = {"api", "scanner", "operator", "discoverer", "frontend", "runtimeAgent",
-         "admission", "migrate", "bootstrap", "auditArchiver"}
+         "admission", "migrate", "bootstrap", "auditArchiver", "complianceScheduler"}
 
 
 def command(*args):

@@ -1061,3 +1061,18 @@ fips:
 # because the CRD itself is cluster-scoped. Set false for cluster-wide workload
 # reconciliation.
 namespaced: true
+
+# Scheduled compliance reports. Provision durable shared storage and a Cosign key
+# Secret before enabling. The API mounts reports read-only; only the scheduler
+# receives the private signing key. ReadWriteOnce colocates the scheduler with API.
+complianceScheduler:
+  enabled: false
+  image: {}
+  interval: 30s
+  storage:
+    existingClaim: ""
+    accessMode: ReadWriteOnce
+  signingSecret: "" # keys: cosign.key and password
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: "1", memory: 512Mi}

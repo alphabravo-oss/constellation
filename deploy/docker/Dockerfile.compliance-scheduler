@@ -1,0 +1,38 @@
+# Standalone scheduled-report worker with pinned offline signing tool.
+ARG GO_VERSION=1.26.9
+ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian13:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3
+
+FROM golang:${GO_VERSION}-bookworm AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+ARG VERSION=dev
+ARG COMMIT=dev
+ARG BUILD_TIME=
+ENV CGO_ENABLED=0 GOOS=linux
+RUN go build -tags timetzdata -trimpath -ldflags="-s -w -X github.com/alphabravocompany/constellation/pkg/version.Version=${VERSION} -X github.com/alphabravocompany/constellation/pkg/version.Commit=${COMMIT} -X github.com/alphabravocompany/constellation/pkg/version.BuildTime=${BUILD_TIME}" \
+      -o /out/constellation-compliance-scheduler ./cmd/constellation-compliance-scheduler
+
+# Prepare account data without shipping account-management utilities.
+RUN mkdir -p /out/home \
+ && printf 'root:x:0:0:root:/root:/sbin/nologin\nconstellation:x:10001:10001:Constellation:/home/constellation:/sbin/nologin\n' > /out/passwd \
+ && printf 'root:x:0:\nconstellation:x:10001:\n' > /out/group
+
+FROM ghcr.io/alphabravo-oss/constellation/scanner@sha256:716b0300f3d1992a1e7d142a306f2255af7b09171989bf67c87a2e961e2a5823 AS signing-tool
+
+FROM ${RUNTIME_IMAGE} AS runtime
+ARG VERSION=dev
+ARG COMMIT=dev
+LABEL org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT}"
+COPY --from=build /out/passwd /etc/passwd
+COPY --from=build /out/group /etc/group
+COPY --from=build --chown=10001:10001 /out/home/ /home/constellation/
+COPY --from=build /out/constellation-compliance-scheduler /usr/local/bin/constellation-compliance-scheduler
+# Reuse the reviewed, dependency-patched Cosign binary, not the scanner filesystem.
+COPY --from=signing-tool /usr/local/bin/cosign /usr/local/bin/cosign
+ENV HOME=/home/constellation
+USER 10001:10001
+WORKDIR /home/constellation
+ENTRYPOINT ["/usr/local/bin/constellation-compliance-scheduler"]
