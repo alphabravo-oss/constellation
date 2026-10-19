@@ -51,7 +51,7 @@ async function settled(check: () => void) { await vi.waitFor(async () => { await
 it("downloads cluster-scoped HTML and invalidates its pending download when scope changes", async () => {
   vi.mocked(downloadExecutiveReport).mockResolvedValue(undefined);
   await renderPage(); await settled(() => expect(host.textContent).toContain("Security risk: 27/100"));
-  const button = [...host.querySelectorAll("button")].find(item => item.textContent?.trim() === "Download report (HTML)")!;
+  const button = [...host.querySelectorAll("button")].find(item => item.textContent?.trim() === "Report for entire cluster (HTML)")!;
   expect(button.disabled).toBe(false); await act(async () => button.click());
   expect(downloadExecutiveReport).toHaveBeenCalledWith("org", "cluster", expect.any(Function));
   const guard = vi.mocked(downloadExecutiveReport).mock.calls[0][2]!; expect(guard()).toBe(true);
@@ -306,4 +306,22 @@ it('preserves the selected recurrence in dashboard detail and triage destination
   vi.mocked(findings.list).mockResolvedValue({ findings: [finding] } as Awaited<ReturnType<typeof findings.list>>);
   await renderPage(); await settled(() => expect(host.textContent).toContain('Repeated observation'));
   expect(host.querySelector('a[href="/clusters/cluster/findings/repeated?first_seen_at=2026-01-01T00%3A00%3A00.123457Z"]')).not.toBeNull();
+});
+
+it("defaults dashboard findings to application scope and carries the include-system choice into links", async () => {
+ await renderPage();
+ await settled(() => expect(dashboard.summary).toHaveBeenCalledWith({cluster_id:"cluster",workload_scope:"application"}));
+ expect(findings.list).toHaveBeenCalledWith(expect.objectContaining({cluster_id:"cluster",workload_scope:"application"}));
+ const toggle=host.querySelector<HTMLInputElement>('input[aria-label="Include Constellation system workloads"]')!;
+ expect(toggle.checked).toBe(false);
+ await act(async()=>toggle.click());
+ const updater=route.setParams.mock.calls.at(-1)![0] as (p:URLSearchParams)=>URLSearchParams;
+ route.params=updater(new URLSearchParams("tab=posture"));
+ expect(route.params.get("tab")).toBe("posture");expect(route.params.get("include_system")).toBe("true");
+ await rerender();
+ await settled(()=>expect(dashboard.summary).toHaveBeenCalledWith({cluster_id:"cluster",workload_scope:"all"}));
+ expect(findings.list).toHaveBeenCalledWith(expect.objectContaining({workload_scope:"all"}));
+ const links=[...host.querySelectorAll<HTMLAnchorElement>('a[href*="/findings?"]')];expect(links.length).toBeGreaterThan(0);
+ for(const link of links)expect(new URL(link.href).searchParams.get("include_system")).toBe("true");
+ expect(host.textContent).toContain("Inventory, hardening, policy coverage, and operational signals cover the whole cluster");
 });

@@ -1,3 +1,4 @@
+import { useRouteSearchParams } from "@/lib/route-search";
 import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
 import { findingHref, findingRowKey } from "@/lib/finding-instance";
 import { useMemo, useRef } from "react";
@@ -75,6 +76,9 @@ const SCORE_FACTORS = [
 ] as const;
 
 export function DashboardPage() {
+  const [scopeParams, setScopeParams] = useRouteSearchParams();
+  const includeSystem = scopeParams.get("include_system") === "true";
+  const workloadScope = includeSystem ? "all" as const : "application" as const;
   const operator = useTablePreferencesIdentity();
   const findingOwner = `${operator?.org_id}:${operator?.user_id}`;
   const { clusterId, cluster, isLoading: clusterLoading, error: clusterError } = useCluster();
@@ -86,15 +90,15 @@ export function DashboardPage() {
   // risk, top actions, heatmap, trend). One 250-row fetch instead of two
   // 1000-row fetches with detail_json — much faster page load.
   const open  = useQuery({
-    queryKey: ["findings", findingOwner, "open", clusterId],
-    queryFn: () => findings.list({ lifecycle: "open", cluster_id: clusterId, limit: 250 }),
+    queryKey: ["findings", findingOwner, "open", clusterId, workloadScope],
+    queryFn: () => findings.list({ lifecycle: "open", cluster_id: clusterId, limit: 250, workload_scope: workloadScope }),
     enabled: scopeReady,
   });
   const bundle = useQuery({ queryKey: ["cve", "bundle"],    queryFn: () => cve.bundle(), enabled: scopeReady });
   const cveStats = useQuery({ queryKey: ["cve", "stats"],   queryFn: () => cve.stats(), enabled: scopeReady, staleTime: 60_000 });
   const sum   = useQuery({
-    queryKey: ["dashboard", clusterId],
-    queryFn: () => dashboard.summary({ cluster_id: clusterId }),
+    queryKey: ["dashboard", clusterId, workloadScope],
+    queryFn: () => dashboard.summary({ cluster_id: clusterId, workload_scope: workloadScope }),
     enabled: scopeReady,
   });
   const platform = useQuery({
@@ -193,7 +197,13 @@ export function DashboardPage() {
   };
   const openItems = useMemo(() => openData?.findings ?? [], [openData]);
   const allItems = openItems; // Finding trends describe only this loaded sample.
-  const clusterPath = (path: string) => clusterId ? `/clusters/${clusterId}${path}` : path;
+  const clusterPath = (path: string) => {
+    const [pathname, query] = path.split("?");
+    const params = new URLSearchParams(query);
+    if (includeSystem && (pathname === "/findings" || pathname === "/dashboard")) params.set("include_system", "true");
+    const target = pathname + (params.size ? `?${params}` : "");
+    return clusterId ? `/clusters/${clusterId}${target}` : target;
+  };
 
   // Counts always come from the complete server aggregate, never the loaded sample.
   const counts = {
@@ -820,6 +830,13 @@ export function DashboardPage() {
   </div>;
   return (
     <div className="space-y-5" data-testid="dashboard-page" data-cluster-id={clusterId ?? ""}>
+      <div className="space-y-1">
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={includeSystem} aria-label="Include Constellation system workloads" onChange={(event) => {
+          const checked = event.target.checked;
+          setScopeParams((current) => { const next = new URLSearchParams(current); if (checked) next.set("include_system", "true"); else next.delete("include_system"); return next; });
+        }} />Include Constellation system workloads</label>
+        <p className="text-xs text-muted-foreground">Filters findings and vulnerability metrics. Inventory, hardening, policy coverage, and operational signals cover the whole cluster.</p>
+      </div>
       <PageHeader
         title={scopeReady && cluster?.name ? `${cluster.name} — Dashboard` : "Security Dashboard"}
         description={
@@ -870,7 +887,7 @@ function DashboardReportDownload({ orgId, clusterId, scopeReady, owner }: { orgI
   } });
   return <div className="flex flex-wrap items-center gap-2">
     <Button variant="outline" disabled={!ready || download.isPending} title="Download this cluster’s executive security report as HTML" onClick={() => download.mutate({ context, current: capture() })}>
-      <FileWarning className="mr-1 h-4 w-4" />{download.isPending ? "Downloading…" : "Download report (HTML)"}
+      <FileWarning className="mr-1 h-4 w-4" />{download.isPending ? "Downloading…" : "Report for entire cluster (HTML)"}
     </Button>
     {download.isError && download.variables.context === context && <span role="alert" className="text-xs">Report download failed or its cluster changed. Refresh before retrying.</span>}
   </div>;

@@ -18505,13 +18505,19 @@
         "description": "Counts cover the requested cluster or organization. Open vulnerability fixability matches Findings fixable=true, including fixed/fixed_version/affected_range fallback and excluding false/not-fixed/wont-fix values. Top vulnerable workloads carry exact deployment IDs; counts are not enforcement acknowledgements.",
         "parameters": [
           {
-            "name": "cluster_id",
+            "name": "workload_scope",
             "in": "query",
+            "required": false,
             "schema": {
               "type": "string",
-              "format": "uuid"
+              "enum": [
+                "application",
+                "constellation",
+                "all"
+              ],
+              "default": "all"
             },
-            "description": "Optional exact cluster scope."
+            "description": "Scopes finding totals, vulnerability metrics, and top vulnerable workloads. Shared images and unknown ownership remain in application scope. Inventory, hardening, policy coverage, and operational metrics remain cluster-wide. UI defaults to application; API defaults to all."
           }
         ]
       }

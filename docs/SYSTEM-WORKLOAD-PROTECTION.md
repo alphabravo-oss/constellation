@@ -4,8 +4,11 @@ The findings page and cluster landing page default to application scope, with an
 “Include Constellation system workloads” toggle. Shared images and unknown owners
 remain visible. This presentation classification never grants enforcement immunity.
 Scanning, findings retention, and alerts continue independently of the filter.
-Dashboard scope alignment and ownership of separately managed dependencies remain
-open work.
+The dashboard applies the same selection to finding totals, vulnerability metrics,
+and top vulnerable workloads, and preserves it in finding links. Inventory,
+hardening, policy coverage, and operational signals retain their full-cluster scope,
+which is stated beside the toggle. Executive downloads are labeled as reports for
+the entire cluster. Ownership of separately managed dependencies remains open work.
 
 ## Network policy write boundary
 

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/alphabravocompany/constellation/internal/db"
+	"github.com/alphabravocompany/constellation/internal/handler/platformrole"
 	"github.com/alphabravocompany/constellation/internal/handler/sqlx"
 )
 
@@ -24,6 +25,7 @@ type Dashboard struct {
 func NewDashboard(d *db.DB) *Dashboard { return &Dashboard{db: d} }
 
 type dashboardSummaryDTO struct {
+	FindingScope    string              `json:"finding_scope"`
 	GeneratedAt     string              `json:"generated_at"`
 	FindingsByLevel map[string]int      `json:"findings_by_severity"`
 	FindingsTotal   int                 `json:"findings_total"`
@@ -93,7 +95,15 @@ func (h *Dashboard) Summary(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	out, err := h.aggregate(r.Context(), subj.OrgID, clusterArg)
+	scope := r.URL.Query().Get("workload_scope")
+	if scope == "" {
+		scope = "all"
+	}
+	if _, err := platformrole.ScopeSQL(scope, "true"); err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	out, err := h.aggregate(r.Context(), subj.OrgID, clusterArg, scope)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "dashboard summary", slog.String("err", err.Error()))
 		jsonError(w, http.StatusInternalServerError, fmt.Sprintf("summary: %v", err))
@@ -155,8 +165,10 @@ SELECT date_trunc('day', at)::date AS d,
 	writeJSON(w, http.StatusOK, map[string]any{"events_timeline": out, "window_start": windowStart.UTC().Format(time.RFC3339Nano)})
 }
 
-func (h *Dashboard) aggregate(ctx context.Context, orgID uuid.UUID, clusterArg any) (dashboardSummaryDTO, error) {
+func (h *Dashboard) aggregate(ctx context.Context, orgID uuid.UUID, clusterArg any, scope string) (dashboardSummaryDTO, error) {
+	findingScope, _ := platformrole.ScopeSQL(scope, platformrole.ConstellationFindingSQL("findings"))
 	out := dashboardSummaryDTO{
+		FindingScope:    scope,
 		GeneratedAt:     time.Now().UTC().Format(time.RFC3339),
 		FindingsByLevel: map[string]int{},
 		RecentActivity:  []dashboardEventDT{},
@@ -169,7 +181,7 @@ func (h *Dashboard) aggregate(ctx context.Context, orgID uuid.UUID, clusterArg a
 	// triaged. Accepted risk is surfaced separately via AcceptedRisks below.
 	rows, err := h.db.Pool().Query(ctx, `
 SELECT severity, COUNT(*)::int FROM findings
- WHERE org_id = $1
+ WHERE (`+findingScope+`) AND org_id = $1
    AND lifecycle = 'open'
    AND ($2::uuid IS NULL OR cluster_id = $2)
    -- Canonical vuln count: exclude the runtime-agent 'workload' pod-scan duplicate of
@@ -196,7 +208,7 @@ SELECT COUNT(*) FILTER (WHERE lifecycle = 'open')::int,
        COUNT(*) FILTER (WHERE lifecycle = 'accepted')::int,
        COALESCE(MAX(risk_score), 0)
   FROM findings
- WHERE org_id = $1
+ WHERE (`+findingScope+`) AND org_id = $1
    AND ($2::uuid IS NULL OR cluster_id = $2)
 	   AND (kind <> 'vulnerability' OR COALESCE(target_type, '') <> 'workload')`, orgID, clusterArg).
 		Scan(&out.OpenFindings, &out.AcceptedRisks, &out.HighestRisk); err != nil {
@@ -244,7 +256,7 @@ SELECT id::text, at, action, COALESCE(target_kind,''), COALESCE(target_id,''), C
 	if err := evRows.Err(); err != nil {
 		return out, fmt.Errorf("audit rows: %w", err)
 	}
-	if err := h.computePosture(ctx, orgID, clusterArg, &out); err != nil {
+	if err := h.computePosture(ctx, orgID, clusterArg, &out, scope); err != nil {
 		return out, fmt.Errorf("posture: %w", err)
 	}
 	return out, nil
@@ -253,7 +265,10 @@ SELECT id::text, at, action, COALESCE(target_kind,''), COALESCE(target_id,''), C
 // computePosture fills the NeuVector-style posture block: vuln location/signals, workload
 // hardening, and a decomposed 0-100 Security Risk Score (100 = safest). The canonical
 // 'workload' exclusion (see findings.go) keeps vuln counts from double-counting.
-func (h *Dashboard) computePosture(ctx context.Context, orgID uuid.UUID, clusterArg any, out *dashboardSummaryDTO) error {
+func (h *Dashboard) computePosture(ctx context.Context, orgID uuid.UUID, clusterArg any, out *dashboardSummaryDTO, scope string) error {
+	findingScope, _ := platformrole.ScopeSQL(scope, platformrole.ConstellationFindingSQL("findings"))
+	aliasedFindingScope, _ := platformrole.ScopeSQL(scope, platformrole.ConstellationFindingSQL("f"))
+	deploymentScope, _ := platformrole.ScopeSQL(scope, platformrole.ConstellationDeploymentSQL("deployments"))
 	p := dashboardPostureDTO{
 		ScoreBreakdown:  map[string]int{},
 		TopVulnerable:   []topVulnerableWorkloadDTO{},
@@ -279,7 +294,7 @@ SELECT
   COUNT(*) FILTER (WHERE severity = 'critical')::int,
   COUNT(*) FILTER (WHERE severity = 'high')::int
   FROM findings
- WHERE org_id = $1
+ WHERE (`+findingScope+`) AND org_id = $1
    AND kind = 'vulnerability'
    AND lifecycle = 'open'
 	   AND COALESCE(target_type, '') <> 'workload'
@@ -346,7 +361,7 @@ SELECT
   JOIN image_workload_links l
     ON l.image_digest = f.target_ref AND l.org_id = f.org_id AND l.cluster_id = f.cluster_id
   LEFT JOIN wl_mode m ON m.org_id=l.org_id AND m.cluster_id=l.cluster_id AND m.workload_id=l.workload_id
- WHERE f.org_id = $1 AND f.kind = 'vulnerability' AND f.lifecycle = 'open'
+ WHERE (`+aliasedFindingScope+`) AND f.org_id = $1 AND f.kind = 'vulnerability' AND f.lifecycle = 'open'
    AND f.target_type = 'image-workload' AND ($2::uuid IS NULL OR f.cluster_id = $2)`,
 		orgID, clusterArg).Scan(&cDiscover, &cMonitor, &cProtect); err != nil {
 		return fmt.Errorf("cve-by-mode rollup: %w", err)
@@ -355,7 +370,7 @@ SELECT
 SELECT COUNT(DISTINCT external_id) FILTER (WHERE target_type = 'platform')::int,
        COUNT(DISTINCT external_id) FILTER (WHERE target_type = 'host')::int
   FROM findings
- WHERE org_id = $1 AND kind = 'vulnerability' AND lifecycle = 'open'
+ WHERE (`+findingScope+`) AND org_id = $1 AND kind = 'vulnerability' AND lifecycle = 'open'
    AND target_type IN ('platform','host') AND ($2::uuid IS NULL OR cluster_id = $2)`,
 		orgID, clusterArg).Scan(&cPlatform, &cHost); err != nil {
 		return fmt.Errorf("cve platform/host rollup: %w", err)
@@ -459,7 +474,7 @@ SELECT COUNT(*) FILTER (WHERE enabled AND engine = 'constellation-admission')::i
 	twRows, err := h.db.Pool().Query(ctx, `
 SELECT id::text, cluster_id, `+platformRoleSQL("namespace", "labels")+`, namespace, name, COALESCE(critical_count,0)::int, COALESCE(high_count,0)::int
   FROM deployments
- WHERE org_id = $1
+ WHERE (`+deploymentScope+`) AND org_id = $1
    AND ($2::uuid IS NULL OR cluster_id = $2)
    AND (COALESCE(critical_count,0) > 0 OR COALESCE(high_count,0) > 0)
  ORDER BY critical_count DESC, high_count DESC, id

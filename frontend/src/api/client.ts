@@ -5242,6 +5242,7 @@ export interface AdmissionDryRunHistoryRow {
 
 // ---------- New endpoints (Wave B) ----------
 export interface DashboardSummary {
+  finding_scope?: "application" | "all" | "constellation";
   generated_at: string;
   findings_by_severity: Record<string, number>;
   findings_total: number;
@@ -5290,7 +5291,7 @@ export interface ExposedService {
 export interface ExposureResponse { ingress: ExposedService[]; egress: ExposedService[] }
 
 export const dashboard = {
-  summary: (params: { cluster_id?: string } = {}) =>
+  summary: (params: { cluster_id?: string; workload_scope?: "application" | "all" | "constellation" } = {}) =>
     api.get<DashboardSummary>("/dashboard/summary", { params }).then((r) => r.data),
   // NV Security Events timeline: kept separate from summary — it scans the large events
   // partition (~6s) and must not slow the primary summary.
