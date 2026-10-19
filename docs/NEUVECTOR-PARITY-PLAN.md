@@ -17,6 +17,33 @@ stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
 
 
+## Static service runtime candidates and node recovery (2026-10-19)
+
+Source `727c603` converts discoverer, admission and operator to the API's pinned
+Distroless static base, with UID/GID 10001, CA roots and embedded timezones. Full
+candidate Dockerfile builds passed. Runtime checks cover static linkage for all
+five binaries, account lookup, temporary storage, DNS/TLS and timezones; admission
+also passed HTTPS readiness and an AdmissionReview request. SBOMs retain 57, 105
+and 163 Go-module records respectively, plus six OS-package records per image.
+
+Using Grype 0.120.1-constellation.1 and the same database built 2026-10-18T06:27:17Z,
+each exact baseline image had 249 records (7 critical, 77 high); each candidate
+had zero. This is a local standalone comparison, not a live multi-engine result.
+Candidates identify the pre-commit working tree. Final source-stamped admission
+and operator builds, publishing, deployment and live workflow/scanner validation
+remain pending. Helm remains at **126**, schema **183**.
+
+Full builds consumed enough space on the shared development node to trigger disk
+pressure and evict workloads. Builds were stopped; regenerable build/compiler/
+module caches were reclaimed, preserving volumes and rollback images. The node
+cleared pressure and the existing deployment recovered: all 14 expected image
+identities matched the release lock, CNPG and storage were healthy, public HTTP
+and authenticated cluster reads returned 200. Capacity checks must account for
+eviction minimum reclaim and build scratch space, not only the initial threshold.
+Two baseline supporting-image scans still have failed attempts pending retry;
+these do not count as verified coverage. Evidence:
+`deploy/dev/registry-release/validation-static-runtime-candidates-20261019.json`.
+
 ## Scanner finding identity correction (Helm 126)
 
 Scanner source `3e67b51` normalizes Trivy's gobinary/gomod labels with Go module
