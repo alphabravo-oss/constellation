@@ -1806,7 +1806,7 @@ export interface PlatformFactsResponse {
 }
 
 export const clusters = {
-  list: () => api.get<{ clusters: ClusterSummary[] }>("/clusters").then((r) => r.data),
+  list: (params?: { workload_scope?: "application" | "all" | "constellation" }) => api.get<{ clusters: ClusterSummary[] }>("/clusters", { params }).then((r) => r.data),
   getOne: (id: string) => api.get<ClusterDetail>(`/clusters/${id}`).then((r) => r.data),
   health: (id: string) => api.get<ClusterHealth>(`/clusters/${id}/health`).then((r) => r.data),
   platformFacts: (id: string) => api.get<PlatformFactsResponse>(`/clusters/${id}/platform-facts`).then((r) => r.data),

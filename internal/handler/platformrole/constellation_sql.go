@@ -1,5 +1,21 @@
 package platformrole
 
+import "fmt"
+
+// ScopeSQL validates a presentation scope and wraps a trusted classification.
+func ScopeSQL(scope, classification string) (string, error) {
+	switch scope {
+	case "", "all":
+		return "true", nil
+	case "application":
+		return "NOT (" + classification + ")", nil
+	case "constellation":
+		return "(" + classification + ")", nil
+	default:
+		return "", fmt.Errorf("invalid workload_scope")
+	}
+}
+
 // ConstellationDeploymentSQL identifies chart-managed Constellation workloads for
 // presentation only. Labels are not authority to bypass enforcement. Unclassified
 // dependencies and customer workloads sharing the namespace remain visible.

@@ -5,7 +5,10 @@ package inventorypresence
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/handler/platformrole"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -58,6 +61,7 @@ const countsSQL = `WITH classified AS (
  LEFT JOIN cluster_inventory_presence s ON s.org_id=c.org_id AND s.cluster_id=c.id
  LEFT JOIN findings f ON f.org_id=c.org_id AND f.cluster_id=c.id
  AND f.lifecycle='open' AND f.kind='vulnerability' AND f.severity IN ('critical','high')
+ /* finding_scope */
  LEFT JOIN assets a ON a.id=f.asset_id AND a.org_id=f.org_id
  WHERE c.org_id=$1 AND ($2::uuid IS NULL OR c.id=$2)
  ) SELECT cluster_id,
@@ -69,16 +73,24 @@ const countsSQL = `WITH classified AS (
  FROM classified GROUP BY cluster_id`
 
 func Read(ctx context.Context, pool *pgxpool.Pool, org, cluster uuid.UUID) (Counts, error) {
-	all, err := read(ctx, pool, org, &cluster)
+	all, err := read(ctx, pool, org, &cluster, "all")
 	return all[cluster], err
 }
 
 func ReadAll(ctx context.Context, pool *pgxpool.Pool, org uuid.UUID) (map[uuid.UUID]Counts, error) {
-	return read(ctx, pool, org, nil)
+	return read(ctx, pool, org, nil, "all")
 }
 
-func read(ctx context.Context, pool *pgxpool.Pool, org uuid.UUID, cluster *uuid.UUID) (map[uuid.UUID]Counts, error) {
-	rows, err := pool.Query(ctx, countsSQL, org, cluster)
+func ReadAllScoped(ctx context.Context, pool *pgxpool.Pool, org uuid.UUID, scope string) (map[uuid.UUID]Counts, error) {
+	return read(ctx, pool, org, nil, scope)
+}
+
+func read(ctx context.Context, pool *pgxpool.Pool, org uuid.UUID, cluster *uuid.UUID, scope string) (map[uuid.UUID]Counts, error) {
+	predicate, err := platformrole.ScopeSQL(scope, platformrole.ConstellationFindingSQL("f"))
+	if err != nil {
+		return nil, err
+	}
+	rows, err := pool.Query(ctx, strings.Replace(countsSQL, "/* finding_scope */", "AND ("+predicate+")", 1), org, cluster)
 	if err != nil {
 		return nil, err
 	}

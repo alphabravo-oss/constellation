@@ -8,6 +8,7 @@
 // The "Org overview" callout below the grid links to the surfaces that legitimately
 // span clusters (CVE DB, Settings, Federation) so they remain one click away.
 import { useMemo } from "react";
+import { useRouteSearchParams } from "@/lib/route-search";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -45,7 +46,10 @@ import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { StatCard, StatGrid } from "@/components/ui/stat-card";
 
 export function ClustersLandingPage() {
-  const list = useQuery({ queryKey: ["clusters"], queryFn: () => clusters.list(), staleTime: 30_000 });
+  const [scopeParams, setScopeParams] = useRouteSearchParams();
+  const includeSystem = scopeParams.get("include_system") === "true";
+  const workloadScope = includeSystem ? "all" as const : "application" as const;
+  const list = useQuery({ queryKey: ["clusters", { workload_scope: workloadScope }], queryFn: () => clusters.list({ workload_scope: workloadScope }), staleTime: 30_000 });
   const data = useMemo(() => sortClustersByActivity(list.data?.clusters ?? []), [list.data?.clusters]);
   const navigate = useNavigate();
   const [requestedTab, setTab] = useTabParam("tab", "overview");
@@ -73,6 +77,13 @@ export function ClustersLandingPage() {
       <VerdictBanner status={list.isError || needsAttention > 0 ? "degraded" : list.isPending || data.length === 0 ? "info" : "ok"}
         title={list.isError ? "Cluster inventory could not be loaded" : list.isPending ? "Loading clusters" : data.length === 0 ? "Connect your first cluster" : needsAttention > 0 ? "Some clusters need attention" : "Clusters are reporting healthy states"}
         detail="Select a cluster to investigate its security posture. Manage registration credentials in the Registration bundles tab." />
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" aria-label="Include Constellation system workloads" checked={includeSystem} onChange={(event) => {
+          const checked = event.target.checked;
+          setScopeParams((current) => { const next = new URLSearchParams(current); if (checked) next.set("include_system", "true"); else next.delete("include_system"); return next; });
+        }} />
+        Include Constellation system workloads
+      </label>
       <StatGrid>
         <StatCard label="Clusters" value={list.data ? data.length : "—"} />
         <StatCard label="Need attention" value={list.data ? needsAttention : "—"} />

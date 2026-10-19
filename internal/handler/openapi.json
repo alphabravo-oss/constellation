@@ -12877,7 +12877,24 @@
     "/api/v1/clusters": {
       "get": {
         "summary": "List registered clusters with risk and sensor rollups",
-        "description": "Includes exposure: inventory_status (fresh, stale, missing), observed_at, current_critical/current_high (distinct open vulnerability IDs), current_occurrences, historical_occurrences (absent or completed pods), and unverified_occurrences (including unmatched image digests). Exposure counts cover critical/high vulnerability findings; existing stats preserve all historical open finding occurrences. Missing or stale discovery cannot establish current exposure."
+        "description": "Includes exposure: inventory_status (fresh, stale, missing), observed_at, current_critical/current_high (distinct open vulnerability IDs), current_occurrences, historical_occurrences (absent or completed pods), and unverified_occurrences (including unmatched image digests). Exposure counts cover critical/high vulnerability findings; existing stats preserve all historical open finding occurrences. Missing or stale discovery cannot establish current exposure.",
+        "parameters": [
+          {
+            "name": "workload_scope",
+            "in": "query",
+            "required": false,
+            "description": "Presentation scope for finding exposure, finding totals, workload counts, and workload risk. Application excludes findings owned exclusively by chart-managed Constellation workloads. Shared images and unknown ownership remain visible. Cluster health is unaffected. The API defaults to all; the cluster landing UI defaults to application.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "application",
+                "constellation",
+                "all"
+              ],
+              "default": "all"
+            }
+          }
+        ]
       }
     },
     "/api/v1/clusters/{id}": {

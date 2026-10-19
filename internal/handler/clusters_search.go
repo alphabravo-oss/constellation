@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/db"
+	"github.com/alphabravocompany/constellation/internal/handler/platformrole"
 	"github.com/alphabravocompany/constellation/internal/inventorypresence"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 )
@@ -44,12 +45,19 @@ func NewClusters(d *db.DB, a ...*audit.Logger) *Clusters {
 // (no N+1 fan-out per cluster card).
 func (h *Clusters) List(w http.ResponseWriter, r *http.Request) {
 	subj, _ := SubjectFrom(r.Context())
-	exposures, err := inventorypresence.ReadAll(r.Context(), h.db.Pool(), subj.OrgID)
+	scope := r.URL.Query().Get("workload_scope")
+	findingScope, err := platformrole.ScopeSQL(scope, platformrole.ConstellationFindingSQL("f"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	deploymentScope, _ := platformrole.ScopeSQL(scope, platformrole.ConstellationDeploymentSQL("d"))
+	exposures, err := inventorypresence.ReadAllScoped(r.Context(), h.db.Pool(), subj.OrgID, scope)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "read current finding exposure"})
 		return
 	}
-	rows, err := h.db.Pool().Query(r.Context(), `
+	query := `
 SELECT c.id, c.name, c.distro, COALESCE(c.cloud_provider,''), COALESCE(c.region,''),
        c.state, COALESCE(c.agent_version, ''),
        -- Every correlated subquery is scoped by org_id so the composite
@@ -80,7 +88,12 @@ SELECT c.id, c.name, c.distro, COALESCE(c.cloud_provider,''), COALESCE(c.region,
   LEFT JOIN cluster_platform_facts cpf
     ON cpf.org_id = c.org_id AND cpf.cluster_id = c.id
  WHERE c.org_id = $1
- ORDER BY c.name`, subj.OrgID, expectedClusterComponents)
+ ORDER BY c.name`
+	// These are fixed SQL fragments, never request expressions. Scope every
+	// finding/workload rollup while keeping cluster health and connectivity intact.
+	query = strings.ReplaceAll(query, "f.org_id = c.org_id AND f.cluster_id = c.id", "f.org_id = c.org_id AND f.cluster_id = c.id AND ("+findingScope+")")
+	query = strings.ReplaceAll(query, "d.org_id = c.org_id AND d.cluster_id = c.id", "d.org_id = c.org_id AND d.cluster_id = c.id AND ("+deploymentScope+")")
+	rows, err := h.db.Pool().Query(r.Context(), query, subj.OrgID, expectedClusterComponents)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
