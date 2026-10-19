@@ -1,7 +1,7 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-19** (Helm 129 scan lease fencing and migration runtime hardening; broader parity remains active)
+Last reconciled: **2026-10-19** (Helm 130 native network-policy system communication protection; broader parity remains active)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -16,6 +16,53 @@ understand the result, and prove that the control is enforced. Constellation's
 stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
 
+
+## Application-side system communication protection (Helm 130)
+
+Operator/applier source `af4abc345484cf26d2b3122a8835355de441095e` is deployed
+as Helm 130. Direct protected-namespace refusals remain, and application-side
+policies now preserve trusted installation/admin-added namespace peers plus
+required service/backend protocol and destination ports. Kubernetes core
+namespaces stay protected targets, but they are not blanket communication peers:
+DNS/API access is preserved without allowing unrelated core-service ports or
+infrastructure proxies. Node addresses do not become unrestricted egress peers.
+
+The write boundary reads complete paginated Kubernetes inventory and exact API
+Endpoints, verifies selected EndpointSlice ownership against the current Service
+UID, and refuses incomplete/untrusted inputs. Presentation labels and retired
+pod IPs do not grant immunity. Explicit Cilium CIDR denies overlapping protected
+endpoints are refused. Other unproven deny/requirement forms fail explicitly;
+recovery deletion stays available. The contract and remaining limits are in
+`docs/network-policy-self-protection.md`.
+
+The [hosted regression suite](https://github.com/alphabravo-oss/constellation/actions/runs/39244515245)
+passed 458 repeated race/shuffle executions; two CI skips were the opt-in live
+helper, subsequently executed against disposable namespaces. The earlier
+implementation (`6731cbb`) passed ordinary traffic checks but failed the live
+negative control because a DNS metrics port bypassed isolation. The corrected
+implementation passed 29 live native-policy traffic checks plus DNS, API transport
+and blocked DNS-metrics checks. Protected pod/service connections and a declared
+port on a shared endpoint stayed reachable; ordinary application ingress/egress,
+unrelated NodePorts and an undeclared port on that same shared IP stayed blocked.
+Deleting the policy restored application traffic. Both fixture runs cleaned up
+all owned namespaces; no production workload was isolated for these probes.
+
+The [hosted image build](https://github.com/alphabravo-oss/constellation/actions/runs/39244654427)
+produced the verified OCI artifact. Its published digest passed Grype with zero
+findings. Live job `b304e9a7-4898-4a91-ac67-3e05fb0c1166` completed with all three
+engines successful, 170 packages and zero findings. All 14 running/completed-init
+image identities match the release lock; controllers and CNPG are healthy. Nine
+live RBAC checks prove inventory reads and deny secret access and pod/service
+mutation. All 13 production protected-service EndpointSlices have matching
+Service ownership. Non-image Helm values and runtime enforcement gates are
+unchanged. Public/authenticated API checks pass; node DiskPressure is false.
+
+Evidence: `deploy/dev/registry-release/validation-system-communication-20261019.json`.
+Native dataplane evidence does not qualify Cilium/Calico dataplanes, third-party
+policies, endpoint/DNS churn or automatic removal of previously applied unsafe
+denies. Finer component identity within shared namespaces and broader parity
+remain open; this is not a claim that all possible rules can never disrupt the
+system.
 
 ## Scan lease fencing and migration runtime hardening (Helm 129)
 

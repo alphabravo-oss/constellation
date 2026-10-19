@@ -12,10 +12,10 @@
     {
       "name": "operator",
       "role": "operator",
-      "source": "constellation/operator:candidate-298207c7ef0180a63dced5ebba00cb76c1019bb7",
-      "digest": "sha256:cae3765afeeedd1abc23647d166bf536cc4b01fe0b0ff54af6cdb4a2f6d9f15a",
+      "source": "constellation/operator:candidate-af4abc345484cf26d2b3122a8835355de441095e",
+      "digest": "sha256:479a0b67c7dccbdd9ce5cbd8f69b7ee4fe603c8eef49e7a80570357a2212a7e5",
       "repository": "ghcr.io/alphabravo-oss/constellation/operator",
-      "tag": "dev-cae3765afeeedd1abc23647d166bf536cc4b01fe0b0ff54af6cdb4a2f6d9f15a"
+      "tag": "dev-479a0b67c7dccbdd9ce5cbd8f69b7ee4fe603c8eef49e7a80570357a2212a7e5"
     },
     {
       "name": "scanner",

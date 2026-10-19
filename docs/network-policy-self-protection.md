@@ -49,7 +49,9 @@ shares an IP with an application, only its declared port receives an exception.
 Effective Kubernetes manifests carry
 `constellation.alphabravo.io/system-communication: preserved` and the protected
 namespace list. Refusals use the existing enforcement status/error reporting path.
-The stored requested manifest remains the user's intent; the live Kubernetes
+A refused write does not remove an older policy object; existing unsafe denies
+need an explicit lift through the normal recovery path. The stored requested
+manifest remains the user's intent; the live Kubernetes
 manifest includes the applier's mandatory protection adjustments.
 
 ## Validation and limits

@@ -54,6 +54,7 @@ def main():
         evidence['probes'].append({'tag': tag, 'sourceNamespace': namespace, 'sourcePod': pod,
                                    'target': target, 'expectedAllowed': expected, 'allowed': success,
                                    'exitCode': result.returncode, 'stderr': result.stderr[-500:]})
+        print(json.dumps({'probe': tag, 'expectedAllowed': expected, 'allowed': success}), flush=True)
         if expected != success:
             raise AssertionError(f'{tag}: expected allowed={expected}, got {success}: {result.stderr}')
 
@@ -61,7 +62,7 @@ def main():
         serve = "while true; do printf 'HTTP/1.1 200 OK\\r\\nContent-Length: 2\\r\\nConnection: close\\r\\n\\r\\nok' | nc -l -p PORT -w 2; done"
         command = '(' + serve.replace('PORT', '18080') + ') & (' + serve.replace('PORT', '18081') + ') & wait'
         return {'apiVersion': 'v1', 'kind': 'Pod', 'metadata': {'name': name, 'namespace': namespace, 'labels': {'proof-role': role}},
-                'spec': {'automountServiceAccountToken': False, 'securityContext': {'runAsNonRoot': True, 'runAsUser': 10001, 'runAsGroup': 10001},
+                'spec': {'automountServiceAccountToken': False, 'terminationGracePeriodSeconds': 1, 'securityContext': {'runAsNonRoot': True, 'runAsUser': 10001, 'runAsGroup': 10001},
                          'containers': [{'name': 'fixture', 'image': args.image, 'command': ['/bin/sh', '-c', command],
                                          'securityContext': {'allowPrivilegeEscalation': False, 'readOnlyRootFilesystem': True, 'capabilities': {'drop': ['ALL']}},
                                          'resources': {'requests': {'cpu': '10m', 'memory': '16Mi'}, 'limits': {'cpu': '100m', 'memory': '64Mi'}}}]}}
@@ -103,6 +104,14 @@ def main():
         for tag, target in targets.items():
             probe(app, 'client', target, True, 'baseline-' + tag)
         probe(app, 'ordinary', f'http://{client_ip}:18080/', True, 'baseline-ordinary-ingress')
+        # DNS transport is required, but its colocated metrics port must not
+        # inherit a blanket kube-system communication exception.
+        dns_service = get('service', 'kube-dns', 'kube-system')
+        metrics_port = next(p['port'] for p in dns_service['spec']['ports'] if p.get('name') == 'metrics')
+        metrics_url = f"http://{dns_service['spec']['clusterIP']}:{metrics_port}/metrics"
+        metrics = kubectl('exec', '-n', app, 'client', '--', 'wget', '-T', '3', '-qO', '/dev/null', metrics_url, check=False, timeout=10)
+        if metrics.returncode:
+            raise AssertionError('DNS metrics baseline is not reachable; this fixture requires its explicit positive control')
         env = dict(os.environ, CONSTELLATION_POLICY_PROOF_NAMESPACE=app,
                    CONSTELLATION_POLICY_PROOF_PROTECTED_NAMESPACE=system, CONSTELLATION_POLICY_PROOF_NONCE=nonce)
         result = subprocess.run([str(args.helper.resolve()), '-test.run', '^TestApplyNativeCommunicationLive$', '-test.v'],
@@ -121,6 +130,10 @@ def main():
         if dns.returncode:
             raise AssertionError('DNS unavailable under isolation: ' + dns.stderr)
         evidence['dnsSucceeded'] = True
+        metrics = kubectl('exec', '-n', app, 'client', '--', 'wget', '-T', '3', '-qO', '/dev/null', metrics_url, check=False, timeout=10)
+        if metrics.returncode == 0:
+            raise AssertionError('Non-DNS core service port bypassed isolation')
+        evidence['coreMetricsBlockedWithDNSWorking'] = True
         api = kubectl('exec', '-n', app, 'client', '--', 'wget', '-T', '3', '-S', '--no-check-certificate', '-O', '-',
                       'https://kubernetes.default.svc.cluster.local/version', check=False, timeout=10)
         if not re.search(r'HTTP/\S+ (200|401|403)', api.stderr):
