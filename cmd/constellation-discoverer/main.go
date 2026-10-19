@@ -561,6 +561,11 @@ func (r *reconciler) mergePodStatusImages(ctx context.Context, out []workload, b
 	}
 	for i := range pods.Items {
 		pod := &pods.Items[i]
+		// Terminal pods remain in the presence snapshot for historical findings,
+		// but must not add retired refs or overwrite current image digests here.
+		if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+			continue
+		}
 		if !namespaceAllowed(pod.Namespace, r.nsGlobs) {
 			continue
 		}
