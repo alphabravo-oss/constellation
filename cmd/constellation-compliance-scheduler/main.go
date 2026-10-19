@@ -39,6 +39,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/csv"
 	"encoding/hex"
 	"encoding/json"
@@ -820,17 +821,77 @@ func hardenGeneratedKey(root *os.Root) (bool, error) {
 func (s *cosignSigner) Sign(ctx context.Context, path string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, s.bin, "sign-blob", "--yes", "--key", s.keyPath, path)
+	scratch, err := os.MkdirTemp("", "compliance-sign-*")
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = os.RemoveAll(scratch) }()
+	// An explicit config with no services keeps report signing offline. Cosign 3
+	// requires a bundle; retain the existing API's detached signature contract.
+	config := filepath.Join(scratch, "signing.json")
+	if err := os.WriteFile(config, []byte(`{"mediaType":"application/vnd.dev.sigstore.signingconfig.v0.2+json"}`), 0o600); err != nil {
+		return "", err
+	}
+	bundle := filepath.Join(scratch, "signature.bundle")
+	cmd := exec.CommandContext(ctx, s.bin, "sign-blob", "--yes", "--key", s.keyPath, "--signing-config", config, "--bundle", bundle, path)
 	cmd.Env = append(os.Environ(), "COSIGN_PASSWORD="+s.password)
 	cmd.WaitDelay = time.Second
-	out, err := cmd.Output()
-	if err != nil {
+	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("cosign sign-blob: %w", errors.Join(err, ctx.Err()))
 	}
 	if err := ctx.Err(); err != nil {
 		return "", fmt.Errorf("cosign sign-blob: %w", err)
 	}
-	return strings.TrimSpace(string(out)), nil
+	return readCosignSignature(bundle, path)
+
+}
+
+// readCosignSignature rejects missing, oversized or mismatched output rather than
+// recording an empty signature as a successfully signed report.
+func readCosignSignature(bundlePath, artifactPath string) (string, error) {
+	file, err := os.Open(bundlePath)
+	if err != nil {
+		return "", fmt.Errorf("empty signature bundle: %w", err)
+	}
+	defer func() { _ = file.Close() }()
+	raw, err := io.ReadAll(io.LimitReader(file, (1<<20)+1))
+	if err != nil || len(raw) > 1<<20 {
+		return "", errors.New("invalid signature bundle size")
+	}
+	var bundle struct {
+		MediaType        string `json:"mediaType"`
+		MessageSignature struct {
+			Signature     string `json:"signature"`
+			MessageDigest struct {
+				Algorithm string `json:"algorithm"`
+				Digest    []byte `json:"digest"`
+			} `json:"messageDigest"`
+		} `json:"messageSignature"`
+	}
+	if err := json.Unmarshal(raw, &bundle); err != nil {
+		return "", errors.New("invalid signature bundle")
+	}
+	signature := bundle.MessageSignature.Signature
+	decoded, err := base64.StdEncoding.DecodeString(signature)
+	if err != nil || len(decoded) == 0 {
+		return "", errors.New("empty signature or invalid signature encoding")
+	}
+	if bundle.MediaType != "application/vnd.dev.sigstore.bundle.v0.3+json" || bundle.MessageSignature.MessageDigest.Algorithm != "SHA2_256" {
+		return "", errors.New("unsupported signature bundle format")
+	}
+	artifact, err := os.Open(artifactPath)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = artifact.Close() }()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, artifact); err != nil {
+		return "", err
+	}
+	if !bytes.Equal(hash.Sum(nil), bundle.MessageSignature.MessageDigest.Digest) {
+		return "", errors.New("signature bundle does not match report")
+	}
+	return signature, nil
 }
 
 // ---------------------- helpers ----------------------

@@ -93,7 +93,7 @@ func TestS3SignatureFailurePersistsFailedRunAndRetainsLocalDelivery(t *testing.T
 		t.Fatal(err)
 	}
 	bin := filepath.Join(t.TempDir(), "cosign")
-	if err := writeSecurityFixture(bin, []byte("#!/bin/sh\nprintf 'fixture-signature'\n"), 0o700); err != nil {
+	if err := writeSecurityFixture(bin, []byte(cosignBundleFixture), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	outDir := t.TempDir()
@@ -113,7 +113,7 @@ func TestS3SignatureFailurePersistsFailedRunAndRetainsLocalDelivery(t *testing.T
 	if err := pool.QueryRow(t.Context(), `SELECT artifact_signature,artifact_filename,error_message FROM compliance_runs WHERE org_id=$1 AND schedule_id=$2`, org, schedule).Scan(&signature, &filename, &storedError); err != nil {
 		t.Fatal(err)
 	}
-	if signature != "fixture-signature" || strings.Contains(storedError+logs.String()+err.Error(), schedulerDeliveryCanary) {
+	if signature != "Zml4dHVyZS1zaWduYXR1cmU=" || strings.Contains(storedError+logs.String()+err.Error(), schedulerDeliveryCanary) {
 		t.Fatal("sidecar failure lost retained signing metadata or disclosed provider diagnostics")
 	}
 	for _, dir := range []string{outDir, destination} {

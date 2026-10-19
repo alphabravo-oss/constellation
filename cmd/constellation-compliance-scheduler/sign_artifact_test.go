@@ -36,12 +36,15 @@ func TestArtifactSigningPersistsPrivateSignatureAndPropagatesWriteFailure(t *tes
 		}
 	})
 	bin := filepath.Join(t.TempDir(), "cosign")
-	if err := writeSecurityFixture(bin, []byte("#!/bin/sh\nprintf 'fixture-signature'\n"), 0o700); err != nil {
+	if err := writeSecurityFixture(bin, []byte(cosignBundleFixture), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "report.csv"), []byte("evidence"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	d := daemon{signer: &cosignSigner{bin: bin}, logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	sig, err := d.signArtifact(t.Context(), root, "report.csv", filepath.Join(dir, "report.csv"), []byte("evidence"))
-	if err != nil || sig != "fixture-signature" {
+	if err != nil || sig != "Zml4dHVyZS1zaWduYXR1cmU=" {
 		t.Fatalf("signature changed: %q %v", sig, err)
 	}
 	body, err := root.ReadFile("report.csv.sig")

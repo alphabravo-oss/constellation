@@ -30,6 +30,16 @@ jobs:
       - name: Database-backed compliance scheduler regression suite
         run: |
           bash scripts/test-go.sh integration ./cmd/constellation-compliance-scheduler ./internal/securefiles ./internal/complianceevidence
+      - name: Compile actual-tool proof on hosted runner
+        run: CGO_ENABLED=0 go test -c -o artifacts/compliance-scheduler.test ./cmd/constellation-compliance-scheduler
+      - name: Prove pinned Cosign signing and independent verification without networking
+        run: |
+          docker run --rm --network none \
+            --entrypoint /proof/compliance-scheduler.test \
+            -e CONSTELLATION_TEST_COSIGN_BIN=/usr/local/bin/cosign \
+            -v "$PWD/artifacts:/proof:ro" \
+            ghcr.io/alphabravo-oss/constellation/scanner@sha256:716b0300f3d1992a1e7d142a306f2255af7b09171989bf67c87a2e961e2a5823 \
+            -test.run '^TestCosignActualToolRoundTrip$' -test.v -test.timeout 60s | tee artifacts/cosign-offline-proof.log
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
