@@ -30,11 +30,26 @@ digest. Scan OS packages and every embedded executable. Compare before/after
 with the same database and retain advisory timestamps. Check reachable use when
 triaging findings, without suppressing package records merely to improve counts.
 
-A release gate rejecting newly introduced fixable critical/high findings remains
-planned; it is not yet established across all roles. Exceptions should identify
-the affected digest, reason, owner and expiry. Scheduled rebuilds and pin-update
-automation also remain open. New advisories require rescanning previously built
-images, even when source code has not changed.
+The tagged release workflow gates each of its 12 image roles before promoting a
+versioned tag or signing the image. It publishes a candidate, scans its immutable
+OCI digest with checksum-pinned Grype 0.120.1, and rejects any fixable Critical or
+High finding. Unfixed findings and lower severities remain in the retained JSON
+report. There is currently no suppression or exception override.
+
+The gate requires a valid database built within five days, the exact requested
+image and configuration digest, and one linux/amd64 runtime. Additional platforms
+require separate scan coverage. Scan failures, filtered reports, and suppressed
+matches fail closed. Promotion revalidates the report and its SHA-256 receipt,
+refuses to overwrite a different release digest, and verifies the resulting tag.
+Failed candidates can remain in the registry; they receive no versioned release
+tag through this workflow. The chart waits for every image job to succeed.
+
+This gate applies to the tagged release workflow, not the development publisher.
+Development rollouts still require their recorded scan and validation checks.
+Local tests cover passing and rejected real frontend images; a remote tagged
+release run has not yet exercised the new workflow. Scheduled rebuilds and
+pin-update automation remain open. New advisories require rescanning previously
+built images, even when source code has not changed.
 
 Before rollout, test the affected contracts: TLS and timezones for API services;
 scan formats, database refresh, private registries and signature verification for

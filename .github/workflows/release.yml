@@ -79,6 +79,8 @@ jobs:
         run: |
           echo "node-version=$(cat .node-version)" >> "$GITHUB_OUTPUT"
           echo "build-time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+      - name: Install pinned image scanner
+        run: bash scripts/install-ci-tools.sh grype
       - id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
@@ -86,7 +88,7 @@ jobs:
           file: ${{ matrix.dockerfile }}
           platforms: linux/amd64
           push: true
-          tags: ghcr.io/alphabravo-oss/constellation/${{ matrix.role }}:${{ matrix.tag_prefix }}${{ github.ref_name }}
+          tags: ghcr.io/alphabravo-oss/constellation/${{ matrix.role }}:candidate-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           build-args: |
             VERSION=${{ github.ref_name }}
             COMMIT=${{ github.sha }}
@@ -96,6 +98,26 @@ jobs:
           sbom: true
           cache-from: type=gha,scope=${{ matrix.role }}
           cache-to: type=gha,mode=max,scope=${{ matrix.role }}
+      - name: Gate immutable candidate image
+        env:
+          IMAGE: ghcr.io/alphabravo-oss/constellation/${{ matrix.role }}@${{ steps.build.outputs.digest }}
+        run: |
+          python3 scripts/gate-image-release.py --image "$IMAGE" \
+            --report test-results/image-scan.json --receipt test-results/image-gate.json
+      - name: Retain image scan and gate evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-image-scan-${{ matrix.role }}
+          path: test-results/image-*.json
+          if-no-files-found: warn
+      - name: Promote gated release image
+        env:
+          IMAGE: ghcr.io/alphabravo-oss/constellation/${{ matrix.role }}@${{ steps.build.outputs.digest }}
+          RELEASE_TAG: ghcr.io/alphabravo-oss/constellation/${{ matrix.role }}:${{ matrix.tag_prefix }}${{ github.ref_name }}
+        run: |
+          python3 scripts/promote-gated-image.py --image "$IMAGE" --tag "$RELEASE_TAG" \
+            --report test-results/image-scan.json --receipt test-results/image-gate.json
       - name: Sign immutable image digest
         env:
           COSIGN_EXPERIMENTAL: "1"

@@ -29,7 +29,7 @@ if [[ "$#" == 0 ]]; then
 fi
 for tool in "$@"; do
   case "$tool" in
-    golangci-lint|gitleaks|shellcheck)
+    golangci-lint|gitleaks|shellcheck|grype)
       if [[ "$(uname -s)/$(uname -m)" != Linux/x86_64 ]]; then
         echo "Archive installer requires Linux/x86_64; install the documented pins manually." >&2
         exit 1
@@ -50,6 +50,15 @@ for tool in "$@"; do
       printf '%s  %s\n' 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198 "$temporary/shellcheck.tar.xz" | sha256sum --check --strict -
       tar -xJf "$temporary/shellcheck.tar.xz" -C "$temporary"
       install -m 0755 "$temporary/shellcheck-v0.11.0/shellcheck" "$bin_dir/shellcheck"
+      ;;
+    grype)
+      # Match the scanner image's reviewed binary and checksum pins.
+      curl --fail --silent --show-error --location --retry 3 \
+        https://github.com/anchore/grype/releases/download/v0.120.1/grype_0.120.1_linux_amd64.tar.gz \
+        -o "$temporary/grype.tar.gz"
+      printf '%s  %s\n' 0a9ee97ef5ae2ee953b0a80098105052e846cdbe319a57d808b519c33cd1343d "$temporary/grype.tar.gz" | sha256sum --check --strict -
+      tar -xzf "$temporary/grype.tar.gz" -C "$temporary" grype
+      install -m 0755 "$temporary/grype" "$bin_dir/grype"
       ;;
     gosec) go install github.com/securego/gosec/v2/cmd/gosec@v2.29.0 ;;
     govulncheck) go install golang.org/x/vuln/cmd/govulncheck@v1.8.0 ;;
