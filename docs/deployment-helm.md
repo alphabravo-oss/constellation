@@ -520,8 +520,8 @@ asynchronous bundles.
 
 | Key                                   | Default                                              | When to change                                                  |
 | ------------------------------------- | ---------------------------------------------------- | --------------------------------------------------------------- |
-| `image.registry`                      | `ghcr.io/alphabravocompany/constellation`            | Mirror to private registry                                      |
-| `image.tag`                           | `""` (uses `.Chart.appVersion`)                      | Pin to a SHA-stable tag                                         |
+| `image.registry`                      | `ghcr.io/alphabravo-oss/constellation`            | Mirror to private registry                                      |
+| `image.tag`                           | `""` (uses `v` + `.Chart.appVersion`)                      | Pin to a SHA-stable tag                                         |
 | `image.pullPolicy`                    | `IfNotPresent`                                       | Set to `Always` for floating tags                               |
 | `image.pullSecrets`                   | `[]`                                                 | Required for private registries                                 |
 | `revisionHistoryLimit`                | `3`                                                  | Raise only if you need more in-cluster rollback history          |
@@ -594,6 +594,14 @@ asynchronous bundles.
 | `astronomer.jwtAudience`              | `""`                                                 | Optional required `aud` claim for Astronomer JWTs                    |
 | `ai.enabled`                          | `false`                                              | Enable Abbot GenAI integration                                  |
 | `fips.enabled`                        | `false`                                              | Switch to FIPS-validated base images for every role             |
+
+Release images use `v`-prefixed application versions, such as `api:v0.2.0`.
+An explicit `image.tag` or per-role tag is used verbatim; per-role digest pins
+still take precedence. The CNPG default is
+`<image.registry>/postgres:16.14-v<Chart.appVersion>` and follows the chart version
+independently of the application `image.tag`. Set `postgres.cloudnativepg.imageName`
+to a version-bearing `tag@sha256:...` reference for a pinned database rollout.
+
 
 ---
 

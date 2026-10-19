@@ -50,13 +50,13 @@ helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version }}
 {{- end -}}
 
 {{- define "constellation.imageTag" -}}
-{{- default .Chart.AppVersion .Values.image.tag -}}
+{{- default (printf "v%s" (trimPrefix "v" .Chart.AppVersion)) .Values.image.tag -}}
 {{- end -}}
 
 {{/*
 constellation.roleImage returns the fully qualified image for a given role.
 
-Default convention: <image.registry>/<role>:<image.tag-or-appVersion>
+Default convention: <image.registry>/<role>:<image.tag-or-v-prefixed-appVersion>
 A role can override repository, tag, or digest via .Values.<role>.image.
 A digest takes precedence over tags and is specific to one role.
 
@@ -74,7 +74,7 @@ The role name used in the default path is the kebab-case form of the key.
 {{- $registry := $ctx.Values.image.registry | default "ghcr.io/alphabravo-oss/constellation" -}}
 {{- if $ctx.Values.fips.enabled -}}{{- $registry = $ctx.Values.fips.registry -}}{{- end -}}
 {{- $repo := printf "%s/%s" $registry $rolePath -}}
-{{- $tag  := default $ctx.Chart.AppVersion $ctx.Values.image.tag -}}
+{{- $tag := include "constellation.imageTag" $ctx -}}
 {{- $digest := "" -}}
 {{- if and $top (kindIs "map" $top) (hasKey $top "image") -}}
   {{- $img := index $top "image" -}}

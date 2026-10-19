@@ -18,7 +18,7 @@
 image:
   registry: ghcr.io/alphabravo-oss/constellation
   pullPolicy: IfNotPresent
-  # Empty -> falls back to .Chart.appVersion (currently "0.2.0"). Use immutable
+  # Empty -> uses v-prefixed .Chart.appVersion (currently "v0.2.0"). Use immutable
   # release tags or digest-qualified role overrides in production.
   tag: ""
   # Optional list of imagePullSecrets applied to every Deployment / DaemonSet /
@@ -836,7 +836,9 @@ postgres:
     # NOTES.txt emits an install-time WARNING when mode=cnpg and this value does
     # not look pgvector-enabled (no "pgvector" in the ref) — a heuristic guard,
     # not a hard gate. See examples/values-cnpg.yaml for a worked profile.
-    imageName: ghcr.io/alphabravo-oss/constellation/postgres:16.14-v0.2.0
+    # Empty -> <image.registry>/postgres:16.14-v<Chart.appVersion>.
+    # Independent of image.tag; use a version-bearing tag@digest override to pin CNPG.
+    imageName: ""
     storage: 20Gi
     storageClass: ""        # empty = cluster default
     resources:

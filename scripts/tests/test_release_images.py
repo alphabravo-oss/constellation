@@ -113,3 +113,68 @@ class HelmImageDigestTests(unittest.TestCase):
             result = self.render("api.image.digest=" + digest)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("api.image.digest", result.stderr)
+
+
+class HelmReleaseReferenceTests(unittest.TestCase):
+    """Compare actual chart output with the publishing workflow's image matrix."""
+    def render(self, chart, *values):
+        args = ['helm', 'template', 'release', str(chart), '--set', 'postgres.mode=cnpg',
+                '--set', 'auditArchiver.enabled=true', '--set', 'auditArchiver.bucket=fixture',
+                '--set', 'kubeBenchWorker.enabled=true', '--set', 'kubeBenchWorker.state.existingClaim=fixture',
+                '--set', 'kubeBenchWorker.image.repository=ghcr.io/alphabravo-oss/constellation/kube-bench-runner']
+        for value in values:
+            args.extend(['--set', value])
+        return subprocess.check_output(args, text=True)
+
+    def release_images(self, rendered):
+        import re
+        return set(re.findall(r'^\s*(?:image|imageName):\s*["\']?(ghcr.io/alphabravo-oss/constellation/[^\s"\']+)', rendered, re.M))
+
+    def expected(self, version):
+        import re
+        workflow = (ROOT/'.github/workflows/release.yml').read_text()
+        rows = re.findall(r'-\s*\{\s*role:\s*([a-z-]+),\s*dockerfile:\s*[^,}\n]+(?:,\s*tag_prefix:\s*"([^"]+)")?\s*\}', workflow)
+        self.assertEqual(len(rows), len(re.findall(r'\brole:', workflow)), 'release matrix format changed; update contract reader')
+        self.assertGreater(len(rows), 0)
+        return {'ghcr.io/alphabravo-oss/constellation/'+role+':'+prefix+'v'+version for role,prefix in rows}
+
+    def test_every_release_role_renders_the_published_tag(self):
+        import re
+        chart = ROOT/'deploy/charts/constellation'
+        version = re.search(r'^appVersion:\s*"?([^"\s]+)', (chart/'Chart.yaml').read_text(), re.M)[1]
+        self.assertEqual(self.release_images(self.render(chart)), self.expected(version))
+
+    def test_version_bump_updates_all_roles_including_cnpg(self):
+        import re
+        import shutil
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            chart = pathlib.Path(directory)/'chart'
+            shutil.copytree(ROOT/'deploy/charts/constellation', chart)
+            metadata = chart/'Chart.yaml'
+            metadata.write_text(re.sub(r'^appVersion:.*$', 'appVersion: "9.8.7"', metadata.read_text(), flags=re.M))
+            self.assertEqual(self.release_images(self.render(chart)), self.expected('9.8.7'))
+            metadata.write_text(re.sub(r'^appVersion:.*$', 'appVersion: "v9.8.7"', metadata.read_text(), flags=re.M))
+            self.assertEqual(self.release_images(self.render(chart)), self.expected('9.8.7'))
+
+    def test_explicit_app_tag_does_not_select_an_unpublished_database_tag(self):
+        chart = ROOT/'deploy/charts/constellation'
+        rendered = self.render(chart, 'image.tag=development', 'api.image.tag=canary',
+                               'migrate.image.digest='+DIGEST)
+        self.assertIn('/scanner:development', rendered)
+        self.assertIn('/api:canary', rendered)
+        self.assertIn('/migrate@'+DIGEST, rendered)
+        expected_postgres = next(ref for ref in self.release_images(self.render(chart)) if '/postgres:' in ref)
+        self.assertIn(expected_postgres, rendered)
+        custom = 'example.test/postgres:16.14-custom@'+DIGEST
+        rendered = self.render(chart, 'postgres.cloudnativepg.imageName='+custom)
+        self.assertIn('imageName: '+custom, rendered)
+
+    def test_cnpg_default_registry_matches_application_registry(self):
+        chart = ROOT/'deploy/charts/constellation'
+        mirrored = self.render(chart, 'image.registry=mirror.example.test/constellation')
+        self.assertIn('imageName: mirror.example.test/constellation/postgres:16.14-v', mirrored)
+        self.assertIn('image: mirror.example.test/constellation/api:v', mirrored)
+        empty = self.render(chart, 'image.registry=')
+        self.assertIn('imageName: ghcr.io/alphabravo-oss/constellation/postgres:16.14-v', empty)
+        self.assertIn('image: ghcr.io/alphabravo-oss/constellation/api:v', empty)

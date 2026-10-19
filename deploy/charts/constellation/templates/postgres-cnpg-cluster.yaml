@@ -13,8 +13,8 @@ CNPG auto-creates the services <fullname>-postgres-rw / -ro / -r — do NOT
 hand-create them. The chart's DATABASE_URL points at <fullname>-postgres-rw.
 
 NOTE: imageName MUST include the pgvector extension (the schema declares
-`embedding vector(1536)`). The default CNPG image does not. Override
-postgres.cloudnativepg.imageName with a pgvector-enabled build.
+`embedding vector(1536)`). The chart selects the release pgvector-enabled build;
+custom postgres.cloudnativepg.imageName values must also include pgvector.
 */ -}}
 {{- $cfg := .Values.postgres.cloudnativepg -}}
 apiVersion: postgresql.cnpg.io/v1
@@ -35,7 +35,7 @@ spec:
       app.kubernetes.io/name: {{ include "constellation.name" . }}
       app.kubernetes.io/component: postgres
   instances: {{ $cfg.instances }}
-  imageName: {{ $cfg.imageName }}
+  imageName: {{ default (printf "%s/postgres:16.14-v%s" (default "ghcr.io/alphabravo-oss/constellation" .Values.image.registry) (trimPrefix "v" .Chart.AppVersion)) $cfg.imageName }}
   {{- include "constellation.pullSecrets" . | nindent 2 }}
   primaryUpdateStrategy: {{ $cfg.primaryUpdateStrategy }}
   enableSuperuserAccess: false
