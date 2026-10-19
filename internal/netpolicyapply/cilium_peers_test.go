@@ -101,7 +101,7 @@ func TestCiliumBackendIdentityBoundary(t *testing.T) {
 func TestCiliumInventoryPaginationNeverAcceptsPartialSnapshot(t *testing.T) {
 	for _, mode := range []string{"complete", "failed-page", "repeated-token"} {
 		t.Run(mode, func(t *testing.T) {
-			dyn := fake.NewSimpleDynamicClient(runtime.NewScheme())
+			dyn := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{{Group: "cilium.io", Version: "v2", Resource: "ciliumendpoints"}: "CiliumEndpointList"})
 			calls := 0
 			dyn.PrependReactor("list", "ciliumendpoints", func(ktesting.Action) (bool, runtime.Object, error) {
 				calls++
