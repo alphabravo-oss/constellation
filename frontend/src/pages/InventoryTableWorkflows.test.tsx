@@ -82,3 +82,11 @@ it.each(["01", "1,", "9223372036854775808", "1&event_id=1"])("rejects invalid ac
 
 it.each([null, undefined, [null], [{id:1}], [audit(1),audit(1)]])("withholds malformed audit rows %j",async events=>{vi.mocked(api.get).mockResolvedValue({data:{events,has_more:false}});await render(<AuditPage scope="organization" />, "/organization/audit");await settled(()=>expect(host.textContent).toContain("Audit evidence unavailable"));expect(host.querySelector("table")).toBeNull();});
 it.each(["1&event_ids=2", "1&cluster_id=cluster", "1&action=test", "1&framework=cis", "1&control=one", Array(21).fill("1").join(",")])("rejects conflicting or excessive URL cohort %s",async ids=>{await render(<AuditPage scope="organization" />,`/organization/audit?event_ids=${ids}`);expect(host.textContent).toContain("Invalid activity selection");expect(api.get).not.toHaveBeenCalled();});
+
+it("shows readable durable response refusal details", async () => {
+ const details="Rule r1 · workload custom-system/api\nquarantine: response action refused: protected system namespace custom-system";
+ vi.mocked(api.get).mockResolvedValue({data:{events:[{...audit(1),action:"runtime.response_rule.refused",details}],has_more:false}});
+ await render(<AuditPage />,"/clusters/cluster/audit");
+ await settled(()=>expect(host.textContent).toContain("View refusal"));
+ expect(host.querySelector("details p")?.textContent).toBe(details);
+});

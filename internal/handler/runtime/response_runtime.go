@@ -20,6 +20,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sort"
 	"strings"
@@ -29,6 +30,7 @@ import (
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	runtimequarantine "github.com/alphabravocompany/constellation/internal/runtime/quarantine"
+	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/notify"
 	"github.com/alphabravocompany/constellation/pkg/quarantine"
 	"github.com/alphabravocompany/constellation/pkg/response"
@@ -200,6 +202,17 @@ func NewResponseDispatch(database *db.DB, dispatcher *notify.Dispatcher) func(ct
 		// error here used to vanish silently, so an operator's notify/ticket rule could
 		// no-op with no trace. Surface them.
 		for _, d := range eng.Dispatch(ctx, &ev) {
+			refusals := responseProtectionRefusals(d.Warnings)
+			if len(refusals) > 0 {
+				_, _, err := audit.New(database.Pool()).Log(ctx, audit.Event{
+					OrgID: &orgID, Action: "runtime.response_rule.refused", TargetKind: "cluster", TargetID: clusterID.String(),
+					After: map[string]any{"cluster_id": clusterID, "rule_id": d.RuleID, "event_id": ev.ID, "workload_id": ev.Workload, "refusals": refusals,
+						"refusal_summary": fmt.Sprintf("Rule %s · workload %s\n%s", d.RuleID, ev.Workload, strings.Join(refusals, "\n"))},
+				})
+				if err != nil {
+					slog.Default().Error("response: could not persist protection refusal", "rule_id", d.RuleID, "org_id", orgID, "cluster_id", clusterID, "err", err)
+				}
+			}
 			for _, warn := range d.Warnings {
 				slog.Default().Warn("response: rule action warning",
 					slog.String("rule_id", d.RuleID),
@@ -208,6 +221,20 @@ func NewResponseDispatch(database *db.DB, dispatcher *notify.Dispatcher) func(ct
 			}
 		}
 	}
+}
+
+// Persist only our explicit protection refusals, never arbitrary receiver errors.
+func responseProtectionRefusals(warnings []string) []string {
+	var out []string
+	for _, warning := range warnings {
+		for _, action := range []string{"quarantine", "isolate", "kill"} {
+			if strings.HasPrefix(warning, action+": response action refused:") {
+				out = append(out, warning)
+				break
+			}
+		}
+	}
+	return out
 }
 
 // ResponseRuleDecision is the side-effect-free v2 response-rule result used by ingest

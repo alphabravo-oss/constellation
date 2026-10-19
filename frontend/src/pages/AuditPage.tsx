@@ -18,6 +18,7 @@ import { clusterCacheReady } from "@/lib/cluster-evidence";
 const PAGE = 100;
 
 interface AuditEvent {
+  details?: string;
   id: number;
   event_id?: string;
   actor_id?: string;
@@ -39,10 +40,11 @@ function validAuditEvent(value: unknown): value is AuditEvent {
     (row.event_id !== undefined ? validAuditID(row.event_id) : Number.isSafeInteger(row.id)) &&
     typeof row.at === "string" && Number.isFinite(Date.parse(row.at)) &&
     typeof row.action === "string" && typeof row.prev_hash === "string" && typeof row.chain_hash === "string" &&
-    [row.actor_id, row.target_kind, row.target_id].every(field => field === undefined || typeof field === "string");
+    [row.actor_id, row.target_kind, row.target_id, row.details].every(field => field === undefined || typeof field === "string");
 }
 
 const auditColumns: Column<AuditEvent>[] = [
+  { id: "details", header: "Response refusal", size: 320, exportValue: e => e.details ?? "", cell: e => e.details ? <details><summary className="cursor-pointer">View refusal</summary><p className="whitespace-pre-wrap text-xs">{e.details}</p></details> : "—" },
   { id: "record", header: "Record ID", kind: "id", size: 112, minSize: 88, exportValue: e => e.event_id ?? String(e.id), cell: e => e.event_id ?? String(e.id) },
   { id: "when", header: "When", kind: "date", size: 190, minSize: 160, maxSize: 240, exportValue: (e) => e.at, cell: (e) => new Date(e.at).toLocaleString(), className: "text-xs text-muted-foreground" },
   { id: "actor", header: "Actor", kind: "id", size: 128, minSize: 112, maxSize: 160, exportValue: (e) => e.actor_id ?? "", cell: (e) => e.actor_id ?? "—", className: "font-mono text-xs" },

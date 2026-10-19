@@ -53,7 +53,7 @@ session endpoint safeguards are implemented. The existing namespace-wide exclusi
 also protect unrelated workloads installed in those namespaces. Finer component
 identity protection remains open; UI classification labels are not sufficient proof.
 
-Remaining work includes durable UI visibility of automatic-response refusals, verification of every separately managed dependency assignment, and a complete audit of
+Remaining work includes image-wide response coverage, verification of every separately managed dependency assignment, and a complete audit of
 all disruptive response paths. Calico selector transformation is tested at the client
 write boundary; live Calico/Cilium data-plane enforcement still requires their own
 cluster fixtures. The development cluster's native rollout does not prove those CNIs.
@@ -78,9 +78,15 @@ are excluded by admission at enforcement time.
 The runtime response-rule bridge uses this same configuration before quarantine,
 isolation, or process-kill actions. Protected or unattributed workload namespaces
 return refusal warnings and queue no quarantine, network-policy, or process-action
-rows. The dispatcher logs those warnings and does not report the refused actions as
-successful. Ordinary application responses remain enabled. These guards do not yet
-cover image-wide scan response rules or provide durable UI history for refusals.
+rows. The dispatcher logs those warnings and appends a hash-chained
+`runtime.response_rule.refused` audit event for each rule with protection refusals.
+The audit event targets the cluster and records the rule, source event, workload,
+and refusal reasons. Audit lists, selected-record views, CSV exports, and the audit
+page expose a refusal-specific summary; arbitrary audit metadata is not exposed.
+Failure to persist audit evidence is logged explicitly and never permits the action.
+The dispatcher does not report refused actions as successful. Ordinary application responses remain enabled. These guards do not yet
+cover image-wide scan response rules. Audit persistence is best-effort under database
+failure or request cancellation; a durable retry queue remains open work.
 
 ## Inline network inspection
 

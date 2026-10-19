@@ -72,6 +72,15 @@ func TestAutomaticResponseProtectionDispatchDatabase(t *testing.T) {
 			t.Fatalf("%s rows=%d err=%v", table, count, err)
 		}
 	}
+	var summary string
+	if err := d.Pool().QueryRow(ctx, `SELECT after->>'refusal_summary' FROM audit_events WHERE org_id=$1 AND action='runtime.response_rule.refused' AND target_id=$2`, org, cluster.String()).Scan(&summary); err != nil {
+		t.Fatal(err)
+	}
+	for _, part := range []string{"custom-system/api", "quarantine:", "isolate:", "kill:", "protected system namespace"} {
+		if !strings.Contains(summary, part) {
+			t.Fatalf("missing %s in durable refusal: %s", part, summary)
+		}
+	}
 	dispatch(ctx, org, cluster, response.Event{ID: "app", Type: response.EventRuntime, Severity: "high", Workload: "payments/api"})
 	for _, table := range []string{"quarantine_entries", "network_policy_lifecycle_states"} {
 		var count int

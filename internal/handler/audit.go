@@ -22,6 +22,7 @@ type Audit struct {
 func NewAudit(database *db.DB) *Audit { return &Audit{db: database} }
 
 type auditDTO struct {
+	Details    string                    `json:"details,omitempty"`
 	EventID    string                    `json:"event_id"`
 	ID         int64                     `json:"id"`
 	OrgID      *uuid.UUID                `json:"org_id,omitempty"`
@@ -158,7 +159,7 @@ func (a *Audit) list(w http.ResponseWriter, r *http.Request, export bool) {
 	}
 	query, args := auditListQuery(subj.OrgID, clusterArg, action, controlPrefixes, eventID, supportBundleJobID, fetch, offset)
 	if cohortSet {
-		query = `SELECT a.id, a.org_id, a.actor_id, a.action, COALESCE(a.target_kind,''), COALESCE(a.target_id,''), a.prev_hash, a.chain_hash, a.at FROM audit_events a WHERE a.org_id=$1 AND a.id=ANY($2::bigint[]) ORDER BY a.at DESC,a.id DESC LIMIT $3 OFFSET $4`
+		query = `SELECT a.id, a.org_id, a.actor_id, a.action, COALESCE(a.target_kind,''), COALESCE(a.target_id,''), a.prev_hash, a.chain_hash, a.at, CASE WHEN a.action='runtime.response_rule.refused' THEN COALESCE(a.after->>'refusal_summary','') ELSE '' END AS details FROM audit_events a WHERE a.org_id=$1 AND a.id=ANY($2::bigint[]) ORDER BY a.at DESC,a.id DESC LIMIT $3 OFFSET $4`
 		args = []any{subj.OrgID, cohort, fetch, offset}
 	}
 	rows, err := a.db.Pool().Query(r.Context(), query, args...)
@@ -205,7 +206,7 @@ func writeAuditCSV(w http.ResponseWriter, events []auditDTO, truncated bool) {
 	w.Header().Set("X-Export-Rows", strconv.Itoa(len(events)))
 	w.Header().Set("X-Export-Truncated", strconv.FormatBool(truncated))
 	cw := csv.NewWriter(w)
-	if err := cw.Write([]string{"event_id", "at", "actor_id", "action", "target_kind", "target_id", "prev_hash", "chain_hash"}); err != nil {
+	if err := cw.Write([]string{"event_id", "at", "actor_id", "action", "target_kind", "target_id", "prev_hash", "chain_hash", "details"}); err != nil {
 		panic(http.ErrAbortHandler)
 	}
 	for _, event := range events {
@@ -213,7 +214,7 @@ func writeAuditCSV(w http.ResponseWriter, events []auditDTO, truncated bool) {
 		if event.ActorID != nil {
 			actor = event.ActorID.String()
 		}
-		if err := cw.Write([]string{event.EventID, event.At.UTC().Format(time.RFC3339Nano), actor, event.Action, event.TargetKind, event.TargetID, event.PrevHash, event.ChainHash}); err != nil {
+		if err := cw.Write([]string{event.EventID, event.At.UTC().Format(time.RFC3339Nano), actor, event.Action, event.TargetKind, event.TargetID, event.PrevHash, event.ChainHash, event.Details}); err != nil {
 			panic(http.ErrAbortHandler)
 		}
 	}
@@ -263,7 +264,8 @@ func auditListQuery(orgID uuid.UUID, clusterID any, action string, controlPrefix
 	}
 	const columns = `a.id, a.org_id, a.actor_id, a.action,
        COALESCE(a.target_kind,'') AS target_kind, COALESCE(a.target_id,'') AS target_id,
-       a.prev_hash, a.chain_hash, a.at`
+       a.prev_hash, a.chain_hash, a.at,
+ CASE WHEN a.action='runtime.response_rule.refused' THEN COALESCE(a.after->>'refusal_summary','') ELSE '' END AS details`
 	if clusterID == nil {
 		return "SELECT " + columns + " FROM audit_events a WHERE " + strings.Join(filters, " AND ") + " ORDER BY a.id DESC LIMIT $2 OFFSET $3", args
 	}
@@ -307,7 +309,7 @@ func readAuditListRows(rows auditListRows, limit int, withControls bool) ([]audi
 	for rows.Next() {
 		var d auditDTO
 		if err := rows.Scan(&d.ID, &d.OrgID, &d.ActorID, &d.Action, &d.TargetKind, &d.TargetID,
-			&d.PrevHash, &d.ChainHash, &d.At); err != nil {
+			&d.PrevHash, &d.ChainHash, &d.At, &d.Details); err != nil {
 			return nil, err
 		}
 		d.EventID = strconv.FormatInt(d.ID, 10)

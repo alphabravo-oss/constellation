@@ -178,3 +178,35 @@ func TestAuditCSVSyntheticRowsDoNotChangeGlobalChain(t *testing.T) {
 		t.Fatal("synthetic CSV fixture changed the global audit chain")
 	}
 }
+
+func TestAuditResponseRefusalDetailsScopeAndCSV(t *testing.T) {
+	f := newAuditCSVFixture(t)
+	summary := "Rule r1 · workload custom-system/api\nquarantine: response action refused: protected system namespace custom-system"
+	id, _, err := auditlog.New(f.database.Pool()).Log(t.Context(), auditlog.Event{OrgID: &f.orgA, Action: "runtime.response_rule.refused", TargetKind: "cluster", TargetID: f.clusterA.String(), After: map[string]any{"refusal_summary": summary, "private_extra": "must not expose"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	params := url.Values{"cluster_id": {f.clusterA.String()}, "event_id": {strconv.FormatInt(id, 10)}}
+	got := f.list(f.orgA, params)
+	if len(got.Events) != 1 || got.Events[0].Details != summary {
+		t.Fatalf("missing refusal: %+v", got)
+	}
+	response, rows := auditCSVRequest(t, f, f.orgA, params)
+	if response.Code != 200 || len(rows) != 2 || rows[0][8] != "details" || rows[1][8] != summary {
+		t.Fatalf("CSV mismatch: %d %v", response.Code, rows)
+	}
+	if strings.Contains(response.Body.String(), "private_extra") {
+		t.Fatal("arbitrary metadata exposed")
+	}
+	params.Set("cluster_id", f.clusterSibling.String())
+	if got := f.list(f.orgA, params); len(got.Events) != 0 {
+		t.Fatal("refusal leaked across clusters")
+	}
+	params.Del("cluster_id")
+	if got := f.list(f.orgB, params); len(got.Events) != 0 {
+		t.Fatal("refusal leaked across organizations")
+	}
+	if broken, err := auditlog.VerifyChain(t.Context(), f.database.Pool()); err != nil || broken != nil {
+		t.Fatalf("audit chain invalid: %v %v", broken, err)
+	}
+}
