@@ -58,7 +58,7 @@ func TestGeneratedSigningKeyRejectsSymlinkAndHardensExistingKey(t *testing.T) {
 	if err := writeSecurityFixture(key, []byte("existing private key"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ensureCosignKey(dir, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+	if _, err := ensureCosignKey(t.Context(), dir, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
 		t.Fatal(err)
 	}
 	if info, _ := os.Stat(key); info.Mode().Perm() != 0o600 {
@@ -74,13 +74,13 @@ func TestGeneratedSigningKeyRejectsSymlinkAndHardensExistingKey(t *testing.T) {
 	if err := os.Symlink(outside, key); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ensureCosignKey(dir, slog.New(slog.NewTextHandler(io.Discard, nil))); err == nil {
+	if _, err := ensureCosignKey(t.Context(), dir, slog.New(slog.NewTextHandler(io.Discard, nil))); err == nil {
 		t.Fatal("accepted generated-key symlink")
 	}
 	// An explicitly mounted external key is a trusted operator input, and retains
 	// compatibility with Kubernetes Secret symlinks.
 	t.Setenv("COSIGN_KEY", key)
-	if _, err := ensureCosignKey(dir, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+	if _, err := ensureCosignKey(t.Context(), dir, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -99,7 +99,7 @@ printf 'fixture public key' > "$3.pub"
 	t.Setenv("COSIGN_BIN", bin)
 	t.Setenv("COSIGN_KEY", "")
 	dir := t.TempDir()
-	signer, err := ensureCosignKey(dir, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	signer, err := ensureCosignKey(t.Context(), dir, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}

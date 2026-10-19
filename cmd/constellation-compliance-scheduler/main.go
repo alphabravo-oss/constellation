@@ -111,7 +111,7 @@ func main() {
 	}
 	defer pool.Close()
 
-	signer, err := ensureCosignKey(*outDir, logger)
+	signer, err := ensureCosignKey(ctx, *outDir, logger)
 	if err != nil {
 		logger.Warn("cosign key bootstrap failed; signatures will be empty", "err", err.Error())
 	}
@@ -718,7 +718,12 @@ type cosignSigner struct {
 
 // ensureCosignKey returns a signer using $COSIGN_KEY when set; otherwise it
 // generates an ephemeral key under outDir/.cosign and reuses it across runs.
-func ensureCosignKey(outDir string, logger *slog.Logger) (*cosignSigner, error) {
+func ensureCosignKey(ctx context.Context, outDir string, logger *slog.Logger) (*cosignSigner, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	bin := os.Getenv("COSIGN_BIN")
 	if bin == "" {
 		bin = "cosign"
@@ -755,10 +760,15 @@ func ensureCosignKey(outDir string, logger *slog.Logger) (*cosignSigner, error) 
 		return nil, err
 	}
 	defer func() { _ = os.RemoveAll(staging) }()
-	cmd := exec.Command(bin, "generate-key-pair", "--output-key-prefix", filepath.Join(staging, "cosign"))
+	cmd := exec.CommandContext(ctx, bin, "generate-key-pair", "--output-key-prefix", filepath.Join(staging, "cosign"))
 	cmd.Env = append(os.Environ(), "COSIGN_PASSWORD="+pw)
-	if _, err := cmd.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("cosign generate-key-pair: %w", err)
+	// Bound pipe draining too, in case a helper leaves an inherited pipe open.
+	cmd.WaitDelay = time.Second
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("cosign generate-key-pair: %w", errors.Join(err, ctx.Err()))
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	generated, err := os.OpenRoot(staging)
 	if err != nil {
@@ -808,10 +818,16 @@ func hardenGeneratedKey(root *os.Root) (bool, error) {
 // Sign produces a base64 cosign signature over the artifact at path. Returns the
 // signature only (matches `cosign sign-blob --yes <path>` output).
 func (s *cosignSigner) Sign(ctx context.Context, path string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
 	cmd := exec.CommandContext(ctx, s.bin, "sign-blob", "--yes", "--key", s.keyPath, path)
 	cmd.Env = append(os.Environ(), "COSIGN_PASSWORD="+s.password)
+	cmd.WaitDelay = time.Second
 	out, err := cmd.Output()
 	if err != nil {
+		return "", fmt.Errorf("cosign sign-blob: %w", errors.Join(err, ctx.Err()))
+	}
+	if err := ctx.Err(); err != nil {
 		return "", fmt.Errorf("cosign sign-blob: %w", err)
 	}
 	return strings.TrimSpace(string(out)), nil
