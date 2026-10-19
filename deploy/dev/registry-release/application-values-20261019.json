@@ -8,7 +8,7 @@
   "admission": {
     "image": {
       "repository": "ghcr.io/alphabravo-oss/constellation/admission",
-      "digest": "sha256:730ace2dbb89124410926a0174d96d05d31e3ab2ad3d0db3e5435f217010b24c"
+      "digest": "sha256:b747fb3ab87c66eb04e687f48a0893bba2a9e5d06011fec103863261286a0c4c"
     },
     "webhook": {
       "rules": [
@@ -79,7 +79,7 @@
   "discoverer": {
     "image": {
       "repository": "ghcr.io/alphabravo-oss/constellation/discoverer",
-      "digest": "sha256:9fc2f286b56ea7e028da288938c71c3fc11e7a796729116292e271eff61661a2"
+      "digest": "sha256:ffb3150e112bce4d2a529d7b6e969edb145251cbb5745562e693fa7839fdabfa"
     },
     "tokenSecret": "constellation-discoverer-enrolled-token"
   },
@@ -92,7 +92,7 @@
   "operator": {
     "image": {
       "repository": "ghcr.io/alphabravo-oss/constellation/operator",
-      "digest": "sha256:1e4e345666f9b1f6aa4bfbeb97925c7f378552b1d54d7717121684e2636aa47d"
+      "digest": "sha256:cae3765afeeedd1abc23647d166bf536cc4b01fe0b0ff54af6cdb4a2f6d9f15a"
     }
   },
   "scanner": {

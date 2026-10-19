@@ -1,7 +1,7 @@
 # Constellation parity and switchability plan
 
 Status: **active canonical plan**
-Last reconciled: **2026-10-19** (Helm 126 scanner finding identity correction; broader parity remains active)
+Last reconciled: **2026-10-19** (Helm 127 static service runtime hardening; broader parity remains active)
 
 This is the only active plan for NeuVector behavioral parity, NeuVector migration,
 the Astronomer-inspired operator experience, and adoption of AlphaBravo's
@@ -16,6 +16,51 @@ understand the result, and prove that the control is enforced. Constellation's
 stronger multi-tenant, CNI-native, evidence, and correlation features remain
 first-class.
 
+
+## Static service runtime hardening deployed (Helm 127)
+
+Dockerfile source `727c603` is deployed from source-stamped hosted build
+`298207c7ef0180a63dced5ebba00cb76c1019bb7`. The
+[hosted workflow](https://github.com/alphabravo-oss/constellation/actions/runs/39234863956)
+built all three OCI archives successfully. Imported digests matched artifact
+identities; the development publisher verified the complete registry graphs.
+All three published images passed the image gate with zero Grype findings.
+The hosted workflow avoids compiling on the shared Kubernetes node and has
+read-only repository permissions; publication and rollout remain separate steps.
+
+Live scans through the unchanged scanner completed with all three engines
+(Syft, Grype, Trivy) succeeding:
+
+| Role | Prior packages / findings | Deployed packages / findings |
+| --- | --- | --- |
+| Discoverer | 148 / 255 | 63 / 0 |
+| Admission | 196 / 256 | 111 / 1 |
+| Operator | 254 / 256 | 169 / 0 |
+
+Admission retains informational `GO-2026-5932` for `golang.org/x/crypto v0.57.0`,
+with no reported fixed version. No critical or high findings remain in these
+three images. The live aggregate and standalone gate are separate measurements;
+no finding was suppressed to produce the reduction.
+
+All five static executables passed identity, CA/TLS/DNS, timezone and temporary
+storage checks. Helm 127 is healthy on schema 183; all 14 expected running or
+completed-init image identities match the release lock. Discovery reconciled
+inventory, operator controllers started, the policy applier is ready, admission
+accepted a server-side dry run, and the compliance collector completed with 51
+result rows. The dry run left no Pod. Application settings other than the three
+image overrides were preserved. Public HTTP and authenticated API checks passed;
+node disk pressure is false.
+
+Three supporting-image scans initially failed because the manual validation jobs
+were anonymous. Rescanning existing registry-bound targets with saved credentials
+completed: CNPG operator 192 packages / 0 findings, Barman sidecar 202 / 183,
+Barman plugin 136 / 56. Their remaining findings are retained. This was a scan
+invocation correction, not a blanket private-registry credential fallback.
+
+Evidence: `deploy/dev/registry-release/validation-static-runtimes-20261019.json`.
+Native runtime-agent hardening, remaining infrastructure vulnerabilities and
+cross-CNI enforcement qualification remain open. These hosted images embed their
+source commit but leave BUILD_TIME unset; the workflow run records build timing.
 
 ## Static service runtime candidates and node recovery (2026-10-19)
 

@@ -173,3 +173,9 @@ publish or deploy. Download the artifacts for runtime checks, publish their exac
 digests using the development publisher, then run the image gate and rollout
 validation. Changes elsewhere in application source require manual dispatch when
 no matching path triggered the workflow.
+
+The first hosted rollout is Helm 127. Live scans reduced discoverer from 255 to
+zero findings, admission from 256 to one informational finding, and operator
+from 256 to zero. All three scan engines succeeded for each image. Exact image
+identities, package counts, remaining advisory and runtime checks are recorded in
+`deploy/dev/registry-release/validation-static-runtimes-20261019.json`.
