@@ -79,7 +79,7 @@
   "discoverer": {
     "image": {
       "repository": "ghcr.io/alphabravo-oss/constellation/discoverer",
-      "digest": "sha256:7d98a84c79b483dd7093c3727d77ead6eff0afb81870816273013378280f551f"
+      "digest": "sha256:9fc2f286b56ea7e028da288938c71c3fc11e7a796729116292e271eff61661a2"
     },
     "tokenSecret": "constellation-discoverer-enrolled-token"
   },
