@@ -83,14 +83,27 @@ func (e *RegoEngine) evaluate(ctx context.Context, req *admissionv1.AdmissionReq
 	}
 	input := map[string]any{
 		"request": map[string]any{
-			"uid":  req.UID,
-			"kind": req.Kind,
+			"uid":         req.UID,
+			"kind":        req.Kind,
+			"resource":    req.Resource,
+			"subResource": req.SubResource,
+			"name":        req.Name,
+			"namespace":   req.Namespace,
+			"operation":   string(req.Operation),
+			"userInfo":    req.UserInfo,
+			"dryRun":      req.DryRun != nil && *req.DryRun,
 		},
 	}
 	if len(req.Object.Raw) > 0 {
 		var obj any
 		if err := json.Unmarshal(req.Object.Raw, &obj); err == nil {
 			input["request"].(map[string]any)["object"] = obj
+		}
+	}
+	if len(req.OldObject.Raw) > 0 {
+		var old any
+		if err := json.Unmarshal(req.OldObject.Raw, &old); err == nil {
+			input["request"].(map[string]any)["oldObject"] = old
 		}
 	}
 

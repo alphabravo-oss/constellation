@@ -632,6 +632,12 @@ func (e *PolicyEngine) SnapshotRules() []Rule {
 // matches surface as warnings (returned via the response Warnings field) but do not block.
 func (e *PolicyEngine) Evaluate(ctx context.Context, req *admissionv1.AdmissionRequest) *admissionv1.AdmissionResponse {
 	resp := &admissionv1.AdmissionResponse{UID: req.UID, Allowed: true}
+	// Retiring replicas must not require re-admitting an unchanged pod
+	// template. New pods and scale-ups still pass the normal checks, and the
+	// ChainEngine continues to evaluate explicit Rego/CEL policies.
+	if isReplicaReduction(req) {
+		return resp
+	}
 
 	e.mu.RLock()
 	rules := append([]Rule(nil), e.Rules...)
