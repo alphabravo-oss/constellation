@@ -167,6 +167,7 @@ func (p *Protection) preserveCommunication(resource ManifestResource, data []byt
 					// Match native Kubernetes' node-origin ingress trust boundary.
 					rules = append(rules, map[string]any{"fromEntities": []any{"host", "remote-node", "kube-apiserver"}})
 				} else {
+					rules = append(rules, snapshot.CiliumPeers...)
 					for _, endpoint := range snapshot.Services {
 						cidr := netip.PrefixFrom(endpoint.Address, endpoint.Address.BitLen()).String()
 						rule := map[string]any{"toCIDR": []any{cidr}, "toPorts": []any{map[string]any{"ports": []any{map[string]any{"port": strconv.Itoa(int(endpoint.Port)), "protocol": endpoint.Protocol}}}}}

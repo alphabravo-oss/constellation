@@ -22,8 +22,10 @@ type ServicePeer struct {
 	Node     bool
 }
 type DependencySnapshot struct {
-	Addresses []netip.Addr
-	Services  []ServicePeer
+	Addresses   []netip.Addr
+	Services    []ServicePeer
+	Pods        []corev1.Pod
+	CiliumPeers []any
 }
 
 // Addresses fence denies. Services grant only declared destination ports, never
@@ -36,6 +38,7 @@ func dependencyReader(client dynamic.Interface) DependencyReader {
 		addresses, nodes := map[netip.Addr]bool{}, map[netip.Addr]bool{}
 		peers := map[ServicePeer]bool{}
 		services := map[string]corev1.Service{}
+		pods := []corev1.Pod{}
 		add := func(raw string) (netip.Addr, error) {
 			if raw == "" || raw == corev1.ClusterIPNone {
 				return netip.Addr{}, nil
@@ -84,6 +87,9 @@ func dependencyReader(client dynamic.Interface) DependencyReader {
 						var pod corev1.Pod
 						if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &pod); err != nil {
 							return empty, err
+						}
+						if pod.Status.Phase != corev1.PodSucceeded && pod.Status.Phase != corev1.PodFailed && !pod.Spec.HostNetwork {
+							pods = append(pods, pod)
 						}
 						if !p.namespaces[pod.Namespace] && !pod.Spec.HostNetwork {
 							continue
@@ -252,7 +258,7 @@ func dependencyReader(client dynamic.Interface) DependencyReader {
 		if apiEndpoints == 0 {
 			return empty, fmt.Errorf("network policy protection: Kubernetes API endpoints empty")
 		}
-		result := DependencySnapshot{}
+		result := DependencySnapshot{Pods: pods}
 		for ip := range addresses {
 			result.Addresses = append(result.Addresses, ip)
 		}

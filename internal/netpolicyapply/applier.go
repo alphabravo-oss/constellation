@@ -105,6 +105,12 @@ func (c KubernetesResourceClient) Apply(ctx context.Context, resource ManifestRe
 	if err != nil {
 		return err
 	}
+	if resource.Kind == "CiliumNetworkPolicy" {
+		addresses.CiliumPeers, err = c.Protection.ciliumPodPeers(ctx, c.Client, addresses)
+		if err != nil {
+			return err
+		}
+	}
 	manifestJSON, err = c.Protection.preserveCommunication(resource, manifestJSON, addresses)
 	if err != nil {
 		return err

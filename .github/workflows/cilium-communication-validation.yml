@@ -12,7 +12,7 @@ on:
     paths:
       - .github/workflows/cilium-communication-validation.yml
       - scripts/test-system-communication.py
-      - internal/netpolicyapply/communication_live_test.go
+      - internal/netpolicyapply/**
 permissions:
   contents: read
 concurrency:
