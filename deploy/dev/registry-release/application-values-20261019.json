@@ -51,5 +51,10 @@
     "protectedNamespaces": [
       "cnpg-system"
     ]
+  },
+  "systemProtection": {
+    "protectedNamespaces": [
+      "cnpg-system"
+    ]
   }
 }

@@ -147,6 +147,11 @@
         "repository": "ghcr.io/alphabravo-oss/constellation/migrate",
         "digest": "sha256:b33345caf0d31cf518f1b6138abc57b679d608db120e82badd08c04dd9ec53c5"
       }
+    },
+    "systemProtection": {
+      "protectedNamespaces": [
+        "cnpg-system"
+      ]
     }
   }
 }
