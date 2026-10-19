@@ -51,8 +51,6 @@ jobs:
           helm install cilium cilium/cilium --version 1.20.3 --namespace kube-system --set ipam.mode=kubernetes --set operator.replicas=1 --set kubeProxyReplacement=false --wait --timeout 5m
           kubectl wait nodes --all --for=condition=Ready --timeout=120s
           kubectl -n kube-system rollout status deployment/coredns --timeout=120s
-          # Expose the existing CoreDNS metrics listener for the positive control.
-          kubectl -n kube-system patch service kube-dns --type=json -p='[{"op":"add","path":"/spec/ports/-","value":{"name":"metrics","port":9153,"protocol":"TCP","targetPort":9153}}]'
           helm get values cilium -n kube-system --all -o json > artifacts/cilium-values.json
           kubectl get pods -A -o json > artifacts/cluster-pods.json
           kubectl version -o json > artifacts/kubernetes-version.json
