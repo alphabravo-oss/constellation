@@ -88,6 +88,9 @@ func dependencyReader(client dynamic.Interface) DependencyReader {
 						if !p.namespaces[pod.Namespace] && !pod.Spec.HostNetwork {
 							continue
 						}
+						if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+							continue
+						}
 						if _, err := add(pod.Status.PodIP); err != nil {
 							return empty, err
 						}

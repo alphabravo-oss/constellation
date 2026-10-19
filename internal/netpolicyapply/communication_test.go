@@ -302,7 +302,8 @@ func TestUnownedServiceSliceCannotGrantAnException(t *testing.T) {
 			slice.OwnerReferences = []metav1.OwnerReference{{APIVersion: "v1", Kind: "Service", Name: service.Name, UID: service.UID}}
 		}
 		spoofed := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "customer", Labels: map[string]string{"app.kubernetes.io/part-of": "constellation"}}, Status: corev1.PodStatus{PodIP: "203.0.113.99"}}
-		dyn := fake.NewSimpleDynamicClient(scheme, service.DeepCopy(), apiService.DeepCopy(), node.DeepCopy(), endpoints.DeepCopy(), slice, spoofed)
+		terminal := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "retired", Namespace: "own"}, Status: corev1.PodStatus{PodIP: "203.0.113.98", Phase: corev1.PodFailed}}
+		dyn := fake.NewSimpleDynamicClient(scheme, service.DeepCopy(), apiService.DeepCopy(), node.DeepCopy(), endpoints.DeepCopy(), slice, spoofed, terminal)
 		snapshot, err := dependencyReader(dyn)(context.Background(), p)
 		if !owned {
 			if err == nil {
@@ -323,8 +324,8 @@ func TestUnownedServiceSliceCannotGrantAnException(t *testing.T) {
 			t.Fatal("owned service endpoint missing")
 		}
 		for _, ip := range snapshot.Addresses {
-			if ip.String() == "203.0.113.99" {
-				t.Fatal("presentation label granted protection")
+			if ip.String() == "203.0.113.99" || ip.String() == "203.0.113.98" {
+				t.Fatal("presentation label or retired pod granted protection")
 			}
 		}
 	}
