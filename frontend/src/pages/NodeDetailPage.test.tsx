@@ -56,9 +56,38 @@ it("searches the server tail and filters before paging while retaining URL conte
  await render("?page=21&sort=package&order=asc&context=a&context=b#host"); await settle(() => expect(rows()).toHaveLength(100)); const input = host.querySelector<HTMLInputElement>('[aria-label="Search node host findings"]')!; input.focus(); await field('[aria-label="Search node host findings"]', "package-2104"); expect(document.activeElement).toBe(input); await settle(() => expect(rows()).toHaveLength(1)); expect(nodes.vulnerabilities).toHaveBeenLastCalledWith("cluster", "node", expect.objectContaining({ q: "package-2104", offset: 0 })); const params = new URLSearchParams(history.location.search); expect(params.has("page")).toBe(false); expect(params.getAll("context")).toEqual(["a", "b"]); expect(history.location.hash).toBe("#host");
 });
 it("restores severity, fixability, exact source and sorting through URL history", async () => {
- await render("?sort=package&order=desc&page=3&context=keep"); await settle(() => expect(rows()).toHaveLength(100)); expect(header("package").getAttribute("aria-sort")).toBe("descending"); await field('[aria-label="Host finding severity"]', "critical"); await settle(() => expect(nodes.vulnerabilities).toHaveBeenLastCalledWith("cluster", "node", expect.objectContaining({ severity: "critical", offset: 0 }))); await field('[aria-label="Host finding fixability"]', "true"); await settle(() => expect(rows()).toHaveLength(100)); expect(host.textContent).toContain("351 matching finding instances"); await field('[aria-label="Host finding source"]', "trivy"); await settle(() => expect(nodes.vulnerabilities).toHaveBeenLastCalledWith("cluster", "node", expect.objectContaining({ severity: "critical", fixable: "true", source: "trivy" })));
- await act(async () => header("package").querySelector<HTMLButtonElement>("button")!.click()); await settle(() => expect(header("package").getAttribute("aria-sort")).toBe("ascending")); expect(rows()[0].textContent).toContain("package-0000"); await act(async () => history.back()); await settle(() => expect(header("package").getAttribute("aria-sort")).toBe("descending")); await act(async () => history.back()); await settle(() => expect(host.querySelector<HTMLSelectElement>('[aria-label="Host finding fixability"]')!.value).toBe("")); expect(history.location.search).toContain("context=keep");
+ await render("?sort=package&order=desc&page=3&context=keep");
+ await settle(() => {
+  expect(rows()).toHaveLength(100);
+  expect(header("package").getAttribute("aria-sort")).toBe("descending");
+ });
+ await field('[aria-label="Host finding severity"]', "critical");
+ await settle(() => expect(nodes.vulnerabilities).toHaveBeenLastCalledWith("cluster", "node", expect.objectContaining({ severity: "critical", offset: 0 })));
+ await field('[aria-label="Host finding fixability"]', "true");
+ await settle(() => {
+  expect(rows()).toHaveLength(100);
+  expect(host.textContent).toContain("351 matching finding instances");
+ });
+ await field('[aria-label="Host finding source"]', "trivy");
+ // Request dispatch precedes React Query's result notification. Wait for the
+ // filtered table to render before interacting with its sorting control.
+ await settle(() => {
+  expect(nodes.vulnerabilities).toHaveBeenLastCalledWith("cluster", "node", expect.objectContaining({ severity: "critical", fixable: "true", source: "trivy" }));
+  expect(rows()).toHaveLength(100);
+  expect(header("package").getAttribute("aria-sort")).toBe("descending");
+ });
+ await act(async () => header("package").querySelector<HTMLButtonElement>("button")!.click());
+ await settle(() => {
+  expect(header("package").getAttribute("aria-sort")).toBe("ascending");
+  expect(rows()[0].textContent).toContain("package-0000");
+ });
+ await act(async () => history.back());
+ await settle(() => expect(header("package").getAttribute("aria-sort")).toBe("descending"));
+ await act(async () => history.back());
+ await settle(() => expect(host.querySelector<HTMLSelectElement>('[aria-label="Host finding fixability"]')!.value).toBe(""));
+ expect(history.location.search).toContain("context=keep");
 });
+
 it("keeps exact selected finding identity across pages without substituting identical CVE/package rows", async () => {
  const items = Array.from({ length: 205 }, (_, i) => ({ ...finding(i), package_name: "identical-package" })); vi.mocked(nodes.vulnerabilities).mockImplementation(async (cluster, name, params) => response(cluster, name, params, items)); await render("?selected=finding-204%3A1791763200.000000"); await settle(() => expect(host.querySelector("dl")?.textContent).toContain("finding-204")); expect(rows()).toHaveLength(100); await click("Next"); await settle(() => expect(rows()).toHaveLength(100)); expect(host.querySelector("dl")).toBeNull(); expect(host.textContent).toContain("no other finding has been substituted"); expect(new URLSearchParams(history.location.search).get("selected")).toBe("finding-204:1791763200.000000"); await act(async () => history.back()); await settle(() => expect(host.querySelector("dl")?.textContent).toContain("finding-204"));
 });
