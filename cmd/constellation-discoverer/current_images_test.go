@@ -59,3 +59,45 @@ func TestMergePodStatusImagesExcludesCompletedPods(t *testing.T) {
 		t.Fatalf("historical presence lost: %+v", presence.Pods)
 	}
 }
+
+func TestRuntimeConfigurationIDIsNotAnImageReference(t *testing.T) {
+	ref := "ghcr.io/alphabravo-oss/constellation/admission@sha256:manifest"
+	pod := corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "admission", Image: ref}}}, Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{Name: "admission", Image: "sha256:config", ImageID: ref}}}}
+	if got := podStatusImageRefs(pod); !reflect.DeepEqual(got, []string{ref}) {
+		t.Fatalf("configuration ID became scan target: %v", got)
+	}
+	got := podStatusImageDigests(pod)
+	if got[ref] != "sha256:manifest" || got["sha256:config"] != "" {
+		t.Fatalf("configuration ID aliased to manifest: %v", got)
+	}
+	// Status may still describe the old running container during an image update.
+	// The new desired spec must not replace its observed repository identity.
+	pod.Spec.Containers[0].Image = "other.example/new:desired"
+	if got := podStatusImageRefs(pod); !reflect.DeepEqual(got, []string{ref}) {
+		t.Fatalf("desired image replaced observed runtime: %v", got)
+	}
+	if got := podStatusImageDigests(pod)["other.example/new:desired"]; got != "" {
+		t.Fatalf("new spec got old runtime digest: %s", got)
+	}
+}
+
+func TestRuntimeImageReferenceFallbackUsesContainerNameAndFamily(t *testing.T) {
+	pod := corev1.Pod{Spec: corev1.PodSpec{
+		Containers:          []corev1.Container{{Name: "sidecar", Image: "registry/sidecar:desired"}, {Name: "app", Image: "registry/app:desired"}},
+		InitContainers:      []corev1.Container{{Name: "init", Image: "registry/init:desired"}},
+		EphemeralContainers: []corev1.EphemeralContainer{{EphemeralContainerCommon: corev1.EphemeralContainerCommon{Name: "debug", Image: "registry/debug:desired"}}},
+	}, Status: corev1.PodStatus{
+		ContainerStatuses:          []corev1.ContainerStatus{{Name: "app", Image: "sha256:app-config", ImageID: "containerd://sha256:app-runtime"}, {Name: "missing", Image: "sha256:unknown", ImageID: "sha256:unknown"}, {Name: "init", Image: "sha256:wrong-family", ImageID: "sha256:wrong-family"}},
+		InitContainerStatuses:      []corev1.ContainerStatus{{Name: "init", Image: "sha256:init-config", ImageID: "sha256:init-runtime"}},
+		EphemeralContainerStatuses: []corev1.ContainerStatus{{Name: "debug", Image: "sha256:debug-config", ImageID: "sha256:debug-runtime"}},
+	}}
+	want := []string{"registry/init:desired", "registry/app:desired", "registry/debug:desired"}
+	if got := podStatusImageRefs(pod); !reflect.DeepEqual(got, want) {
+		t.Fatalf("name/family fallback = %v, want %v", got, want)
+	}
+	for _, ref := range podStatusImageRefs(pod) {
+		if runtimeOnlyImageRef(ref) {
+			t.Fatalf("non-pullable scan target %s", ref)
+		}
+	}
+}

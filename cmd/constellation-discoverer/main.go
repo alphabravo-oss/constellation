@@ -683,15 +683,62 @@ func podSpecImages(ps corev1.PodSpec) []string {
 	return out
 }
 
+// resolvedPodStatusImages keeps runtime/configuration IDs out of pullable image
+// references. Prefer an observed repository-qualified imageID over a possibly
+// newer desired spec image; use the same named container's spec only as fallback.
+func resolvedPodStatusImages(pod corev1.Pod) []struct {
+	status corev1.ContainerStatus
+	ref    string
+} {
+	out := []struct {
+		status corev1.ContainerStatus
+		ref    string
+	}{}
+	add := func(statuses []corev1.ContainerStatus, specs map[string]string) {
+		for _, status := range statuses {
+			ref := strings.TrimSpace(status.Image)
+			if ref == "" || runtimeOnlyImageRef(ref) {
+				ref = normalizeKubeImageID(status.ImageID)
+				if ref == "" || runtimeOnlyImageRef(ref) {
+					ref = strings.TrimSpace(specs[status.Name])
+				}
+			}
+			if runtimeOnlyImageRef(ref) {
+				ref = ""
+			}
+			out = append(out, struct {
+				status corev1.ContainerStatus
+				ref    string
+			}{status, ref})
+		}
+	}
+	specs := map[string]string{}
+	for _, c := range pod.Spec.InitContainers {
+		specs[c.Name] = c.Image
+	}
+	add(pod.Status.InitContainerStatuses, specs)
+	specs = map[string]string{}
+	for _, c := range pod.Spec.Containers {
+		specs[c.Name] = c.Image
+	}
+	add(pod.Status.ContainerStatuses, specs)
+	specs = map[string]string{}
+	for _, c := range pod.Spec.EphemeralContainers {
+		specs[c.Name] = c.Image
+	}
+	add(pod.Status.EphemeralContainerStatuses, specs)
+	return out
+}
+
+func runtimeOnlyImageRef(ref string) bool {
+	return strings.HasPrefix(ref, "sha256:") || strings.Contains(ref, "://")
+}
+
 func podStatusImageRefs(pod corev1.Pod) []string {
 	out := []string{}
-	statuses := make([]corev1.ContainerStatus, 0, len(pod.Status.InitContainerStatuses)+len(pod.Status.ContainerStatuses)+len(pod.Status.EphemeralContainerStatuses))
-	statuses = append(statuses, pod.Status.InitContainerStatuses...)
-	statuses = append(statuses, pod.Status.ContainerStatuses...)
-	statuses = append(statuses, pod.Status.EphemeralContainerStatuses...)
-	for _, status := range statuses {
-		if status.Image != "" {
-			out = append(out, status.Image)
+	for _, image := range resolvedPodStatusImages(pod) {
+		if image.ref != "" {
+			out = append(out, image.ref)
 		}
 	}
 	return mergeImageRefs(nil, out...)
@@ -746,23 +793,20 @@ func normalizeKubeImageID(imageID string) string {
 	return strings.TrimSpace(imageID)
 }
 
-// podStatusImageDigests maps each running container's image ref (the
-// status.Image, e.g. "ghcr.io/acme/api:dev") to its resolved content digest
+// podStatusImageDigests maps each container's resolved image reference
+// (e.g. "ghcr.io/acme/api:dev") to its observed runtime digest
 // ("sha256:<hex>") taken from status.containerStatuses[].imageID. Containers
 // that have not started yet (empty imageID) or whose imageID carries no digest
 // are skipped, so the result only contains refs we could actually resolve.
 func podStatusImageDigests(pod corev1.Pod) map[string]string {
 	out := map[string]string{}
-	statuses := make([]corev1.ContainerStatus, 0, len(pod.Status.InitContainerStatuses)+len(pod.Status.ContainerStatuses)+len(pod.Status.EphemeralContainerStatuses))
-	statuses = append(statuses, pod.Status.InitContainerStatuses...)
-	statuses = append(statuses, pod.Status.ContainerStatuses...)
-	statuses = append(statuses, pod.Status.EphemeralContainerStatuses...)
-	for _, status := range statuses {
+	for _, image := range resolvedPodStatusImages(pod) {
+		status := image.status
 		digest := digestFromKubeImageID(status.ImageID)
 		if digest == "" {
 			continue
 		}
-		// The spec ref (status.Image, e.g. a tag) is the ref we link/scan on, so
+		// The resolved repository reference is the ref we link/scan on, so
 		// map it to the digest. Also map the normalized imageID ref itself so a
 		// "repo@sha256:..." ref resolves to its own digest.
 		//
@@ -772,7 +816,7 @@ func podStatusImageDigests(pod corev1.Pod) map[string]string {
 		// SPEC ref, so also map the default-registry-stripped variants — otherwise a
 		// locally-built image (spec omits the registry) never gets its digest and can't
 		// join to the runtime-agent's digest-keyed local evidence (WS-F1).
-		if ref := strings.TrimSpace(status.Image); ref != "" {
+		if ref := image.ref; ref != "" {
 			for _, v := range imageRefRegistryVariants(ref) {
 				out[v] = digest
 			}
