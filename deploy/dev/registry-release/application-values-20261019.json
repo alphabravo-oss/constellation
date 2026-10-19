@@ -73,7 +73,7 @@
   "api": {
     "image": {
       "repository": "ghcr.io/alphabravo-oss/constellation/api",
-      "digest": "sha256:240157999b92f787f88718ff7a9b78d8935a1198cf80e57807c2be67d5175fd1"
+      "digest": "sha256:9f033dca758cc613d92aef67705e6da95419fe75555d96bd682dd9759a99526d"
     }
   },
   "discoverer": {
@@ -104,7 +104,7 @@
   "migrate": {
     "image": {
       "repository": "ghcr.io/alphabravo-oss/constellation/migrate",
-      "digest": "sha256:b33345caf0d31cf518f1b6138abc57b679d608db120e82badd08c04dd9ec53c5"
+      "digest": "sha256:6abc8c6581f88021124d263b17dd80219a906a8523e4ceb744cd4655192fd1d8"
     }
   },
   "networkPolicyApplier": {

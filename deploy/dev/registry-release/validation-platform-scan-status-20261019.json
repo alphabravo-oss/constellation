@@ -1,0 +1,167 @@
+{
+  "sourceCommit": "8e47288",
+  "helmRevision": 120,
+  "schemaVersion": 183,
+  "deployed": true,
+  "validatedAt": "2026-10-19T08:28:39.101868+00:00",
+  "changes": [
+    "Persist inventory identity at job claim without backfilling historical jobs",
+    "Platform scanned status requires completed job identity to match current target and evidence"
+  ],
+  "validation": {
+    "raceTests": "=== RUN   TestPlatformFactsReportQueuesEvidenceBackedScan\n--- PASS: TestPlatformFactsReportQueuesEvidenceBackedScan (0.10s)\n=== RUN   TestPlatformFactsReportRejectsUnboundClustersWithoutWrites\n=== RUN   TestPlatformFactsReportRejectsUnboundClustersWithoutWrites/foreign_cluster\n=== RUN   TestPlatformFactsReportRejectsUnboundClustersWithoutWrites/ambiguous_token\n=== RUN   TestPlatformFactsReportRejectsUnboundClustersWithoutWrites/unbound_single_cluster\n=== RUN   TestPlatformFactsReportRejectsUnboundClustersWithoutWrites/same-org_mismatch\n=== RUN   TestPlatformFactsReportRejectsUnboundClustersWithoutWrites/foreign_bundle\n=== RUN   TestPlatformFactsReportRejectsUnboundClustersWithoutWrites/scanner_token\n--- PASS: TestPlatformFactsReportRejectsUnboundClustersWithoutWrites (0.15s)\n    --- PASS: TestPlatformFactsReportRejectsUnboundClustersWithoutWrites/foreign_cluster (0.01s)\n    --- PASS: TestPlatformFactsReportRejectsUnboundClustersWithoutWrites/ambiguous_token (0.01s)\n    --- PASS: TestPlatformFactsReportRejectsUnboundClustersWithoutWrites/unbound_single_cluster (0.01s)\n    --- PASS: TestPlatformFactsReportRejectsUnboundClustersWithoutWrites/same-org_mismatch (0.01s)\n    --- PASS: TestPlatformFactsReportRejectsUnboundClustersWithoutWrites/foreign_bundle (0.00s)\n    --- PASS: TestPlatformFactsReportRejectsUnboundClustersWithoutWrites/scanner_token (0.00s)\n=== RUN   TestPlatformRole\n=== RUN   TestPlatformRole/kubernetes\n=== RUN   TestPlatformRole/constellation\n=== RUN   TestPlatformRole/astronomer\n=== RUN   TestPlatformRole/custom_constellation\n=== RUN   TestPlatformRole/custom_astronomer\n=== RUN   TestPlatformRole/custom_chart\n=== RUN   TestPlatformRole/custom_installation\n=== RUN   TestPlatformRole/same_instance_without_identity\n=== RUN   TestPlatformRole/customer_prefix\n=== RUN   TestPlatformRole/customer_workload\n--- PASS: TestPlatformRole (0.00s)\n    --- PASS: TestPlatformRole/kubernetes (0.00s)\n    --- PASS: TestPlatformRole/constellation (0.00s)\n    --- PASS: TestPlatformRole/astronomer (0.00s)\n    --- PASS: TestPlatformRole/custom_constellation (0.00s)\n    --- PASS: TestPlatformRole/custom_astronomer (0.00s)\n    --- PASS: TestPlatformRole/custom_chart (0.00s)\n    --- PASS: TestPlatformRole/custom_installation (0.00s)\n    --- PASS: TestPlatformRole/same_instance_without_identity (0.00s)\n    --- PASS: TestPlatformRole/customer_prefix (0.00s)\n    --- PASS: TestPlatformRole/customer_workload (0.00s)\n=== RUN   TestPlatformRoleInventoryAPIs\n--- PASS: TestPlatformRoleInventoryAPIs (0.19s)\n=== RUN   TestPlatformScanStatusRequiresMatchingClaimedInventory\n=== RUN   TestPlatformScanStatusRequiresMatchingClaimedInventory/completed/current\n=== RUN   TestPlatformScanStatusRequiresMatchingClaimedInventory/completed/old\n=== RUN   TestPlatformScanStatusRequiresMatchingClaimedInventory/completed/\n=== RUN   TestPlatformScanStatusRequiresMatchingClaimedInventory/running/current\n=== RUN   TestPlatformScanStatusRequiresMatchingClaimedInventory/running/old\n=== RUN   TestPlatformScanStatusRequiresMatchingClaimedInventory/running/\n=== RUN   TestPlatformScanStatusRequiresMatchingClaimedInventory/failed/current\n=== RUN   TestPlatformScanStatusRequiresMatchingClaimedInventory/failed/old\n=== RUN   TestPlatformScanStatusRequiresMatchingClaimedInventory/pending/\n--- PASS: TestPlatformScanStatusRequiresMatchingClaimedInventory (0.00s)\n    --- PASS: TestPlatformScanStatusRequiresMatchingClaimedInventory/completed/current (0.00s)\n    --- PASS: TestPlatformScanStatusRequiresMatchingClaimedInventory/completed/old (0.00s)\n    --- PASS: TestPlatformScanStatusRequiresMatchingClaimedInventory/completed/ (0.00s)\n    --- PASS: TestPlatformScanStatusRequiresMatchingClaimedInventory/running/current (0.00s)\n    --- PASS: TestPlatformScanStatusRequiresMatchingClaimedInventory/running/old (0.00s)\n    --- PASS: TestPlatformScanStatusRequiresMatchingClaimedInventory/running/ (0.00s)\n    --- PASS: TestPlatformScanStatusRequiresMatchingClaimedInventory/failed/current (0.00s)\n    --- PASS: TestPlatformScanStatusRequiresMatchingClaimedInventory/failed/old (0.00s)\n    --- PASS: TestPlatformScanStatusRequiresMatchingClaimedInventory/pending/ (0.00s)\nPASS\nok  \tgithub.com/alphabravocompany/constellation/internal/handler\t1.904s\n=== RUN   TestScanJobClaimPersistsInventoryAndRefreshesOnRetry\n--- PASS: TestScanJobClaimPersistsInventoryAndRefreshesOnRetry (0.11s)\n=== RUN   TestScanJobs_ReadsIgnoreJobsLinkedToForeignOrgTargets\n--- PASS: TestScanJobs_ReadsIgnoreJobsLinkedToForeignOrgTargets (0.12s)\n=== RUN   TestScanJobs_RejectsJobWithForeignOrgTarget\n--- PASS: TestScanJobs_RejectsJobWithForeignOrgTarget (0.11s)\n=== RUN   TestScanJobs_ClaimIgnoresEvidenceLinkedToForeignOrgTarget\n--- PASS: TestScanJobs_ClaimIgnoresEvidenceLinkedToForeignOrgTarget (0.09s)\n=== RUN   TestScanJobs_RejectsExecutableRepositoryTarget\n--- PASS: TestScanJobs_RejectsExecutableRepositoryTarget (0.00s)\n=== RUN   TestScanJobs_QueueLifecycle\n--- PASS: TestScanJobs_QueueLifecycle (0.17s)\n=== RUN   TestScanJobs_ClaimReclaimsExpiredLeaseAndFailureRequiresWorker\n--- PASS: TestScanJobs_ClaimReclaimsExpiredLeaseAndFailureRequiresWorker (0.11s)\n=== RUN   TestScanJobs_RenewRequiresSameScannerInstance\n--- PASS: TestScanJobs_RenewRequiresSameScannerInstance (0.09s)\n=== RUN   TestScanJobs_RetryBackoffAndMaxAttempts\n--- PASS: TestScanJobs_RetryBackoffAndMaxAttempts (0.11s)\n=== RUN   TestScanJobs_ClaimFiltersTargetTypes\n--- PASS: TestScanJobs_ClaimFiltersTargetTypes (0.11s)\n=== RUN   TestScanJobs_CompleteWritesCanonicalImageResultWithoutFindingProjection\n--- PASS: TestScanJobs_CompleteWritesCanonicalImageResultWithoutFindingProjection (0.14s)\n=== RUN   TestScanJobs_CompleteWritesImageScanArtifacts\n--- PASS: TestScanJobs_CompleteWritesImageScanArtifacts (0.16s)\n=== RUN   TestScanJobs_RepositorySourceImageScanPreservesProvenance\n--- PASS: TestScanJobs_RepositorySourceImageScanPreservesProvenance (0.17s)\n=== RUN   TestScanJobs_ImpactedWorkloadsMatchesDigestAndCluster\n--- PASS: TestScanJobs_ImpactedWorkloadsMatchesDigestAndCluster (0.09s)\n=== RUN   TestScanJobs_ListIncludesQueueMetricsByTargetType\n--- PASS: TestScanJobs_ListIncludesQueueMetricsByTargetType (0.07s)\n=== RUN   TestScanJobs_ImageFindingsPromotedToDashboardAndFindingsList\n--- PASS: TestScanJobs_ImageFindingsPromotedToDashboardAndFindingsList (0.11s)\n=== RUN   TestScanJobs_StatusReportsNeuVectorAggregate\n--- PASS: TestScanJobs_StatusReportsNeuVectorAggregate (0.05s)\n=== RUN   TestScanJobs_CanceledRunningWorkerReportsAreDropped\n--- PASS: TestScanJobs_CanceledRunningWorkerReportsAreDropped (0.06s)\nPASS\nok  \tgithub.com/alphabravocompany/constellation/internal/handler/scanning\t3.317s\n=== RUN   TestRequiredSchemaMatchesMigrationInventory\n--- PASS: TestRequiredSchemaMatchesMigrationInventory (0.00s)\nPASS\nok  \tgithub.com/alphabravocompany/constellation/internal/db\t1.014s\n",
+    "migrationTest": "2026/10/19 08:24:49 OK   183_scan_job_inventory_identity.sql (4.33ms)\n2026/10/19 08:24:49 goose: successfully migrated database to version: 183\n",
+    "liveVersion": {
+      "time": "2026-10-19T08:28:10.127989226Z",
+      "level": "INFO",
+      "msg": "component.version",
+      "service": "constellation-api",
+      "component": "api",
+      "version": "0.2.0",
+      "commit": "8e47288",
+      "commit_short": "8e47288",
+      "build_time": "0001-01-01T00:00:00Z",
+      "go": "go1.26.9",
+      "fips_enabled": false,
+      "crypto_module": "latest",
+      "hostname": "constellation-api-686c578788-sldbl",
+      "pid": 1
+    },
+    "platformStatus": "scanned",
+    "latestPlatformJob": {
+      "claimed_inventory_hash": "sha256:7f72e0b3cd34e7b14fe5325e0c3f1b157e4dc3a216376313b9d492195bea5d6e",
+      "id": "43e8b82e-fb59-428c-879b-e10a35c7a42c",
+      "status": "completed",
+      "package_count": 9,
+      "requested_at": "2026-10-19T08:28:17.838539Z",
+      "claimed_at": "2026-10-19T08:28:29.747886Z",
+      "finished_at": "2026-10-19T08:28:31.538279Z"
+    },
+    "inventoryHash": "sha256:7f72e0b3cd34e7b14fe5325e0c3f1b157e4dc3a216376313b9d492195bea5d6e",
+    "liveRecordedClaims": [
+      {
+        "id": "43e8b82e-fb59-428c-879b-e10a35c7a42c",
+        "status": "completed",
+        "claimed_inventory_hash": "sha256:7f72e0b3cd34e7b14fe5325e0c3f1b157e4dc3a216376313b9d492195bea5d6e",
+        "claimed_at": "2026-10-19T08:28:29.747886+00:00",
+        "finished_at": "2026-10-19T08:28:31.538279+00:00"
+      }
+    ],
+    "legacyCompletedJobsWithoutClaimIdentity": 7384,
+    "authenticatedAPIHTTP": 200,
+    "healthHTTP": "200",
+    "rollout": {
+      "helmRevision": 120,
+      "restartHoldRemoved": true,
+      "clusterHealthy": true,
+      "postBackupPhase": "completed",
+      "postBackupId": "20261019T054924",
+      "containers": [
+        {
+          "namespace": "constellation-system",
+          "pod": "constellation-admission-68bcf749b9-d47pt",
+          "container": "admission",
+          "image": "ghcr.io/alphabravo-oss/constellation/admission@sha256:730ace2dbb89124410926a0174d96d05d31e3ab2ad3d0db3e5435f217010b24c",
+          "imageID": "ghcr.io/alphabravo-oss/constellation/admission@sha256:730ace2dbb89124410926a0174d96d05d31e3ab2ad3d0db3e5435f217010b24c"
+        },
+        {
+          "namespace": "constellation-system",
+          "pod": "constellation-api-686c578788-sldbl",
+          "container": "wait-for-migrations",
+          "image": "ghcr.io/alphabravo-oss/constellation/api@sha256:9f033dca758cc613d92aef67705e6da95419fe75555d96bd682dd9759a99526d",
+          "imageID": "ghcr.io/alphabravo-oss/constellation/api@sha256:9f033dca758cc613d92aef67705e6da95419fe75555d96bd682dd9759a99526d"
+        },
+        {
+          "namespace": "constellation-system",
+          "pod": "constellation-api-686c578788-sldbl",
+          "container": "api",
+          "image": "ghcr.io/alphabravo-oss/constellation/api@sha256:9f033dca758cc613d92aef67705e6da95419fe75555d96bd682dd9759a99526d",
+          "imageID": "ghcr.io/alphabravo-oss/constellation/api@sha256:9f033dca758cc613d92aef67705e6da95419fe75555d96bd682dd9759a99526d"
+        },
+        {
+          "namespace": "constellation-system",
+          "pod": "constellation-cnpg-postgres-1",
+          "container": "bootstrap-controller",
+          "image": "ghcr.io/alphabravo-oss/constellation/cnpg-operator@sha256:cc61009ac3d2cdf0aa2ff7f44f85dbb7bdf85ab50425d41a71da2af6521cc1b9",
+          "imageID": "ghcr.io/alphabravo-oss/constellation/cnpg-operator@sha256:cc61009ac3d2cdf0aa2ff7f44f85dbb7bdf85ab50425d41a71da2af6521cc1b9"
+        },
+        {
+          "namespace": "constellation-system",
+          "pod": "constellation-cnpg-postgres-1",
+          "container": "plugin-barman-cloud",
+          "image": "ghcr.io/alphabravo-oss/constellation/barman-sidecar@sha256:5c6b5559b08b7b49c89937b6d823a37fbeb8e7b883d4b0da6278fe09de87d1f1",
+          "imageID": "ghcr.io/alphabravo-oss/constellation/barman-sidecar@sha256:5c6b5559b08b7b49c89937b6d823a37fbeb8e7b883d4b0da6278fe09de87d1f1"
+        },
+        {
+          "namespace": "constellation-system",
+          "pod": "constellation-cnpg-postgres-1",
+          "container": "postgres",
+          "image": "ghcr.io/alphabravo-oss/constellation/postgres:16.14-dev-98087f2e517416edda6e3649154c3be4a5a7b0ce2228c4fab3f4e2bed430d92a@sha256:98087f2e517416edda6e3649154c3be4a5a7b0ce2228c4fab3f4e2bed430d92a",
+          "imageID": "ghcr.io/alphabravo-oss/constellation/postgres@sha256:98087f2e517416edda6e3649154c3be4a5a7b0ce2228c4fab3f4e2bed430d92a"
+        },
+        {
+          "namespace": "constellation-system",
+          "pod": "constellation-discoverer-cf8f5d959-frgwg",
+          "container": "discoverer",
+          "image": "ghcr.io/alphabravo-oss/constellation/discoverer@sha256:9fc2f286b56ea7e028da288938c71c3fc11e7a796729116292e271eff61661a2",
+          "imageID": "ghcr.io/alphabravo-oss/constellation/discoverer@sha256:9fc2f286b56ea7e028da288938c71c3fc11e7a796729116292e271eff61661a2"
+        },
+        {
+          "namespace": "constellation-system",
+          "pod": "constellation-frontend-6dd45c54c5-xb7ks",
+          "container": "nginx",
+          "image": "ghcr.io/alphabravo-oss/constellation/frontend@sha256:faa3bc055e8b07143b1e98dad0ac23b8f8841c922a5a5f5d3c4d544381412fb7",
+          "imageID": "ghcr.io/alphabravo-oss/constellation/frontend@sha256:faa3bc055e8b07143b1e98dad0ac23b8f8841c922a5a5f5d3c4d544381412fb7"
+        },
+        {
+          "namespace": "constellation-system",
+          "pod": "constellation-network-policy-applier-f5d6bddfc-mgc9p",
+          "container": "applier",
+          "image": "ghcr.io/alphabravo-oss/constellation/operator@sha256:1e4e345666f9b1f6aa4bfbeb97925c7f378552b1d54d7717121684e2636aa47d",
+          "imageID": "ghcr.io/alphabravo-oss/constellation/operator@sha256:1e4e345666f9b1f6aa4bfbeb97925c7f378552b1d54d7717121684e2636aa47d"
+        },
+        {
+          "namespace": "constellation-system",
+          "pod": "constellation-operator-69df9946c5-rcssw",
+          "container": "operator",
+          "image": "ghcr.io/alphabravo-oss/constellation/operator@sha256:1e4e345666f9b1f6aa4bfbeb97925c7f378552b1d54d7717121684e2636aa47d",
+          "imageID": "ghcr.io/alphabravo-oss/constellation/operator@sha256:1e4e345666f9b1f6aa4bfbeb97925c7f378552b1d54d7717121684e2636aa47d"
+        },
+        {
+          "namespace": "constellation-system",
+          "pod": "constellation-runtime-agent-d27qs",
+          "container": "agent",
+          "image": "ghcr.io/alphabravo-oss/constellation/runtime-agent@sha256:d8d0e4903abc6c291fb98e32806ac61ea11b562b0abfa62c60230e3fa5afaadf",
+          "imageID": "ghcr.io/alphabravo-oss/constellation/runtime-agent@sha256:d8d0e4903abc6c291fb98e32806ac61ea11b562b0abfa62c60230e3fa5afaadf"
+        },
+        {
+          "namespace": "constellation-system",
+          "pod": "constellation-scanner-d97b5d4dc-t5btw",
+          "container": "scanner",
+          "image": "ghcr.io/alphabravo-oss/constellation/scanner@sha256:f6c1c072de953e5031331c5ab556158ff05fd75e33859be5a7ab7ef68156e629",
+          "imageID": "ghcr.io/alphabravo-oss/constellation/scanner@sha256:f6c1c072de953e5031331c5ab556158ff05fd75e33859be5a7ab7ef68156e629"
+        },
+        {
+          "namespace": "cnpg-system",
+          "pod": "barman-cloud-669fcf8689-47ssk",
+          "container": "barman-cloud",
+          "image": "ghcr.io/alphabravo-oss/constellation/barman-plugin@sha256:de96d9e4bf0f2f69f8d2b3c1a8bc953ea8235d613901ae19754600b55cb07590",
+          "imageID": "ghcr.io/alphabravo-oss/constellation/barman-plugin@sha256:de96d9e4bf0f2f69f8d2b3c1a8bc953ea8235d613901ae19754600b55cb07590"
+        },
+        {
+          "namespace": "cnpg-system",
+          "pod": "cnpg-controller-manager-fb6948887-whhm5",
+          "container": "manager",
+          "image": "ghcr.io/alphabravo-oss/constellation/cnpg-operator@sha256:cc61009ac3d2cdf0aa2ff7f44f85dbb7bdf85ab50425d41a71da2af6521cc1b9",
+          "imageID": "ghcr.io/alphabravo-oss/constellation/cnpg-operator@sha256:cc61009ac3d2cdf0aa2ff7f44f85dbb7bdf85ab50425d41a71da2af6521cc1b9"
+        }
+      ]
+    }
+  },
+  "limitations": [
+    "Historical jobs without a recorded inventory identity remain unverified",
+    "Finding totals retain open/historical records; current status does not reclassify individual findings",
+    "Other inventory views and job-attempt history need separate review",
+    "Broad NeuVector parity remains unproven"
+  ]
+}
