@@ -10,14 +10,6 @@
       "tag": "dev-d8d0e4903abc6c291fb98e32806ac61ea11b562b0abfa62c60230e3fa5afaadf"
     },
     {
-      "name": "admission",
-      "role": "admission",
-      "source": "constellation/admission:image-matching-20261019-27a10a1",
-      "digest": "sha256:1b3ad32002e653a9452bd3b514fed3e40555961b87d234e3ef78974263f67b41",
-      "repository": "ghcr.io/alphabravo-oss/constellation/admission",
-      "tag": "dev-1b3ad32002e653a9452bd3b514fed3e40555961b87d234e3ef78974263f67b41"
-    },
-    {
       "name": "api",
       "role": "api",
       "source": "constellation/api:image-quarantine-20261019-55e00c3",
@@ -97,6 +89,14 @@
       "digest": "sha256:5c6b5559b08b7b49c89937b6d823a37fbeb8e7b883d4b0da6278fe09de87d1f1",
       "repository": "ghcr.io/alphabravo-oss/constellation/barman-sidecar",
       "tag": "dev-5c6b5559b08b7b49c89937b6d823a37fbeb8e7b883d4b0da6278fe09de87d1f1"
+    },
+    {
+      "name": "admission",
+      "role": "admission",
+      "source": "constellation/admission:owner-quarantine-20261019-08d830a",
+      "digest": "sha256:730ace2dbb89124410926a0174d96d05d31e3ab2ad3d0db3e5435f217010b24c",
+      "repository": "ghcr.io/alphabravo-oss/constellation/admission",
+      "tag": "dev-730ace2dbb89124410926a0174d96d05d31e3ab2ad3d0db3e5435f217010b24c"
     }
   ],
   "helm_values": {
@@ -109,7 +109,7 @@
     "admission": {
       "image": {
         "repository": "ghcr.io/alphabravo-oss/constellation/admission",
-        "digest": "sha256:1b3ad32002e653a9452bd3b514fed3e40555961b87d234e3ef78974263f67b41"
+        "digest": "sha256:730ace2dbb89124410926a0174d96d05d31e3ab2ad3d0db3e5435f217010b24c"
       },
       "webhook": {
         "rules": [

@@ -8,7 +8,7 @@
   "admission": {
     "image": {
       "repository": "ghcr.io/alphabravo-oss/constellation/admission",
-      "digest": "sha256:1b3ad32002e653a9452bd3b514fed3e40555961b87d234e3ef78974263f67b41"
+      "digest": "sha256:730ace2dbb89124410926a0174d96d05d31e3ab2ad3d0db3e5435f217010b24c"
     },
     "webhook": {
       "rules": [
