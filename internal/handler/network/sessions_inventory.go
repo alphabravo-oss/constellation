@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
@@ -61,12 +63,12 @@ func scanSessionInventory(row inventorylist.Row) (sessionDTO, error) {
 func (h *Network) writeSessionInventory(w http.ResponseWriter, r *http.Request, export, summaryOnly bool) {
 	subj, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, 401, map[string]string{"error": "subject required"})
+		apiutil.WriteStatus(r.Context(), w, 401, "subject required")
 		return
 	}
 	values, err := inventorylist.Query(r)
 	if err != nil {
-		httpx.WriteJSON(w, 400, map[string]string{"error": "invalid query encoding"})
+		apiutil.WriteStatus(r.Context(), w, 400, "invalid query encoding")
 		return
 	}
 	cluster, err := h.sessionInventoryCluster(r, subj.OrgID)
@@ -77,20 +79,20 @@ func (h *Network) writeSessionInventory(w http.ResponseWriter, r *http.Request, 
 			status = 400
 			message = err.Error()
 		}
-		httpx.WriteJSON(w, status, map[string]string{"error": message})
+		apiutil.WriteStatus(r.Context(), w, status, message)
 		return
 	}
 	sorts := map[string]string{"workload": "lower(workload_id)", "node": "lower(node)", "application": "lower(application_label)", "protocol": "lower(protocol_label)", "client": "ROW(lower(client_ip),client_port)", "server": "ROW(lower(server_ip),server_port)", "bytes": "bytes", "packets": "packets", "client_bytes": "client_bytes", "server_bytes": "server_bytes", "age": "age", "idle": "idle", "severity": "severity", "observed": "updated_at", "state": "ROW(lower(client_state_label),lower(server_state_label))"}
 	opts, err := inventorylist.Parse(values, sorts, "bytes")
 	if err != nil {
-		httpx.WriteJSON(w, 400, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, 400, err.Error())
 		return
 	}
 	opts.Limit = 500
 	if values.Has("limit") {
 		n, e := strconv.Atoi(values.Get("limit"))
 		if e != nil || n < 1 || n > 2000 {
-			httpx.WriteJSON(w, 400, map[string]string{"error": "limit must be between 1 and 2000"})
+			apiutil.WriteStatus(r.Context(), w, 400, "limit must be between 1 and 2000")
 			return
 		}
 		opts.Limit = n
@@ -98,7 +100,7 @@ func (h *Network) writeSessionInventory(w http.ResponseWriter, r *http.Request, 
 	if values.Has("offset") {
 		n, e := strconv.Atoi(values.Get("offset"))
 		if e != nil || n < 0 || n > inventorylist.MaxOffset {
-			httpx.WriteJSON(w, 400, map[string]string{"error": "invalid offset"})
+			apiutil.WriteStatus(r.Context(), w, 400, "invalid offset")
 			return
 		}
 		opts.Offset = n
@@ -111,12 +113,12 @@ func (h *Network) writeSessionInventory(w http.ResponseWriter, r *http.Request, 
 	opts.OrderSQL += ", cluster_id ASC,node ASC,session_id ASC"
 	filters, err := parseSessionFilters(r)
 	if err != nil {
-		httpx.WriteJSON(w, 400, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, 400, err.Error())
 		return
 	}
 	members, name, active, err := handler.ResolveGroupFilterMembers(r.Context(), h.db.Pool(), subj.OrgID, cluster, filters.Group)
 	if err != nil {
-		httpx.WriteJSON(w, 400, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, 400, err.Error())
 		return
 	}
 	filters.GroupMembers, filters.GroupName, filters.GroupActive = members, name, active
@@ -126,7 +128,7 @@ func (h *Network) writeSessionInventory(w http.ResponseWriter, r *http.Request, 
 	case "true", "1":
 		hidePlatform = true
 	default:
-		httpx.WriteJSON(w, 400, map[string]string{"error": "invalid hide_platform"})
+		apiutil.WriteStatus(r.Context(), w, 400, "invalid hide_platform")
 		return
 	}
 	where, args := filters.applySessionWhere([]string{"true"}, []any{subj.OrgID, cluster})
@@ -149,7 +151,7 @@ func (h *Network) writeSessionInventory(w http.ResponseWriter, r *http.Request, 
 	}
 	items, meta, err := inventorylist.Read(r.Context(), h.db.Pool(), definition, opts, scanSessionInventory)
 	if err != nil {
-		httpx.WriteJSON(w, 500, map[string]string{"error": "live sessions could not be read"})
+		apiutil.WriteStatus(r.Context(), w, 500, "live sessions could not be read")
 		return
 	}
 	if summaryOnly {
@@ -160,18 +162,18 @@ func (h *Network) writeSessionInventory(w http.ResponseWriter, r *http.Request, 
 		var body bytes.Buffer
 		writer := csv.NewWriter(&body)
 		if err := writer.Write([]string{"row_id", "cluster_id", "session_id", "node", "workload_id", "platform_role", "application", "ip_proto", "client_ip", "client_port", "server_ip", "server_port", "client_state", "server_state", "client_bytes", "server_bytes", "client_pkts", "server_pkts", "age", "idle", "ingress", "severity", "threat_id", "updated_at"}); err != nil {
-			httpx.WriteJSON(w, 500, map[string]string{"error": "session export failed"})
+			apiutil.WriteStatus(r.Context(), w, 500, "session export failed")
 			return
 		}
 		for _, item := range items {
 			if err := writer.Write([]string{item.RowID, item.ClusterID.String(), strconv.FormatInt(item.ID, 10), item.Node, item.WorkloadID, item.PlatformRole, item.Application, item.IPProto, item.ClientIP, strconv.Itoa(item.ClientPort), item.ServerIP, strconv.Itoa(item.ServerPort), item.ClientState, item.ServerState, strconv.FormatInt(item.ClientBytes, 10), strconv.FormatInt(item.ServerBytes, 10), strconv.FormatInt(item.ClientPkts, 10), strconv.FormatInt(item.ServerPkts, 10), strconv.Itoa(item.Age), strconv.Itoa(item.Idle), strconv.FormatBool(item.Ingress), strconv.Itoa(item.Severity), strconv.FormatInt(item.ThreatID, 10), item.UpdatedAt.UTC().Format(time.RFC3339Nano)}); err != nil {
-				httpx.WriteJSON(w, 500, map[string]string{"error": "session export failed"})
+				apiutil.WriteStatus(r.Context(), w, 500, "session export failed")
 				return
 			}
 		}
 		writer.Flush()
 		if writer.Error() != nil {
-			httpx.WriteJSON(w, 500, map[string]string{"error": "session export failed"})
+			apiutil.WriteStatus(r.Context(), w, 500, "session export failed")
 			return
 		}
 		inventorylist.WriteCSV(w, "constellation-network-sessions.csv", body.Bytes(), meta)

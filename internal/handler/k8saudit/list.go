@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
 	"github.com/alphabravocompany/constellation/pkg/rbac"
@@ -50,7 +52,7 @@ func (h *Ingest) VerbList() rbac.Verb { return rbac.VerbReadFindings }
 func (h *Ingest) List(w http.ResponseWriter, r *http.Request) {
 	sub, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "auth required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "auth required")
 		return
 	}
 	q := r.URL.Query()
@@ -85,7 +87,7 @@ SELECT id::text, org_id::text, cluster_id::text,
  LIMIT 500`,
 		sub.OrgID, strconv.Itoa(hours), clusterID, verb, resource, namespace, user, signal, decision, highOnly)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()
@@ -100,7 +102,7 @@ SELECT id::text, org_id::text, cluster_id::text,
 			&a.Decision, &a.Signal, &a.Severity, &a.AuditID,
 			&a.ReportedAt, &a.At,
 		); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		out = append(out, a)

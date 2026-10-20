@@ -6,7 +6,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/alphabravocompany/constellation/internal/handler/httpx"
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/alphabravocompany/constellation/pkg/risk"
 )
 
@@ -38,7 +39,7 @@ type reachabilityBody struct {
 func (f *Findings) Reachability(w http.ResponseWriter, r *http.Request) {
 	var body reachabilityBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request: " + err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad request: "+err.Error())
 		return
 	}
 	tx, found, subj, err := f.beginMutation(r, body.ReviewedRevision)
@@ -73,13 +74,13 @@ func (f *Findings) Reachability(w http.ResponseWriter, r *http.Request) {
 			merged["reachable_call_stack"] = body.CallStack
 		}
 	default:
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "must set runtime_confirmed or static_only"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "must set runtime_confirmed or static_only")
 		return
 	}
 
 	out, err := json.Marshal(merged)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -113,7 +114,7 @@ func (f *Findings) Reachability(w http.ResponseWriter, r *http.Request) {
 	if _, err := tx.Exec(r.Context(),
 		`UPDATE findings SET risk_inputs = $2, risk_score = $4, last_seen_at = NOW() WHERE id = $1 AND org_id = $3 AND first_seen_at=$5`,
 		found.ID, out, subj.OrgID, newScore, found.FirstSeen); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 

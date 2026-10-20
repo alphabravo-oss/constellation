@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/google/uuid"
 
 	"github.com/alphabravocompany/constellation/internal/db"
@@ -110,7 +112,7 @@ func (a *Audit) list(w http.ResponseWriter, r *http.Request, export bool) {
 	fetch := limit + 1
 	clusterArg, err := parseClusterIDParam(r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if clusterArg != nil {
@@ -164,7 +166,7 @@ func (a *Audit) list(w http.ResponseWriter, r *http.Request, export bool) {
 	}
 	rows, err := a.db.Pool().Query(r.Context(), query, args...)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()
@@ -175,7 +177,7 @@ func (a *Audit) list(w http.ResponseWriter, r *http.Request, export bool) {
 		strings.EqualFold(r.URL.Query().Get("with_controls"), "true")
 	out, err := readAuditListRows(rows, limit, withControls)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	// Trim the probe row and report whether another page exists.
@@ -353,7 +355,7 @@ func (a *Audit) ControlMappings(w http.ResponseWriter, r *http.Request) {
 
 func (a *Audit) Verify(w http.ResponseWriter, r *http.Request) {
 	if a.db == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "audit database unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusServiceUnavailable, "audit database unavailable")
 		return
 	}
 	var eventCount int
@@ -361,11 +363,11 @@ func (a *Audit) Verify(w http.ResponseWriter, r *http.Request) {
 	if err := a.db.Pool().QueryRow(r.Context(), `
 SELECT COUNT(*)::int, COALESCE((SELECT chain_hash FROM audit_events ORDER BY id DESC LIMIT 1), '')
   FROM audit_events`).Scan(&eventCount, &lastHash); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if chainBreak, err := auditlog.VerifyChain(r.Context(), a.db.Pool()); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	} else if chainBreak != nil {
 		writeJSON(w, http.StatusConflict, map[string]any{

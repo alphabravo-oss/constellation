@@ -25,8 +25,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
 	"github.com/alphabravocompany/constellation/internal/astronomer"
 	"github.com/alphabravocompany/constellation/internal/auth"
+	colcrypto "github.com/alphabravocompany/constellation/internal/crypto"
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
@@ -46,7 +48,6 @@ import (
 	"github.com/alphabravocompany/constellation/pkg/livegraph"
 	"github.com/alphabravocompany/constellation/pkg/notify"
 	"github.com/alphabravocompany/constellation/pkg/rbac"
-	regsecrets "github.com/alphabravocompany/constellation/pkg/registry/secrets"
 	"github.com/alphabravocompany/constellation/pkg/version"
 )
 
@@ -197,7 +198,7 @@ func New(ctx context.Context, cfg Config, tel *telemetry.Telemetry, database *db
 	// and (H2) the IdP secret fields in auth_servers.config. nil when no KEK is available, in which
 	// case those paths fall back to their pre-seal behavior rather than failing startup.
 	var sealer auth.Sealer
-	if cipher, cerr := regsecrets.Default(ctx, database.Pool(), tel.Logger); cerr != nil {
+	if cipher, cerr := colcrypto.Default(); cerr != nil {
 		tel.Logger.Warn("install KEK cipher unavailable; per-joint mTLS + IdP secret sealing disabled", slog.String("err", cerr.Error()))
 	} else {
 		sealer = cipher
@@ -557,7 +558,7 @@ func (s *Server) buildRouter() chi.Router {
 	// below still yields a 500 with a request id, then request id + trace span, then the
 	// access log, then the cross-cutting guards, then authn (authMiddleware) and authz
 	// (requireVerb) at the route groups.
-	r.Use(chimw.Recoverer)
+	r.Use(apiutil.Recoverer)
 	r.Use(chimw.RequestID)
 	r.Use(correlationID)
 	// Resolve the client only through the trusted suffix of X-Forwarded-For;
@@ -584,6 +585,10 @@ func (s *Server) buildRouter() chi.Router {
 		corsOpts.AllowOriginFunc = func(*http.Request, string) bool { return false }
 	}
 	r.Use(cors.Handler(corsOpts))
+	r.NotFound(apiutil.NotFoundHandler)
+	r.MethodNotAllowed(apiutil.MethodNotAllowedHandler)
+	r.NotFound(apiutil.NotFoundHandler)
+	r.MethodNotAllowed(apiutil.MethodNotAllowedHandler)
 
 	r.Get("/healthz", s.handleHealth)
 	r.Get("/readyz", s.handleReady)
@@ -2500,8 +2505,10 @@ func bearerToken(r *http.Request) string {
 	return strings.TrimPrefix(h, "Bearer ")
 }
 
+// writeError is the legacy status-first helper; apiutil keeps the body shape
+// and scrubs 5xx messages. New code returns typed errors to apiutil.WriteError.
 func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
+	apiutil.WriteStatus(context.Background(), w, status, msg)
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {

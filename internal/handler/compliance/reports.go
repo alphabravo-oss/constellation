@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
@@ -93,7 +95,7 @@ func writeReport(ctx context.Context, w http.ResponseWriter, html []byte, asPDF 
 			return
 		}
 		if !errors.Is(err, report.ErrPDFToolMissing) {
-			http.Error(w, "Report PDF could not be rendered", 500)
+			apiutil.WriteStatus(ctx, w, 500, "Report PDF could not be rendered")
 			return
 		}
 		w.Header().Set("X-Constellation-PDF-Fallback", "browser-print")
@@ -141,12 +143,12 @@ func reportChecks(ctx context.Context, tx pgx.Tx, org uuid.UUID, cluster *uuid.U
 func (h *Reports) serveCompliance(w http.ResponseWriter, r *http.Request, asPDF bool) {
 	sub, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		http.Error(w, "auth required", http.StatusUnauthorized)
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "auth required")
 		return
 	}
 	q, cluster, err := reportQuery(r)
 	if err != nil {
-		http.Error(w, err.Error(), 400)
+		apiutil.WriteStatus(r.Context(), w, 400, err.Error())
 		return
 	}
 	framework := strings.TrimSpace(q.Get("framework"))
@@ -167,32 +169,32 @@ func (h *Reports) serveCompliance(w http.ResponseWriter, r *http.Request, asPDF 
 	}
 	tx, err := h.db.Pool().BeginTx(r.Context(), pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
-		http.Error(w, "Report source unavailable", 500)
+		apiutil.WriteStatus(r.Context(), w, 500, "Report source unavailable")
 		return
 	}
 	defer tx.Rollback(r.Context())
 	orgName, scope, err := reportScope(r.Context(), tx, sub.OrgID, cluster)
 	if errors.Is(err, pgx.ErrNoRows) {
-		http.Error(w, "Report scope not found", 404)
+		apiutil.WriteStatus(r.Context(), w, 404, "Report scope not found")
 		return
 	}
 	if err != nil {
-		http.Error(w, "Report scope unavailable", 500)
+		apiutil.WriteStatus(r.Context(), w, 500, "Report scope unavailable")
 		return
 	}
 	checks, summary, truncated, err := reportChecks(r.Context(), tx, sub.OrgID, cluster, framework)
 	if err != nil {
-		http.Error(w, "Compliance report evidence unavailable", 500)
+		apiutil.WriteStatus(r.Context(), w, 500, "Compliance report evidence unavailable")
 		return
 	}
 	data := report.ComplianceData{OrgName: orgName, Framework: framework, FrameworkName: name, GeneratedAt: time.Now().UTC(), Checks: checks, Summary: summary, ClusterName: scope, SourceLabel: "Current retained compliance check rows with effective exemptions; " + scope + "; graded rate excludes manual/exempted/not-applicable", SourceTotal: summary.Total, SourceReturned: len(checks), SourceTruncated: truncated}
 	html, err := report.ComplianceHTML(data)
 	if err != nil {
-		http.Error(w, "Report could not be rendered", 500)
+		apiutil.WriteStatus(r.Context(), w, 500, "Report could not be rendered")
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		http.Error(w, "Report source unavailable", 500)
+		apiutil.WriteStatus(r.Context(), w, 500, "Report source unavailable")
 		return
 	}
 	w.Header().Set("X-Report-Limit", fmt.Sprint(inventorylist.ExportLimit))
@@ -204,44 +206,44 @@ func (h *Reports) serveCompliance(w http.ResponseWriter, r *http.Request, asPDF 
 func (h *Reports) serveExecutive(w http.ResponseWriter, r *http.Request, asPDF bool) {
 	sub, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		http.Error(w, "auth required", http.StatusUnauthorized)
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "auth required")
 		return
 	}
 	_, cluster, err := reportQuery(r)
 	if err != nil {
-		http.Error(w, err.Error(), 400)
+		apiutil.WriteStatus(r.Context(), w, 400, err.Error())
 		return
 	}
 	tx, err := h.db.Pool().BeginTx(r.Context(), pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
-		http.Error(w, "Report source unavailable", 500)
+		apiutil.WriteStatus(r.Context(), w, 500, "Report source unavailable")
 		return
 	}
 	defer tx.Rollback(r.Context())
 	orgName, scope, err := reportScope(r.Context(), tx, sub.OrgID, cluster)
 	if errors.Is(err, pgx.ErrNoRows) {
-		http.Error(w, "Report scope not found", 404)
+		apiutil.WriteStatus(r.Context(), w, 404, "Report scope not found")
 		return
 	}
 	if err != nil {
-		http.Error(w, "Report scope unavailable", 500)
+		apiutil.WriteStatus(r.Context(), w, 500, "Report scope unavailable")
 		return
 	}
 	data := report.ExecutiveData{OrgName: orgName, GeneratedAt: time.Now().UTC(), ScanWindow: "All retained finding instances", SourceLabel: scope + "; counts include all retained lifecycles and kinds, using the actual finding source cluster; top workload rows are the highest 10 reported risks", MTTRSource: "Organization-wide materialized metrics observed in the last 90 days; this source has no cluster dimension and is not the finding-count time window"}
 	if err := tx.QueryRow(r.Context(), `SELECT count(*),count(*) FILTER(WHERE severity='critical'),count(*) FILTER(WHERE severity='high'),count(*) FILTER(WHERE lifecycle='suppressed'),count(*) FILTER(WHERE lifecycle='accepted') FROM findings f WHERE org_id=$1 AND ($2::uuid IS NULL OR cluster_id=$2) AND (cluster_id IS NULL OR EXISTS(SELECT 1 FROM clusters WHERE id=f.cluster_id AND org_id=$1))`, sub.OrgID, cluster).Scan(&data.TotalFindings, &data.CriticalFindings, &data.HighFindings, &data.SuppressedCount, &data.AcceptedCount); err != nil {
-		http.Error(w, "Finding report evidence unavailable", 500)
+		apiutil.WriteStatus(r.Context(), w, 500, "Finding report evidence unavailable")
 		return
 	}
 	rows, err := tx.Query(r.Context(), `SELECT d.name,COALESCE(d.cluster_id::text,''),d.namespace,`+platformrole.SQL("d.namespace", "d.labels")+`,d.risk_score,d.finding_count FROM deployments d WHERE d.org_id=$1 AND ($2::uuid IS NULL OR d.cluster_id=$2) AND (d.cluster_id IS NULL OR EXISTS(SELECT 1 FROM clusters WHERE id=d.cluster_id AND org_id=$1)) ORDER BY d.risk_score DESC,d.id ASC LIMIT 10`, sub.OrgID, cluster)
 	if err != nil {
-		http.Error(w, "Workload report evidence unavailable", 500)
+		apiutil.WriteStatus(r.Context(), w, 500, "Workload report evidence unavailable")
 		return
 	}
 	for rows.Next() {
 		var item report.AssetRow
 		if err := rows.Scan(&item.Name, &item.ClusterID, &item.Namespace, &item.PlatformRole, &item.RiskScore, &item.Findings); err != nil {
 			rows.Close()
-			http.Error(w, "Workload report evidence unavailable", 500)
+			apiutil.WriteStatus(r.Context(), w, 500, "Workload report evidence unavailable")
 			return
 		}
 		data.TopAssets = append(data.TopAssets, item)
@@ -249,19 +251,19 @@ func (h *Reports) serveExecutive(w http.ResponseWriter, r *http.Request, asPDF b
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
-		http.Error(w, "Workload report evidence unavailable", 500)
+		apiutil.WriteStatus(r.Context(), w, 500, "Workload report evidence unavailable")
 		return
 	}
 	mttr, err := tx.Query(r.Context(), `SELECT severity,COALESCE(sum(mttr_seconds*resolved_count)/NULLIF(sum(resolved_count),0),0)/86400.0,COALESCE(sum(resolved_count),0) FROM metrics_daily WHERE org_id=$1 AND day>=CURRENT_DATE-INTERVAL '90 days' GROUP BY severity ORDER BY severity`, sub.OrgID)
 	if err != nil {
-		http.Error(w, "MTTR report source unavailable", 500)
+		apiutil.WriteStatus(r.Context(), w, 500, "MTTR report source unavailable")
 		return
 	}
 	for mttr.Next() {
 		var item report.MTTRRow
 		if err := mttr.Scan(&item.Severity, &item.Days, &item.Resolved); err != nil {
 			mttr.Close()
-			http.Error(w, "MTTR report source unavailable", 500)
+			apiutil.WriteStatus(r.Context(), w, 500, "MTTR report source unavailable")
 			return
 		}
 		data.MTTRBySeverity = append(data.MTTRBySeverity, item)
@@ -269,19 +271,19 @@ func (h *Reports) serveExecutive(w http.ResponseWriter, r *http.Request, asPDF b
 	err = mttr.Err()
 	mttr.Close()
 	if err != nil {
-		http.Error(w, "MTTR report source unavailable", 500)
+		apiutil.WriteStatus(r.Context(), w, 500, "MTTR report source unavailable")
 		return
 	}
 	fw, err := tx.Query(r.Context(), `WITH effective(`+complianceInventoryColumns+`) AS (`+complianceEffectiveRowsSQL+`) SELECT framework,count(*),count(*) FILTER(WHERE effective_status='pass'),count(*) FILTER(WHERE effective_status='fail'),count(*) FILTER(WHERE effective_status NOT IN('pass','fail','exempted','not_applicable')),count(*) FILTER(WHERE effective_status='exempted'),count(*) FILTER(WHERE effective_status='not_applicable') FROM effective GROUP BY framework ORDER BY framework`, sub.OrgID, cluster)
 	if err != nil {
-		http.Error(w, "Compliance report source unavailable", 500)
+		apiutil.WriteStatus(r.Context(), w, 500, "Compliance report source unavailable")
 		return
 	}
 	for fw.Next() {
 		var item report.FrameworkSummaryNamed
 		if err := fw.Scan(&item.Name, &item.Total, &item.Pass, &item.Fail, &item.Manual, &item.Exempted, &item.NotApplicable); err != nil {
 			fw.Close()
-			http.Error(w, "Compliance report source unavailable", 500)
+			apiutil.WriteStatus(r.Context(), w, 500, "Compliance report source unavailable")
 			return
 		}
 		data.FrameworkPass = append(data.FrameworkPass, item)
@@ -289,16 +291,16 @@ func (h *Reports) serveExecutive(w http.ResponseWriter, r *http.Request, asPDF b
 	err = fw.Err()
 	fw.Close()
 	if err != nil {
-		http.Error(w, "Compliance report source unavailable", 500)
+		apiutil.WriteStatus(r.Context(), w, 500, "Compliance report source unavailable")
 		return
 	}
 	html, err := report.ExecutiveHTML(data)
 	if err != nil {
-		http.Error(w, "Report could not be rendered", 500)
+		apiutil.WriteStatus(r.Context(), w, 500, "Report could not be rendered")
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		http.Error(w, "Report source unavailable", 500)
+		apiutil.WriteStatus(r.Context(), w, 500, "Report source unavailable")
 		return
 	}
 	reportScopeReceipt(w, sub.OrgID, cluster)

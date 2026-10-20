@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
@@ -213,7 +215,7 @@ func (c *CVE) AffectedInventoryCSV(w http.ResponseWriter, r *http.Request) {
 	c.readAffectedInventory(w, r, true)
 }
 func (c *CVE) readAffectedInventory(w http.ResponseWriter, r *http.Request, export bool) {
-	fail := func(status int, message string) { httpx.WriteJSON(w, status, map[string]string{"error": message}) }
+	fail := func(status int, message string) { apiutil.WriteStatus(r.Context(), w, status, message) }
 	subject, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
 		fail(401, "subject required")

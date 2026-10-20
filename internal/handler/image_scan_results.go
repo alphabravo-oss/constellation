@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 
 	"github.com/go-chi/chi/v5"
@@ -222,17 +224,17 @@ func imageInventoryDefinition(r *http.Request) (inventorylist.Definition, invent
 
 func (h *ImageScanResults) List(w http.ResponseWriter, r *http.Request) {
 	if _, ok := SubjectFrom(r.Context()); !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "subject required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
 		return
 	}
 	d, o, err := imageInventoryDefinition(r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	items, meta, err := inventorylist.Read(r.Context(), h.db.Pool(), d, o, func(row inventorylist.Row) (imageScanResultDTO, error) { return scanImageResultRow(row) })
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"image_scan_results": items, "limit": o.Limit, "offset": o.Offset, "sort": o.Sort, "order": o.Order, "total": meta.Total, "has_more": meta.HasMore, "summary": meta.Summary})
@@ -240,12 +242,12 @@ func (h *ImageScanResults) List(w http.ResponseWriter, r *http.Request) {
 
 func (h *ImageScanResults) ExportCSV(w http.ResponseWriter, r *http.Request) {
 	if _, ok := SubjectFrom(r.Context()); !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "subject required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
 		return
 	}
 	d, o, err := imageInventoryDefinition(r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	body, meta, err := inventorylist.CSV(r.Context(), h.db.Pool(), d, o, func(row inventorylist.Row) (imageScanResultDTO, error) { return scanImageResultRow(row) }, []string{"ID", "Image", "Digest", "Source", "Source reference", "Profile", "Packages", "Findings", "Critical", "High", "Medium", "Low", "Info", "Risk", "Workloads", "Last scanned", "Engine outcomes"}, func(item imageScanResultDTO) []string {
@@ -253,7 +255,7 @@ func (h *ImageScanResults) ExportCSV(w http.ResponseWriter, r *http.Request) {
 		return []string{item.ID.String(), item.ImageRef, item.ImageDigest, item.SourceType, item.SourceRef, item.ScannerProfile, strconv.Itoa(item.PackageCount), strconv.Itoa(item.FindingCount), strconv.Itoa(item.CriticalCount), strconv.Itoa(item.HighCount), strconv.Itoa(item.MediumCount), strconv.Itoa(item.LowCount), strconv.Itoa(item.InfoCount), strconv.Itoa(item.MaxRiskScore), strconv.Itoa(item.ImpactedCount), item.LastScannedAt.Format(time.RFC3339), string(engines)}
 	})
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	inventorylist.WriteCSV(w, "constellation-image-scan-results.csv", body, meta)
@@ -263,23 +265,23 @@ func (h *ImageScanResults) Packages(w http.ResponseWriter, r *http.Request) {
 	subj, _ := SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	artifact, err := h.getArtifact(r, subj.OrgID, id, "package-inventory", "constellation-package-inventory-v1")
 	if errors.Is(err, pgx.ErrNoRows) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "package inventory not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "package inventory not found")
 		return
 	}
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	var inventory struct {
 		Packages []scanner.Package `json:"packages"`
 	}
 	if err := json.Unmarshal(artifact.Payload, &inventory); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "package inventory decode: " + err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "package inventory decode: "+err.Error())
 		return
 	}
 	layers := []scanner.ImageLayer{}
@@ -288,12 +290,12 @@ func (h *ImageScanResults) Packages(w http.ResponseWriter, r *http.Request) {
 			Layers []scanner.ImageLayer `json:"layers"`
 		}
 		if err := json.Unmarshal(layerArtifact.Payload, &layerPayload); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "layer metadata decode: " + err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "layer metadata decode: "+err.Error())
 			return
 		}
 		layers = layerPayload.Layers
 	} else if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	packageLayers, layerPackageCount, unattributedPackageCount := packageLayerSummary(inventory.Packages, layers)
@@ -314,16 +316,16 @@ func (h *ImageScanResults) Secrets(w http.ResponseWriter, r *http.Request) {
 	subj, _ := SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	artifact, err := h.getArtifact(r, subj.OrgID, id, "secret-scan", "constellation-image-secrets-v1")
 	if errors.Is(err, pgx.ErrNoRows) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "secret report not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "secret report not found")
 		return
 	}
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -340,16 +342,16 @@ func (h *ImageScanResults) Layers(w http.ResponseWriter, r *http.Request) {
 	subj, _ := SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	artifact, err := h.getArtifact(r, subj.OrgID, id, "layer-metadata", "constellation-image-layers-v1")
 	if errors.Is(err, pgx.ErrNoRows) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "layer metadata not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "layer metadata not found")
 		return
 	}
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -366,16 +368,16 @@ func (h *ImageScanResults) FileRisks(w http.ResponseWriter, r *http.Request) {
 	subj, _ := SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	artifact, err := h.getArtifact(r, subj.OrgID, id, "file-risk", "constellation-image-file-risk-v1")
 	if errors.Is(err, pgx.ErrNoRows) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "file risk report not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "file risk report not found")
 		return
 	}
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -394,16 +396,16 @@ func (h *ImageScanResults) ConfigChecks(w http.ResponseWriter, r *http.Request) 
 	subj, _ := SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	artifact, err := h.getArtifact(r, subj.OrgID, id, "config-checks", "constellation-image-config-checks-v1")
 	if errors.Is(err, pgx.ErrNoRows) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "config-check report not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "config-check report not found")
 		return
 	}
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -420,16 +422,16 @@ func (h *ImageScanResults) Signature(w http.ResponseWriter, r *http.Request) {
 	subj, _ := SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	artifact, err := h.getArtifact(r, subj.OrgID, id, "signature-scan", "constellation-image-signature-v1")
 	if errors.Is(err, pgx.ErrNoRows) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "signature report not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "signature report not found")
 		return
 	}
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -453,22 +455,22 @@ func (h *ImageScanResults) Get(w http.ResponseWriter, r *http.Request) {
 	subj, _ := SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	result, err := h.getResult(r, subj.OrgID, id)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "not found")
 		return
 	}
 	findings, err := h.getFindings(r, subj.OrgID, id)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	impacts, err := h.getImpactedWorkloads(r, subj.OrgID, result)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	result.ImpactedCount = len(impacts)
@@ -485,17 +487,17 @@ func (h *ImageScanResults) FindingsCSV(w http.ResponseWriter, r *http.Request) {
 	subj, _ := SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	result, err := h.getResult(r, subj.OrgID, id)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "not found")
 		return
 	}
 	findings, err := h.getFindings(r, subj.OrgID, id)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -566,16 +568,16 @@ func (h *ImageScanResults) writeSBOMArtifact(w http.ResponseWriter, r *http.Requ
 	subj, _ := SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	artifact, err := h.getArtifact(r, subj.OrgID, id, "sbom", format)
 	if errors.Is(err, pgx.ErrNoRows) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "sbom not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "sbom not found")
 		return
 	}
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpx.WriteRawSBOM(w, artifact.Payload, filename)
@@ -700,17 +702,17 @@ func (h *ImageScanResults) AffectedWorkloads(w http.ResponseWriter, r *http.Requ
 	subj, _ := SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	result, err := h.getResult(r, subj.OrgID, id)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "not found")
 		return
 	}
 	impacts, err := h.getImpactedWorkloads(r, subj.OrgID, result)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

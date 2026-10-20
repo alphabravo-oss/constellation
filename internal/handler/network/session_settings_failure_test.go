@@ -8,7 +8,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -156,11 +159,12 @@ func TestIngestSessionsSettingsReadFailurePreservesCommittedSnapshotAndKills(t *
 	if response.Code != http.StatusInternalServerError {
 		t.Fatalf("settings failure status=%d body=%s", response.Code, response.Body.String())
 	}
-	var failure map[string]any
+	var failure apiutil.Body
 	if err := json.Unmarshal(response.Body.Bytes(), &failure); err != nil {
 		t.Fatal(err)
 	}
-	if len(failure) != 1 || failure["error"] != "read threat settings failed" {
+	// A 500 carries only the scrubbed message; the cause is logged, never sent.
+	if failure.Error.Code != apiutil.CodeInternal || failure.Error.Message != apiutil.InternalMessage || strings.Contains(response.Body.String(), "threat settings") {
 		t.Fatalf("failure response exposes false success or database internals: %s", response.Body.String())
 	}
 	f.assertStored(t, 1)

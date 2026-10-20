@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 
 	"github.com/alphabravocompany/constellation/internal/handler"
@@ -170,17 +172,17 @@ func serverlessInventoryDefinition(r *http.Request) (inventorylist.Definition, i
 
 func (h *ServerlessInventoryHandler) List(w http.ResponseWriter, r *http.Request) {
 	if _, ok := authctx.SubjectFrom(r.Context()); !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "subject required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
 		return
 	}
 	d, o, err := serverlessInventoryDefinition(r)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	items, meta, err := inventorylist.Read(r.Context(), h.db.Pool(), d, o, func(row inventorylist.Row) (serverlessFunctionDTO, error) { return scanServerlessFunctionRow(row) })
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"serverless_functions": items, "limit": o.Limit, "offset": o.Offset, "sort": o.Sort, "order": o.Order, "total": meta.Total, "has_more": meta.HasMore, "summary": meta.Summary})
@@ -188,12 +190,12 @@ func (h *ServerlessInventoryHandler) List(w http.ResponseWriter, r *http.Request
 
 func (h *ServerlessInventoryHandler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 	if _, ok := authctx.SubjectFrom(r.Context()); !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "subject required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
 		return
 	}
 	d, o, err := serverlessInventoryDefinition(r)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	body, meta, err := inventorylist.CSV(r.Context(), h.db.Pool(), d, o, func(row inventorylist.Row) (serverlessFunctionDTO, error) { return scanServerlessFunctionRow(row) }, []string{"ID", "Function", "Reference", "Provider", "Account", "Region", "Runtime", "Packages", "Open findings", "Critical", "High", "Role posture", "Permission status", "Job status", "Evidence observed", "Last seen"}, func(item serverlessFunctionDTO) []string {
@@ -204,7 +206,7 @@ func (h *ServerlessInventoryHandler) ExportCSV(w http.ResponseWriter, r *http.Re
 		return []string{item.ID.String(), item.FunctionName, item.FunctionRef, item.Provider, item.AccountID, item.Region, item.Runtime, strconv.Itoa(item.PackageCount), strconv.Itoa(item.OpenFindings), strconv.Itoa(item.CriticalFindings), strconv.Itoa(item.HighFindings), item.PermissionLevel, item.PermissionStatus, item.LatestJobStatus, observed, item.LastSeenAt.Format(time.RFC3339)}
 	})
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	inventorylist.WriteCSV(w, "constellation-serverless-functions.csv", body, meta)

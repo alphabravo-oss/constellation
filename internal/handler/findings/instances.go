@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/alphabravocompany/constellation/pkg/notify"
 
 	"github.com/go-chi/chi/v5"
@@ -31,10 +33,10 @@ func (e *instanceError) Error() string { return e.message }
 func writeInstanceError(w http.ResponseWriter, err error) {
 	var e *instanceError
 	if errors.As(err, &e) {
-		httpx.WriteJSON(w, e.status, map[string]string{"error": e.message, "code": e.code})
+		apiutil.WriteStatusCode(context.Background(), w, e.status, e.code, e.message)
 		return
 	}
-	httpx.WriteJSON(w, 500, map[string]string{"error": "finding instance unavailable"})
+	apiutil.WriteStatus(context.Background(), w, 500, "finding instance unavailable")
 }
 
 type instanceSelector struct {

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -75,41 +77,41 @@ const maxSessionBatchSize = 5000
 func (h *Network) IngestSessions(w http.ResponseWriter, r *http.Request) {
 	tok, ok := handler.RuntimeAgentTokenFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "runtime-agent token required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "runtime-agent token required")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 8<<20)
 	var rows []sessionIngestRow
 	if err := json.NewDecoder(r.Body).Decode(&rows); err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body: " + err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid body: "+err.Error())
 		return
 	}
 	if len(rows) > maxSessionBatchSize {
-		httpx.WriteJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": fmt.Sprintf("batch > %d", maxSessionBatchSize)})
+		apiutil.WriteStatus(r.Context(), w, http.StatusRequestEntityTooLarge, fmt.Sprintf("batch > %d", maxSessionBatchSize))
 		return
 	}
 	boundCluster, err := handler.ResolveAgentClusterID(r.Context(), h.db, tok)
 	if err != nil {
 		if errors.Is(err, handler.ErrAgentClusterScope) {
-			httpx.WriteJSON(w, http.StatusForbidden, map[string]string{"error": "agent token cluster scope mismatch"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusForbidden, "agent token cluster scope mismatch")
 			return
 		}
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "resolve cluster failed"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "resolve cluster failed")
 		return
 	}
 	if boundCluster == nil {
-		httpx.WriteJSON(w, http.StatusForbidden, map[string]string{"error": "agent token cluster scope is ambiguous"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusForbidden, "agent token cluster scope is ambiguous")
 		return
 	}
 	clusterID := *boundCluster
 	for _, requested := range r.URL.Query()["cluster_id"] {
 		requestedID, err := uuid.Parse(strings.TrimSpace(requested))
 		if err != nil {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster_id"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid cluster_id")
 			return
 		}
 		if requestedID != clusterID {
-			httpx.WriteJSON(w, http.StatusForbidden, map[string]string{"error": "agent token cluster scope mismatch"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusForbidden, "agent token cluster scope mismatch")
 			return
 		}
 	}
@@ -120,22 +122,22 @@ func (h *Network) IngestSessions(w http.ResponseWriter, r *http.Request) {
 	// A snapshot replaces one node's rows; validate the entire batch before deleting.
 	node := rows[0].Node
 	if strings.TrimSpace(node) == "" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "node required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "node required")
 		return
 	}
 	for _, row := range rows {
 		if row.Node != node {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "snapshot contains multiple nodes"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "snapshot contains multiple nodes")
 			return
 		}
 		if row.ClusterID != "" {
 			rowClusterID, err := uuid.Parse(row.ClusterID)
 			if err != nil {
-				httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster_id"})
+				apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid cluster_id")
 				return
 			}
 			if rowClusterID != clusterID {
-				httpx.WriteJSON(w, http.StatusForbidden, map[string]string{"error": "agent token cluster scope mismatch"})
+				apiutil.WriteStatus(r.Context(), w, http.StatusForbidden, "agent token cluster scope mismatch")
 				return
 			}
 		}
@@ -143,7 +145,7 @@ func (h *Network) IngestSessions(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.db.Pool().Begin(r.Context())
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
@@ -152,7 +154,7 @@ func (h *Network) IngestSessions(w http.ResponseWriter, r *http.Request) {
 	if _, err := tx.Exec(r.Context(),
 		`DELETE FROM network_sessions WHERE org_id = $1 AND cluster_id = $2 AND node = $3`,
 		tok.OrgID, clusterID, node); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	const insertSQL = `
@@ -183,7 +185,7 @@ ON CONFLICT (org_id, cluster_id, node, id) DO UPDATE SET
 		accepted++
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	h.writeSessionIngestResponse(w, r, tok.OrgID, clusterID, node, accepted)
@@ -198,7 +200,7 @@ func (h *Network) writeSessionIngestResponse(w http.ResponseWriter, r *http.Requ
 		`SELECT weak_tls_enabled FROM dpi_threat_settings WHERE org_id = $1 AND cluster_id = $2`,
 		orgID, clusterID).Scan(&weakTLS)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "read threat settings failed"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "read threat settings failed")
 		return
 	}
 	// Deliver + consume pending session-kill requests for this node (NV session-kill).
@@ -253,12 +255,12 @@ func (h *Network) KillSession(w http.ResponseWriter, r *http.Request) {
 	subj, _ := authctx.SubjectFrom(r.Context())
 	clusterID, err := h.resolveNetworkCluster(r, subj.OrgID)
 	if err != nil || clusterID == nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "cluster_id required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "cluster_id required")
 		return
 	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid session id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid session id")
 		return
 	}
 	node := strings.TrimSpace(r.URL.Query().Get("node"))
@@ -269,7 +271,7 @@ INSERT INTO network_session_kills (org_id, cluster_id, node, session_id, request
 VALUES ($1,$2,$3,$4,$5,$6)
 ON CONFLICT (org_id, cluster_id, node, session_id) DO UPDATE SET requested_by = EXCLUDED.requested_by, requested_at = EXCLUDED.requested_at`,
 		subj.OrgID, *clusterID, node, id, subj.UserID, requestedAt); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	response := map[string]any{

@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/alphabravocompany/constellation/internal/auth"
 )
 
@@ -108,15 +110,15 @@ func (a *Auth) prepareSAMLACS(w http.ResponseWriter, r *http.Request, browser bo
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "SAML response too large"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusRequestEntityTooLarge, "SAML response too large")
 		} else {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid SAML form"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid SAML form")
 		}
 		return false
 	}
 	r.Body = io.NopCloser(bytes.NewReader(body))
 	if err := r.ParseForm(); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid SAML form"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid SAML form")
 		return false
 	}
 	if !browser {
@@ -124,7 +126,7 @@ func (a *Auth) prepareSAMLACS(w http.ResponseWriter, r *http.Request, browser bo
 	}
 	assertions := r.PostForm["SAMLResponse"]
 	if r.Method != http.MethodPost || len(assertions) != 1 || assertions[0] == "" || r.Form.Has("SAMLart") {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid SAML form"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid SAML form")
 		return false
 	}
 	var nonce string
@@ -140,7 +142,7 @@ func (a *Auth) prepareSAMLACS(w http.ResponseWriter, r *http.Request, browser bo
 		if a.auditLog != nil {
 			a.auditLoginFailure(r.Context(), r, nil, nil, "", "saml_browser_binding_failed")
 		}
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "invalid SAML browser state; restart login"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusForbidden, "invalid SAML browser state; restart login")
 		return false
 	}
 	r.Header.Set(auth.BrowserHeader, "browser")

@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/alphabravocompany/constellation/internal/handler/platformrole"
 
 	"github.com/go-chi/chi/v5"
@@ -49,16 +51,16 @@ type assetDTO struct {
 func (a *Assets) Get(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	subj, ok := SubjectFrom(r.Context())
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 	fail := func() {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "asset evidence unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "asset evidence unavailable")
 	}
 	var d assetDTO
 	var labels []byte
@@ -68,7 +70,7 @@ func (a *Assets) Get(w http.ResponseWriter, r *http.Request) {
 		Scan(&d.ID, &d.ClusterID, &d.Kind, &d.Name, &d.DisplayName, &d.Digest, &labels, &d.AIWorkload,
 			&d.Criticality, &d.FirstSeenAt, &d.LastSeenAt, &d.PlatformRole)
 	if errors.Is(err, pgx.ErrNoRows) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "not found")
 		return
 	}
 	if err != nil {

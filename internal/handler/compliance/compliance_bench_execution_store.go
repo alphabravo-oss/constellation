@@ -8,10 +8,11 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/alphabravocompany/constellation/internal/handler/httpx"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 	compliancepkg "github.com/alphabravocompany/constellation/pkg/compliance"
 )
@@ -72,7 +73,7 @@ func strictBenchBody(w http.ResponseWriter, r *http.Request, target any, maxByte
 }
 
 func benchReplyError(w http.ResponseWriter, status int, code, message string) {
-	httpx.WriteJSON(w, status, map[string]string{"error": message, "code": code})
+	apiutil.WriteStatusCode(context.Background(), w, status, code, message)
 }
 
 func benchUUID(raw string) (uuid.UUID, bool) {

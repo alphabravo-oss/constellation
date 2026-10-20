@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/google/uuid"
 
 	"github.com/alphabravocompany/constellation/internal/handler"
@@ -46,7 +48,7 @@ func (h *Network) Exposure(w http.ResponseWriter, r *http.Request) {
 	}
 	clusterID, err := h.resolveNetworkCluster(r, subj.OrgID)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -146,12 +148,12 @@ SELECT observed.workload, observed.external_peers, observed.protocols,
 
 	ingress, err := query("ingress")
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	egress, err := query("egress")
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ingress": ingress, "egress": egress})

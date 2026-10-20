@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/google/uuid"
 
 	"github.com/alphabravocompany/constellation/internal/db"
@@ -142,14 +144,14 @@ type pendingAlert struct {
 func (h *Ingest) Bulk(w http.ResponseWriter, r *http.Request) {
 	tok, ok := handler.RuntimeAgentTokenFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "cluster token required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "cluster token required")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 16<<20) // 16 MiB — audit events can carry request objects
 
 	items, err := decodeAuditItems(r.Body)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body: " + err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid body: "+err.Error())
 		return
 	}
 	if len(items) == 0 {
@@ -157,28 +159,28 @@ func (h *Ingest) Bulk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(items) > maxAuditBatchSize {
-		httpx.WriteJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": fmt.Sprintf("batch > %d", maxAuditBatchSize)})
+		apiutil.WriteStatus(r.Context(), w, http.StatusRequestEntityTooLarge, fmt.Sprintf("batch > %d", maxAuditBatchSize))
 		return
 	}
 
 	boundCluster, err := handler.ResolveAgentClusterID(r.Context(), h.db, tok)
 	if err != nil {
 		if errors.Is(err, handler.ErrAgentClusterScope) {
-			httpx.WriteJSON(w, http.StatusForbidden, map[string]string{"error": "agent token cluster scope mismatch"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusForbidden, "agent token cluster scope mismatch")
 			return
 		}
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "resolve cluster failed"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "resolve cluster failed")
 		return
 	}
 	if boundCluster == nil {
-		httpx.WriteJSON(w, http.StatusForbidden, map[string]string{"error": "agent token cluster scope is ambiguous"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusForbidden, "agent token cluster scope is ambiguous")
 		return
 	}
 	cluster := *boundCluster
 
 	tx, err := h.db.Pool().Begin(r.Context())
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
@@ -232,7 +234,7 @@ VALUES ($1,$2, NULLIF($3,''), NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), NULLI
 			reported.UTC(),
 			time.Now().UTC(),
 		); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "insert: " + err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "insert: "+err.Error())
 			return
 		}
 		accepted++
@@ -250,7 +252,7 @@ VALUES ($1,$2, NULLIF($3,''), NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), NULLI
 	}
 
 	if err := tx.Commit(r.Context()); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "commit: " + err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "commit: "+err.Error())
 		return
 	}
 

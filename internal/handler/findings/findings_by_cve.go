@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
 )
@@ -20,14 +22,14 @@ import (
 func (f *Findings) ByCVE(w http.ResponseWriter, r *http.Request) {
 	subj, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "no subject"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "no subject")
 		return
 	}
 	values := r.URL.Query()
 	values.Set("kind", "vulnerability")
 	where, args, err := findingFilter(subj.OrgID, values, true, false)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if values.Get("id_scope") != "all" {
@@ -44,7 +46,7 @@ func (f *Findings) ByCVE(w http.ResponseWriter, r *http.Request) {
 	}
 	var total int
 	if err := f.db.Pool().QueryRow(r.Context(), "SELECT count(*) FROM (SELECT external_id FROM findings WHERE "+where+" GROUP BY external_id"+having+") matched", args...).Scan(&total); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	args = append(args, limit, offset)
@@ -78,7 +80,7 @@ SELECT external_id,
  ORDER BY max(risk_score) DESC, external_id
  LIMIT $`+strconv.Itoa(len(args)-1)+` OFFSET $`+strconv.Itoa(len(args)), args...)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()
@@ -111,7 +113,7 @@ SELECT external_id,
 		if err := rows.Scan(&c.CVE, &c.Severity, &c.RiskScore, &pkg, &fixed,
 			&c.Instances, &c.AffectedImages, &c.AffectedClusters, &c.Images, &lastSeen,
 			&cvss, &cvssVector, &kev, &hasFix); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		if cvss != nil {
@@ -136,7 +138,7 @@ SELECT external_id,
 		out = append(out, c)
 	}
 	if err := rows.Err(); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"cves": out, "limit": limit, "offset": offset, "total": total})

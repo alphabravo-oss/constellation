@@ -2391,7 +2391,7 @@ SELECT id, status, attempt_count, max_attempts, next_attempt_at
 			Action:     "scan-job.fail",
 			TargetKind: "scan-job",
 			TargetID:   id.String(),
-			After: map[string]any{
+			After: map[string]any{ // apiutil:allow — audit payload, not an HTTP error body
 				"error":           body.Error,
 				"status":          status,
 				"retryable":       body.Retryable,

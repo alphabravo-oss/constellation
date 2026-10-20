@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/google/uuid"
 
 	evidence "github.com/alphabravocompany/constellation/internal/complianceevidence"
@@ -64,17 +66,17 @@ func (c *Compliance) Summary(w http.ResponseWriter, r *http.Request) {
 	subj, _ := authctx.SubjectFrom(r.Context())
 	clusterArg, err := sqlx.ParseClusterIDParam(r)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if clusterArg != nil {
 		var owned bool
 		if err := c.db.Pool().QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM clusters WHERE id = $1 AND org_id = $2)`, clusterArg, subj.OrgID).Scan(&owned); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		if !owned {
-			httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "cluster not found")
 			return
 		}
 	}
@@ -90,7 +92,7 @@ SELECT framework,
  GROUP BY framework
  ORDER BY framework`, subj.OrgID, clusterArg)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()
@@ -99,7 +101,7 @@ SELECT framework,
 		var fw string
 		var pass, fail, manual, notApplicable, exempted, total int
 		if err := rows.Scan(&fw, &pass, &fail, &manual, &notApplicable, &exempted, &total); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		pct := 0
@@ -121,7 +123,7 @@ SELECT framework,
 		})
 	}
 	if err := rows.Err(); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"frameworks": out})
@@ -181,13 +183,13 @@ func (c *Compliance) Ingest(w http.ResponseWriter, r *http.Request) {
 func (c *Compliance) ingest(w http.ResponseWriter, r *http.Request, scope complianceWriteScope) {
 	benchmark := strings.TrimSpace(r.URL.Query().Get("benchmark"))
 	if !compliancepkg.ValidBenchmarkID(benchmark) {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid benchmark identifier"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid benchmark identifier")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 16<<20)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad body"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad body")
 		return
 	}
 	// profile selects the host-compliance parser. Default is kube-bench; the
@@ -201,18 +203,18 @@ func (c *Compliance) ingest(w http.ResponseWriter, r *http.Request, scope compli
 		// per-control CIS profile id; empty keeps the report-derived tagging.
 		checks, err = compliancepkg.IngestKubeBenchProfile(body, benchmark)
 	default:
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown profile"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "unknown profile")
 		return
 	}
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid benchmark report"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid benchmark report")
 		return
 	}
 	clusterArg := scope.clusterID
 	node := strings.TrimSpace(r.URL.Query().Get("node"))
 	tx, err := c.db.Pool().Begin(r.Context())
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "ingest unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "ingest unavailable")
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
@@ -221,18 +223,18 @@ func (c *Compliance) ingest(w http.ResponseWriter, r *http.Request, scope compli
 	}
 	failures, err := persistBenchChecks(r.Context(), tx, scope, node, checks)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "ingest unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "ingest unavailable")
 		return
 	}
 	if c.audit != nil {
 		_, _, err := c.audit.LogInTx(r.Context(), tx, audit.Event{OrgID: &scope.orgID, ActorID: scope.actorID, Action: "compliance.ingest", TargetKind: "compliance", After: map[string]any{"rows": len(checks), "cluster_id": scope.clusterID, "agent_token_id": scope.agentID}})
 		if err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "ingest unavailable"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "ingest unavailable")
 			return
 		}
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "ingest unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "ingest unavailable")
 		return
 	}
 	// Close the compliance->response loop: failed controls fire response rules,

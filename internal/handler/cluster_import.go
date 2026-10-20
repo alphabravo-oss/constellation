@@ -9,6 +9,8 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
@@ -44,12 +46,12 @@ func (h *ClusterImport) Manifest(w http.ResponseWriter, r *http.Request) {
 	filename := chi.URLParam(r, "filename")
 	token := strings.TrimSuffix(filename, ".yaml")
 	if token == "" || len(token) < 16 {
-		http.Error(w, "# invalid import token", http.StatusBadRequest)
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "# invalid import token")
 		return
 	}
 	clusterID, clusterName, ok := h.resolve(r.Context(), token)
 	if !ok {
-		http.Error(w, "# import token not found, expired, or revoked", http.StatusNotFound)
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "# import token not found, expired, or revoked")
 		return
 	}
 	manifest, err := renderImportManifest(importParams{
@@ -60,7 +62,7 @@ func (h *ClusterImport) Manifest(w http.ResponseWriter, r *http.Request) {
 		AgentImage:      agentImage(),
 	})
 	if err != nil {
-		http.Error(w, "# render error: "+err.Error(), http.StatusInternalServerError)
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "# render error: "+err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "application/yaml")

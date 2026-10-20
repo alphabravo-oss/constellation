@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/google/uuid"
 
 	"github.com/alphabravocompany/constellation/internal/db"
@@ -101,13 +103,13 @@ func (h *Enterprise) RuntimeOverview(w http.ResponseWriter, r *http.Request) {
 	out["workloads"] = []runtimeWorkloadEvidenceDTO{}
 	clusterArg, err := parseClusterIDParam(r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if h.db != nil {
 		if subj, ok := SubjectFrom(r.Context()); ok {
 			if err := h.attachRuntimeEvidence(r, out, subj.OrgID.String(), clusterArg); err != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 				return
 			}
 		}

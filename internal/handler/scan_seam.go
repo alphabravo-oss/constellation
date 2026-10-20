@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -31,7 +33,7 @@ import (
 // formerly lived in scanjobs.go (now relocated to the handler/scanning
 // sub-package); kept here so the rest of package handler still resolves it.
 func jsonError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
+	apiutil.WriteStatus(context.Background(), w, status, msg)
 }
 
 // scannerJobLeaseInterval is the worker lease window used by the scan-job queue

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/google/uuid"
 
 	"github.com/alphabravocompany/constellation/internal/db"
@@ -170,11 +172,11 @@ func TestJoinRemoteReturnsCategoricalFailureJSON(t *testing.T) {
 			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/federation/join-remote", strings.NewReader(`{"master_url":"https://127.0.0.1:8443/owned/`+remoteJoinDiagnosticCanary+`","token":"owned-token","cluster_id":"owned-cluster"}`))
 			response := httptest.NewRecorder()
 			NewFederation(&db.DB{}, nil).JoinRemote(response, request)
-			var value map[string]string
-			if response.Code != http.StatusBadGateway || json.Unmarshal(response.Body.Bytes(), &value) != nil {
+			var value apiutil.Body
+			if response.Code != http.StatusBadGateway || json.Unmarshal(response.Body.Bytes(), &value) != nil || value.Error.Code == "" {
 				t.Fatal("join error did not return structured 502")
 			}
-			if strings.Contains(value["error"], remoteJoinDiagnosticCanary) || !strings.Contains(value["error"], category) {
+			if strings.Contains(value.Error.Message, remoteJoinDiagnosticCanary) || !strings.Contains(value.Error.Message, category) {
 				t.Fatal("join API error disclosed diagnostics or lost its categorical operation")
 			}
 		})

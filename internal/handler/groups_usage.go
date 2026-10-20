@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -62,13 +64,13 @@ type groupUsageDTO struct {
 func (h *Groups) Usage(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	subj, _ := SubjectFrom(r.Context())
 	clusterArg, err := parseClusterIDParam(r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -81,7 +83,7 @@ SELECT name, members
    AND org_id = $2
    AND ($3::uuid IS NULL OR cluster_id IS NULL OR cluster_id = $3)`,
 		id, subj.OrgID, clusterArg).Scan(&name, &membersRaw); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "not found")
 		return
 	}
 	members := []string{}
@@ -91,31 +93,31 @@ SELECT name, members
 	refs := []groupUsageReferenceDTO{}
 	networkRefs, err := h.groupNetworkEdgeUsage(r, subj.OrgID, nil, name)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	refs = append(refs, networkRefs...)
 	dpiRefs, err := h.groupDPIBindingUsage(r, subj.OrgID, nil, id)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	refs = append(refs, dpiRefs...)
 	responseRefs, err := h.groupResponseRuleUsage(r, subj.OrgID, nil, id, name)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	refs = append(refs, responseRefs...)
 	admissionRefs, err := h.groupAdmissionRuleUsage(r.Context(), subj.OrgID, nil, id, name)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	refs = append(refs, admissionRefs...)
 	profileRefs, err := h.groupMemberProfileUsage(r, subj.OrgID, clusterArg, members)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	refs = append(refs, profileRefs...)

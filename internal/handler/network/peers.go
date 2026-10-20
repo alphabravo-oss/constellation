@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"strconv"
 	"strings"
 	"time"
@@ -47,24 +49,24 @@ func (h *Network) Peers(w http.ResponseWriter, r *http.Request) {
 	subj, _ := authctx.SubjectFrom(r.Context())
 	query, err := url.ParseQuery(r.URL.RawQuery)
 	if err != nil {
-		httpx.WriteJSON(w, 400, map[string]string{"error": "invalid query"})
+		apiutil.WriteStatus(r.Context(), w, 400, "invalid query")
 		return
 	}
 	for _, values := range query {
 		if len(values) != 1 {
-			httpx.WriteJSON(w, 400, map[string]string{"error": "duplicate query parameter"})
+			apiutil.WriteStatus(r.Context(), w, 400, "duplicate query parameter")
 			return
 		}
 	}
 	workload := strings.TrimSpace(query.Get("workload"))
 	if workload == "" {
-		httpx.WriteJSON(w, 400, map[string]string{"error": "workload required"})
+		apiutil.WriteStatus(r.Context(), w, 400, "workload required")
 		return
 	}
 	hide := false
 	if raw := query.Get("hide_platform"); raw != "" {
 		if raw != "true" && raw != "false" {
-			httpx.WriteJSON(w, 400, map[string]string{"error": "hide_platform must be true or false"})
+			apiutil.WriteStatus(r.Context(), w, 400, "hide_platform must be true or false")
 			return
 		}
 		hide = raw == "true"
@@ -75,7 +77,7 @@ func (h *Network) Peers(w http.ResponseWriter, r *http.Request) {
 	}
 	tx, err := h.db.Pool().BeginTx(r.Context(), pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
-		httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, 500, err.Error())
 		return
 	}
 	defer tx.Rollback(r.Context())
@@ -85,16 +87,16 @@ func (h *Network) Peers(w http.ResponseWriter, r *http.Request) {
 	if raw := strings.TrimSpace(query.Get("cluster_id")); raw != "" {
 		parsed, err := uuid.Parse(raw)
 		if err != nil {
-			httpx.WriteJSON(w, 400, map[string]string{"error": "invalid cluster_id"})
+			apiutil.WriteStatus(r.Context(), w, 400, "invalid cluster_id")
 			return
 		}
 		var exists bool
 		if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM clusters WHERE org_id=$1 AND id=$2)`, subj.OrgID, parsed).Scan(&exists); err != nil {
-			httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, 500, err.Error())
 			return
 		}
 		if !exists {
-			httpx.WriteJSON(w, 400, map[string]string{"error": "cluster not found"})
+			apiutil.WriteStatus(r.Context(), w, 400, "cluster not found")
 			return
 		}
 		clusterID = &parsed
@@ -102,7 +104,7 @@ func (h *Network) Peers(w http.ResponseWriter, r *http.Request) {
 		var selected uuid.UUID
 		err := tx.QueryRow(r.Context(), `SELECT id FROM clusters WHERE org_id=$1 ORDER BY CASE WHEN state='connected' THEN 0 ELSE 1 END,last_heartbeat_at DESC NULLS LAST,created_at ASC,id ASC LIMIT 1`, subj.OrgID).Scan(&selected)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, 500, err.Error())
 			return
 		}
 		if err == nil {
@@ -113,7 +115,7 @@ func (h *Network) Peers(w http.ResponseWriter, r *http.Request) {
 	workloadRole := ""
 	if clusterID != nil {
 		if err := tx.QueryRow(r.Context(), `SELECT `+roleSQL, subj.OrgID, clusterID, workload).Scan(&workloadRole); err != nil {
-			httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, 500, err.Error())
 			return
 		}
 	}
@@ -147,7 +149,7 @@ func (h *Network) Peers(w http.ResponseWriter, r *http.Request) {
  ) SELECT *,count(*) OVER() FROM folded ORDER BY bytes DESC,direction ASC,peer_ip ASC LIMIT 500`, handler.EvidencePlatformRoleSQL("i.org_id", "i.cluster_id", "i.peer", "''"))
 	rows, err := tx.Query(r.Context(), sql, subj.OrgID, clusterID, workload, strconv.Itoa(hours), hide, workloadRole)
 	if err != nil {
-		httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, 500, err.Error())
 		return
 	}
 	out := []peerDTO{}
@@ -157,7 +159,7 @@ func (h *Network) Peers(w http.ResponseWriter, r *http.Request) {
 		var lastT time.Time
 		if err := rows.Scan(&p.Direction, &p.PeerIP, &p.Peer, &p.PeerPlatformRole, &p.PeerClusterID, &p.Bytes, &p.Packets, &p.Sessions, &p.Ports, &p.Protocols, &p.Verdict, &p.FQDN, &lastT, &total); err != nil {
 			rows.Close()
-			httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, 500, err.Error())
 			return
 		}
 		p.LastSeenAt = lastT.UTC().Format(time.RFC3339)
@@ -178,11 +180,11 @@ func (h *Network) Peers(w http.ResponseWriter, r *http.Request) {
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
-		httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, 500, err.Error())
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, 500, err.Error())
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"workload": workload, "cluster_id": clusterID, "workload_platform_role": workloadRole, "hide_platform": hide, "source_limit": 500, "total": total, "has_more": total > int64(len(out)), "peers": out})

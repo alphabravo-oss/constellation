@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -95,7 +97,7 @@ type responseRuleV2OptionsDTO struct {
 func (h *ResponseRulesV2) Options(w http.ResponseWriter, r *http.Request) {
 	receivers, webhooks, err := h.loadReceiverOptions(r)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	out := responseRuleV2OptionsDTO{
@@ -207,7 +209,7 @@ func (h *ResponseRulesV2) List(w http.ResponseWriter, r *http.Request) {
 	subj, _ := authctx.SubjectFrom(r.Context())
 	clusterArg, err := sqlx.ParseClusterIDParam(r)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	rows, err := h.db.Pool().Query(r.Context(), `
@@ -217,7 +219,7 @@ SELECT id, name, description, enabled, priority, event_type, conditions, actions
    AND ($2::uuid IS NULL OR cluster_id IS NULL OR cluster_id = $2)
  ORDER BY priority, name`, subj.OrgID, clusterArg)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()
@@ -227,7 +229,7 @@ SELECT id, name, description, enabled, priority, event_type, conditions, actions
 		var conditions, actions, sel []byte
 		if err := rows.Scan(&d.ID, &d.Name, &d.Description, &d.Enabled, &d.Priority, &d.EventType,
 			&conditions, &actions, &sel, &d.CreatedAt, &d.UpdatedAt); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		_ = json.Unmarshal(conditions, &d.Conditions)
@@ -241,7 +243,7 @@ SELECT id, name, description, enabled, priority, event_type, conditions, actions
 func (h *ResponseRulesV2) Create(w http.ResponseWriter, r *http.Request) {
 	var body responseRuleV2Body
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad request")
 		return
 	}
 	rule := response.Rule{
@@ -253,13 +255,13 @@ func (h *ResponseRulesV2) Create(w http.ResponseWriter, r *http.Request) {
 		Selector:   body.WorkloadMatch,
 	}
 	if err := rule.Validate(); err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	subj, _ := authctx.SubjectFrom(r.Context())
 	clusterArg, err := sqlx.ParseClusterIDParam(r)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	conds, _ := json.Marshal(body.Conditions)
@@ -267,7 +269,7 @@ func (h *ResponseRulesV2) Create(w http.ResponseWriter, r *http.Request) {
 	sel, _ := json.Marshal(body.WorkloadMatch)
 	tx, err := h.db.Pool().Begin(r.Context())
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer tx.Rollback(r.Context())
@@ -286,11 +288,11 @@ VALUES ($1,$2,$3,$4,$5,
             AND ($2::uuid IS NULL OR cluster_id IS NULL OR cluster_id=$2)),
         $6,$7,$8,$9,$10) RETURNING id`,
 		subj.OrgID, clusterArg, rule.Name, body.Description, body.Enabled, body.EventType, conds, acts, sel, subj.UserID).Scan(&id); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	oid := subj.OrgID
@@ -304,18 +306,18 @@ VALUES ($1,$2,$3,$4,$5,
 func (h *ResponseRulesV2) Update(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	var body responseRuleV2Body
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad request")
 		return
 	}
 	rule := response.Rule{Name: body.Name, EventType: response.EventType(body.EventType),
 		Conditions: body.Conditions, Actions: body.Actions, Selector: body.WorkloadMatch, Enabled: body.Enabled}
 	if err := rule.Validate(); err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	subj, _ := authctx.SubjectFrom(r.Context())
@@ -324,7 +326,7 @@ func (h *ResponseRulesV2) Update(w http.ResponseWriter, r *http.Request) {
 	sel, _ := json.Marshal(body.WorkloadMatch)
 	tx, err := h.db.Pool().Begin(r.Context())
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer tx.Rollback(r.Context())
@@ -337,15 +339,15 @@ UPDATE response_rules_v2 SET name=$1, description=$2, enabled=$3, event_type=$4,
  WHERE id=$8 AND org_id=$9`,
 		body.Name, body.Description, body.Enabled, body.EventType, conds, acts, sel, id, subj.OrgID)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if tag.RowsAffected() == 0 {
-		httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "not found")
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	oid := subj.OrgID
@@ -361,22 +363,22 @@ func (h *ResponseRulesV2) validateGroupSelector(w http.ResponseWriter, r *http.R
 	}
 	var lockedOrgID uuid.UUID
 	if err := tx.QueryRow(r.Context(), `SELECT id FROM orgs WHERE id=$1 FOR KEY SHARE`, orgID).Scan(&lockedOrgID); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return false
 	}
 	if _, err := tx.Exec(r.Context(), `LOCK TABLE response_rules_v2 IN EXCLUSIVE MODE`); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return false
 	}
 	if ruleID != nil {
 		var ruleClusterID *uuid.UUID
 		err := tx.QueryRow(r.Context(), `SELECT cluster_id FROM response_rules_v2 WHERE id=$1 AND org_id=$2`, *ruleID, orgID).Scan(&ruleClusterID)
 		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "not found")
 			return false
 		}
 		if err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return false
 		}
 		if ruleClusterID != nil {
@@ -391,16 +393,16 @@ SELECT id FROM groups
    AND (cluster_id IS NULL OR ($3::uuid IS NOT NULL AND cluster_id=$3))
  FOR SHARE NOWAIT`, orgID, selector, clusterArg).Scan(&groupID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "workload_match.group does not reference a group in this scope"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "workload_match.group does not reference a group in this scope")
 		return false
 	}
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "55P03" {
-		httpx.WriteJSON(w, http.StatusConflict, map[string]string{"error": "workload_match.group is being modified; retry"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusConflict, "workload_match.group is being modified; retry")
 		return false
 	}
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return false
 	}
 	return true
@@ -409,12 +411,12 @@ SELECT id FROM groups
 func (h *ResponseRulesV2) Delete(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	subj, _ := authctx.SubjectFrom(r.Context())
 	if _, err := h.db.Pool().Exec(r.Context(), `DELETE FROM response_rules_v2 WHERE id=$1 AND org_id=$2`, id, subj.OrgID); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	oid := subj.OrgID
@@ -435,24 +437,24 @@ type reorderBody struct {
 func (h *ResponseRulesV2) Reorder(w http.ResponseWriter, r *http.Request) {
 	subj, _ := authctx.SubjectFrom(r.Context())
 	if h.auditLog == nil {
-		httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "audit unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusServiceUnavailable, "audit unavailable")
 		return
 	}
 	clusterArg, err := sqlx.ParseClusterIDParam(r)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	var body reorderBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.OrderedIDs) == 0 {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "ordered_ids required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "ordered_ids required")
 		return
 	}
 	ids := make([]uuid.UUID, 0, len(body.OrderedIDs))
 	for _, s := range body.OrderedIDs {
 		id, err := uuid.Parse(strings.TrimSpace(s))
 		if err != nil {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id in ordered_ids"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid id in ordered_ids")
 			return
 		}
 		ids = append(ids, id)
@@ -461,7 +463,7 @@ func (h *ResponseRulesV2) Reorder(w http.ResponseWriter, r *http.Request) {
 	seen := make(map[uuid.UUID]struct{}, len(ids))
 	for _, id := range ids {
 		if _, ok := seen[id]; ok {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "ordered_ids contains duplicate ids"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "ordered_ids contains duplicate ids")
 			return
 		}
 		seen[id] = struct{}{}
@@ -469,7 +471,7 @@ func (h *ResponseRulesV2) Reorder(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := h.db.Pool().BeginTx(r.Context(), pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
@@ -477,9 +479,9 @@ func (h *ResponseRulesV2) Reorder(w http.ResponseWriter, r *http.Request) {
 		var ownedCluster uuid.UUID
 		if err := tx.QueryRow(r.Context(), `SELECT id FROM clusters WHERE id=$1 AND org_id=$2 FOR SHARE`, clusterArg, subj.OrgID).Scan(&ownedCluster); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})
+				apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "cluster not found")
 			} else {
-				httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify cluster"})
+				apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to verify cluster")
 			}
 			return
 		}
@@ -493,7 +495,7 @@ SELECT id
  ORDER BY priority, name
  FOR UPDATE`, subj.OrgID, clusterArg)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	scopeIDs := make(map[uuid.UUID]struct{}, len(ids))
@@ -502,7 +504,7 @@ SELECT id
 		var id uuid.UUID
 		if err := rows.Scan(&id); err != nil {
 			rows.Close()
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		scopeIDs[id] = struct{}{}
@@ -510,17 +512,17 @@ SELECT id
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	rows.Close()
 	if len(ids) != len(scopeIDs) {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "ordered_ids must include every response rule in scope"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "ordered_ids must include every response rule in scope")
 		return
 	}
 	for _, id := range ids {
 		if _, ok := scopeIDs[id]; !ok {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "ordered_ids contains a rule outside this scope"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "ordered_ids contains a rule outside this scope")
 			return
 		}
 	}
@@ -537,14 +539,14 @@ SELECT id
 		Action: "response_rule_v2.reorder_attempt", TargetKind: "response-rule-v2", TargetID: targetID,
 		Before: map[string]any{"ordered_ids": beforeOrder}, After: map[string]any{"ordered_ids": afterOrder}})
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "audit unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusServiceUnavailable, "audit unavailable")
 		return
 	}
 	for i, id := range ids {
 		if _, err := tx.Exec(r.Context(),
 			`UPDATE response_rules_v2 SET priority=$1, updated_at=NOW() WHERE id=$2 AND org_id=$3`,
 			(i+1)*10, id, subj.OrgID); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	}
@@ -552,11 +554,11 @@ SELECT id
 		Action: "response_rule_v2.reorder", TargetKind: "response-rule-v2", TargetID: targetID,
 		Before: map[string]any{"ordered_ids": beforeOrder}, After: map[string]any{"ordered_ids": afterOrder, "audit_attempt_id": attemptID}})
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "audit unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusServiceUnavailable, "audit unavailable")
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "count": len(ids),

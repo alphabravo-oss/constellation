@@ -1,16 +1,17 @@
 package policy
 
 import (
+	"context"
 	"net/http"
 
-	"github.com/alphabravocompany/constellation/internal/handler/httpx"
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
 )
 
 // jsonError writes a {"error": msg} JSON body with the given status. It mirrors
 // the package-private handler.jsonError helper the policy handlers used before
 // the ARC-1 split; kept domain-local so the sub-package stays self-contained.
 func jsonError(w http.ResponseWriter, status int, msg string) {
-	httpx.WriteJSON(w, status, map[string]string{"error": msg})
+	apiutil.WriteStatus(context.Background(), w, status, msg)
 }
 
 // firstNonEmpty returns the first non-empty string. It is a pure-stdlib helper

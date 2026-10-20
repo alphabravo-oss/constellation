@@ -130,7 +130,7 @@ func TestAuthServerRolePreviewProvidersScopeAndSourceRejection(t *testing.T) {
 				t.Fatal(err)
 			}
 			status, result = doJSON(t, http.MethodPost, path, admin, map[string]any{"groups": []string{"sec-team"}})
-			if status != http.StatusConflict || result["error"] != "scoped mapping unavailable" {
+			if status != http.StatusConflict || errMessage(result) != "scoped mapping unavailable" {
 				t.Fatalf("invalid stored scope preview %d: %v", status, result)
 			}
 			if _, err := pool.Exec(ctx, `DELETE FROM sso_role_mappings WHERE id=$1`, invalidMappingID); err != nil {
@@ -140,7 +140,7 @@ func TestAuthServerRolePreviewProvidersScopeAndSourceRejection(t *testing.T) {
 				t.Fatal(err)
 			}
 			status, result = doJSON(t, http.MethodPost, path, admin, map[string]any{"groups": []string{"sec-team"}})
-			if status != http.StatusConflict || result["error"] != "scoped mapping unavailable" {
+			if status != http.StatusConflict || errMessage(result) != "scoped mapping unavailable" {
 				t.Fatalf("foreign scoped row preview %d: %v", status, result)
 			}
 			if _, err := pool.Exec(ctx, `DELETE FROM sso_role_mappings WHERE id=$1`, invalidMappingID); err != nil {

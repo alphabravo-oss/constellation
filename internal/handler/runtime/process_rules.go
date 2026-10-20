@@ -22,6 +22,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/jackc/pgx/v5"
 
 	"github.com/go-chi/chi/v5"
@@ -94,7 +96,7 @@ SELECT id::text, name, path, COALESCE(sha256,''), COALESCE(parent_name,''), acti
 func (h *Baselines) resolveRuleWorkload(w http.ResponseWriter, r *http.Request) (authctx.Subject, observedWorkload, bool) {
 	subj, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "subject required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
 		return subj, observedWorkload{}, false
 	}
 	workloadID := workloadIDParam(r)

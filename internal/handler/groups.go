@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -125,7 +127,7 @@ func (h *Groups) List(w http.ResponseWriter, r *http.Request) {
 	subj, _ := SubjectFrom(r.Context())
 	clusterArg, err := parseClusterIDParam(r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	rows, err := h.db.Pool().Query(r.Context(), `
@@ -135,7 +137,7 @@ SELECT id, name, kind, comment, criteria, members, learned_from, cfg_type, polic
    AND ($2::uuid IS NULL OR cluster_id IS NULL OR cluster_id = $2)
  ORDER BY name`, subj.OrgID, clusterArg)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()
@@ -145,7 +147,7 @@ SELECT id, name, kind, comment, criteria, members, learned_from, cfg_type, polic
 		var criteria, members []byte
 		if err := rows.Scan(&d.ID, &d.Name, &d.Kind, &d.Comment, &criteria, &members,
 			&d.LearnedFrom, &d.CfgType, &d.PolicyMode, &d.ProfileMode, &d.CreatedAt, &d.UpdatedAt); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		_ = json.Unmarshal(criteria, &d.Criteria)
@@ -159,7 +161,7 @@ SELECT id, name, kind, comment, criteria, members, learned_from, cfg_type, polic
 		out = append(out, d)
 	}
 	if err := h.attachMembershipPreviews(r.Context(), subj.OrgID, clusterArg, out); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"groups": out})
@@ -233,13 +235,13 @@ func (h *Groups) serviceModeDefaults(ctx context.Context, orgID, clusterID uuid.
 func (h *Groups) Create(w http.ResponseWriter, r *http.Request) {
 	var body groupBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad request")
 		return
 	}
 	subj, _ := SubjectFrom(r.Context())
 	clusterArg, err := parseClusterIDParam(r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// Seed unspecified modes from the cluster's new-service default (NV NewServiceMode).
@@ -262,21 +264,21 @@ func (h *Groups) Create(w http.ResponseWriter, r *http.Request) {
 		g.CfgType = "user"
 	}
 	if err := g.Validate(); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// Members are server-computed from criteria against current deployments;
 	// client-supplied members are ignored (NeuVector derives membership).
 	memberIDs, err := h.computeMembers(r, subj.OrgID, clusterArg, g)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	criteria, _ := json.Marshal(body.Criteria)
 	members, _ := json.Marshal(memberIDs)
 	tx, err := h.db.Pool().Begin(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer tx.Rollback(r.Context())
@@ -285,15 +287,15 @@ func (h *Groups) Create(w http.ResponseWriter, r *http.Request) {
 INSERT INTO groups (org_id, cluster_id, name, kind, comment, criteria, members, learned_from, cfg_type, policy_mode, profile_mode, created_by)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
 		subj.OrgID, clusterArg, g.Name, g.Kind, g.Comment, criteria, members, g.LearnedFrom, g.CfgType, g.PolicyMode, g.ProfileMode, subj.UserID).Scan(&id); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if err := propagateGroupModeTx(r.Context(), tx, subj.OrgID, clusterArg, memberIDs, g.ProfileMode); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	oid := subj.OrgID
@@ -308,30 +310,30 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
 func (h *Groups) Update(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	var body groupBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad request")
 		return
 	}
 	g := &group.Group{Name: strings.TrimSpace(body.Name), Kind: body.Kind, Comment: body.Comment,
 		Criteria: body.Criteria, LearnedFrom: body.LearnedFrom, CfgType: body.CfgType,
 		PolicyMode: body.PolicyMode, ProfileMode: body.ProfileMode}
 	if err := g.Validate(); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	subj, _ := SubjectFrom(r.Context())
 	clusterArg, err := parseClusterIDParam(r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	tx, err := h.beginGroupReferenceMutation(r.Context(), subj.OrgID, id)
 	if err != nil {
-		writeJSON(w, groupMutationBeginErrorStatus(err), map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, groupMutationBeginErrorStatus(err), err.Error())
 		return
 	}
 	defer tx.Rollback(r.Context())
@@ -346,14 +348,14 @@ SELECT name, kind, criteria, members, learned_from, cfg_type
    AND ($3::uuid IS NULL OR cluster_id IS NULL OR cluster_id = $3)`,
 		id, subj.OrgID, clusterArg).Scan(&currentName, &currentKind, &currentCriteriaRaw, &currentMembersRaw, &currentLearnedFrom, &currentCfgType); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "not found")
 			return
 		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if currentCfgType == "fed" {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": errFedReadOnly.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusForbidden, errFedReadOnly.Error())
 		return
 	}
 	var currentMembers []string
@@ -363,7 +365,7 @@ SELECT name, kind, criteria, members, learned_from, cfg_type
 	if stringSetContains(changedFields, "criteria") {
 		memberIDs, err = h.computeMembers(r, subj.OrgID, clusterArg, g)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		memberIDs = normalizeGroupMembers(memberIDs)
@@ -374,15 +376,12 @@ SELECT name, kind, criteria, members, learned_from, cfg_type
 	if len(changedFields) > 0 {
 		blockingRefs, err := groupBlockingReferenceCount(r.Context(), tx, subj.OrgID, id, currentName)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		if blockingRefs > 0 {
-			writeJSON(w, http.StatusConflict, map[string]any{
-				"error":               "group has policy references",
-				"blocking_references": blockingRefs,
-				"changed_fields":      changedFields,
-			})
+			apiutil.WriteDetailed(r.Context(), w, http.StatusConflict, "group_in_use", "group has policy references",
+				map[string]any{"blocking_references": blockingRefs, "changed_fields": changedFields})
 			return
 		}
 	}
@@ -393,19 +392,19 @@ UPDATE groups SET name=$1, kind=$2, comment=$3, criteria=$4, members=$5, learned
  WHERE id=$10 AND org_id=$11`,
 		g.Name, body.Kind, body.Comment, criteria, members, body.LearnedFrom, body.CfgType, g.PolicyMode, g.ProfileMode, id, subj.OrgID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if tag.RowsAffected() == 0 {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "not found")
 		return
 	}
 	if err := propagateGroupModeTx(r.Context(), tx, subj.OrgID, clusterArg, memberIDs, g.ProfileMode); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	oid := subj.OrgID
@@ -461,13 +460,13 @@ func normalizeGroupCriteria(in []group.Criterion) []group.Criterion {
 func (h *Groups) Delete(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	subj, _ := SubjectFrom(r.Context())
 	tx, err := h.beginGroupReferenceMutation(r.Context(), subj.OrgID, id)
 	if err != nil {
-		writeJSON(w, groupMutationBeginErrorStatus(err), map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, groupMutationBeginErrorStatus(err), err.Error())
 		return
 	}
 	defer tx.Rollback(r.Context())
@@ -475,31 +474,29 @@ func (h *Groups) Delete(w http.ResponseWriter, r *http.Request) {
 	if err := tx.QueryRow(r.Context(),
 		`SELECT name, cfg_type FROM groups WHERE id=$1 AND org_id=$2`, id, subj.OrgID).
 		Scan(&name, &cfgType); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "not found")
 		return
 	}
 	if cfgType == "fed" {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": errFedReadOnly.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusForbidden, errFedReadOnly.Error())
 		return
 	}
 	blockingRefs, err := groupBlockingReferenceCount(r.Context(), tx, subj.OrgID, id, name)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if blockingRefs > 0 {
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"error":               "group has policy references",
-			"blocking_references": blockingRefs,
-		})
+		apiutil.WriteDetailed(r.Context(), w, http.StatusConflict, "group_in_use", "group has policy references",
+			map[string]any{"blocking_references": blockingRefs})
 		return
 	}
 	if _, err := tx.Exec(r.Context(), `DELETE FROM groups WHERE id=$1 AND org_id=$2`, id, subj.OrgID); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	oid := subj.OrgID

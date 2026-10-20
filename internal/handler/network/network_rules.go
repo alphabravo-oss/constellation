@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -91,12 +93,12 @@ SELECT from_ep, to_ep, ports, applications, action, disable, comment, priority, 
 func (h *Network) NetworkRules(w http.ResponseWriter, r *http.Request) {
 	subj, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "subject required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
 		return
 	}
 	clusterID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid cluster id")
 		return
 	}
 
@@ -136,7 +138,7 @@ SELECT src_workload, dst_workload, verdict,
 			var matches int64
 			var lastMatch *time.Time
 			if err := rows.Scan(&d.From, &d.To, &verdict, &apps, &ports, &matches, &lastMatch); err != nil {
-				httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 				return
 			}
 			key := d.From + "\x00" + d.To
@@ -177,7 +179,7 @@ SELECT src_workload, dst_workload, verdict,
 			out = append(out, d)
 		}
 		if err := rows.Err(); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	}
@@ -255,23 +257,23 @@ type ruleMutation struct {
 func (h *Network) UpsertNetworkRule(w http.ResponseWriter, r *http.Request) {
 	subj, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "subject required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
 		return
 	}
 	clusterID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid cluster id")
 		return
 	}
 	body := ruleMutation{Priority: 1000}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid body")
 		return
 	}
 	body.From = strings.TrimSpace(body.From)
 	body.To = strings.TrimSpace(body.To)
 	if body.From == "" || body.To == "" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "from and to are required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "from and to are required")
 		return
 	}
 	if body.Action != "deny" {
@@ -304,7 +306,7 @@ ON CONFLICT (org_id, cluster_id, from_ep, to_ep) DO UPDATE SET
   cfg_type = EXCLUDED.cfg_type, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
 		subj.OrgID, clusterID, body.From, body.To, body.Ports, body.Applications,
 		body.Action, body.Disable, body.Comment, body.Priority, cfgType, subj.UserID); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "id": ruleID(body.From, body.To), "cfg_type": cfgType})
@@ -318,12 +320,12 @@ ON CONFLICT (org_id, cluster_id, from_ep, to_ep) DO UPDATE SET
 func (h *Network) MoveNetworkRuleToTop(w http.ResponseWriter, r *http.Request) {
 	subj, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "subject required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
 		return
 	}
 	clusterID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid cluster id")
 		return
 	}
 	var body struct {
@@ -331,30 +333,30 @@ func (h *Network) MoveNetworkRuleToTop(w http.ResponseWriter, r *http.Request) {
 		To   string `json:"to"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid body")
 		return
 	}
 	body.From, body.To = strings.TrimSpace(body.From), strings.TrimSpace(body.To)
 	if body.From == "" || body.To == "" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "from and to are required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "from and to are required")
 		return
 	}
 	if h.audit == nil {
-		httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "audit unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusServiceUnavailable, "audit unavailable")
 		return
 	}
 	tx, err := h.db.Pool().BeginTx(r.Context(), pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to begin rule transition"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to begin rule transition")
 		return
 	}
 	defer tx.Rollback(r.Context())
 	var lockedCluster uuid.UUID
 	if err := tx.QueryRow(r.Context(), `SELECT id FROM clusters WHERE id=$1 AND org_id=$2 FOR UPDATE`, clusterID, subj.OrgID).Scan(&lockedCluster); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "cluster not found")
 		} else {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify cluster"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to verify cluster")
 		}
 		return
 	}
@@ -367,20 +369,20 @@ SELECT EXISTS (
   SELECT 1 FROM network_flow_rollups
    WHERE org_id=$1 AND cluster_id=$2 AND src_workload=$3 AND dst_workload=$4)`,
 		subj.OrgID, clusterID, body.From, body.To).Scan(&overridden, &learned); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify rule"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to verify rule")
 		return
 	}
 	if !overridden && !learned {
-		httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "network rule not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "network rule not found")
 		return
 	}
 	var minPriority int
 	if err := tx.QueryRow(r.Context(), `SELECT COALESCE(MIN(priority), 1000) FROM network_rule_overrides WHERE org_id=$1 AND cluster_id=$2`, subj.OrgID, clusterID).Scan(&minPriority); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to read precedence"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to read precedence")
 		return
 	}
 	if minPriority < -2147483638 {
-		httpx.WriteJSON(w, http.StatusConflict, map[string]string{"error": "network rule priority range exhausted"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusConflict, "network rule priority range exhausted")
 		return
 	}
 	newPri := minPriority - 10
@@ -392,7 +394,7 @@ SELECT EXISTS (
 		Before: before, After: map[string]any{"priority": newPri},
 	})
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "audit unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusServiceUnavailable, "audit unavailable")
 		return
 	}
 	cfgType := "user_created"
@@ -406,7 +408,7 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
 ON CONFLICT (org_id, cluster_id, from_ep, to_ep) DO UPDATE SET
   priority = EXCLUDED.priority, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
 		subj.OrgID, clusterID, body.From, body.To, newPri, cfgType, subj.UserID); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	completionID, _, err := h.audit.LogInTx(r.Context(), tx, audit.Event{
@@ -415,11 +417,11 @@ ON CONFLICT (org_id, cluster_id, from_ep, to_ep) DO UPDATE SET
 		Before: before, After: map[string]any{"priority": newPri, "audit_attempt_id": auditID},
 	})
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "audit unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusServiceUnavailable, "audit unavailable")
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to commit precedence"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to commit precedence")
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
@@ -433,25 +435,25 @@ ON CONFLICT (org_id, cluster_id, from_ep, to_ep) DO UPDATE SET
 func (h *Network) DeleteNetworkRule(w http.ResponseWriter, r *http.Request) {
 	subj, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "subject required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
 		return
 	}
 	clusterID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid cluster id")
 		return
 	}
 	from := strings.TrimSpace(r.URL.Query().Get("from"))
 	to := strings.TrimSpace(r.URL.Query().Get("to"))
 	if from == "" || to == "" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "from and to are required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "from and to are required")
 		return
 	}
 	if _, err := h.db.Pool().Exec(r.Context(), `
 DELETE FROM network_rule_overrides
  WHERE org_id = $1 AND cluster_id = $2 AND from_ep = $3 AND to_ep = $4`,
 		subj.OrgID, clusterID, from, to); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})

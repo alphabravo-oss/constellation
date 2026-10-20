@@ -137,9 +137,13 @@ func TestSystemConfig_RedactedFieldErrorsDoNotMutateAndRBAC(t *testing.T) {
 				t.Fatalf("error leaked rejected values: %s", payload)
 			}
 			var body struct {
-				Fields []syscfg.FieldError `json:"field_errors"`
+				Error struct {
+					Details struct {
+						Fields []syscfg.FieldError `json:"field_errors"`
+					} `json:"details"`
+				} `json:"error"`
 			}
-			if err := json.Unmarshal(payload, &body); err != nil || len(body.Fields) == 0 || body.Fields[0].Field != testcase.field {
+			if err := json.Unmarshal(payload, &body); err != nil || len(body.Error.Details.Fields) == 0 || body.Error.Details.Fields[0].Field != testcase.field {
 				t.Fatalf("invalid field errors: %s (%v)", payload, err)
 			}
 		})
@@ -155,7 +159,7 @@ func TestSystemConfig_RedactedFieldErrorsDoNotMutateAndRBAC(t *testing.T) {
 	auditor := issueFor(t, signer, auditorID, orgID, 0)
 	for _, method := range []string{http.MethodGet, http.MethodPatch} {
 		status, body := doJSON(t, method, server.URL+"/api/v1/system/config", auditor, map[string]any{"tls_verify": false})
-		if status != http.StatusForbidden || body["provenance"] != nil || body["field_errors"] != nil {
+		if status != http.StatusForbidden || body["provenance"] != nil || errDetail(body, "field_errors") != nil {
 			t.Fatalf("RBAC %s status=%d body=%+v", method, status, body)
 		}
 	}

@@ -34,9 +34,6 @@ func (h *slogHandler) Handle(ctx context.Context, rec slog.Record) error {
 	if ev == nil {
 		return nil
 	}
-	if !rec.Time.IsZero() {
-		ev = ev.Time(zerolog.TimestampFieldName, rec.Time)
-	}
 	if id := CorrelationID(ctx); id != "" {
 		ev = ev.Str("correlation_id", id)
 	}

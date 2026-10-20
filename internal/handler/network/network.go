@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/google/uuid"
 
 	"github.com/alphabravocompany/constellation/internal/db"
@@ -43,7 +45,7 @@ func (h *Network) Map(w http.ResponseWriter, r *http.Request) {
 	if raw := strings.TrimSpace(r.URL.Query().Get("port")); raw != "" {
 		port, _ = strconv.Atoi(raw)
 		if port < 1 || port > 65535 {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid port"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid port")
 			return
 		}
 	}
@@ -53,7 +55,7 @@ func (h *Network) Map(w http.ResponseWriter, r *http.Request) {
 	if raw := strings.TrimSpace(r.URL.Query().Get("offset")); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed < 0 || parsed > 1000000 {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid offset"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid offset")
 			return
 		}
 		flowOffset = parsed
@@ -62,50 +64,50 @@ func (h *Network) Map(w http.ResponseWriter, r *http.Request) {
 	if raw := strings.TrimSpace(r.URL.Query().Get("recent_offset")); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed < 0 || parsed > 1000000 {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid recent_offset"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid recent_offset")
 			return
 		}
 		recentOffset = parsed
 	}
 	clusterID, err := h.resolveNetworkCluster(r, subj.OrgID)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	groupMembers, groupName, groupActive, err := handler.ResolveGroupFilterMembers(r.Context(), h.db.Pool(), subj.OrgID, clusterID, r.URL.Query().Get("group"))
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	clusters, err := h.networkClusters(r, subj.OrgID)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	workloads, err := h.workloads(r, subj.OrgID, clusterID, namespace, groupActive, groupMembers)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	flows, err := h.flows(r, subj.OrgID, clusterID, hours, namespace, verdict, groupActive, groupMembers, port, peer, application, flowOffset)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	recentFlows, err := h.recentFlows(r, subj.OrgID, clusterID, hours, namespace, verdict, groupActive, groupMembers, port, peer, application, recentOffset)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	flowTotal, err := h.flowTotal(r, subj.OrgID, clusterID, hours, namespace, verdict, groupActive, groupMembers, port, peer, application)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	recentTotal, err := h.recentFlowTotal(r, subj.OrgID, clusterID, hours, namespace, verdict, groupActive, groupMembers, port, peer, application)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -139,7 +141,7 @@ func (h *Network) Map(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.reconcileGraphRoles(r, subj.OrgID, workloads, flows); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 

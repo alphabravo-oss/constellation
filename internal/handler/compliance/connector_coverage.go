@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 
 	"github.com/alphabravocompany/constellation/internal/db"
@@ -219,12 +221,12 @@ func (h *ConnectorCoverage) Overview(w http.ResponseWriter, r *http.Request) {
 	}
 	subj, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthenticated"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "unauthenticated")
 		return
 	}
 	overview, err := h.dbOverview(r, subj.OrgID.String())
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, overview)
@@ -234,29 +236,29 @@ func (h *ConnectorCoverage) Test(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(r.URL.Query().Get("id"))
 	kind := strings.TrimSpace(r.URL.Query().Get("type"))
 	if id == "" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "connector id required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "connector id required")
 		return
 	}
 	if kind == "" {
 		kind = "registry"
 	}
 	if kind != "registry" && kind != "cloud" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "type must be registry or cloud"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "type must be registry or cloud")
 		return
 	}
 	if h.db != nil {
 		subj, ok := authctx.SubjectFrom(r.Context())
 		if !ok {
-			httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthenticated"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "unauthenticated")
 			return
 		}
 		exists, err := h.connectorExists(r, subj.OrgID.String(), id, kind)
 		if err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		if !exists {
-			httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": kind + " connector not found"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, kind+" connector not found")
 			return
 		}
 	}
@@ -274,17 +276,17 @@ func (h *ConnectorCoverage) Test(w http.ResponseWriter, r *http.Request) {
 
 func (h *ConnectorCoverage) SaveConfig(w http.ResponseWriter, r *http.Request) {
 	if h.db == nil {
-		httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "connector config storage unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusServiceUnavailable, "connector config storage unavailable")
 		return
 	}
 	subj, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthenticated"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "unauthenticated")
 		return
 	}
 	var body saveConnectorConfigBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad request")
 		return
 	}
 	body.ConnectorID = strings.TrimSpace(body.ConnectorID)
@@ -299,22 +301,22 @@ func (h *ConnectorCoverage) SaveConfig(w http.ResponseWriter, r *http.Request) {
 		body.ScanCadence = "daily"
 	}
 	if body.ConnectorID == "" || body.DisplayName == "" || body.Endpoint == "" || body.AuthMode == "" || body.Owner == "" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "connector_id, display_name, endpoint, auth_mode, and owner are required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "connector_id, display_name, endpoint, auth_mode, and owner are required")
 		return
 	}
 	if body.ConnectorType != "registry" && body.ConnectorType != "cloud" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "connector_type must be registry or cloud"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "connector_type must be registry or cloud")
 		return
 	}
 	if strings.TrimSpace(body.Secret) != "" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "raw secrets are not accepted; provide credential_ref from an external secret store"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "raw secrets are not accepted; provide credential_ref from an external secret store")
 		return
 	}
 	var rotationDueAt *time.Time
 	if body.RotationDueAt != "" {
 		parsed, err := time.Parse(time.RFC3339, body.RotationDueAt)
 		if err != nil {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "rotation_due_at must be RFC3339"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "rotation_due_at must be RFC3339")
 			return
 		}
 		rotationDueAt = &parsed
@@ -357,7 +359,7 @@ RETURNING id::text, connector_id, connector_type, provider, display_name, endpoi
 		Scan(&out.ID, &out.ConnectorID, &out.ConnectorType, &out.Provider, &out.DisplayName, &out.Endpoint,
 			&out.AuthMode, &out.Owner, &out.ScanCadence, &rotation, &out.CredentialPresent,
 			&out.CredentialRef, &out.CredentialFingerprint, &out.LastTestStatus, &lastTestAt, &updatedAt); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if rotation != nil {
@@ -372,27 +374,27 @@ RETURNING id::text, connector_id, connector_type, provider, display_name, endpoi
 
 func (h *ConnectorCoverage) TestSavedConfig(w http.ResponseWriter, r *http.Request) {
 	if h.db == nil {
-		httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "connector config storage unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusServiceUnavailable, "connector config storage unavailable")
 		return
 	}
 	subj, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthenticated"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "unauthenticated")
 		return
 	}
 	configID := strings.TrimSpace(chi.URLParam(r, "id"))
 	if configID == "" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "config id is required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "config id is required")
 		return
 	}
 	if r.Body != nil && r.ContentLength != 0 {
 		var body saveConnectorConfigBody
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad request")
 			return
 		}
 		if strings.TrimSpace(body.Secret) != "" {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "raw secrets are not accepted; saved connector tests use credential_ref metadata"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "raw secrets are not accepted; saved connector tests use credential_ref metadata")
 			return
 		}
 	}
@@ -404,7 +406,7 @@ SELECT id::text, connector_id, connector_type, provider, display_name, endpoint,
        COALESCE(credential_ref, ''), COALESCE(credential_fingerprint, ''), last_test_status, last_test_at, updated_at
   FROM connector_configs
  WHERE id = $1 AND org_id = $2`, configID, subj.OrgID), &existing); err != nil {
-		httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "connector config not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "connector config not found")
 		return
 	}
 
@@ -427,7 +429,7 @@ RETURNING id::text, connector_id, connector_type, provider, display_name, endpoi
           owner, scan_cadence, rotation_due_at, credential_present,
           COALESCE(credential_ref, ''), COALESCE(credential_fingerprint, ''), last_test_status, last_test_at, updated_at`,
 		status, subj.UserID, configID, subj.OrgID), &out); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, connectorConfigTestDTO{

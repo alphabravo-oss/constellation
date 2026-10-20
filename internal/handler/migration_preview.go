@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -458,18 +460,18 @@ func (h *Enterprise) MigrationPreview(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
 	var req migrationPreviewRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid migration preview request"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid migration preview request")
 		return
 	}
 	source := strings.ToLower(strings.TrimSpace(req.Source))
 	raw := []byte(req.Export)
 	if source == "" || len(strings.TrimSpace(req.Export)) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "source and export are required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "source and export are required")
 		return
 	}
 	sourceCounts, err := countMigrationSourceObjects(source, raw)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -480,7 +482,7 @@ func (h *Enterprise) MigrationPreview(w http.ResponseWriter, r *http.Request) {
 	}
 	vulnerabilityProfiles, registries, remainingUnsupported, err := h.convertMigrationRemaining(r, subj.OrgID, source, raw, strings.TrimSpace(req.ClusterID))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	policies, err := convertMigrationPreview(source, raw)
@@ -488,7 +490,7 @@ func (h *Enterprise) MigrationPreview(w http.ResponseWriter, r *http.Request) {
 		if hasSubject {
 			h.auditMigration(r, subj, "migration.import.preview.failed", source, map[string]any{"source": source, "error": err.Error()})
 		}
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	fileProfiles, err := convertMigrationFileProfiles(source, raw)
@@ -496,7 +498,7 @@ func (h *Enterprise) MigrationPreview(w http.ResponseWriter, r *http.Request) {
 		if hasSubject {
 			h.auditMigration(r, subj, "migration.import.preview.failed", source, map[string]any{"source": source, "error": err.Error()})
 		}
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	processProfiles, processUnsupported, err := convertMigrationProcessProfiles(source, raw)
@@ -504,7 +506,7 @@ func (h *Enterprise) MigrationPreview(w http.ResponseWriter, r *http.Request) {
 		if hasSubject {
 			h.auditMigration(r, subj, "migration.import.preview.failed", source, map[string]any{"source": source, "error": err.Error()})
 		}
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	groups, groupUnsupported, err := convertMigrationGroups(source, raw)
@@ -512,7 +514,7 @@ func (h *Enterprise) MigrationPreview(w http.ResponseWriter, r *http.Request) {
 		if hasSubject {
 			h.auditMigration(r, subj, "migration.import.preview.failed", source, map[string]any{"source": source, "error": err.Error()})
 		}
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	dpiRules, dpiBindings, dpiUnsupported, err := convertMigrationDPIRules(source, raw)
@@ -520,7 +522,7 @@ func (h *Enterprise) MigrationPreview(w http.ResponseWriter, r *http.Request) {
 		if hasSubject {
 			h.auditMigration(r, subj, "migration.import.preview.failed", source, map[string]any{"source": source, "error": err.Error()})
 		}
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	networkRules, networkUnsupported, err := convertMigrationNetworkRules(source, raw)
@@ -528,7 +530,7 @@ func (h *Enterprise) MigrationPreview(w http.ResponseWriter, r *http.Request) {
 		if hasSubject {
 			h.auditMigration(r, subj, "migration.import.preview.failed", source, map[string]any{"source": source, "error": err.Error()})
 		}
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	clusterIDRaw := strings.TrimSpace(req.ClusterID)
@@ -536,7 +538,7 @@ func (h *Enterprise) MigrationPreview(w http.ResponseWriter, r *http.Request) {
 	if needsCluster || clusterIDRaw != "" {
 		clusterID, err := uuid.Parse(strings.TrimSpace(req.ClusterID))
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "target cluster_id is required for NeuVector group, process profile, network rule, and DLP/WAF imports"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "target cluster_id is required for NeuVector group, process profile, network rule, and DLP/WAF imports")
 			return
 		}
 		clusterIDRaw = clusterID.String()
@@ -550,7 +552,7 @@ func (h *Enterprise) MigrationPreview(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if !ok {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "target cluster_id does not belong to this organization"})
+				apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "target cluster_id does not belong to this organization")
 				return
 			}
 		}
@@ -707,7 +709,7 @@ func (h *Enterprise) MigrationPreview(w http.ResponseWriter, r *http.Request) {
 	if h != nil && h.db != nil {
 		id, err := h.persistMigrationPreview(r, subj, source, raw, out)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		out.ImportID = id.String()

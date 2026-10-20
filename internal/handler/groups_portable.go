@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"gopkg.in/yaml.v3"
@@ -48,7 +50,7 @@ func (h *Groups) Export(w http.ResponseWriter, r *http.Request) {
 	subj, _ := SubjectFrom(r.Context())
 	clusterArg, err := parseClusterIDParam(r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	includeLearned := r.URL.Query().Get("include_learned") == "1" || r.URL.Query().Get("include_learned") == "true"
@@ -59,7 +61,7 @@ SELECT name, kind, comment, criteria, policy_mode, profile_mode, cfg_type, learn
    AND ($2::uuid IS NULL OR cluster_id IS NULL OR cluster_id = $2)
  ORDER BY name`, subj.OrgID, clusterArg)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()
@@ -68,7 +70,7 @@ SELECT name, kind, comment, criteria, policy_mode, profile_mode, cfg_type, learn
 		var name, kind, comment, policyMode, profileMode, cfgType, learnedFrom string
 		var criteriaRaw []byte
 		if err := rows.Scan(&name, &kind, &comment, &criteriaRaw, &policyMode, &profileMode, &cfgType, &learnedFrom); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		if !includeLearned && (cfgType == "learned" || learnedFrom != "") {
@@ -84,7 +86,7 @@ SELECT name, kind, comment, criteria, policy_mode, profile_mode, cfg_type, learn
 	}
 	out, err := yaml.Marshal(bundle)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "application/x-yaml")
@@ -99,21 +101,21 @@ func (h *Groups) Import(w http.ResponseWriter, r *http.Request) {
 	subj, _ := SubjectFrom(r.Context())
 	clusterArg, err := parseClusterIDParam(r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "read body"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "read body")
 		return
 	}
 	var bundle groupBundle
 	if err := yaml.Unmarshal(raw, &bundle); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid bundle: " + err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid bundle: "+err.Error())
 		return
 	}
 	if len(bundle.Groups) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bundle contains no groups"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bundle contains no groups")
 		return
 	}
 	type result struct {

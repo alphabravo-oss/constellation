@@ -133,7 +133,7 @@ func TestReceiverTestFireDeliveryVisibilityAndAudit(t *testing.T) {
 	if status, body := doJSON(t, http.MethodPost, firstURL+"/pause", admin, nil); status != http.StatusOK || body["paused"] != true {
 		t.Fatalf("pause receiver: status=%d body=%+v", status, body)
 	}
-	if status, body := doJSON(t, http.MethodPost, firstURL+"/test-fire", admin, nil); status != http.StatusConflict || body["error"] != "receiver paused" {
+	if status, body := doJSON(t, http.MethodPost, firstURL+"/test-fire", admin, nil); status != http.StatusConflict || errMessage(body) != "receiver paused" {
 		t.Fatalf("paused receiver test-fire: status=%d body=%+v, want 409", status, body)
 	}
 	var deliveryCount, auditCount int

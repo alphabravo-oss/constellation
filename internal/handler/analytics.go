@@ -8,6 +8,8 @@ package handler
 import (
 	"net/http"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/alphabravocompany/constellation/internal/db"
 )
 
@@ -27,7 +29,7 @@ SELECT day, severity, SUM(finding_count) AS cnt
  GROUP BY 1, 2
  ORDER BY 1`, subj.OrgID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()
@@ -55,7 +57,7 @@ SELECT severity,
  GROUP BY 1
  ORDER BY 1`, subj.OrgID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()
@@ -80,7 +82,7 @@ SELECT id, started_at, finished_at, status, COALESCE(object_uri,''), COALESCE(sh
  ORDER BY started_at DESC
  LIMIT 50`)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()

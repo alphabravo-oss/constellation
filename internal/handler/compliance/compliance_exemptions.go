@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -48,23 +50,23 @@ func (c *Compliance) ListExemptions(w http.ResponseWriter, r *http.Request) {
 	controlID := strings.TrimSpace(r.URL.Query().Get("control_id"))
 	clusterArg, err := sqlx.ParseClusterIDParam(r)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if clusterArg != nil {
 		var owned bool
 		if err := c.db.Pool().QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM clusters WHERE id = $1 AND org_id = $2)`, clusterArg, subj.OrgID).Scan(&owned); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		if !owned {
-			httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "cluster not found")
 			return
 		}
 	}
 	items, err := c.listExemptions(r, subj.OrgID, framework, controlID, clusterArg)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"exemptions": items})
@@ -74,7 +76,7 @@ func (c *Compliance) CreateExemption(w http.ResponseWriter, r *http.Request) {
 	subj, _ := authctx.SubjectFrom(r.Context())
 	var body createComplianceExemptionBody
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad request")
 		return
 	}
 	body.Framework = strings.TrimSpace(body.Framework)
@@ -82,20 +84,20 @@ func (c *Compliance) CreateExemption(w http.ResponseWriter, r *http.Request) {
 	body.Reason = strings.TrimSpace(body.Reason)
 	body.ClusterID = strings.TrimSpace(body.ClusterID)
 	if body.Framework == "" || body.ControlID == "" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "framework and control_id are required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "framework and control_id are required")
 		return
 	}
 	if len(body.Reason) < 12 {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "reason must be at least 12 characters"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "reason must be at least 12 characters")
 		return
 	}
 	expiresAt, err := time.Parse(time.RFC3339, body.ExpiresAt)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "expires_at must be RFC3339"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "expires_at must be RFC3339")
 		return
 	}
 	if !expiresAt.After(time.Now().UTC()) {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "expires_at must be in the future"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "expires_at must be in the future")
 		return
 	}
 	var clusterID *uuid.UUID
@@ -103,7 +105,7 @@ func (c *Compliance) CreateExemption(w http.ResponseWriter, r *http.Request) {
 	if body.ClusterID != "" {
 		parsed, err := uuid.Parse(body.ClusterID)
 		if err != nil {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "cluster_id must be a UUID"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "cluster_id must be a UUID")
 			return
 		}
 		clusterID = &parsed
@@ -118,10 +120,10 @@ RETURNING id`,
 		subj.OrgID, clusterArg, body.Framework, body.ControlID, body.Reason, subj.UserID, expiresAt.UTC(),
 	).Scan(&id); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "cluster not found")
 			return
 		}
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if c.audit != nil {
@@ -147,7 +149,7 @@ func (c *Compliance) RevokeExemption(w http.ResponseWriter, r *http.Request) {
 	subj, _ := authctx.SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad exemption id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad exemption id")
 		return
 	}
 	tag, err := c.db.Pool().Exec(r.Context(), `
@@ -156,11 +158,11 @@ UPDATE compliance_exemptions AS ce
  WHERE ce.id = $1 AND ce.org_id = $2 AND ce.revoked_at IS NULL
    AND (ce.cluster_id IS NULL OR EXISTS (SELECT 1 FROM clusters WHERE id = ce.cluster_id AND org_id = $2))`, id, subj.OrgID)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if tag.RowsAffected() == 0 {
-		httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "exemption not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "exemption not found")
 		return
 	}
 	if c.audit != nil {
