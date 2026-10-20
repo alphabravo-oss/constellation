@@ -198,17 +198,14 @@ type accessControlSummaryDTO struct {
 }
 
 type accessControlUserDTO struct {
-	ID                    string   `json:"id"`
-	Name                  string   `json:"name"`
-	Email                 string   `json:"email"`
-	Status                string   `json:"status"`
-	AuthProviderID        string   `json:"auth_provider_id"`
-	Roles                 []string `json:"roles"`
-	LastLoginAt           string   `json:"last_login_at"`
-	MFAEnabled            bool     `json:"mfa_enabled"`
-	LocalPassword         bool     `json:"local_password"`
-	Locked                bool     `json:"locked"`
-	PasswordResetRequired bool     `json:"password_reset_required"`
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	Email          string   `json:"email"`
+	Status         string   `json:"status"`
+	AuthProviderID string   `json:"auth_provider_id"`
+	Roles          []string `json:"roles"`
+	LastLoginAt    string   `json:"last_login_at"`
+	MFAEnabled     bool     `json:"mfa_enabled"`
 }
 
 type accessControlRoleDTO struct {
@@ -333,8 +330,7 @@ func (h *AccessControl) loadOverview(r *http.Request, orgID uuid.UUID) (accessCo
 
 	// Users from DB.
 	userRows, err := h.db.Pool().Query(ctx, `
-SELECT id, email, display_name, disabled, COALESCE(oidc_issuer, ''), COALESCE(last_login_at,created_at),
-       FALSE, NULL::timestamptz, FALSE
+SELECT id, email, display_name, disabled, COALESCE(oidc_issuer, ''), COALESCE(last_login_at,created_at)
   FROM users WHERE org_id = $1 ORDER BY display_name`, orgID)
 	if err != nil {
 		return out, fmt.Errorf("query users: %w", err)
@@ -342,15 +338,13 @@ SELECT id, email, display_name, disabled, COALESCE(oidc_issuer, ''), COALESCE(la
 	defer userRows.Close()
 	for userRows.Next() {
 		var (
-			id                           uuid.UUID
-			email, name                  string
-			disabled                     bool
-			oidcIssuer                   string
-			createdAt                    time.Time
-			localPassword, resetRequired bool
-			blockSince                   *time.Time
+			id          uuid.UUID
+			email, name string
+			disabled    bool
+			oidcIssuer  string
+			createdAt   time.Time
 		)
-		if err := userRows.Scan(&id, &email, &name, &disabled, &oidcIssuer, &createdAt, &localPassword, &blockSince, &resetRequired); err != nil {
+		if err := userRows.Scan(&id, &email, &name, &disabled, &oidcIssuer, &createdAt); err != nil {
 			return out, fmt.Errorf("scan user: %w", err)
 		}
 		status := "active"
@@ -364,10 +358,7 @@ SELECT id, email, display_name, disabled, COALESCE(oidc_issuer, ''), COALESCE(la
 		out.Users = append(out.Users, accessControlUserDTO{
 			ID: id.String(), Name: name, Email: email, Status: status,
 			AuthProviderID: provider, Roles: []string{},
-			LastLoginAt:           createdAt.UTC().Format(time.RFC3339),
-			LocalPassword:         localPassword,
-			Locked:                false,
-			PasswordResetRequired: resetRequired,
+			LastLoginAt: createdAt.UTC().Format(time.RFC3339),
 		})
 	}
 

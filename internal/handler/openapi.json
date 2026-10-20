@@ -1617,123 +1617,6 @@
           }
         }
       },
-      "AuthServer": {
-        "type": "object",
-        "description": "B4 DB-backed auth provider (IdP). One of LDAP/SAML/OIDC. The config object's meaningful fields depend on type. Provider secrets (config.bind_password, config.sp_key_pem, config.client_secret) are returned redacted on read, and a redaction-marker echo on update preserves the stored secret.",
-        "required": [
-          "type",
-          "name"
-        ],
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "readOnly": true
-          },
-          "type": {
-            "type": "string",
-            "enum": [
-              "ldap",
-              "saml",
-              "oidc"
-            ],
-            "description": "Provider kind. Immutable after create."
-          },
-          "name": {
-            "type": "string",
-            "description": "Unique provider name within the org."
-          },
-          "enabled": {
-            "type": "boolean"
-          },
-          "auth_order": {
-            "type": "integer",
-            "description": "Lower value is preferred when multiple providers of the same type are enabled."
-          },
-          "config": {
-            "type": "object",
-            "description": "Provider-specific configuration. LDAP: url, bind_dn, bind_password, base_dn, user_filter, group_attribute, email_attribute. SAML: idp_metadata_xml, entity_id, acs_url, sp_cert_pem, sp_key_pem, group_attribute, email_attribute. OIDC: issuer_url, client_id, client_secret, redirect_url, scopes.",
-            "properties": {
-              "url": {
-                "type": "string"
-              },
-              "bind_dn": {
-                "type": "string"
-              },
-              "bind_password": {
-                "type": "string",
-                "description": "SECRET. Redacted on read."
-              },
-              "base_dn": {
-                "type": "string"
-              },
-              "user_filter": {
-                "type": "string"
-              },
-              "group_attribute": {
-                "type": "string"
-              },
-              "email_attribute": {
-                "type": "string"
-              },
-              "idp_metadata_xml": {
-                "type": "string"
-              },
-              "entity_id": {
-                "type": "string"
-              },
-              "acs_url": {
-                "type": "string"
-              },
-              "sp_cert_pem": {
-                "type": "string"
-              },
-              "sp_key_pem": {
-                "type": "string",
-                "description": "SECRET. Redacted on read."
-              },
-              "issuer_url": {
-                "type": "string"
-              },
-              "client_id": {
-                "type": "string"
-              },
-              "client_secret": {
-                "type": "string",
-                "description": "SECRET. Redacted on read."
-              },
-              "redirect_url": {
-                "type": "string"
-              },
-              "scopes": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "role_mapping": {
-            "type": "object",
-            "description": "Maps IdP-supplied group/attribute values (lower-cased) to Constellation role names, with an optional default role.",
-            "properties": {
-              "rules": {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "string"
-                }
-              },
-              "default": {
-                "type": "string"
-              }
-            }
-          },
-          "revision": {
-            "type": "integer",
-            "readOnly": true
-          }
-        }
-      },
       "SystemConfig": {
         "type": "object",
         "description": "Runtime-mutable system configuration. Secret-bearing fields (ca_bundle_pem, and any credentials embedded in egress_proxy.https_proxy) are returned redacted on GET.",
@@ -9610,7 +9493,7 @@
   "paths": {
     "/api/v1/access-control": {
       "get": {
-        "description": "Requires manage_users. Each users item includes local_password (whether a local password exists), locked (whether the effective failed-login lockout window is still active), and password_reset_required (whether login must change the password). The status field remains active or suspended and is independent of these recovery flags.",
+        "description": "Requires manage-users. Returns OIDC identities, canonical and custom product roles, scoped bindings, and automation identities. Human sign-in is managed through the deployment OIDC configuration.",
         "summary": "Access control users, roles, bindings, providers, tokens, permissions, and guardrails"
       }
     },
@@ -11612,18 +11495,59 @@
     },
     "/api/v1/auth/break-glass": {
       "post": {
-        "responses": {
-          "200": {
-            "description": "ok"
+        "summary": "Sign in as the emergency administrator",
+        "description": "Disabled by default. Requires the Secret-configured password and a fresh six-digit TOTP. Cross-replica rate limit: five attempts per five minutes. Sets a Secure HttpOnly host session cookie, at most ten minutes, without refresh. Success commits a critical audit event and increments the emergency-login metric. Requires browser origin and X-Constellation-Client: browser.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "password",
+                  "totp"
+                ],
+                "properties": {
+                  "password": {
+                    "type": "string",
+                    "format": "password"
+                  },
+                  "totp": {
+                    "type": "string",
+                    "pattern": "^[0-9]{6}$"
+                  }
+                }
+              }
+            }
           }
         },
-        "summary": "Create break-glass"
+        "responses": {
+          "200": {
+            "description": "Emergency browser session established"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          },
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/api/v1/auth/logout": {
       "post": {
         "summary": "Logout (audited)",
-        "description": "Revokes all user sessions and refresh families and expires both browser cookies. Cookie-authenticated requests require browser CSRF headers."
+        "description": "Ends the caller\u2019s local browser sessions. Does not end the upstream identity provider session. Cookie requests require browser CSRF headers."
       }
     },
     "/api/v1/auth/me": {
@@ -11674,7 +11598,7 @@
         },
         "security": [],
         "summary": "List available browser SSO methods",
-        "description": "Returns live OIDC and SAML availability without exposing provider configuration. No authentication required."
+        "description": "Returns OIDC configuration availability and whether emergency break-glass access is enabled. Contains no secrets."
       }
     },
     "/api/v1/backups": {
@@ -34122,12 +34046,22 @@
     },
     "/api/v1/settings/identity": {
       "get": {
+        "summary": "Inspect the single sign-on provider and emergency access status",
+        "description": "Requires manage-auth-servers. Returns deployment-managed OIDC issuer, client ID, audience, role-claim name, exact role mapping and break-glass status. Never returns client secrets, password hashes or TOTP seeds.",
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Provider configuration and break-glass status"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
-        },
-        "summary": "Get identity"
+        }
       }
     },
     "/api/v1/settings/org": {

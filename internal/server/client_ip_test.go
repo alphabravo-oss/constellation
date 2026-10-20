@@ -120,11 +120,13 @@ func TestAuthLoginRateLimitRejectsForwardedSpoof(t *testing.T) {
 	ts, _, _, _, _ := newAuthTestServer(t)
 	for i := 0; i <= authIPRateLimit; i++ {
 		body := bytes.NewBufferString(`{"email":"forwarded-spoof@example.test","password":"invalid"}`)
-		r, err := http.NewRequestWithContext(t.Context(), http.MethodPost, ts.URL+"/api/v1/auth/login", body)
+		r, err := http.NewRequestWithContext(t.Context(), http.MethodPost, ts.URL+"/api/v1/auth/break-glass", body)
 		if err != nil {
 			t.Fatal(err)
 		}
 		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Origin", ts.URL)
+		r.Header.Set("X-Constellation-Client", "browser")
 		spoof := fmt.Sprintf("192.0.2.%d", i+1)
 		r.Header.Set("True-Client-IP", spoof)
 		r.Header.Set("X-Real-IP", spoof)
@@ -136,7 +138,7 @@ func TestAuthLoginRateLimitRejectsForwardedSpoof(t *testing.T) {
 		if err := response.Body.Close(); err != nil {
 			t.Fatal(err)
 		}
-		want := http.StatusUnauthorized
+		want := http.StatusNotFound
 		if i == authIPRateLimit {
 			want = http.StatusTooManyRequests
 		}

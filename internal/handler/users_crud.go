@@ -15,28 +15,6 @@ import (
 	"github.com/alphabravocompany/constellation/pkg/rbac"
 )
 
-// AUTH-USERCRUD-20 — local-user admin CRUD. The Users handler already carries the
-// lifecycle verbs (Disable / Delete / ForcePasswordReset / Unlock); this file adds the
-// two operations it was missing: Create (invite a local, password-authenticated user with
-// an initial org-scoped role + a forced temporary password) and Update (change an existing
-// user's role / email / active state). Both are org-scoped, audited, and honor the same
-// privilege-escalation guard the SSO JIT / CreateLocalUser paths use — a caller may never
-// mint or promote a user to a role more privileged than their own effective privilege.
-//
-// ROUTES (add to internal/server/server.go alongside the other /users/{id}/... routes,
-// e.g. after the unlock line):
-//
-//	r.Post("/users", s.requireVerb(rbac.VerbManageUsers, users.Create))
-//	r.Put("/users/{id}", s.requireVerb(rbac.VerbManageUsers, users.Update))
-
-// createUserBody is the POST /users request.
-type createUserBody struct {
-	Email       string `json:"email"`
-	DisplayName string `json:"display_name"`
-	Password    string `json:"password"`
-	Role        string `json:"role"`
-}
-
 // updateUserBody is the PUT /users/{id} request. Fields are pointers so an omitted field
 // is left unchanged (partial update); a present field is applied.
 type updateUserBody struct {
