@@ -1,327 +1,177 @@
 @import "tailwindcss";
-@import "./styles/tokens.css";
+@import "./ui/tokens.css";
+@import "./ui/kit.css";
 
 /*
- * Constellation — design system (Astronomer-aligned).
- *
- * Aesthetic direction:
- *   - Near-monochrome cool-gray surfaces (OKLCH, hue ~264 ≈ zinc/neutral-240).
- *   - Neutral shadcn primary; chromatic color reserved for MEANING (status) and
- *     one blue→violet brand accent (brand mark, gradients, active nav, focus).
- *   - Type: Inter (body + display) · JetBrains Mono (tabular numerics).
- *   - One radius (8px), hairline 1px borders, shadows only on floating layers.
- *   - Restrained motion: transition-colors, 0.3s page fade-in, no springs.
+ * Constellation — product layer over the shared AlphaBravo UI kit
+ * (src/ui, docs/ui/KIT.md). The kit owns neutrals, status + severity HSL
+ * pairs, type scale, density, shell geometry and the table contract. This
+ * file only:
+ *   1. sets Constellation's identity: teal is the single accent (brand slots,
+ *      active nav, primary buttons, text links and the focus ring);
+ *   2. exposes the legacy `--color-*` custom properties that inline styles and
+ *      chart fills still reference, mapped onto the kit's HSL tokens;
+ *   3. keeps product-only components (column resize/pin handles, cell overflow
+ *      modes, compact semantic tables, the network map controls, star field).
  */
 
-@theme {
-  /* ───────────────────────────── Surface (LIGHT defaults) ───────────────────────────── */
-  /* Astronomer-EXACT values (shadcn zinc/neutral, hue 240). These are the light
-     palette; dark overrides live in @layer base under :root.dark ONLY, so
-     removing the .dark class actually yields light mode. */
-  --color-background:        hsl(0 0% 100%);
-  --color-foreground:        hsl(240 10% 3.9%);
-  --color-card:              hsl(0 0% 100%);
-  --color-card-foreground:   hsl(240 10% 3.9%);
-  --color-popover:           hsl(0 0% 100%);
-  --color-popover-foreground: hsl(240 10% 3.9%);
-
-  /* ───────────────────────────── Brand ───────────────────────────── */
-  /* Primary is neutral (shadcn): near-black on light, near-white on dark. */
-  --color-primary:           hsl(240 5.9% 10%);
-  --color-primary-foreground: hsl(0 0% 98%);
-  --color-secondary:         hsl(240 4.8% 95.9%);
-  --color-secondary-foreground: hsl(240 5.9% 10%);
-  --color-accent:            hsl(240 4.8% 95.9%);
-  --color-accent-foreground: hsl(240 5.9% 10%);
-  --color-muted:             hsl(240 4.8% 95.9%);
-  --color-muted-foreground:  hsl(240 3.8% 46.1%);
-  --color-destructive:       hsl(0 84.2% 60.2%);
-  --color-destructive-foreground: hsl(0 0% 98%);
-
-  /* Brand accent — blue → violet. Brand mark, gradients, active nav. */
-  --color-brand:             oklch(62% 0.19 258);
-  --color-brand-2:           oklch(53% 0.23 293);
-
-  /* ───────────────────────────── Form / shape ───────────────────────────── */
-  --color-border:            hsl(240 5.9% 90%);
-  --color-input:             hsl(240 5.9% 90%);
-  --color-ring:              hsl(240 5.9% 10%);
-  --radius:                  0.5rem;
-
-  /* ───────────────────────────── Sidebar ───────────────────────────── */
-  --color-sidebar:           hsl(0 0% 98%);
-  --color-sidebar-foreground: hsl(240 5.9% 10%);
-  --color-sidebar-border:    hsl(240 5.9% 90%);
-  --color-sidebar-accent:    hsl(240 4.8% 95.9%);
-  --color-sidebar-accent-foreground: hsl(240 5.9% 10%);
-
-  /* ───────────────────────────── Status (Astronomer hex) ───────────────────────────── */
-  --color-status-success:    #10b981;
-  --color-status-warning:    #f59e0b;
-  --color-status-error:      #ef4444;
-  --color-status-info:       #3b82f6;
-  --color-status-pending:    #6366f1;
-  --color-status-neutral:    #6b7280;
-
-  /* ─────────────────────────── Severity (CVE domain) ─────────────────────────── */
-  --color-severity-info:     #6b7280;
-  --color-severity-low:      #3b82f6;
-  --color-severity-medium:   #f59e0b;
-  --color-severity-high:     #f97316;
-  --color-severity-critical: #ef4444;
-
-  /* ─────────────────────────── Legacy accent aliases ─────────────────────────── */
-  /* Kept (repointed teal→brand) so existing `accent-teal` references stay valid. */
-  --color-accent-teal:       oklch(62% 0.19 258);
-  --color-accent-teal-soft:  oklch(62% 0.19 258 / 0.15);
-
-  /* ───────────────────────────── Type ───────────────────────────── */
-  --font-sans:    "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-display: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-mono:    "JetBrains Mono", "Fira Code", ui-monospace, monospace;
-  --text-2xs: 0.6875rem;
-  --text-2xs--line-height: 1rem;
-
-  /* Density step controls row heights; toggled via data-density on <body>. */
-  --row-h: 32px;
-}
+@custom-variant dark (&:where(.dark, .dark *));
 
 @layer base {
-  /* Light is the default (@theme values on :root). Dark overrides apply ONLY
-     when <html> carries the .dark class (toggled by ThemeContext). Astronomer-
-     EXACT dark palette. */
-  :root { color-scheme: light; }
-  :root.dark {
-    color-scheme: dark;
-    --color-background:        hsl(240 10% 3.9%);
-    --color-foreground:        hsl(0 0% 98%);
-    --color-card:              hsl(240 10% 5.5%);
-    --color-card-foreground:   hsl(0 0% 98%);
-    --color-popover:           hsl(240 10% 5.5%);
-    --color-popover-foreground: hsl(0 0% 98%);
-
-    --color-primary:           hsl(0 0% 98%);
-    --color-primary-foreground: hsl(240 5.9% 10%);
-    --color-secondary:         hsl(240 3.7% 15.9%);
-    --color-secondary-foreground: hsl(0 0% 98%);
-    --color-accent:            hsl(240 3.7% 15.9%);
-    --color-accent-foreground: hsl(0 0% 98%);
-    --color-muted:             hsl(240 3.7% 15.9%);
-    --color-muted-foreground:  hsl(240 5% 64.9%);
-    --color-destructive:       hsl(0 62.8% 30.6%);
-    --color-destructive-foreground: hsl(0 0% 98%);
-
-    --color-border:            hsl(240 3.7% 15.9%);
-    --color-input:             hsl(240 3.7% 15.9%);
-    --color-ring:              hsl(240 4.9% 83.9%);
-
-    --color-sidebar:           hsl(240 10% 4.5%);
-    --color-sidebar-foreground: hsl(240 4.8% 75%);
-    --color-sidebar-border:    hsl(240 3.7% 12%);
-    --color-sidebar-accent:    hsl(240 3.7% 10%);
-    --color-sidebar-accent-foreground: hsl(0 0% 98%);
+  :root {
+    /* Teal accent, derived from the line-art mark (#338A84). White text on
+     * the light accent is 5.0:1; the dark accent carries dark text. */
+    --brand: 175 50% 31%;
+    --brand-foreground: 0 0% 100%;
+    --brand-from: 172 48% 38%;
+    --brand-to: 188 56% 33%;
+    /* Focus is the accent too (C1: teal for active nav, primary, links, focus). */
+    --ring: 175 50% 31%;
+  }
+  .dark {
+    --brand: 174 52% 50%;
+    --brand-foreground: 240 10% 3.9%;
+    --brand-from: 172 52% 52%;
+    --brand-to: 188 60% 52%;
+    --ring: 174 52% 50%;
   }
 
-  * { @apply border-border; }
-  *:focus-visible {
-    outline: 2px solid var(--color-ring);
-    outline-offset: 2px;
-    border-radius: var(--radius);
+  /* Legacy custom properties for inline styles / chart fills. Values always
+   * follow the kit tokens, so light/dark pairs come for free. */
+  :root {
+    --color-background: hsl(var(--background));
+    --color-foreground: hsl(var(--foreground));
+    --color-card: hsl(var(--card));
+    --color-card-foreground: hsl(var(--card-foreground));
+    --color-popover: hsl(var(--popover));
+    --color-primary: hsl(var(--primary));
+    --color-primary-foreground: hsl(var(--primary-foreground));
+    --color-secondary: hsl(var(--secondary));
+    --color-muted: hsl(var(--muted));
+    --color-muted-foreground: hsl(var(--muted-foreground));
+    --color-accent: hsl(var(--accent));
+    --color-destructive: hsl(var(--destructive));
+    --color-border: hsl(var(--border));
+    --color-ring: hsl(var(--ring));
+    --color-brand: hsl(var(--brand));
+    --color-brand-2: hsl(var(--brand-to));
+    --color-accent-teal: hsl(var(--brand));
+    --color-status-success: hsl(var(--status-success));
+    --color-status-warning: hsl(var(--status-warning));
+    --color-status-error: hsl(var(--status-error));
+    --color-status-info: hsl(var(--status-info));
+    --color-status-pending: hsl(var(--status-pending));
+    --color-status-neutral: hsl(var(--status-neutral));
+    --color-severity-critical: hsl(var(--severity-critical));
+    --color-severity-high: hsl(var(--severity-high));
+    --color-severity-medium: hsl(var(--severity-medium));
+    --color-severity-low: hsl(var(--severity-low));
+    --color-severity-info: hsl(var(--severity-info));
+    --ease-out: var(--motion-ease);
   }
 
-  html, body, #root { height: 100%; }
-  html { font-feature-settings: "cv11" 1, "rlig" 1, "calt" 1; }
-
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
   body {
-    @apply bg-background text-foreground antialiased;
-    font-family: var(--font-sans);
-    font-feature-settings: "rlig" 1, "calt" 1;
-    text-rendering: optimizeLegibility;
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
+    font-family: var(--font-app-sans);
+    font-feature-settings:
+      "cv11" 1,
+      "rlig" 1,
+      "calt" 1;
   }
-  body[data-density="compact"] { --row-h: 24px; }
-  body[data-density="cozy"]    { --row-h: 32px; }
-  body[data-density="comfy"]   { --row-h: 40px; }
-
-  h1, h2, h3, h4, h5 { font-family: var(--font-display); letter-spacing: -0.015em; }
-
-  /* Tabular numerics on any element via .num */
-  .num, [class*="font-mono"] { font-variant-numeric: tabular-nums; }
-
-  /* Scrollbar — thin and unobtrusive */
-  ::-webkit-scrollbar       { width: 8px; height: 8px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: color-mix(in oklab, var(--color-muted-foreground) 22%, transparent); border-radius: 4px; }
-  ::-webkit-scrollbar-thumb:hover { background: color-mix(in oklab, var(--color-muted-foreground) 40%, transparent); }
-
-  ::selection { background-color: color-mix(in oklab, var(--color-brand) 30%, transparent); color: var(--color-foreground); }
-
-  @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after {
-      animation-duration: 0.001ms !important;
-      animation-iteration-count: 1 !important;
-      transition-duration: 0.001ms !important;
-    }
+  h1,
+  h2,
+  h3,
+  h4 {
+    letter-spacing: -0.01em;
+  }
+  .num,
+  [class*="font-mono"] {
+    font-variant-numeric: tabular-nums;
+  }
+  ::selection {
+    background-color: hsl(var(--brand) / 0.25);
+  }
+  *:focus-visible {
+    outline-color: hsl(var(--ring));
   }
 }
 
 @layer components {
-  /* Sidebar nav row (Astronomer parity — bg-accent active, no accent bar) */
-  .nav-item {
-    @apply flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium
-           text-muted-foreground hover:text-foreground hover:bg-accent
-           transition-all duration-150;
+  /* Text links inside page content are the accent (entity links in tables
+   * stay neutral per the kit's table contract). */
+  .text-link {
+    color: hsl(var(--brand));
+    text-decoration-line: underline;
+    text-decoration-color: hsl(var(--brand) / 0.4);
+    text-underline-offset: 4px;
   }
-  .nav-item.active {
-    @apply text-foreground bg-accent;
-  }
-
-  /* Glass card surface used on dashboard tiles */
-  .glass-card {
-    @apply bg-card border border-border rounded-lg;
-    background-image:
-      radial-gradient(color-mix(in oklab, var(--color-foreground) 4%, transparent) 1px, transparent 1px);
-    background-size: 22px 22px;
-    background-position: 0 0;
+  .text-link:hover {
+    text-decoration-color: currentColor;
   }
 
-  /* Subtle dot-grid background, used on hero panels */
-  .dot-grid {
-    background-image:
-      radial-gradient(color-mix(in oklab, var(--color-foreground) 6%, transparent) 1px, transparent 1px);
-    background-size: 22px 22px;
-  }
-
-  /* Constellation star-field used on hero band — extremely subtle */
+  /* Constellation's login texture: a sparse star field. */
   .star-field {
     background-image:
-      radial-gradient(color-mix(in oklab, var(--color-brand) 28%, transparent) 1px, transparent 1px),
-      radial-gradient(color-mix(in oklab, var(--color-foreground) 5%, transparent) 1px, transparent 1px);
-    background-size: 96px 96px, 28px 28px;
-    background-position: 12px 12px, 0 0;
+      radial-gradient(circle at 1px 1px, hsl(0 0% 100% / 0.55) 1px, transparent 1.5px),
+      radial-gradient(circle at 1px 1px, hsl(var(--brand) / 0.55) 1px, transparent 1.5px),
+      radial-gradient(circle at 1px 1px, hsl(0 0% 100% / 0.18) 0.75px, transparent 1px);
+    background-size:
+      173px 151px,
+      241px 199px,
+      37px 41px;
+    background-position:
+      13px 29px,
+      97px 61px,
+      0 0;
   }
 
-  /* Table row hover */
-  .table-row-hover {
-    @apply hover:bg-accent/50 transition-colors cursor-pointer;
-  }
-
-  /* Hairline divider used in panels */
-  .hairline { @apply border-t border-border; }
-
-  /* Brand gradient text */
-  .text-gradient {
-    background: linear-gradient(135deg, var(--color-brand), var(--color-brand-2));
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-  }
-
-  /* Glows kept minimal */
-  .glow-primary { box-shadow: 0 0 24px color-mix(in oklab, var(--color-brand) 22%, transparent); }
-  .glow-critical { box-shadow: 0 0 16px color-mix(in oklab, var(--color-severity-critical) 22%, transparent); }
-}
-
-@layer utilities {
-  .no-scrollbar::-webkit-scrollbar { display: none; }
-  .no-scrollbar {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
-
-  .text-display { font-family: var(--font-display); letter-spacing: -0.015em; }
-  .text-mono    { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
-
-  /* 150ms slide-in accent bar — used by table row hover */
-  .accent-slide {
-    position: relative;
-    isolation: isolate;
-  }
-  .accent-slide::before {
-    content: "";
-    position: absolute;
-    inset-block: 4px;
-    left: 0;
-    width: 2px;
-    background: var(--color-brand);
-    transform: scaleY(0);
-    transform-origin: top;
-    transition: transform 150ms ease-out;
-  }
-  .accent-slide:hover::before { transform: scaleY(1); }
-
-  /* Page mount fade-in (Astronomer parity) */
-  @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
-  .animate-fade-in { animation: fade-in 0.3s var(--ease-out, ease-out) both; }
-
-  /* Live status dot */
-  @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-  .animate-pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
-
-  /* Staggered reveal — used on dashboard load */
-  @keyframes c-rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-  .c-rise { animation: c-rise 280ms ease-out both; }
-  .c-rise-1 { animation-delay: 0ms; }
-  .c-rise-2 { animation-delay: 40ms; }
-  .c-rise-3 { animation-delay: 80ms; }
-  .c-rise-4 { animation-delay: 120ms; }
-  .c-rise-5 { animation-delay: 160ms; }
-  .c-rise-6 { animation-delay: 200ms; }
-}
-
-@layer components {
-  .app-data-table,
-  .app-semantic-table {
-    --table-text-primary: var(--color-foreground);
-    --table-text-secondary: color-mix(in oklab, var(--color-foreground) 86%, var(--color-background));
-    --table-text-tertiary: color-mix(in oklab, var(--color-foreground) 68%, var(--color-background));
-    --table-header-bg: color-mix(in oklab, var(--color-muted) 72%, var(--color-card));
-    --table-row-hover: color-mix(in oklab, var(--color-accent) 58%, transparent);
-    --table-row-selected: color-mix(in oklab, var(--color-primary) 9%, transparent);
-    font-size: 0.875rem;
-    line-height: 1.25rem;
-    font-weight: 450;
-  }
-
-  .app-data-table thead {
-    background: var(--table-header-bg);
-    box-shadow: 0 1px 0 var(--color-border), 0 5px 12px color-mix(in oklab, var(--color-background) 22%, transparent);
+  /* ---------- Product table extensions (resize, pin, overflow modes) ---------- */
+  .app-data-table tr::before,
+  .app-data-table tr::after {
+    content: none;
   }
   .app-data-table thead th {
-    color: var(--table-text-secondary);
-    font-size: 0.75rem;
-    line-height: 1rem;
-    font-weight: 600;
-    letter-spacing: 0;
-    text-transform: none;
     text-align: left;
     vertical-align: middle;
   }
-
-  .app-data-table tbody td { color: var(--color-foreground); vertical-align: middle; }
-
-  /* Never put generated content on a table row: browsers can allocate an
-     anonymous cell for it, shifting body columns away from their headers. */
-  .app-data-table tr::before,
-  .app-data-table tr::after { content: none; }
-
-  .app-table-scroll { max-width: 100%; }
+  .app-data-table tbody td {
+    vertical-align: middle;
+  }
+  .app-table-scroll {
+    max-width: 100%;
+  }
   .app-table-resize {
-    position: absolute; inset-block: 0; right: 0; width: 7px;
-    cursor: col-resize; touch-action: none; user-select: none; z-index: 2;
+    position: absolute;
+    inset-block: 0;
+    right: 0;
+    width: 7px;
+    cursor: col-resize;
+    touch-action: none;
+    user-select: none;
+    z-index: 2;
     border-right: 2px solid transparent;
   }
-  .app-table-resize:hover, .app-table-resize:focus-visible {
-    border-right-color: var(--color-primary); outline: none;
-    background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  .app-table-resize:hover,
+  .app-table-resize:focus-visible {
+    border-right-color: hsl(var(--ring));
+    outline: none;
+    background: hsl(var(--ring) / 0.12);
   }
   .app-data-table .app-table-pinned {
-    background: var(--color-card); z-index: 2;
-    box-shadow: inset -1px 0 var(--color-border), inset 1px 0 var(--color-border);
+    background: hsl(var(--card));
+    z-index: 2;
+    box-shadow:
+      inset -1px 0 hsl(var(--border)),
+      inset 1px 0 hsl(var(--border));
   }
-  .app-data-table thead .app-table-pinned { z-index: 3; }
-
+  .app-data-table thead .app-table-pinned {
+    z-index: 3;
+    background: var(--table-header-bg);
+  }
   .app-table-header-button {
     display: flex;
     width: 100%;
@@ -330,12 +180,25 @@
     gap: 0.375rem;
     text-align: inherit;
   }
-  .app-data-table th[data-align="right"] .app-table-header-button { justify-content: flex-end; }
-  .app-data-table th[data-align="center"] .app-table-header-button { justify-content: center; }
-  .app-data-table table[data-layout="semantic"] th { white-space: nowrap; }
-  .app-table-cell-content { min-width: 0; max-width: 100%; }
+  .app-data-table th[data-align="right"] .app-table-header-button {
+    justify-content: flex-end;
+  }
+  .app-data-table th[data-align="center"] .app-table-header-button {
+    justify-content: center;
+  }
+  .app-data-table table[data-layout="semantic"] th {
+    white-space: nowrap;
+  }
+  .app-table-cell-content {
+    min-width: 0;
+    max-width: 100%;
+  }
   .app-table-cell-content[data-overflow="truncate"],
-  .app-table-cell-content[data-overflow="middle"] { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .app-table-cell-content[data-overflow="middle"] {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
   .app-table-cell-content[data-overflow="wrap-2"] {
     display: -webkit-box;
     -webkit-box-orient: vertical;
@@ -344,8 +207,15 @@
     overflow-wrap: anywhere;
     white-space: normal;
   }
-  .app-table-cell-content[data-overflow="wrap"] { white-space: normal; overflow-wrap: anywhere; }
-  .app-table-cell-content[data-overflow="nowrap"] { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .app-table-cell-content[data-overflow="wrap"] {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .app-table-cell-content[data-overflow="nowrap"] {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   .app-data-table td[data-kind="actions"] .app-table-cell-content {
     display: flex;
     justify-content: flex-end;
@@ -353,141 +223,98 @@
     gap: 0.5rem;
   }
 
-  .app-data-table tbody td .text-muted-foreground {
-    color: var(--table-text-secondary);
-  }
-
-  .app-table-primary { color: var(--table-text-primary); font-weight: 600; }
-  .app-table-secondary { color: var(--table-text-secondary); font-size: 0.8125rem; }
-  .app-table-tertiary { color: var(--table-text-tertiary); font-size: 0.75rem; }
-  .app-table-code { color: var(--table-text-secondary); font-family: var(--font-mono); font-size: 0.8125rem; }
-  .app-table-numeric { color: var(--table-text-primary); font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; }
-
-  .app-data-table tbody a,
-  .app-table-entity-link {
-    color: var(--color-primary);
-    font-weight: 550;
-    text-decoration-line: underline;
-    text-decoration-color: color-mix(in oklab, var(--color-primary) 48%, transparent);
-    text-underline-offset: 4px;
-    transition: color 120ms ease-out, text-decoration-color 120ms ease-out;
-  }
-
-  .app-data-table tbody a:hover,
-  .app-table-entity-link:hover {
-    color: color-mix(in oklab, var(--color-primary) 82%, var(--color-foreground));
-    text-decoration-color: currentColor;
-  }
-
-  .app-data-table tbody a:focus-visible,
-  .app-table-entity-link:focus-visible {
-    border-radius: 2px;
-    outline: 2px solid var(--color-primary);
-    outline-offset: 3px;
-  }
-
-  .app-data-table-row-clickable:hover,
-  .app-data-table-row-clickable:focus-visible {
-    box-shadow: inset 3px 0 0 var(--color-primary);
-    background: var(--table-row-hover);
-  }
-
-  .app-data-table tr[data-selected="true"] {
-    background: var(--table-row-selected);
-    box-shadow: inset 3px 0 0 var(--color-primary);
-  }
-
-  /* Compact read-only matrices share the canonical table treatment. Data
-     inventories still use the TanStack-powered .app-data-table component. */
+  /* Compact read-only matrices share the table typography. */
   .app-semantic-table {
     width: 100%;
     border-collapse: collapse;
-    color: var(--color-foreground);
+    color: hsl(var(--foreground));
     font-size: 0.875rem;
+    font-weight: 450;
   }
   .app-semantic-table thead {
-    border-bottom: 1px solid var(--color-border);
-    background: color-mix(in oklab, var(--color-muted) 35%, transparent);
+    border-bottom: 1px solid hsl(var(--border));
+    background: hsl(var(--muted) / 0.5);
   }
   .app-semantic-table th {
     height: 2.25rem;
     padding: 0 0.75rem;
     text-align: left;
-    color: var(--color-foreground);
+    color: hsl(var(--muted-foreground));
     font-size: 0.75rem;
     font-weight: 600;
   }
   .app-semantic-table tbody tr {
-    border-bottom: 1px solid var(--color-border);
-    transition: background-color 150ms var(--ease-out);
+    border-bottom: 1px solid hsl(var(--border));
+    transition: background-color 150ms var(--motion-ease);
   }
   .app-semantic-table tbody tr:hover {
-    background: color-mix(in oklab, var(--color-accent) 25%, transparent);
+    background: hsl(var(--accent) / 0.4);
   }
   .app-semantic-table td {
     padding: 0.625rem 0.75rem;
-    color: var(--color-foreground);
-  }
-  .app-semantic-table td.text-muted-foreground {
-    color: var(--table-text-secondary);
   }
   .app-semantic-table a[href] {
-    color: var(--color-primary);
-    font-weight: 550;
+    font-weight: 500;
     text-decoration: underline;
-    text-decoration-color: color-mix(in oklab, var(--color-primary) 48%, transparent);
+    text-decoration-color: hsl(var(--muted-foreground) / 0.4);
     text-underline-offset: 4px;
+  }
+
+  /* Stat rows that still render as tiles (detail pages) fit the content width. */
+  .app-stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
+    gap: 0.75rem;
+  }
+  .app-stat-grid > * {
+    min-width: 0;
   }
 }
 
-/* React-Flow themed controls — repositioned to the right edge UNDER the
-   Legend so they don't collide. Override colors so zoom/in/out/fit read
-   clearly in our OKLCH dark palette. */
+@layer utilities {
+  .text-display {
+    letter-spacing: -0.01em;
+  }
+  .text-mono {
+    font-family: var(--font-app-mono);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* React Flow controls, under the legend on the network map. */
 .constellation-rf-controls.react-flow__controls,
 .constellation-rf-controls {
   position: absolute !important;
-  top: 150px !important;     /* below the ~120px Legend at top:12 */
+  top: 150px !important;
   right: 12px !important;
   left: auto !important;
   bottom: auto !important;
   border-radius: 8px;
   overflow: hidden;
   box-shadow: var(--elev-2);
-  background: color-mix(in oklab, var(--color-card) 95%, transparent);
-  border: 1px solid var(--color-border);
+  background: hsl(var(--card) / 0.95);
+  border: 1px solid hsl(var(--border));
   display: flex;
   flex-direction: column;
   z-index: 20;
 }
 .constellation-rf-controls .react-flow__controls-button {
   background: transparent;
-  border-bottom: 1px solid color-mix(in oklab, var(--color-border) 60%, transparent);
-  color: var(--color-foreground);
+  border-bottom: 1px solid hsl(var(--border) / 0.6);
+  color: hsl(var(--foreground));
   width: 32px;
   height: 32px;
   display: grid;
   place-items: center;
-  transition: background 120ms var(--ease-out);
 }
 .constellation-rf-controls .react-flow__controls-button:last-child {
   border-bottom: none;
 }
 .constellation-rf-controls .react-flow__controls-button:hover {
-  background: color-mix(in oklab, var(--color-foreground) 8%, transparent);
-  color: var(--color-foreground);
+  background: hsl(var(--foreground) / 0.08);
 }
 .constellation-rf-controls .react-flow__controls-button svg {
   width: 14px;
   height: 14px;
   fill: currentColor;
 }
-
-/* Shared metric rows respond to content width rather than viewport breakpoints. */
-.app-stat-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
-  gap: 0.75rem;
-}
-.app-stat-grid > * { min-width: 0; }
-.app-stat-value { font-size: 1.875rem; line-height: 2.25rem; }
-.app-stat-value[data-kind="text"] { font-size: 1rem; line-height: 1.5rem; }
