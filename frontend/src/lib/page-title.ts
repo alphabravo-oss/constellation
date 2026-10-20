@@ -37,7 +37,14 @@ export function useCrumbLabel(label: string | null | undefined, path?: string) {
   }, [label, path]);
 }
 
+/** A fresh snapshot per registration, so memoized consumers recompute. */
+let snapshot = new Map<string, string>();
+let snapshotVersion = -1;
 export function useCrumbLabels(): Map<string, string> {
-  useSyncExternalStore(subscribe, () => version, () => version);
-  return labels;
+  const current = useSyncExternalStore(subscribe, () => version, () => version);
+  if (snapshotVersion !== current) {
+    snapshot = new Map(labels);
+    snapshotVersion = current;
+  }
+  return snapshot;
 }

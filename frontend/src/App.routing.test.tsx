@@ -11,7 +11,6 @@ vi.mock("./components/AppShell", () => ({ AppShell: () => <Outlet /> }));
 vi.mock("./pages/ClusterRouter", () => ({ ClusterRouter: () => <Outlet /> }));
 vi.mock("./pages/LoginPage", () => ({ LoginPage: () => <div>Sign in</div> }));
 vi.mock("./pages/ClustersLandingPage", () => ({ ClustersLandingPage: () => <div>Clusters</div> }));
-vi.mock("./pages/SettingsLanding", () => ({ SettingsLanding: () => <div>Settings</div> }));
 vi.mock("./components/SettingsShell", () => ({ SettingsShell: () => <Outlet /> }));
 vi.mock("./api/client", () => ({ clusters: { list: async () => ({ clusters: [{ id: "cluster-1", name: "Cluster", last_seen: "2026-10-11T00:00:00Z" }] }) } }));
 

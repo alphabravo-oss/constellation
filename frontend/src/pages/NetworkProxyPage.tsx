@@ -103,7 +103,7 @@ export function NetworkProxyPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Network & Proxy"
+        title="Network and proxy"
         description="Outbound connectivity for the platform — how Constellation reaches the internet and where it mirrors audit events."
       />
 

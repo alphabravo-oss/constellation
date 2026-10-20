@@ -80,8 +80,8 @@ const POLICY_TABS: HubTab[] = [
 ];
 
 const POLICY_SUB: Record<string, Array<{ label: string; path: string }>> = {
-  admission: [{ label: "Admission rules", path: "admission" }, { label: "Policy catalog", path: "policies" }],
-  response: [{ label: "Response rules", path: "response-rules" }, { label: "Built-in catalog", path: "response" }],
+  admission: [{ label: "Rules", path: "admission" }, { label: "Policy catalog", path: "policies" }],
+  response: [{ label: "Rules", path: "response-rules" }, { label: "Built-in catalog", path: "response" }],
 };
 
 export function PoliciesHub({ tab, children }: { tab: "admission" | "runtime" | "network" | "response"; children: ReactNode }) {

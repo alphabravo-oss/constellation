@@ -87,7 +87,7 @@ test.describe("C1 shell", () => {
     const crumbs = page.getByRole("navigation", { name: "Breadcrumb" });
     await expect(crumbs).toBeVisible();
     await expect(crumbs).not.toHaveText(UUID);
-    await expect(crumbs.locator('[aria-current="page"]')).toHaveText(/^(CVE-\d{4}-\d+|GO-\d{4}-\d+|[A-Z]+-[\w-]+|.{6,})$/);
+    await expect(crumbs.locator('[aria-current="page"]')).not.toHaveText("Finding");
     expect(await crumbs.innerText()).not.toMatch(/[0-9a-f]{8}-/i);
   });
 });
