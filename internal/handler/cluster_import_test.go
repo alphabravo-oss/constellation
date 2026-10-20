@@ -11,7 +11,7 @@ func TestRenderImportManifest(t *testing.T) {
 		Token:           "raw-agent-token-abc123def456",
 		ClusterID:       "2a46e2a1-9485-4bd6-a622-b1fcd6ee4130",
 		ClusterName:     "prod-us-east-1",
-		AgentImage:      "ghcr.io/alphabravocompany/constellation/runtime-agent:latest",
+		AgentImage:      "ghcr.io/alphabravo-oss/constellation/runtime-agent:latest",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -24,7 +24,7 @@ func TestRenderImportManifest(t *testing.T) {
 		`token: "raw-agent-token-abc123def456"`,            // credential in the secret
 		`value: "prod-us-east-1"`,                          // cluster name
 		`value: "2a46e2a1-9485-4bd6-a622-b1fcd6ee4130"`,    // cluster id
-		"ghcr.io/alphabravocompany/constellation/runtime-agent:latest",
+		"ghcr.io/alphabravo-oss/constellation/runtime-agent:latest",
 	} {
 		if !strings.Contains(m, want) {
 			t.Fatalf("manifest missing %q", want)

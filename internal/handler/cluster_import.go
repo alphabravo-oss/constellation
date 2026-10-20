@@ -36,7 +36,7 @@ func agentImage() string {
 	if v := strings.TrimSpace(os.Getenv("CONSTELLATION_AGENT_IMAGE")); v != "" {
 		return v
 	}
-	return "ghcr.io/alphabravocompany/constellation/runtime-agent:latest"
+	return "ghcr.io/alphabravo-oss/constellation/runtime-agent:latest"
 }
 
 // Manifest handles GET /api/v1/import/{filename}. filename is "<token>.yaml".

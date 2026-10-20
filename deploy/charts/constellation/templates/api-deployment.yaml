@@ -69,6 +69,9 @@ spec:
             {{- end }}
             - name: LISTEN_ADDR
               value: ":8080"
+            # Imported clusters pull the same runtime-agent image this release runs.
+            - name: CONSTELLATION_AGENT_IMAGE
+              value: {{ include "constellation.roleImage" (dict "ctx" . "role" "runtimeAgent") | quote }}
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
