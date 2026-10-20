@@ -29,6 +29,7 @@ test("settings show one generic OIDC provider, its role map and break-glass stat
   expect(settings.break_glass.totp_required).toBeTruthy();
   for (const secret of ["client_secret", "password_hash", "totp_secret"]) expect(JSON.stringify(settings)).not.toContain(secret);
   await expect(page.getByRole("button", { name: "Add provider", exact: true })).toHaveCount(0);
+  await page.screenshot({path:test.info().outputPath("identity-settings.png"),fullPage:true});
 });
 
 async function oidcLogin(page: Page) {
@@ -88,7 +89,8 @@ test("break-glass signs in with the issuer down and emits an operator alert", as
     const page = await context.newPage(); await page.goto("/auth/login");
     await page.getByRole("button", { name: "Emergency access", exact: true }).click();
     await page.locator("#login-password").fill(process.env.BREAK_GLASS_PASSWORD!);
-    await page.locator("#login-totp").fill(totp(process.env.BREAK_GLASS_TOTP_SECRET!));
+    const emergencyCode=totp(process.env.BREAK_GLASS_TOTP_SECRET!);
+    await page.locator("#login-totp").fill(emergencyCode);
     await page.getByRole("button", { name: "Sign in", exact: true }).click();
     await expect(page).toHaveURL(/\/clusters(?:[/?#]|$)/, { timeout: 30_000 });
     expect((await (await context.request.get("/api/v1/auth/me")).json()).email).toBe("break-glass@constellation.local");
@@ -100,6 +102,17 @@ test("break-glass signs in with the issuer down and emits an operator alert", as
       return (await response.json()).data.result.length;
     }, { timeout: 90_000, intervals: [1000, 2000, 5000] }).toBeGreaterThan(0);
     await page.goto("/settings/identity"); await expect(page.getByText("TOTP required", { exact: true })).toBeVisible();
+    const emergencyHeaders={Origin:baseURL!,"X-Constellation-Client":"browser"};
+    const attempt=(password:string,totp:string)=>context.request.post("/api/v1/auth/break-glass",{headers:emergencyHeaders,data:{password,totp}});
+    expect((await attempt(process.env.BREAK_GLASS_PASSWORD!,emergencyCode)).status()).toBe(401); // one-use TOTP
+    expect((await attempt(process.env.BREAK_GLASS_PASSWORD!,"")).status()).toBe(401); // mandatory TOTP
+    expect((await attempt("incorrect-password",emergencyCode)).status()).toBe(401);
+    expect((await attempt("incorrect-password",emergencyCode)).status()).toBe(401);
+    const limited=await attempt("incorrect-password",emergencyCode);
+    expect(limited.status()).toBe(429);expect(limited.headers()["retry-after"]).toBe("300");
+    expect((await context.request.post("/api/v1/auth/logout",{headers:emergencyHeaders})).status()).toBe(200);
+    expect((await context.request.get("/api/v1/auth/me")).status()).toBe(401);
+
   } finally {
     execFileSync("kubectl", ["-n", namespace, "scale", `deployment/${deployment}`, "--replicas=1"]);
     await context.close();
