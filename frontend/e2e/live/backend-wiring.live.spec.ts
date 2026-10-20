@@ -39,7 +39,10 @@ test("finding detail uses the API's asset_name in the affected-asset chip", asyn
   const findingId = decodeURIComponent(new URL(page.url()).pathname.split("/").pop()!);
   const query = new URL(page.url()).search;
   const detail = await (await page.request.get(`/api/v1/findings/${encodeURIComponent(findingId)}${query}`, { headers: H })).json() as { asset_name?: string };
-  if (detail.asset_name) await expect(page.getByTestId("finding-affected-asset-name")).toHaveText(detail.asset_name);
+  const chip = page.getByTestId("finding-affected-asset-name");
+  // A readable asset_name is shown as-is; a bare digest resolves to the image reference.
+  if (detail.asset_name && !/^sha256:/i.test(detail.asset_name)) await expect(chip).toHaveText(detail.asset_name);
+  else await expect(chip).not.toHaveText(/^(Asset|Loading asset…)$/);
 });
 
 test("API errors show the request id as the reference", async ({ page }) => {

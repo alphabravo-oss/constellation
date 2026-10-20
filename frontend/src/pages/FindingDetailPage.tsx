@@ -48,8 +48,10 @@ function FindingDetail({ finding: f, clusterId, unavailable }: { finding: Findin
   const assetCluster = f.source_cluster_id ?? f.cluster_id;
   useCrumbLabel(f.external_id || f.title);
   // Phase 1 returns asset_name/asset_kind on the finding; older APIs need a lookup.
-  const asset = useQuery({ queryKey: ["finding-asset-name", assetCluster, f.asset_id], queryFn: () => assets.get(f.asset_id), enabled: !!f.asset_id && !f.asset_name, staleTime: 60_000, retry: false });
-  const assetName = f.asset_name || (asset.data ? assetDisplayName(asset.data.asset, asset.data.image) : undefined);
+  // A bare image digest is not a display name: resolve the image reference instead.
+  const apiName = f.asset_name && !/^sha256:[0-9a-f]{16,}$/i.test(f.asset_name) ? f.asset_name : undefined;
+  const asset = useQuery({ queryKey: ["finding-asset-name", assetCluster, f.asset_id], queryFn: () => assets.get(f.asset_id), enabled: !!f.asset_id && !apiName, staleTime: 60_000, retry: false });
+  const assetName = apiName || (asset.data ? assetDisplayName(asset.data.asset, asset.data.image) : undefined) || f.asset_name;
   const score = cvssScore(f);
   const hasVulnerabilityMetadata =
     typeof score === "number" || Boolean(f.cvss_vector) || Boolean(f.kev) || typeof f.epss === "number";
