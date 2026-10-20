@@ -191,11 +191,6 @@ func env(key, def string) string {
 	return def
 }
 
-// envFileOrValue resolves a PEM/XML blob from either <KEY> (inline value) or <KEY>_FILE (a path
-// to read), preferring the inline value. Returns nil when neither is set. SAML metadata/cert/key
-// are usually mounted as Secret files, so the _FILE form is the common production path; the inline
-// form keeps local/dev config a single env var.
-
 func envDuration(key string, def time.Duration) time.Duration {
 	v := os.Getenv(key)
 	if v == "" {
