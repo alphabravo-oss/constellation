@@ -112,7 +112,7 @@ func TestBuildVerifyLoadRoundTripWithLayeredResolver(t *testing.T) {
 		}
 	}
 	vals, _ := os.ReadFile(values)
-	if string(vals) == "" || !contains(string(vals), "imageRegistry: "+lo) || !contains(string(vals), "digest: sha256:") {
+	if string(vals) == "" || !contains(string(vals), "imageRegistry: "+lo) || !contains(string(vals), "digest: sha256:") || !contains(string(vals), "tag: v1") {
 		t.Fatalf("values: %s", vals)
 	}
 

@@ -611,6 +611,9 @@ admission:
 # Scanner (image / SBOM scanning worker)
 # ---------------------------------------------------------------------------
 scanner:
+  # Registry hosts (host[:port]) the scanner reaches over plain HTTP — the air-gap
+  # cluster-local registry. Empty = TLS everywhere.
+  insecureRegistries: []
   enabled: true
   replicas: 2
   image: {}
