@@ -247,10 +247,10 @@ func evalBool(tokens []string, facts map[string]any, doc *Document) bool {
 	i := 0
 	for i < len(tokens) {
 		t := tokens[i]
-		switch {
-		case t == "(":
+		switch t {
+		case "(":
 			ops = append(ops, t)
-		case t == ")":
+		case ")":
 			for len(ops) > 0 && ops[len(ops)-1] != "(" {
 				out = append(out, ops[len(ops)-1])
 				ops = ops[:len(ops)-1]
@@ -258,7 +258,7 @@ func evalBool(tokens []string, facts map[string]any, doc *Document) bool {
 			if len(ops) > 0 {
 				ops = ops[:len(ops)-1]
 			}
-		case t == "and" || t == "or" || t == "not":
+		case "and", "or", "not":
 			for len(ops) > 0 && ops[len(ops)-1] != "(" && prec(ops[len(ops)-1]) >= prec(t) {
 				out = append(out, ops[len(ops)-1])
 				ops = ops[:len(ops)-1]

@@ -566,7 +566,7 @@ func (s *Supervisor) lockPolicyLifecycle() func() {
 // happy path on ctx cancel).
 func (s *Supervisor) runOnce(ctx context.Context) bool {
 	args := s.dpArgs()
-	cmd := exec.CommandContext(ctx, s.opt.Binary, args...)
+	cmd := exec.CommandContext(ctx, s.opt.Binary, args...) //nolint:gosec // G204: Binary is the operator-configured dp path; args come from dpArgs
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		// Put dp in its own process group so a signal to the agent doesn't
 		// race with dp's own signal handler. We kill explicitly on ctx cancel
@@ -603,8 +603,8 @@ func (s *Supervisor) runOnce(ctx context.Context) bool {
 	s.activeGen.Store(s.generation.Load())
 	unlockPolicy()
 
-	go pipeToLogger(stderr, s.logger, slog.LevelInfo, "dp.stderr")
-	go pipeToLogger(stdout, s.logger, slog.LevelInfo, "dp.stdout")
+	go pipeToLogger(ctx, stderr, s.logger, slog.LevelInfo, "dp.stderr")
+	go pipeToLogger(ctx, stdout, s.logger, slog.LevelInfo, "dp.stdout")
 
 	err := cmd.Wait()
 	unlockPolicy = s.lockPolicyLifecycle()
@@ -715,8 +715,8 @@ func errStr(err error) string {
 // pipeToLogger consumes one of dp's pipes line by line and forwards each line
 // through the supplied slog handler. Done as a goroutine; returns when the
 // pipe closes (which happens when dp exits).
-func pipeToLogger(r io.ReadCloser, logger *slog.Logger, lvl slog.Level, stream string) {
-	defer r.Close()
+func pipeToLogger(ctx context.Context, r io.ReadCloser, logger *slog.Logger, lvl slog.Level, stream string) {
+	defer func() { _ = r.Close() }()
 	buf := make([]byte, 4096)
 	var leftover []byte
 	for {
@@ -733,12 +733,12 @@ func pipeToLogger(r io.ReadCloser, logger *slog.Logger, lvl slog.Level, stream s
 				if line == "" {
 					continue
 				}
-				logger.Log(nil, lvl, line, slog.String("stream", stream))
+				logger.Log(ctx, lvl, line, slog.String("stream", stream))
 			}
 		}
 		if err != nil {
 			if len(leftover) > 0 {
-				logger.Log(nil, lvl, string(leftover), slog.String("stream", stream))
+				logger.Log(ctx, lvl, string(leftover), slog.String("stream", stream))
 			}
 			return
 		}

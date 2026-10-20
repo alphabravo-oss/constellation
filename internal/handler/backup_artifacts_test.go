@@ -94,7 +94,7 @@ func assertCompletedBackupArtifact(t *testing.T, h *Backups, id, org uuid.UUID, 
 	if response.Code != http.StatusOK {
 		t.Fatalf("download status=%d body=%s", response.Code, response.Body.String())
 	}
-	result, err := backup.VerifyArchive(backup.RestoreOptions{In: bytes.NewReader(response.Body.Bytes()), AllowUnverified: true})
+	result, err := backup.VerifyArchive(context.Background(), backup.RestoreOptions{In: bytes.NewReader(response.Body.Bytes()), AllowUnverified: true})
 	if err != nil || result.Manifest.OrgName != name {
 		t.Fatalf("wrong downloaded archive: %+v %v", result, err)
 	}

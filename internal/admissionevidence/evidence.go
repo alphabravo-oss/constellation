@@ -1179,7 +1179,7 @@ func admissionEvidenceImages(pod *corev1.Pod) []admissionEvidenceImage {
 		out = append(out, admissionEvidenceImageFor(c.Name, "container", c.Image))
 	}
 	for _, c := range pod.Spec.EphemeralContainers {
-		out = append(out, admissionEvidenceImageFor(c.Name, "ephemeral", c.EphemeralContainerCommon.Image))
+		out = append(out, admissionEvidenceImageFor(c.Name, "ephemeral", c.Image))
 	}
 	return out
 }

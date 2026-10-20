@@ -121,7 +121,7 @@ func (a cliBackupCreateOptions) run(cmd *cobra.Command) (resultErr error) {
 	defer func() {
 		resultErr = errors.Join(resultErr, backup.CLIFailure("backup artifact close", artifact.Close()))
 	}()
-	if err = a.verify(artifact, mode); err != nil {
+	if err = a.verify(ctx, artifact, mode); err != nil {
 		return err
 	}
 	if workspace != nil {
@@ -141,11 +141,11 @@ func (a cliBackupCreateOptions) run(cmd *cobra.Command) (resultErr error) {
 	return receipt.print(cmd, name, a.verifyKey != "")
 }
 
-func (a cliBackupCreateOptions) verify(file *os.File, mode backup.SignMode) error {
+func (a cliBackupCreateOptions) verify(ctx context.Context, file *os.File, mode backup.SignMode) error {
 	if mode != backup.SignModeKeyless && a.verifyKey == "" {
 		return nil
 	}
-	return backup.CLIFailure("backup verification", verifyOpenedCLIBackup(file, mode, a.verifyKey))
+	return backup.CLIFailure("backup verification", verifyOpenedCLIBackup(ctx, file, mode, a.verifyKey))
 }
 func (a cliBackupCreateOptions) upload(ctx context.Context, name string, id uuid.UUID, at time.Time, file *os.File, size int64) (string, error) {
 	if a.s3URI == "" {
@@ -203,7 +203,7 @@ func (r cliBackupReceipt) print(cmd *cobra.Command, name string, explicitVerify 
 	return output.result()
 }
 
-func verifyOpenedCLIBackup(file *os.File, mode backup.SignMode, key string) error {
+func verifyOpenedCLIBackup(ctx context.Context, file *os.File, mode backup.SignMode, key string) error {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
@@ -211,7 +211,7 @@ func verifyOpenedCLIBackup(file *os.File, mode backup.SignMode, key string) erro
 	if err != nil {
 		return err
 	}
-	_, err = backup.Verify(manifest, sig, cert, backup.VerifierOptions{Mode: mode, KeyPath: key})
+	_, err = backup.Verify(ctx, manifest, sig, cert, backup.VerifierOptions{Mode: mode, KeyPath: key})
 	return err
 }
 

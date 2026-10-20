@@ -190,6 +190,8 @@ func ReconcileState(ctx context.Context, client ResourceClient, state LifecycleS
 		err = client.Apply(ctx, resource, manifestJSON)
 	case ActionDelete:
 		err = client.Delete(ctx, resource)
+	case ActionSkip:
+		// nothing to send; the result records the skip
 	}
 	if err != nil {
 		result.Status = StatusError

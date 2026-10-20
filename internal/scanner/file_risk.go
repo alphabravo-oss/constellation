@@ -238,7 +238,7 @@ func fileRiskFindingFromHeader(hdr *tar.Header, cleanPath string, layerIndex int
 
 func tarHeaderKind(hdr *tar.Header) string {
 	switch hdr.Typeflag {
-	case tar.TypeReg, tar.TypeRegA:
+	case tar.TypeReg:
 		return "regular"
 	case tar.TypeDir:
 		return "directory"

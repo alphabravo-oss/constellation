@@ -967,7 +967,7 @@ func (r *reconciler) upsertWorkload(ctx context.Context, w workload) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx) //nolint:errcheck
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	// Upsert deployment.
 	images := w.images

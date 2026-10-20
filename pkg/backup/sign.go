@@ -21,6 +21,7 @@
 package backup
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -60,7 +61,7 @@ type SignerOptions struct {
 // For static-key: writes nothing to disk, runs in-process; returns nil cert.
 // For keyless:    requires `cosign` on PATH; produces a bundle file alongside.
 // For none:       returns ("", "", "") and Verify will skip.
-func Sign(manifestBytes []byte, opts SignerOptions) (sig []byte, cert []byte, identity string, err error) {
+func Sign(ctx context.Context, manifestBytes []byte, opts SignerOptions) (sig []byte, cert []byte, identity string, err error) {
 	switch opts.Mode {
 	case SignModeNone, "":
 		return nil, nil, "", nil
@@ -76,13 +77,13 @@ func Sign(manifestBytes []byte, opts SignerOptions) (sig []byte, cert []byte, id
 		ident := "key:" + pubKeyFingerprint(pub)
 		return []byte(base64.StdEncoding.EncodeToString(raw)), nil, ident, nil
 	case SignModeKeyless:
-		return signKeyless(manifestBytes, opts)
+		return signKeyless(ctx, manifestBytes, opts)
 	default:
 		return nil, nil, "", fmt.Errorf("unknown sign mode %q", opts.Mode)
 	}
 }
 
-func signKeyless(manifestBytes []byte, opts SignerOptions) (sig, cert []byte, identity string, err error) {
+func signKeyless(ctx context.Context, manifestBytes []byte, opts SignerOptions) (sig, cert []byte, identity string, err error) {
 	bin := opts.CosignBin
 	if bin == "" {
 		bin = "cosign"
@@ -108,7 +109,7 @@ func signKeyless(manifestBytes []byte, opts SignerOptions) (sig, cert []byte, id
 	// `cosign sign-blob --yes --output-signature SIG --output-certificate CERT BLOB`.
 	// We rely on ambient OIDC ($COSIGN_IDENTITY_TOKEN, or a browser prompt) which the
 	// caller is responsible for arranging.
-	cmd := exec.Command(bin, "sign-blob", "--yes",
+	cmd := exec.CommandContext(ctx, bin, "sign-blob", "--yes", //nolint:gosec // G204: bin is the operator-configured cosign binary (LookPath-checked above)
 		"--output-signature", sigPath,
 		"--output-certificate", certPath,
 		blobPath)
@@ -145,7 +146,7 @@ type VerifierOptions struct {
 
 // Verify confirms sig is a valid signature over manifestBytes per opts. Returns the
 // signer identity string for audit-logging on success.
-func Verify(manifestBytes, sig, cert []byte, opts VerifierOptions) (identity string, err error) {
+func Verify(ctx context.Context, manifestBytes, sig, cert []byte, opts VerifierOptions) (identity string, err error) {
 	switch opts.Mode {
 	case SignModeNone, "":
 		return "", errors.New("verify: no signature mode declared")
@@ -166,13 +167,13 @@ func Verify(manifestBytes, sig, cert []byte, opts VerifierOptions) (identity str
 		}
 		return "key:" + pubKeyFingerprint(pub), nil
 	case SignModeKeyless:
-		return verifyKeyless(manifestBytes, sig, cert, opts)
+		return verifyKeyless(ctx, manifestBytes, sig, cert, opts)
 	default:
 		return "", fmt.Errorf("unknown verify mode %q", opts.Mode)
 	}
 }
 
-func verifyKeyless(manifestBytes, sig, cert []byte, opts VerifierOptions) (identity string, err error) {
+func verifyKeyless(ctx context.Context, manifestBytes, sig, cert []byte, opts VerifierOptions) (identity string, err error) {
 	bin := opts.CosignBin
 	if bin == "" {
 		bin = "cosign"
@@ -195,7 +196,7 @@ func verifyKeyless(manifestBytes, sig, cert []byte, opts VerifierOptions) (ident
 		args = append(args, "--certificate-identity", opts.Identity)
 	}
 	args = append(args, filepath.Join(dir, "blob.json"))
-	cmd := exec.Command(bin, args...)
+	cmd := exec.CommandContext(ctx, bin, args...) //nolint:gosec // G204: bin is the operator-configured cosign binary (LookPath-checked above)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("cosign verify-blob: %s: %w", out, err)

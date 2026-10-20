@@ -139,6 +139,8 @@ func rank(t CfgType) int {
 		return 0
 	case CfgPredefined:
 		return 1
+	case CfgUser:
+		return 2
 	default:
 		return 2
 	}

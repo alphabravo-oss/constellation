@@ -333,6 +333,8 @@ func EnforceAction(hit EnforceHit) uint8 {
 	switch hit {
 	case HitThreat:
 		return DPIActionReset
+	case HitPolicyDeny:
+		return DPIActionDrop
 	default:
 		return DPIActionDrop
 	}

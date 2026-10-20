@@ -179,7 +179,7 @@ func (s *Store) UpsertGroup(ctx context.Context, row GroupRow) error {
 	if err != nil {
 		return fmt.Errorf("begin group upsert: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 	var id uuid.UUID
 	var currentKind, currentPolicyMode, currentProfileMode string
 	var currentCriteria []byte
@@ -250,7 +250,7 @@ func (s *Store) DeleteGroup(ctx context.Context, orgID uuid.UUID, name string) (
 	if err != nil {
 		return false, fmt.Errorf("begin group delete: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 	var id uuid.UUID
 	err = tx.QueryRow(ctx, `SELECT id FROM groups WHERE org_id=$1 AND name=$2 AND cluster_id IS NULL
 AND created_by IS NULL AND cfg_type='user' FOR UPDATE`, orgID, name).Scan(&id)
@@ -340,7 +340,7 @@ func (s *Store) UpsertNetworkRule(ctx context.Context, row NetworkRuleRow) error
 	if err != nil {
 		return fmt.Errorf("begin network rule upsert: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 	if err := lockNetworkRuleScope(ctx, tx, row.OrgID, row.ClusterID, row.FromGroup, row.ToGroup); err != nil {
 		return fmt.Errorf("network rule %s->%s: %w", row.FromGroup, row.ToGroup, err)
 	}
@@ -398,7 +398,7 @@ func (s *Store) DeleteNetworkRule(ctx context.Context, orgID, clusterID uuid.UUI
 	if err != nil {
 		return false, fmt.Errorf("begin network rule delete: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 	var id uuid.UUID
 	err = tx.QueryRow(ctx, `SELECT id FROM group_rule_edges WHERE org_id=$1 AND cluster_id=$2
 AND from_group=$3 AND to_group=$4 AND created_by IS NULL FOR UPDATE`,

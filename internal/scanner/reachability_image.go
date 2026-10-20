@@ -182,7 +182,7 @@ func extractLayerBinaryTargets(rc io.Reader, wantByClean map[string]string, dir 
 			continue
 		}
 		// Only real regular files are usable executables; skip symlinks/dirs/devices.
-		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeRegA {
+		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
 		if hdr.Size > reachabilityMaxBinaryBytes || *total+hdr.Size > reachabilityMaxTotalBytes {

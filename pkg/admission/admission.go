@@ -730,7 +730,8 @@ func (e *PolicyEngine) Evaluate(ctx context.Context, req *admissionv1.AdmissionR
 			continue
 		}
 		if rule.Mode == "enforce" {
-			resp.Warnings = append(warnings, fmt.Sprintf("policy %q (allow): admitted by carve-out: %s", rule.ID, reason))
+			warnings = append(warnings, fmt.Sprintf("policy %q (allow): admitted by carve-out: %s", rule.ID, reason))
+			resp.Warnings = warnings
 			return resp
 		}
 		warnings = append(warnings, fmt.Sprintf("policy %q (allow, monitor): would carve out of deny rules: %s", rule.ID, reason))
@@ -1480,8 +1481,8 @@ func imageInAllowlist(image string, allowlist []string) bool {
 			continue
 		}
 		eHost, ePath := e, ""
-		if slash := strings.Index(e, "/"); slash != -1 {
-			eHost, ePath = e[:slash], e[slash+1:]
+		if h, rest, ok := strings.Cut(e, "/"); ok {
+			eHost, ePath = h, rest
 		}
 		if !strings.EqualFold(eHost, host) {
 			continue

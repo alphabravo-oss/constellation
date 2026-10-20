@@ -35,7 +35,6 @@ import (
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	otelprom "go.opentelemetry.io/otel/exporters/prometheus"
 	otellog "go.opentelemetry.io/otel/log"
-	"go.opentelemetry.io/otel/log/global"
 	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/propagation"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
@@ -253,7 +252,7 @@ func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 		return nil, fmt.Errorf("telemetry: log exporter: %w", err)
 	}
 	lp := sdklog.NewLoggerProvider(sdklog.WithProcessor(sdklog.NewBatchProcessor(logExp)), sdklog.WithResource(res))
-	global.SetLoggerProvider(lp)
+	otel.SetLoggerProvider(lp)
 	t.LoggerOTel = lp.Logger(cfg.ServiceName)
 	t.shutdowns = append(t.shutdowns, lp.Shutdown)
 

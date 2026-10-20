@@ -175,7 +175,7 @@ func ListRunningContainers(ctx context.Context, opts ListRunningContainersOption
 
 	listCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	listCmd := exec.CommandContext(listCtx, bin,
+	listCmd := exec.CommandContext(listCtx, bin, //nolint:gosec // G204: bin is the configured crictl path; socket comes from the runtime-socket allow-list
 		"--runtime-endpoint", "unix://"+socket,
 		"ps", "-o", "json", // running only (no -a)
 	)
@@ -242,7 +242,7 @@ type crictlPodsResponse struct {
 func listPodSandboxLabels(ctx context.Context, bin, socket string, timeout time.Duration) map[string]map[string]string {
 	ctx2, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx2, bin,
+	cmd := exec.CommandContext(ctx2, bin, //nolint:gosec // G204: bin is the configured crictl path; socket comes from the runtime-socket allow-list
 		"--runtime-endpoint", "unix://"+socket,
 		"pods", "-o", "json",
 	)
@@ -275,7 +275,7 @@ func listPodSandboxLabels(ctx context.Context, bin, socket string, timeout time.
 func inspectContainer(ctx context.Context, bin, socket, containerID string, timeout time.Duration) (crictlInspectResponse, error) {
 	ctx2, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx2, bin,
+	cmd := exec.CommandContext(ctx2, bin, //nolint:gosec // G204: bin is the configured crictl path; containerID is a runtime-reported ID
 		"--runtime-endpoint", "unix://"+socket,
 		"inspect", "-o", "json", containerID,
 	)

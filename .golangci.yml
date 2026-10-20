@@ -49,6 +49,8 @@ linters:
       - ^third_party/
       - ^tmp/
       - ^bin/
+      - ^frontend/
+      - ^node_modules/
     rules:
       # Phase 2 (domain-by-domain handler -> service -> store split) is where the
       # god-package gets its complexity, error-handling and security findings fixed.
@@ -63,6 +65,11 @@ linters:
       # Test files: complexity and length limits do not apply.
       - path: _test\.go$
         linters: [cyclop, funlen, gocognit, gosec, nestif, noctx, bodyclose, errcheck, contextcheck, errorlint, gocritic, staticcheck, unparam, wastedassign, rowserrcheck, sqlclosecheck, unconvert, misspell, exhaustive]
+      # Phase 1 debt: functions above the golden thresholds in packages not yet
+      # refactored; shrink this list as functions are split.
+      # See docs/decisions/0002-adopt-guide-stack.md.
+      - path: ^(deploy/e2e/runtime-smoke|internal/admissionevidence|internal/auth|internal/cspm/aws|internal/cspm/gcp|internal/migration/neuvector|internal/netpolicyapply|internal/operator/controllers|internal/operator/policydb|internal/runtime/dlp|internal/runtime/dp|internal/runtime/dpi|internal/runtime/hostscan|internal/scanner|internal/serverless/awslambda|internal/syscfg|internal/telemetry|pkg/admission|pkg/backup|pkg/group|pkg/netpolicy|pkg/notify|pkg/policy/eval|pkg/reachability|pkg/response|pkg/responserule|pkg/runtime/falco|pkg/search/dsl)/
+        linters: [cyclop, funlen, gocognit, nestif]
       # cmd/ mains may call os.Exit after defers and carry long wiring functions.
       - path: ^cmd/
         linters: [funlen, gocognit, cyclop, nestif, gocritic, errorlint, contextcheck, exhaustive, noctx, wastedassign, errcheck, staticcheck, unparam, unused, ineffassign, bodyclose, rowserrcheck, sqlclosecheck, unconvert, misspell, gosec]
@@ -78,6 +85,8 @@ formatters:
     generated: strict
     paths:
       - ^third_party/
+      - ^frontend/
+      - ^node_modules/
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0

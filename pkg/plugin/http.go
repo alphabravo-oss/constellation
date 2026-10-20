@@ -82,7 +82,7 @@ func (c *Client) do(ctx context.Context, method, path string, in any) ([]byte, e
 	if err != nil {
 		return nil, fmt.Errorf("plugin: %s %s: %w", method, path, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	out, _ := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 	if resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("plugin: %s %s status %d: %s", method, path, resp.StatusCode, out)

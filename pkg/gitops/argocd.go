@@ -99,7 +99,7 @@ func (a *ArgoCDClient) ListApplications(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("argocd: list apps: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("argocd: status %d", resp.StatusCode)
@@ -137,7 +137,7 @@ func (a *ArgoCDClient) ManagedResources(ctx context.Context, appName string) (de
 	if err != nil {
 		return nil, nil, fmt.Errorf("argocd: managed-resources: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 	if resp.StatusCode != 200 {
 		return nil, nil, fmt.Errorf("argocd: managed-resources status %d", resp.StatusCode)

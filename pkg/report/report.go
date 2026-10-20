@@ -11,6 +11,7 @@ package report
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"html/template"
@@ -131,12 +132,12 @@ func ExecutiveHTML(d ExecutiveData) ([]byte, error) {
 
 // HTMLToPDF converts HTML bytes to PDF via wkhtmltopdf. Returns ErrPDFToolMissing when
 // wkhtmltopdf isn't on PATH so callers can fall back to serving HTML.
-func HTMLToPDF(html []byte) ([]byte, error) {
+func HTMLToPDF(ctx context.Context, html []byte) ([]byte, error) {
 	bin, err := exec.LookPath("wkhtmltopdf")
 	if err != nil {
 		return nil, ErrPDFToolMissing
 	}
-	cmd := exec.Command(bin, "--quiet", "--enable-local-file-access", "-", "-")
+	cmd := exec.CommandContext(ctx, bin, "--quiet", "--enable-local-file-access", "-", "-") //nolint:gosec // G204: bin is the fixed wkhtmltopdf tool resolved via LookPath
 	cmd.Stdin = bytes.NewReader(html)
 	var out, errBuf bytes.Buffer
 	cmd.Stdout = &out

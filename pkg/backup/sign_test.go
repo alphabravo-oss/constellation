@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -15,7 +16,7 @@ func TestEd25519RoundTrip(t *testing.T) {
 	}
 
 	msg := []byte("constellation-backup-manifest:v1")
-	sig, cert, identity, err := Sign(msg, SignerOptions{Mode: SignModeStaticKey, KeyPath: privPath})
+	sig, cert, identity, err := Sign(context.Background(), msg, SignerOptions{Mode: SignModeStaticKey, KeyPath: privPath})
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
@@ -26,7 +27,7 @@ func TestEd25519RoundTrip(t *testing.T) {
 		t.Errorf("identity should be populated")
 	}
 
-	gotID, err := Verify(msg, sig, nil, VerifierOptions{Mode: SignModeStaticKey, KeyPath: pubPath})
+	gotID, err := Verify(context.Background(), msg, sig, nil, VerifierOptions{Mode: SignModeStaticKey, KeyPath: pubPath})
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
@@ -37,7 +38,7 @@ func TestEd25519RoundTrip(t *testing.T) {
 	// Tamper test: flip a byte; verify must fail.
 	tampered := append([]byte{}, msg...)
 	tampered[0] ^= 0xff
-	if _, err := Verify(tampered, sig, nil, VerifierOptions{Mode: SignModeStaticKey, KeyPath: pubPath}); err == nil {
+	if _, err := Verify(context.Background(), tampered, sig, nil, VerifierOptions{Mode: SignModeStaticKey, KeyPath: pubPath}); err == nil {
 		t.Errorf("verify on tampered manifest should fail")
 	}
 }

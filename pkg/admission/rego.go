@@ -22,7 +22,8 @@ import (
 	admissionv1 "k8s.io/api/admission/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/open-policy-agent/opa/rego"
+	"github.com/open-policy-agent/opa/v1/ast"
+	"github.com/open-policy-agent/opa/v1/rego"
 )
 
 // RegoPolicy wraps one Rego module compiled at registration time.
@@ -51,6 +52,7 @@ func NewRegoEngine(ctx context.Context, modules map[string]string, modes map[str
 			mode = "enforce"
 		}
 		q, err := rego.New(
+			rego.SetRegoVersion(ast.RegoV0),
 			rego.Query("data.constellation.admission.deny"),
 			rego.Module(id+".rego", src),
 		).PrepareForEval(ctx)

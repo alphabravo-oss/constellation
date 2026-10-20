@@ -21,6 +21,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 )
@@ -71,7 +72,7 @@ func (c *Connector) Scan(ctx context.Context) ([]Finding, error) {
 	}
 	iamF, ierr := c.ScanIAM(ctx)
 	storageF, serr := c.ScanStorage(ctx)
-	out := append(iamF, storageF...)
+	out := slices.Concat(iamF, storageF)
 	// Surface a failure whenever ANY sub-scan fails so a partial scan (e.g. IAM
 	// denied, storage ok) is not reported as a clean, complete scan.
 	if err := errors.Join(ierr, serr); err != nil {
@@ -201,7 +202,7 @@ func (c *Connector) requestJSON(ctx context.Context, method, endpoint string, bo
 	if err != nil {
 		return fmt.Errorf("API request failed: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		return fmt.Errorf("API returned status %d", response.StatusCode)
 	}

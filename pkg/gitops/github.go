@@ -9,7 +9,7 @@ package gitops
 import (
 	"bytes"
 	"context"
-	"crypto/sha1"
+	"crypto/sha1" //nolint:gosec // G505: git blob object IDs are SHA-1 by protocol definition
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -85,7 +85,7 @@ func pushGitHub(ctx context.Context, cfg ConnectorConfig, fileContents []byte, m
 	if err != nil {
 		return fmt.Errorf("gitops: github put: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated {
 		return nil
@@ -109,7 +109,7 @@ func githubExistingSHA(ctx context.Context, cfg ConnectorConfig, contentURL stri
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return "", nil // new file
@@ -135,8 +135,8 @@ func githubHeaders(req *http.Request, pat string) {
 // matching what the GitHub Contents API returns as a file's sha so we can short-circuit
 // no-op pushes.
 func gitBlobSHA1(content []byte) string {
-	h := sha1.New()
-	fmt.Fprintf(h, "blob %d\x00", len(content))
+	h := sha1.New() //nolint:gosec // G401: computing a git blob ID, not a security hash
+	_, _ = fmt.Fprintf(h, "blob %d\x00", len(content))
 	h.Write(content)
 	return hex.EncodeToString(h.Sum(nil))
 }

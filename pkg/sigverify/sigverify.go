@@ -115,7 +115,7 @@ func (v *Verifier) verifyRoot(ctx context.Context, imageRef string, root RootOfT
 	args = append(args, imageRef)
 
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, v.CosignBinary, args...)
+	cmd := exec.CommandContext(ctx, v.CosignBinary, args...) //nolint:gosec // G204: CosignBinary is the operator-configured cosign path
 	cmd.Env = v.commandEnv(env...)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -173,7 +173,7 @@ func (v *Verifier) VerifyAttestation(ctx context.Context, subjectRef string, pol
 	args = append(args, subjectRef)
 
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, v.CosignBinary, args...)
+	cmd := exec.CommandContext(ctx, v.CosignBinary, args...) //nolint:gosec // G204: CosignBinary is the operator-configured cosign path
 	cmd.Env = v.commandEnv()
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -470,8 +470,7 @@ func walkAttestationJSON(value any, out *[]map[string]any) {
 			*out = append(*out, typed)
 		}
 		for key, child := range typed {
-			switch strings.ToLower(key) {
-			case "payload":
+			if strings.EqualFold(key, "payload") {
 				if decoded, ok := decodeEmbeddedPayload(child); ok {
 					walkAttestationJSON(decoded, out)
 					continue

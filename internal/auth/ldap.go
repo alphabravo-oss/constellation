@@ -105,7 +105,7 @@ func (p *LDAPProvider) Authenticate(username, password string) (*LDAPIdentity, e
 	if err != nil {
 		return nil, fmt.Errorf("ldap: dial: %w", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	if p.cfg.BindDN != "" {
 		if err := conn.Bind(p.cfg.BindDN, p.cfg.BindPassword); err != nil {
@@ -213,7 +213,7 @@ func (p *LDAPProvider) ResolveUserDN(username string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if p.cfg.BindDN != "" {
 		if err := conn.Bind(p.cfg.BindDN, p.cfg.BindPassword); err != nil {
 			return "", false

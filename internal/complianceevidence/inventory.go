@@ -127,7 +127,7 @@ func (c Collector) readInventory(ctx context.Context, q Query) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	defer tx.Rollback(context.WithoutCancel(ctx))
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
 	args := []any{q.OrgID, uuidArg(q.ClusterID), q.Namespace, mappings, hosts, q.Targets, q.Scope, q.Framework, q.ControlID, q.Status, q.Search, q.Target}
 	var encoded []byte
 	summarySQL := evidenceInventorySQL + ` SELECT jsonb_build_object(` + evidenceSummaryJSON + `) || jsonb_build_object('by_scope',COALESCE((SELECT jsonb_object_agg(scope,counts) FROM (SELECT scope,jsonb_build_object(` + evidenceSummaryJSON + `) AS counts FROM matching GROUP BY scope) grouped),'{}'::jsonb)) FROM matching`

@@ -87,9 +87,9 @@ func ParseReqImageName(image string) ImageRef {
 	}
 
 	// digest? — split @sha256:... first.
-	if idx := strings.Index(imgName, "@"); idx != -1 {
-		out.Repo = imgName[:idx]
-		out.Digest = imgName[idx+1:]
+	if repo, digest, ok := strings.Cut(imgName, "@"); ok {
+		out.Repo = repo
+		out.Digest = digest
 		// repo may still carry :tag before the @
 		if colon := strings.Index(out.Repo, ":"); colon != -1 {
 			out.Tag = out.Repo[colon+1:]
@@ -129,7 +129,7 @@ func ParseAdmissionContainers(req *admissionv1.AdmissionRequest) ([]ContainerIma
 		out = append(out, ContainerImage{Name: c.Name, Role: "container", Image: ParseReqImageName(c.Image)})
 	}
 	for _, c := range pod.Spec.EphemeralContainers {
-		out = append(out, ContainerImage{Name: c.Name, Role: "ephemeral", Image: ParseReqImageName(c.EphemeralContainerCommon.Image)})
+		out = append(out, ContainerImage{Name: c.Name, Role: "ephemeral", Image: ParseReqImageName(c.Image)})
 	}
 	return out, nil
 }

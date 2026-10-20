@@ -121,7 +121,7 @@ func CollectContainers(ctx context.Context, opts ContainersOptions) (Containers,
 	// `crictl --runtime-endpoint unix://<socket> ps -a -o json` returns
 	// every container the runtime knows about, not just Running ones.
 	// We pass -q false so labels/annotations are included.
-	cmd := exec.CommandContext(ctx2, bin,
+	cmd := exec.CommandContext(ctx2, bin, //nolint:gosec // G204: bin is the configured crictl path; socket comes from the runtime-socket allow-list
 		"--runtime-endpoint", "unix://"+socket,
 		"ps", "-a", "-o", "json",
 	)

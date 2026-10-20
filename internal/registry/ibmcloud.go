@@ -26,11 +26,11 @@ type IBMCloud struct {
 
 // ibmAPIKeyGrant is the IBM Cloud IAM grant type for exchanging an API key for a
 // bearer token (matches NeuVector's grantType constant).
-const ibmAPIKeyGrant = "urn:ibm:params:oauth:grant-type:apikey"
+const ibmAPIKeyGrant = "urn:ibm:params:oauth:grant-type:apikey" //nolint:gosec // G101: IAM grant type URN, not a credential
 
 // defaultIBMTokenURL is the public IAM token-exchange endpoint used when the
 // caller does not override Config.TokenURL.
-const defaultIBMTokenURL = "https://iam.cloud.ibm.com/identity/token"
+const defaultIBMTokenURL = "https://iam.cloud.ibm.com/identity/token" //nolint:gosec // G101: public IAM endpoint URL, not a credential
 
 func NewIBMCloud(cfg Config) *IBMCloud {
 	return &IBMCloud{cfg: cfg, client: cfg.httpClient(30 * time.Second)}

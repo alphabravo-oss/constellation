@@ -37,8 +37,8 @@ import (
 
 const (
 	gcpCloudPlatformScope = "https://www.googleapis.com/auth/cloud-platform"
-	gcpDefaultTokenURI    = "https://oauth2.googleapis.com/token"
-	gcpJWTBearerGrant     = "urn:ietf:params:oauth:grant-type:jwt-bearer"
+	gcpDefaultTokenURI    = "https://oauth2.googleapis.com/token"         //nolint:gosec // G101: public OAuth endpoint, not a credential
+	gcpJWTBearerGrant     = "urn:ietf:params:oauth:grant-type:jwt-bearer" //nolint:gosec // G101: RFC 7523 grant type URN, not a credential
 )
 
 // serviceAccountKey is the subset of a GCP SA JSON key we need to sign a JWT.
@@ -143,7 +143,7 @@ const (
 	azureAuthorityBase = "https://login.microsoftonline.com"
 	azureARMScope      = "https://management.azure.com/.default"
 	azureARMResource   = "https://management.azure.com/"
-	azureIMDSTokenURL  = "http://169.254.169.254/metadata/identity/oauth2/token"
+	azureIMDSTokenURL  = "http://169.254.169.254/metadata/identity/oauth2/token" //nolint:gosec // G101: IMDS endpoint URL, not a credential
 	// acrPullScope requests catalog + pull/metadata across all repositories, which is
 	// what repository enumeration + digest resolution need.
 	acrPullScope = "registry:catalog:* repository:*:pull repository:*:metadata_read"

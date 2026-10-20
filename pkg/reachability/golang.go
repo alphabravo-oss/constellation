@@ -59,7 +59,7 @@ func AnalyzeGo(ctx context.Context, modulePath string) ([]Verdict, error) {
 	defer cancel()
 
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, bin, "-json", "-mode", "source", "./...")
+	cmd := exec.CommandContext(ctx, bin, "-json", "-mode", "source", "./...") //nolint:gosec // G204: bin is the fixed govulncheck tool resolved via LookPath
 	cmd.Dir = modulePath
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

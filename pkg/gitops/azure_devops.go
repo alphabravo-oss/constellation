@@ -97,7 +97,7 @@ func azureGetRef(ctx context.Context, cfg ConnectorConfig) (azureRef, error) {
 	if err != nil {
 		return azureRef{}, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return azureRef{}, fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
@@ -143,7 +143,7 @@ func azurePush(ctx context.Context, cfg ConnectorConfig, ref azureRef, op string
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusCreated {
 		return nil
 	}

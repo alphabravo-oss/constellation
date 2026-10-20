@@ -380,12 +380,12 @@ func Restore(path string) (map[string][]byte, *Manifest, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	gz, err := gzip.NewReader(f)
 	if err != nil {
 		return nil, nil, fmt.Errorf("quarantine: gzip: %w", err)
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 	tr := tar.NewReader(gz)
 	out := map[string][]byte{}
 	for {

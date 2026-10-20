@@ -177,7 +177,7 @@ func (c *Client) Query(ctx context.Context, req QueryRequest) (*QueryResponse, e
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrServiceUnreachable, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 500 || resp.StatusCode == http.StatusNotFound {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return nil, fmt.Errorf("%w: status %d: %s", ErrServiceUnreachable, resp.StatusCode, strings.TrimSpace(string(msg)))

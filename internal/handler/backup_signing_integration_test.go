@@ -180,7 +180,7 @@ func TestBackupOneOffDefaultsDoNotInheritScheduleAndStaticModeVerifies(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, verifyErr := backup.VerifyArchive(backup.RestoreOptions{In: file, Verify: backup.VerifierOptions{KeyPath: public}})
+	result, verifyErr := backup.VerifyArchive(context.Background(), backup.RestoreOptions{In: file, Verify: backup.VerifierOptions{KeyPath: public}})
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}

@@ -160,7 +160,7 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Acknowledge fast; process async so GitHub doesn't retry on long scans.
-		go s.handlePullRequest(context.Background(), ev)
+		go s.handlePullRequest(context.WithoutCancel(r.Context()), ev)
 		w.WriteHeader(http.StatusAccepted)
 		return
 	case "push":
@@ -231,10 +231,10 @@ func (s *Server) runImageCheck(ctx context.Context, imageRef string) (summary st
 	if err != nil {
 		return fmt.Sprintf("could not create workdir: %v", err), true
 	}
-	defer os.RemoveAll(tmp)
+	defer func() { _ = os.RemoveAll(tmp) }()
 	sarifPath := filepath.Join(tmp, "image.sarif")
 
-	cmd := exec.CommandContext(ctx, s.cfg.CLIBinary, "image-check", imageRef,
+	cmd := exec.CommandContext(ctx, s.cfg.CLIBinary, "image-check", imageRef, //nolint:gosec // G204: CLIBinary is the operator-configured constellation CLI path
 		"--fail-on", "critical",
 		"--sarif", sarifPath,
 		"--quiet",
@@ -251,7 +251,7 @@ func (s *Server) runImageCheck(ctx context.Context, imageRef string) (summary st
 func (s *Server) runIaCCheck(ctx context.Context) (summary string, failed bool) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, s.cfg.CLIBinary, "iac-check", ".",
+	cmd := exec.CommandContext(ctx, s.cfg.CLIBinary, "iac-check", ".", //nolint:gosec // G204: CLIBinary is the operator-configured constellation CLI path
 		"--fail-on", "high",
 	)
 	cmd.Env = append(os.Environ(),
@@ -280,7 +280,7 @@ func (s *Server) installationToken(ctx context.Context, installID int64) (string
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode/100 != 2 {
 		b, _ := io.ReadAll(resp.Body)
 		return "", fmt.Errorf("installation_token: http %d: %s", resp.StatusCode, string(b))
@@ -338,7 +338,7 @@ func (s *Server) postIssueComment(ctx context.Context, token, repo string, prNum
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode/100 != 2 {
 		b, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("issue comment: http %d: %s", resp.StatusCode, string(b))
@@ -361,7 +361,7 @@ func (s *Server) postStatus(ctx context.Context, token, repo, sha, state, desc s
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode/100 != 2 {
 		b, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("statuses: http %d: %s", resp.StatusCode, string(b))

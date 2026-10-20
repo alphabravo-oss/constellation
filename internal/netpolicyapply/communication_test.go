@@ -197,8 +197,9 @@ func TestDependencyInventoryReadsAllPagesAndFailsOnIncompleteData(t *testing.T) 
 		}
 		lists[schema.GroupVersionResource{Group: "discovery.k8s.io", Version: "v1", Resource: "endpointslices"}] = "EndpointSliceList"
 		dyn := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), lists)
-		dyn.PrependReactor("get", "endpoints", func(ktesting.Action) (bool, runtime.Object, error) {
-			e := corev1.Endpoints{Subsets: []corev1.EndpointSubset{{Addresses: []corev1.EndpointAddress{{IP: "192.0.2.10"}}, Ports: []corev1.EndpointPort{{Port: 6443, Protocol: corev1.ProtocolTCP}}}}}
+		dyn.PrependReactor("get", "endpointslices", func(ktesting.Action) (bool, runtime.Object, error) {
+			apiPort, tcp := int32(6443), corev1.ProtocolTCP
+			e := discoveryv1.EndpointSlice{AddressType: discoveryv1.AddressTypeIPv4, Endpoints: []discoveryv1.Endpoint{{Addresses: []string{"192.0.2.10"}}}, Ports: []discoveryv1.EndpointPort{{Port: &apiPort, Protocol: &tcp}}}
 			m, _ := runtime.DefaultUnstructuredConverter.ToUnstructured(&e)
 			return true, &unstructured.Unstructured{Object: m}, nil
 		})
@@ -298,7 +299,8 @@ func TestUnownedServiceSliceCannotGrantAnException(t *testing.T) {
 	service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "protected", Namespace: "own", UID: "service-uid"}, Spec: corev1.ServiceSpec{ClusterIP: "10.43.1.1", Ports: []corev1.ServicePort{{Port: 443, Protocol: protocol}}}}
 	apiService := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "kubernetes", Namespace: "default"}, Spec: corev1.ServiceSpec{ClusterIP: "10.43.0.1", Ports: []corev1.ServicePort{{Port: 443, Protocol: protocol}}}}
 	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node"}, Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeInternalIP, Address: "192.0.2.10"}}}}
-	endpoints := &corev1.Endpoints{ObjectMeta: metav1.ObjectMeta{Name: "kubernetes", Namespace: "default"}, Subsets: []corev1.EndpointSubset{{Addresses: []corev1.EndpointAddress{{IP: "192.0.2.10"}}, Ports: []corev1.EndpointPort{{Port: 6443, Protocol: protocol}}}}}
+	apiPort := int32(6443)
+	endpoints := &discoveryv1.EndpointSlice{ObjectMeta: metav1.ObjectMeta{Name: "kubernetes", Namespace: "default", Labels: map[string]string{discoveryv1.LabelServiceName: "kubernetes"}}, AddressType: discoveryv1.AddressTypeIPv4, Ports: []discoveryv1.EndpointPort{{Port: &apiPort, Protocol: &protocol}}, Endpoints: []discoveryv1.Endpoint{{Addresses: []string{"192.0.2.10"}}}}
 	for _, owned := range []bool{false, true} {
 		slice := &discoveryv1.EndpointSlice{ObjectMeta: metav1.ObjectMeta{Name: "selected", Namespace: "own", Labels: map[string]string{discoveryv1.LabelServiceName: "protected"}}, AddressType: discoveryv1.AddressTypeIPv4, Ports: []discoveryv1.EndpointPort{{Port: &port, Protocol: &protocol}}, Endpoints: []discoveryv1.Endpoint{{Addresses: []string{"203.0.113.10"}}}}
 		if owned {

@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -80,7 +81,7 @@ func (c *Connector) Scan(ctx context.Context) ([]Finding, error) {
 	iamF, ierr := c.ScanIAM(ctx)
 	s3F, serr := c.ScanS3(ctx)
 
-	out := append(iamF, s3F...)
+	out := slices.Concat(iamF, s3F)
 	// Surface a failure whenever ANY sub-scan fails: a partial scan (e.g. an
 	// AccessDenied on iam:ListRoles with a healthy S3 scan) must not be reported
 	// clean, or operators conclude an unscanned source is compliant.

@@ -52,7 +52,7 @@ func (m *TrivyPackageMatcher) MatchPackages(ctx context.Context, ref string, pac
 	if err != nil {
 		return nil, fmt.Errorf("trivy-matcher: temp file: %w", err)
 	}
-	defer os.Remove(f.Name())
+	defer func() { _ = os.Remove(f.Name()) }()
 	if _, err := f.Write(sbom); err != nil {
 		_ = f.Close()
 		return nil, fmt.Errorf("trivy-matcher: write sbom: %w", err)
@@ -69,7 +69,7 @@ func (m *TrivyPackageMatcher) MatchPackages(ctx context.Context, ref string, pac
 	args = append(args, f.Name())
 
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd := exec.CommandContext(ctx, bin, args...) //nolint:gosec // G204: bin is the operator-configured trivy binary (LookPath-checked above)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	cmd.Env = RegistryEnvironment(opts)

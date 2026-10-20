@@ -232,7 +232,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, ev Event) ([]uuid.UUID, error
 			// Queue full — DON'T drop the alert. Mark it retrying with next_retry_at set so
 			// the sweeper re-enqueues it once the worker pool drains. final_state stays NULL
 			// (a full queue during an alert storm is exactly when losing alerts is worst).
-			d.markQueueFull(context.Background(), dlvID)
+			d.markQueueFull(context.WithoutCancel(ctx), dlvID)
 		}
 	}
 	return ids, nil
@@ -473,7 +473,7 @@ SELECT r.paused
 		d.handleFailure(ctx, j, fmt.Sprintf("post: %v", err))
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 {
 		// Drain a snippet of body for the error column.
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
@@ -863,7 +863,7 @@ func signHMAC(key string, body []byte, now time.Time) (string, time.Time) {
 	}
 	ts := now.Unix()
 	mac := hmac.New(sha256.New, []byte(key))
-	fmt.Fprintf(mac, "%d.", ts)
+	_, _ = fmt.Fprintf(mac, "%d.", ts)
 	mac.Write(body)
 	return fmt.Sprintf("t=%d,v1=%s", ts, hex.EncodeToString(mac.Sum(nil))), now
 }
@@ -888,7 +888,7 @@ func VerifyHMAC(key, header string, body []byte) bool {
 		return false
 	}
 	mac := hmac.New(sha256.New, []byte(key))
-	fmt.Fprintf(mac, "%s.", ts)
+	_, _ = fmt.Fprintf(mac, "%s.", ts)
 	mac.Write(body)
 	expected := hex.EncodeToString(mac.Sum(nil))
 	return hmac.Equal([]byte(expected), []byte(sig))

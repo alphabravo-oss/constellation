@@ -90,8 +90,8 @@ func validatedRingBufferSize(requested int) (uint32, error) {
 // resolveObjectPath walks a few candidate locations: $CONSTELLATION_BPF_OBJ,
 // ./bpf/runtime.bpf.o, and the directory of the current source file (dev mode).
 func resolveObjectPath() (string, error) {
-	if p := os.Getenv("CONSTELLATION_BPF_OBJ"); p != "" {
-		if _, err := os.Stat(p); err == nil {
+	if p := filepath.Clean(os.Getenv("CONSTELLATION_BPF_OBJ")); p != "." {
+		if _, err := os.Stat(p); err == nil { //nolint:gosec // G703: CONSTELLATION_BPF_OBJ is an operator-supplied override, reviewed like G304
 			return p, nil
 		}
 	}

@@ -1,6 +1,7 @@
 package backup
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,11 +62,11 @@ func TestExplicitSecretSymlinkStillSignsAndVerifies(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := []byte("manifest fixture")
-	sig, _, id, err := Sign(body, SignerOptions{Mode: SignModeStaticKey, KeyPath: privateLink})
+	sig, _, id, err := Sign(context.Background(), body, SignerOptions{Mode: SignModeStaticKey, KeyPath: privateLink})
 	if err != nil {
 		t.Fatal(err)
 	}
-	verified, err := Verify(body, sig, nil, VerifierOptions{Mode: SignModeStaticKey, KeyPath: publicLink})
+	verified, err := Verify(context.Background(), body, sig, nil, VerifierOptions{Mode: SignModeStaticKey, KeyPath: publicLink})
 	if err != nil || verified != id {
 		t.Fatal("mounted Secret compatibility", err)
 	}
@@ -106,11 +107,11 @@ fi
 	t.Setenv("TEST_ARTIFACT_RECORD", record)
 	for _, operation := range []string{"sign", "verify"} {
 		if operation == "sign" {
-			if _, _, _, err := Sign([]byte("manifest"), SignerOptions{Mode: SignModeKeyless, CosignBin: bin}); err != nil {
+			if _, _, _, err := Sign(context.Background(), []byte("manifest"), SignerOptions{Mode: SignModeKeyless, CosignBin: bin}); err != nil {
 				t.Fatal(err)
 			}
 		} else {
-			if _, err := Verify([]byte("manifest"), []byte("signature"), []byte("cert"), VerifierOptions{Mode: SignModeKeyless, CosignBin: bin}); err != nil {
+			if _, err := Verify(context.Background(), []byte("manifest"), []byte("signature"), []byte("cert"), VerifierOptions{Mode: SignModeKeyless, CosignBin: bin}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -123,10 +124,10 @@ func TestKeylessTempFailureReturnsErrorWithoutPanic(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "missing"))
-	if _, _, _, err := Sign([]byte("manifest"), SignerOptions{Mode: SignModeKeyless, CosignBin: bin}); err == nil {
+	if _, _, _, err := Sign(context.Background(), []byte("manifest"), SignerOptions{Mode: SignModeKeyless, CosignBin: bin}); err == nil {
 		t.Fatal("ignored signing staging error")
 	}
-	if _, err := Verify([]byte("manifest"), []byte("signature"), nil, VerifierOptions{Mode: SignModeKeyless, CosignBin: bin}); err == nil {
+	if _, err := Verify(context.Background(), []byte("manifest"), []byte("signature"), nil, VerifierOptions{Mode: SignModeKeyless, CosignBin: bin}); err == nil {
 		t.Fatal("ignored verification staging error")
 	}
 }

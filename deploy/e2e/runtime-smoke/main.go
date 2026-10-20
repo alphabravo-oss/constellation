@@ -27,6 +27,11 @@ import (
 )
 
 func main() {
+	os.Exit(run())
+}
+
+// run holds the whole smoke flow so deferred cleanups run before the exit code is returned.
+func run() int {
 	var (
 		duration = flag.Duration("duration", 10*time.Second, "smoke window")
 		minExec  = flag.Int("min-exec", 10, "minimum /bin/true exec events to require")
@@ -47,9 +52,9 @@ func main() {
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "agent New: %v\n", err)
-		os.Exit(2)
+		return 2
 	}
-	defer a.Close()
+	defer func() { _ = a.Close() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), *duration+2*time.Second)
 	defer cancel()
@@ -97,6 +102,8 @@ func main() {
 					logger.Info("file_open", slog.String("comm", evt.File.Comm), slog.String("path", evt.File.Path))
 					firstFiles++
 				}
+			case ebpf.EventKindUnknown:
+				// not counted
 			}
 		}
 	}()
@@ -150,7 +157,8 @@ func main() {
 		failed = true
 	}
 	if failed {
-		os.Exit(1)
+		return 1
 	}
 	fmt.Println("OK")
+	return 0
 }

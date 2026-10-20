@@ -364,7 +364,7 @@ func (h *Backups) Verify(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, "resolve caller org")
 		return
 	}
-	result, err := backup.VerifyArchive(backup.RestoreOptions{
+	result, err := backup.VerifyArchive(r.Context(), backup.RestoreOptions{
 		In: http.MaxBytesReader(w, r.Body, 256<<20),
 		Verify: backup.VerifierOptions{
 			KeyPath:  os.Getenv("CONSTELLATION_BACKUP_VERIFY_KEY"),

@@ -119,28 +119,22 @@ func Collect(ctx context.Context, client kubernetes.Interface, opts Options) ([]
 	if err != nil {
 		return nil, fmt.Errorf("list deployments: %w", err)
 	}
-	for _, item := range deployments.Items {
-		if nsAllowed[item.Namespace] {
-			out = append(out, evaluatePodTemplate("Deployment", item.Namespace, item.Name, item.Spec.Template.Spec, opts.ObservedAt)...)
-		}
-	}
 	statefulSets, err := client.AppsV1().StatefulSets("").List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("list statefulsets: %w", err)
-	}
-	for _, item := range statefulSets.Items {
-		if nsAllowed[item.Namespace] {
-			out = append(out, evaluatePodTemplate("StatefulSet", item.Namespace, item.Name, item.Spec.Template.Spec, opts.ObservedAt)...)
-		}
 	}
 	daemonSets, err := client.AppsV1().DaemonSets("").List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("list daemonsets: %w", err)
 	}
+	for _, item := range deployments.Items {
+		out = appendWorkloadEvidence(out, nsAllowed, "Deployment", item.Namespace, item.Name, item.Spec.Template.Spec, opts.ObservedAt)
+	}
+	for _, item := range statefulSets.Items {
+		out = appendWorkloadEvidence(out, nsAllowed, "StatefulSet", item.Namespace, item.Name, item.Spec.Template.Spec, opts.ObservedAt)
+	}
 	for _, item := range daemonSets.Items {
-		if nsAllowed[item.Namespace] {
-			out = append(out, evaluatePodTemplate("DaemonSet", item.Namespace, item.Name, item.Spec.Template.Spec, opts.ObservedAt)...)
-		}
+		out = appendWorkloadEvidence(out, nsAllowed, "DaemonSet", item.Namespace, item.Name, item.Spec.Template.Spec, opts.ObservedAt)
 	}
 
 	workloadCount := len(deployments.Items) + len(statefulSets.Items) + len(daemonSets.Items)
@@ -156,6 +150,14 @@ func Collect(ctx context.Context, client kubernetes.Interface, opts Options) ([]
 		out = append(out, evaluateCustomChecks(opts.CustomChecks, targets, opts.ObservedAt)...)
 	}
 	return out, nil
+}
+
+// appendWorkloadEvidence evaluates one workload's pod template when its namespace is included.
+func appendWorkloadEvidence(out []Evidence, nsAllowed map[string]bool, kind, namespace, name string, spec corev1.PodSpec, observedAt time.Time) []Evidence {
+	if !nsAllowed[namespace] {
+		return out
+	}
+	return append(out, evaluatePodTemplate(kind, namespace, name, spec, observedAt)...)
 }
 
 // gatherCustomTargets renders the already-listed objects into the generic form CEL custom

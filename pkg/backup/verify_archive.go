@@ -1,17 +1,18 @@
 package backup
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 )
 
-func VerifyArchive(opts RestoreOptions) (*RestoreResult, error) {
-	result, _, err := readAndVerifyArchive(opts)
+func VerifyArchive(ctx context.Context, opts RestoreOptions) (*RestoreResult, error) {
+	result, _, err := readAndVerifyArchive(ctx, opts)
 	return result, err
 }
 
-func readAndVerifyArchive(opts RestoreOptions) (*RestoreResult, map[string][]byte, error) {
+func readAndVerifyArchive(ctx context.Context, opts RestoreOptions) (*RestoreResult, map[string][]byte, error) {
 	files, err := readTarGz(opts.In)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read archive: %w", err)
@@ -56,7 +57,7 @@ func readAndVerifyArchive(opts RestoreOptions) (*RestoreResult, map[string][]byt
 		}
 		return result, files, nil
 	}
-	identity, err := Verify(manifestBytes, signature, certificate, opts.Verify)
+	identity, err := Verify(ctx, manifestBytes, signature, certificate, opts.Verify)
 	if err != nil {
 		if !opts.AllowUnverified {
 			return nil, nil, fmt.Errorf("signature verify: %w", err)

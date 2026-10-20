@@ -189,7 +189,7 @@ func dependencyReader(client dynamic.Interface) DependencyReader {
 							continue
 						}
 						// A freely supplied service-name label alone cannot grant an exception.
-						// The special built-in API service is read by exact Endpoints identity below.
+						// The special built-in API service is read by exact EndpointSlice identity below.
 						owned := false
 						for _, owner := range slice.OwnerReferences {
 							if owner.APIVersion == "v1" && owner.Kind == "Service" && owner.Name == svc.Name && svc.UID != "" && owner.UID == svc.UID {
@@ -236,19 +236,31 @@ func dependencyReader(client dynamic.Interface) DependencyReader {
 		if !sawAPI || len(nodes) == 0 {
 			return empty, fmt.Errorf("network policy protection: Kubernetes API or node addresses unavailable")
 		}
-		apiObject, err := client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "endpoints"}).Namespace("default").Get(ctx, "kubernetes", metav1.GetOptions{})
+		// The API server publishes its own endpoints as the EndpointSlice named
+		// "kubernetes" in "default" (the v1 Endpoints object is deprecated since 1.33).
+		apiObject, err := client.Resource(schema.GroupVersionResource{Group: "discovery.k8s.io", Version: "v1", Resource: "endpointslices"}).Namespace("default").Get(ctx, "kubernetes", metav1.GetOptions{})
 		if err != nil {
 			return empty, fmt.Errorf("network policy protection: Kubernetes API endpoints unavailable: %w", err)
 		}
-		var api corev1.Endpoints
+		var api discoveryv1.EndpointSlice
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(apiObject.Object, &api); err != nil {
 			return empty, err
 		}
 		apiEndpoints := 0
-		for _, subset := range api.Subsets {
-			for _, a := range subset.Addresses {
-				for _, port := range subset.Ports {
-					if err := peer(a.IP, port.Port, string(port.Protocol)); err != nil {
+		for _, endpoint := range api.Endpoints {
+			if endpoint.Conditions.Ready != nil && !*endpoint.Conditions.Ready {
+				continue
+			}
+			for _, address := range endpoint.Addresses {
+				for _, port := range api.Ports {
+					if port.Port == nil {
+						continue
+					}
+					protocol := ""
+					if port.Protocol != nil {
+						protocol = string(*port.Protocol)
+					}
+					if err := peer(address, *port.Port, protocol); err != nil {
 						return empty, err
 					}
 					apiEndpoints++

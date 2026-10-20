@@ -170,7 +170,7 @@ func runOrgBackup(ctx context.Context, logger *slog.Logger, databaseURL string, 
 		return recordOrgBackupFailure(ctx, pool, rowID, "backup artifact open", err)
 	}
 	defer func() { resultErr = errors.Join(resultErr, backup.CLIFailure("backup artifact close", file.Close())) }()
-	if err = verifyRequestedOrgBackup(logger, file, args, signMode); err != nil {
+	if err = verifyRequestedOrgBackup(ctx, logger, file, args, signMode); err != nil {
 		return recordOrgBackupFailure(ctx, pool, rowID, "backup verification", err)
 	}
 	sum, size, err := hashOpenedArtifact(file)
@@ -240,11 +240,11 @@ func validateOrgBackupArgs(args orgBackupArgs) (backup.SignMode, error) {
 	}
 	return mode, nil
 }
-func verifyRequestedOrgBackup(logger *slog.Logger, file *os.File, args orgBackupArgs, mode backup.SignMode) error {
+func verifyRequestedOrgBackup(ctx context.Context, logger *slog.Logger, file *os.File, args orgBackupArgs, mode backup.SignMode) error {
 	if mode != backup.SignModeKeyless && args.VerifyKey == "" {
 		return nil
 	}
-	if err := verifyOpenedBackup(file, mode, args.VerifyKey); err != nil {
+	if err := verifyOpenedBackup(ctx, file, mode, args.VerifyKey); err != nil {
 		return err
 	}
 	logger.Info("verify-after-write ok")
@@ -261,7 +261,7 @@ func uploadOrgBackup(ctx context.Context, destination, name string, id uuid.UUID
 	return uri, backup.UploadS3Artifact(ctx, uri, "", file, size)
 }
 
-func verifyOpenedBackup(file *os.File, mode backup.SignMode, key string) error {
+func verifyOpenedBackup(ctx context.Context, file *os.File, mode backup.SignMode, key string) error {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
@@ -269,7 +269,7 @@ func verifyOpenedBackup(file *os.File, mode backup.SignMode, key string) error {
 	if err != nil {
 		return err
 	}
-	_, err = backup.Verify(manifest, sig, cert, backup.VerifierOptions{Mode: mode, KeyPath: key})
+	_, err = backup.Verify(ctx, manifest, sig, cert, backup.VerifierOptions{Mode: mode, KeyPath: key})
 	return err
 }
 

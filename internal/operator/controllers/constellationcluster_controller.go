@@ -271,7 +271,7 @@ func (r *Reconciler) ensureDeployment(
 			dep.Spec.Replicas = replicas
 		}
 		dep.Spec.Selector = &metav1.LabelSelector{MatchLabels: labels}
-		dep.Spec.Template.ObjectMeta.Labels = labels
+		dep.Spec.Template.Labels = labels
 		dep.Spec.Template.Spec.Containers = []corev1.Container{{
 			Name:  role,
 			Image: image,
@@ -312,7 +312,7 @@ func (r *Reconciler) ensureAgentDaemonSet(
 		}
 		ds.Labels = labels
 		ds.Spec.Selector = &metav1.LabelSelector{MatchLabels: labels}
-		ds.Spec.Template.ObjectMeta.Labels = labels
+		ds.Spec.Template.Labels = labels
 		t := true
 		hostPathDir := corev1.HostPathDirectory
 		hostPathDirOrCreate := corev1.HostPathDirectoryOrCreate
@@ -427,8 +427,7 @@ func (r *Reconciler) deleteIfExists(ctx context.Context, name types.NamespacedNa
 // "make it boot" flags; production deployments override via a ConstellationCluster
 // extension that has yet to land.
 func roleArgs(role string) []string {
-	switch role {
-	case "admission":
+	if role == "admission" {
 		// No cert-manager wiring yet; run plain HTTP on :8443.
 		return []string{"--insecure"}
 	}

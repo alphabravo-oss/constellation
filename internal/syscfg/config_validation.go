@@ -48,8 +48,7 @@ func validatePatchValue(raw json.RawMessage, typ reflect.Type, field string, val
 		validation.add(field, "null_not_allowed", "Null values are not allowed.")
 		return
 	}
-	switch typ.Kind() {
-	case reflect.Struct:
+	if typ.Kind() == reflect.Struct {
 		if len(raw) == 0 || raw[0] != '{' {
 			validation.add(field, "invalid_type", "Value must be a JSON object.")
 			return
@@ -96,7 +95,9 @@ func validatePatchValue(raw json.RawMessage, typ reflect.Type, field string, val
 			seen[name] = true
 			validatePatchValue(value, member, path, validation)
 		}
-	case reflect.Slice:
+		return
+	}
+	if typ.Kind() == reflect.Slice {
 		var values []json.RawMessage
 		if err := json.Unmarshal(raw, &values); err != nil {
 			validation.add(field, "invalid_type", "Value must be a JSON array.")
@@ -105,9 +106,9 @@ func validatePatchValue(raw json.RawMessage, typ reflect.Type, field string, val
 		for _, value := range values {
 			validatePatchValue(value, typ.Elem(), field, validation)
 		}
-	default:
-		if err := json.Unmarshal(raw, reflect.New(typ).Interface()); err != nil {
-			validation.add(field, "invalid_type", "Value has an invalid JSON type or is out of range.")
-		}
+		return
+	}
+	if err := json.Unmarshal(raw, reflect.New(typ).Interface()); err != nil {
+		validation.add(field, "invalid_type", "Value has an invalid JSON type or is out of range.")
 	}
 }

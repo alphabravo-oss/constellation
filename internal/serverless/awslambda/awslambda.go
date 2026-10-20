@@ -267,7 +267,7 @@ func processFunction(ctx context.Context, client LambdaAPI, downloader Downloade
 		summary.Failed++
 		return fmt.Errorf("%s: temp dir: %w", ref, err)
 	}
-	defer os.RemoveAll(workDir)
+	defer func() { _ = os.RemoveAll(workDir) }()
 
 	zipPath := filepath.Join(workDir, "function.zip")
 	extractDir := filepath.Join(workDir, "package")
@@ -410,7 +410,7 @@ func extractZip(zipPath string, dst string, maxBytes int64) error {
 	if err != nil {
 		return err
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 	if err := os.MkdirAll(dst, 0o700); err != nil {
 		return err
 	}

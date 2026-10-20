@@ -83,9 +83,9 @@ func reportScopeReceipt(w http.ResponseWriter, org uuid.UUID, cluster *uuid.UUID
 	w.Header().Set("X-Report-Cluster-ID", scope)
 }
 
-func writeReport(w http.ResponseWriter, html []byte, asPDF bool, filename string) {
+func writeReport(ctx context.Context, w http.ResponseWriter, html []byte, asPDF bool, filename string) {
 	if asPDF {
-		pdf, err := report.HTMLToPDF(html)
+		pdf, err := report.HTMLToPDF(ctx, html)
 		if err == nil {
 			w.Header().Set("Content-Type", "application/pdf")
 			w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`.pdf"`)
@@ -199,7 +199,7 @@ func (h *Reports) serveCompliance(w http.ResponseWriter, r *http.Request, asPDF 
 	w.Header().Set("X-Report-Total", fmt.Sprint(summary.Total))
 	w.Header().Set("X-Report-Truncated", fmt.Sprint(truncated))
 	reportScopeReceipt(w, sub.OrgID, cluster)
-	writeReport(w, html, asPDF, "constellation-compliance")
+	writeReport(r.Context(), w, html, asPDF, "constellation-compliance")
 }
 func (h *Reports) serveExecutive(w http.ResponseWriter, r *http.Request, asPDF bool) {
 	sub, ok := authctx.SubjectFrom(r.Context())
@@ -302,5 +302,5 @@ func (h *Reports) serveExecutive(w http.ResponseWriter, r *http.Request, asPDF b
 		return
 	}
 	reportScopeReceipt(w, sub.OrgID, cluster)
-	writeReport(w, html, asPDF, "constellation-executive")
+	writeReport(r.Context(), w, html, asPDF, "constellation-executive")
 }

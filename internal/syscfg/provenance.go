@@ -95,11 +95,13 @@ func configValues(cfg Config) map[string]any {
 			child := value.Field(index)
 			if child.Kind() == reflect.Struct {
 				visit(child, name+".")
-			} else if child.Kind() == reflect.Slice {
-				values[name] = append([]string(nil), child.Interface().([]string)...)
-			} else {
-				values[name] = child.Interface()
+				continue
 			}
+			if child.Kind() == reflect.Slice {
+				values[name] = append([]string(nil), child.Interface().([]string)...)
+				continue
+			}
+			values[name] = child.Interface()
 		}
 	}
 	visit(reflect.ValueOf(cfg), "")

@@ -308,7 +308,7 @@ UPDATE compliance_schedules
 		return err
 	}
 
-	artifact, ext, err := renderArtifact(s.ReportFormat, report.ComplianceData{
+	artifact, ext, err := renderArtifact(ctx, s.ReportFormat, report.ComplianceData{
 		OrgName:       orgName,
 		GeneratedAt:   time.Now().UTC(),
 		Framework:     s.Framework,
@@ -460,14 +460,14 @@ func (d *daemon) resolveNames(ctx context.Context, orgID uuid.UUID, clusterID *u
 // pdf it tries wkhtmltopdf; if that's missing it returns the rendered HTML so
 // the artifact is at least viewable in a browser. ext is the file extension to
 // stamp into the local filename (and the X-Content-Type hint).
-func renderArtifact(format string, data report.ComplianceData) ([]byte, string, error) {
+func renderArtifact(ctx context.Context, format string, data report.ComplianceData) ([]byte, string, error) {
 	switch strings.ToLower(format) {
 	case "", "pdf":
 		html, err := report.ComplianceHTML(data)
 		if err != nil {
 			return nil, "", err
 		}
-		pdf, err := report.HTMLToPDF(html)
+		pdf, err := report.HTMLToPDF(ctx, html)
 		if err == nil {
 			return pdf, "pdf", nil
 		}

@@ -129,14 +129,20 @@ func combine(op dsl.BooleanOperator, m []bool) bool {
 		return false
 	case dsl.OpNot:
 		return !m[0]
-	default: // AND
-		for _, v := range m {
-			if !v {
-				return false
-			}
-		}
-		return true
+	case dsl.OpAnd:
+		return allTrue(m)
+	default: // unknown operator: conjoin, the conservative choice
+		return allTrue(m)
 	}
+}
+
+func allTrue(m []bool) bool {
+	for _, v := range m {
+		if !v {
+			return false
+		}
+	}
+	return true
 }
 
 func evalCriterion(c dsl.Criterion, r Record) bool {

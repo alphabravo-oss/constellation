@@ -161,7 +161,7 @@ func (s *AuthServer) mergeSecrets(prev AuthServer) {
 // secretEncPrefix tags a stored secret value that has been sealed at rest (so openConfigSecrets
 // can distinguish a sealed value from a legacy plaintext one and migrate gracefully). The bytes
 // after the prefix are base64(nonce||ciphertext||tag) from the install-KEK cipher.
-const secretEncPrefix = "cstl-enc:v1:"
+const secretEncPrefix = "cstl-enc:v1:" //nolint:gosec // G101: format tag for sealed values, not a credential
 
 // secretFieldPtrs returns the addresses of the three secret-bearing config fields so seal/open
 // can iterate them uniformly. The order is irrelevant (each is independent).
@@ -293,7 +293,7 @@ func CreateAuthServer(ctx context.Context, s store, srv AuthServer, sealer Seale
 	if err != nil {
 		return AuthServer{}, err
 	}
-	cfg, _ := json.Marshal(sealedCfg)
+	cfg, _ := json.Marshal(sealedCfg) //nolint:gosec // G117: ClientSecret is sealed by sealConfigSecrets before marshal
 	rm, _ := json.Marshal(srv.RoleMapping)
 	var id uuid.UUID
 	var rev int64
@@ -332,7 +332,7 @@ func UpdateAuthServer(ctx context.Context, s store, srv AuthServer, sealer Seale
 	if err != nil {
 		return AuthServer{}, err
 	}
-	cfg, _ := json.Marshal(sealedCfg)
+	cfg, _ := json.Marshal(sealedCfg) //nolint:gosec // G117: ClientSecret is sealed by sealConfigSecrets before marshal
 	rm, _ := json.Marshal(srv.RoleMapping)
 	var rev int64
 	err = s.QueryRow(ctx, `
@@ -378,7 +378,7 @@ func SeedAuthServer(ctx context.Context, s store, srv AuthServer, sealer Sealer)
 	if err != nil {
 		return false, err
 	}
-	cfg, _ := json.Marshal(sealedCfg)
+	cfg, _ := json.Marshal(sealedCfg) //nolint:gosec // G117: ClientSecret is sealed by sealConfigSecrets before marshal
 	rm, _ := json.Marshal(srv.RoleMapping)
 	ct, err := s.Exec(ctx, `
 INSERT INTO auth_servers (org_id, type, name, enabled, auth_order, config, role_mapping)

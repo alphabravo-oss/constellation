@@ -164,7 +164,7 @@ func sendOnce(ctx context.Context, client *http.Client, url string, cfg Heartbea
 		}
 		return false
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
 		buf, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
 		cfg.Logger.Warn("heartbeat.status",

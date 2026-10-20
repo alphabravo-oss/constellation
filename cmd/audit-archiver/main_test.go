@@ -88,7 +88,7 @@ func TestSignArchiveManifestStaticKey(t *testing.T) {
 		SignMode:      backup.SignModeStaticKey,
 		CreatedAt:     "2026-06-12T00:01:00Z",
 	}
-	manifestBytes, sig, cert, err := signArchiveManifest(manifest, backup.SignerOptions{
+	manifestBytes, sig, cert, err := signArchiveManifest(context.Background(), manifest, backup.SignerOptions{
 		Mode:    backup.SignModeStaticKey,
 		KeyPath: priv,
 	})
@@ -101,7 +101,7 @@ func TestSignArchiveManifestStaticKey(t *testing.T) {
 	if len(cert) != 0 {
 		t.Fatalf("static-key cert length = %d, want 0", len(cert))
 	}
-	if _, err := backup.Verify(manifestBytes, sig, nil, backup.VerifierOptions{
+	if _, err := backup.Verify(context.Background(), manifestBytes, sig, nil, backup.VerifierOptions{
 		Mode:    backup.SignModeStaticKey,
 		KeyPath: pub,
 	}); err != nil {

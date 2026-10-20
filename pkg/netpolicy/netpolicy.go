@@ -261,18 +261,19 @@ func renderNativeEgress(flows []Flow) []map[string]any {
 	}
 	for _, f := range dedupeFlows(flows) {
 		rule := map[string]any{}
-		if f.DstWorkload != "" {
+		switch {
+		case f.DstWorkload != "":
 			rule["to"] = []map[string]any{{
 				"podSelector": map[string]any{"matchLabels": labelOrApp(f.DstWorkload, f.DstLabels)},
 				"namespaceSelector": map[string]any{
 					"matchLabels": map[string]string{"kubernetes.io/metadata.name": f.DstNamespace},
 				},
 			}}
-		} else if f.DstIP != "" {
+		case f.DstIP != "":
 			rule["to"] = []map[string]any{{
 				"ipBlock": map[string]any{"cidr": f.DstIP + "/32"},
 			}}
-		} else {
+		default:
 			// No peer identity: a native egress rule with `ports` but no `to`
 			// matches ALL destinations on the port (K8s allow-all). Fail closed.
 			continue
@@ -436,11 +437,12 @@ func renderCalicoEgress(flows []Flow) []map[string]any {
 	}
 	for _, f := range dedupeFlows(flows) {
 		dest := map[string]any{"ports": []int{f.Port}}
-		if f.DstWorkload != "" {
+		switch {
+		case f.DstWorkload != "":
 			dest["selector"] = calicoSelector(f.DstWorkload, f.DstNamespace, f.DstLabels)
-		} else if f.DstIP != "" {
+		case f.DstIP != "":
 			dest["nets"] = []string{f.DstIP + "/32"}
-		} else {
+		default:
 			// No peer identity: a destination with only ports matches every
 			// host on the port. Fail closed rather than allow-all egress.
 			continue

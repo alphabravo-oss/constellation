@@ -77,7 +77,7 @@ func (m *GrypePackageMatcher) MatchSBOM(ctx context.Context, ref string, sbom []
 	if err != nil {
 		return nil, fmt.Errorf("grype-matcher: temp file: %w", err)
 	}
-	defer os.Remove(f.Name())
+	defer func() { _ = os.Remove(f.Name()) }()
 	if _, err := f.Write(sbom); err != nil {
 		_ = f.Close()
 		return nil, fmt.Errorf("grype-matcher: write sbom: %w", err)
@@ -88,7 +88,7 @@ func (m *GrypePackageMatcher) MatchSBOM(ctx context.Context, ref string, sbom []
 	defer cancel()
 
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, bin, "sbom:"+f.Name(), "-o", "json", "-q")
+	cmd := exec.CommandContext(ctx, bin, "sbom:"+f.Name(), "-o", "json", "-q") //nolint:gosec // G204: bin is the operator-configured grype binary (LookPath-checked above)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	cmd.Env = grypeEnv(opts)

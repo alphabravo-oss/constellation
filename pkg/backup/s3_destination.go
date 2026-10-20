@@ -90,7 +90,7 @@ func UploadS3Artifact(ctx context.Context, destination, endpoint string, file *o
 	if endpoint != "" {
 		args = append([]string{"--endpoint-url", endpoint}, args...)
 	}
-	cmd := exec.CommandContext(ctx, "aws", args...)
+	cmd := exec.CommandContext(ctx, "aws", args...) //nolint:gosec // G204: fixed aws CLI; args are built from the validated destination config
 	cmd.Stdin = file
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard

@@ -436,7 +436,7 @@ func (s *Syslog) Send(ctx context.Context, alerts []Alert) error {
 	if err != nil {
 		return fmt.Errorf("syslog: dial %s %s: %w", network, s.Addr, err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	for _, a := range shipped {
 		if _, err := io.WriteString(conn, s.format(a)); err != nil {
 			return fmt.Errorf("syslog: write: %w", err)
@@ -858,7 +858,7 @@ func postJSON(ctx context.Context, client *http.Client, url string, body []byte,
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("notify: %s status %d", url, resp.StatusCode)
 	}

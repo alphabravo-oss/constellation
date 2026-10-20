@@ -41,7 +41,7 @@ func TestExportAtomicSignedArchivePreservesExplicitCLIContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verified, verifyErr := VerifyArchive(RestoreOptions{In: file, Verify: VerifierOptions{KeyPath: public}})
+	verified, verifyErr := VerifyArchive(context.Background(), RestoreOptions{In: file, Verify: VerifierOptions{KeyPath: public}})
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestScheduledBackupsSameTimestampHaveIndependentArtifacts(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		result, verifyErr := VerifyArchive(RestoreOptions{In: file, AllowUnverified: true})
+		result, verifyErr := VerifyArchive(context.Background(), RestoreOptions{In: file, AllowUnverified: true})
 		if err := file.Close(); err != nil {
 			t.Fatal(err)
 		}

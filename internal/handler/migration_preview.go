@@ -935,7 +935,7 @@ func (h *Enterprise) MigrationApply(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	defer tx.Rollback(r.Context()) //nolint:errcheck
+	defer func() { _ = tx.Rollback(r.Context()) }()
 
 	source, status, preview, err := h.loadMigrationImportForUpdate(r, tx, subj.OrgID, id)
 	if err != nil {
@@ -1105,7 +1105,7 @@ func (h *Enterprise) MigrationRollback(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	defer tx.Rollback(r.Context()) //nolint:errcheck
+	defer func() { _ = tx.Rollback(r.Context()) }()
 
 	var source string
 	var status string

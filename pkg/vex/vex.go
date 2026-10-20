@@ -18,7 +18,8 @@
 package vex
 
 import (
-	"crypto/sha1"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"sort"
@@ -171,16 +172,19 @@ func vulnURI(id string) string {
 }
 
 func sha1Short(s string) string {
-	h := sha1.Sum([]byte(s))
+	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:6])
 }
 
-// uuidV4 is a tiny UUID-shaped string for the CycloneDX serialNumber field — same approach
-// as pkg/sbom (no crypto guarantee needed, just uniqueness).
+// uuidV4 is a random RFC 4122 version-4 UUID for the CycloneDX serialNumber field —
+// same approach as pkg/sbom (uniqueness is all that is needed).
 func uuidV4() string {
-	h := sha1.Sum([]byte(fmt.Sprintf("%d-vex", time.Now().UnixNano())))
-	hex := hex.EncodeToString(h[:])
-	return fmt.Sprintf("%s-%s-%s-%s-%s", hex[0:8], hex[8:12], "4"+hex[13:16], "8"+hex[17:20], hex[20:32])
+	var b [16]byte
+	_, _ = rand.Read(b[:]) // crypto/rand.Read never returns an error on supported platforms
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	hex := hex.EncodeToString(b[:])
+	return fmt.Sprintf("%s-%s-%s-%s-%s", hex[0:8], hex[8:12], hex[12:16], hex[16:20], hex[20:32])
 }
 
 // SortByCVE makes the output stable across publications (byte-comparable releases).

@@ -51,7 +51,7 @@ func (execIPTRunner) Run(ctx context.Context, netns string, args ...string) (str
 		name = "nsenter"
 		full = append([]string{"--net=" + netns, "iptables"}, args...)
 	}
-	cmd := exec.CommandContext(ctx, name, full...)
+	cmd := exec.CommandContext(ctx, name, full...) //nolint:gosec // G204: name is iptables or nsenter; args are built by the policy compiler
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("%s %s: %w (output: %s)",

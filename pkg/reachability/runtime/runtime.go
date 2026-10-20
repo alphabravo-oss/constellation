@@ -133,6 +133,8 @@ func (c *Confirmer) OnEvent(evt ebpf.Event) {
 		c.handleProcess(evt)
 	case ebpf.EventKindFile:
 		c.handleFile(evt)
+	case ebpf.EventKindUnknown, ebpf.EventKindNetwork:
+		// not evidence of a symbol being reached
 	}
 }
 

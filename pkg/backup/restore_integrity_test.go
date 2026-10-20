@@ -53,7 +53,7 @@ func TestRestoreIntegrityCannotBeWaived(t *testing.T) {
 			archive := makeTarGz(t, files)
 			for _, allow := range []bool{false, true} {
 				options := RestoreOptions{In: bytes.NewReader(archive), AllowUnverified: allow}
-				if _, err := VerifyArchive(options); err == nil {
+				if _, err := VerifyArchive(context.Background(), options); err == nil {
 					t.Fatalf("verification accepted %s (allow=%v)", mutation, allow)
 				}
 				options.In = bytes.NewReader(archive)
@@ -76,12 +76,12 @@ func TestVerifyArchiveUsesCryptographicIdentity(t *testing.T) {
 	_ = json.Unmarshal(files["manifest.json"], &manifest)
 	manifest.SignerIdentity = "attacker-claimed-identity"
 	files["manifest.json"], _ = json.Marshal(manifest)
-	signature, _, identity, err := Sign(files["manifest.json"], SignerOptions{Mode: SignModeStaticKey, KeyPath: privateKey})
+	signature, _, identity, err := Sign(context.Background(), files["manifest.json"], SignerOptions{Mode: SignModeStaticKey, KeyPath: privateKey})
 	if err != nil {
 		t.Fatal(err)
 	}
 	files["manifest.json.sig"] = signature
-	result, err := VerifyArchive(RestoreOptions{
+	result, err := VerifyArchive(context.Background(), RestoreOptions{
 		In: bytes.NewReader(makeTarGz(t, files)), Verify: VerifierOptions{KeyPath: publicKey},
 	})
 	if err != nil || !result.Verified || result.SignerIdentity != identity {
@@ -89,12 +89,12 @@ func TestVerifyArchiveUsesCryptographicIdentity(t *testing.T) {
 	}
 	delete(files, "manifest.json.sig")
 	options := RestoreOptions{In: bytes.NewReader(makeTarGz(t, files))}
-	if _, err := VerifyArchive(options); err == nil {
+	if _, err := VerifyArchive(context.Background(), options); err == nil {
 		t.Fatal("unsigned archive accepted without operator opt-in")
 	}
 	options.In = bytes.NewReader(makeTarGz(t, files))
 	options.AllowUnverified = true
-	result, err = VerifyArchive(options)
+	result, err = VerifyArchive(context.Background(), options)
 	if err != nil || result.Verified || result.SignerIdentity != "" {
 		t.Fatalf("unverified archive acquired a trusted identity: %+v %v", result, err)
 	}

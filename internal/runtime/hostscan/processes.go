@@ -148,7 +148,7 @@ func readProcess(procDir string, pid int32, opts ProcessOptions) (Process, bool)
 	if err != nil {
 		return Process{}, false
 	}
-	defer statusF.Close()
+	defer func() { _ = statusF.Close() }()
 
 	var (
 		ppid int32

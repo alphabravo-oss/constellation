@@ -115,7 +115,7 @@ func Export(ctx context.Context, pool *pgxpool.Pool, opts ExportOptions) (*Expor
 	if err != nil {
 		return nil, fmt.Errorf("marshal manifest: %w", err)
 	}
-	sig, cert, identity, err := Sign(manifestBytes, opts.Sign)
+	sig, cert, identity, err := Sign(ctx, manifestBytes, opts.Sign)
 	if err != nil {
 		return nil, fmt.Errorf("sign manifest: %w", err)
 	}
@@ -125,7 +125,7 @@ func Export(ctx context.Context, pool *pgxpool.Pool, opts ExportOptions) (*Expor
 		manifest.SignerIdentity = identity
 		manifestBytes, _ = json.MarshalIndent(manifest, "", "  ")
 		// Re-sign to bind identity into the signed bytes.
-		sig, cert, identity, err = Sign(manifestBytes, opts.Sign)
+		sig, cert, identity, err = Sign(ctx, manifestBytes, opts.Sign)
 		if err != nil {
 			return nil, fmt.Errorf("re-sign manifest: %w", err)
 		}

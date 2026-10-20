@@ -136,6 +136,8 @@ func isSecurityEvent(t EventType) bool {
 	switch t {
 	case EventRuntime, EventSecurity, EventThreat, EventIncident, EventViolation, EventDLP, EventWAF:
 		return true
+	case EventAdmission, EventScan, EventCompliance, EventEvent, EventActivity, EventCVEReport, EventAdmissionControl, EventServerless:
+		return false
 	default:
 		return false
 	}
@@ -646,6 +648,8 @@ func (r *Rule) Validate() error {
 			if err != nil || n < 0 {
 				return fmt.Errorf("response: %s requires a non-negative integer value, got %q", c.Type, c.Value)
 			}
+		case CondName, CondLevel, CondCVECritical, CondProc, CondEventType:
+			// free-form values; regex conditions were compiled above
 		}
 	}
 	for _, a := range r.Actions {

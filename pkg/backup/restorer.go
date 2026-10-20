@@ -103,7 +103,7 @@ func Restore(ctx context.Context, pool *pgxpool.Pool, opts RestoreOptions) (*Res
 	if opts.OnConflict != ConflictSkip && opts.OnConflict != ConflictOverwrite {
 		return nil, errors.New("on_conflict must be skip or overwrite")
 	}
-	res, files, err := readAndVerifyArchive(opts)
+	res, files, err := readAndVerifyArchive(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +225,7 @@ func readTarGz(r io.Reader) (map[string][]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 	tr := tar.NewReader(gz)
 	out := map[string][]byte{}
 	var total int64
@@ -237,7 +237,7 @@ func readTarGz(r io.Reader) (map[string][]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeRegA {
+		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
 		if _, exists := out[hdr.Name]; exists {
@@ -429,10 +429,11 @@ func restoreClusters(ctx context.Context, pool Querier, body []byte, orgID strin
 		agentVer := nullStr(r, "agent_version")
 
 		var id string
-		if existing != "" && conflict == ConflictSkip {
+		switch {
+		case existing != "" && conflict == ConflictSkip:
 			id = existing
 			stats.Skipped++
-		} else if existing != "" && conflict == ConflictOverwrite {
+		case existing != "" && conflict == ConflictOverwrite:
 			err = pool.QueryRow(ctx, `
 UPDATE clusters SET distro=$3, cloud_provider=$4, region=$5, state=$6, agent_version=$7, updated_at=NOW()
 WHERE org_id=$1 AND name=$2 RETURNING id`, orgID, name, distro, cloud, region, state, agentVer).Scan(&id)
@@ -440,7 +441,7 @@ WHERE org_id=$1 AND name=$2 RETURNING id`, orgID, name, distro, cloud, region, s
 				return stats, err
 			}
 			stats.Updated++
-		} else {
+		default:
 			err = pool.QueryRow(ctx, `
 INSERT INTO clusters(org_id, name, distro, cloud_provider, region, state, agent_version)
 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,

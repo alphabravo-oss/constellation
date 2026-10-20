@@ -42,7 +42,7 @@ func (s *SyftEngine) Scan(ctx context.Context, ref string, opts ScanOptions) (*E
 	defer cancel()
 
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd := exec.CommandContext(ctx, bin, args...) //nolint:gosec // G204: bin is the operator-configured scanner binary (LookPath-checked above)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	// Keep binary-level evidence available to native SBOM consumers. Missing

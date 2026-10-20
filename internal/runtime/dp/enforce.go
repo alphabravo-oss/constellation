@@ -138,7 +138,7 @@ func (m *enforceManager) run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			m.teardown(context.Background())
+			m.teardown(context.WithoutCancel(ctx))
 			return
 		case <-t.C:
 			m.reconcileOnce(ctx)

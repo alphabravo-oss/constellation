@@ -299,7 +299,7 @@ SELECT id, org_id, actor_id, actor_ip::text, action, target_kind, target_id, bef
 		manifest.CertificateKey = keys.Cert
 	}
 
-	manifestBytes, sigBytes, certBytes, err := signArchiveManifest(manifest, backup.SignerOptions{
+	manifestBytes, sigBytes, certBytes, err := signArchiveManifest(context.Background(), manifest, backup.SignerOptions{
 		Mode:      backup.SignMode(*signMode),
 		KeyPath:   *signKey,
 		CosignBin: *cosignBin,
@@ -380,7 +380,7 @@ func makeArchiveKeys(prefix string, start, end time.Time) archiveKeys {
 	}
 }
 
-func signArchiveManifest(manifest archiveManifest, opts backup.SignerOptions) ([]byte, []byte, []byte, error) {
+func signArchiveManifest(ctx context.Context, manifest archiveManifest, opts backup.SignerOptions) ([]byte, []byte, []byte, error) {
 	if opts.Mode == "" {
 		opts.Mode = backup.SignModeNone
 	}
@@ -398,7 +398,7 @@ func signArchiveManifest(manifest archiveManifest, opts backup.SignerOptions) ([
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	sig, cert, identity, err := backup.Sign(manifestBytes, opts)
+	sig, cert, identity, err := backup.Sign(ctx, manifestBytes, opts)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -408,7 +408,7 @@ func signArchiveManifest(manifest archiveManifest, opts backup.SignerOptions) ([
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		sig, cert, _, err = backup.Sign(manifestBytes, opts)
+		sig, cert, _, err = backup.Sign(ctx, manifestBytes, opts)
 		if err != nil {
 			return nil, nil, nil, err
 		}
