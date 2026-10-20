@@ -89,7 +89,8 @@ cmd_up() {
   "${COMPOSE[@]}" up -d --wait
   wait_for_pg
   migrate_db up
-  seed_admin || echo "seed failed (non-fatal); see $LOG_DIR/seed.log"
+  # DEV_SEED=0 when DATABASE_URL points at a restored dump: the seed TRUNCATEs demo tables.
+  if [ "${DEV_SEED:-1}" = 1 ]; then seed_admin || echo "seed failed (non-fatal); see $LOG_DIR/seed.log"; fi
   ensure_kubeconfig_readable
   start_bg api air -c .air.api.toml
   start_bg operator air -c .air.operator.toml
