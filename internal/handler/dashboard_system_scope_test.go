@@ -2,10 +2,12 @@ package handler
 
 import (
 	"encoding/json"
-	"github.com/alphabravocompany/constellation/internal/handler/findings"
-	"github.com/google/uuid"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/internal/handler/findings"
 )
 
 func TestDashboardFindingScopeMatchesDestinations(t *testing.T) {

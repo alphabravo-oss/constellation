@@ -4,8 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/alphabravocompany/constellation/internal/inventorypresence"
 	corev1 "k8s.io/api/core/v1"
+
+	"github.com/alphabravocompany/constellation/internal/inventorypresence"
 )
 
 func podInventoryPresence(pods []corev1.Pod) inventorypresence.Snapshot {

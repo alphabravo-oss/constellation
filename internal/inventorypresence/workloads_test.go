@@ -2,17 +2,18 @@ package inventorypresence
 
 import (
 	"context"
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestWorkloadPresenceRequiresFreshCompleteEvidence(t *testing.T) {
 	url := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
 	if url == "" {
-		url = "postgres://test:test@localhost:15433/constellation_test?sslmode=disable"
+		t.Skip("CONSTELLATION_TEST_DATABASE_URL not set; integration test")
 	}
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, url)

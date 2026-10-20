@@ -1,9 +1,10 @@
 package scanning
 
 import (
-	"github.com/alphabravocompany/constellation/internal/handler"
 	"strings"
 	"testing"
+
+	"github.com/alphabravocompany/constellation/internal/handler"
 )
 
 func TestImageCompletionIdentityConsistency(t *testing.T) {

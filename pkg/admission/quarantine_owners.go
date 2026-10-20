@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/alphabravocompany/constellation/pkg/quarantine"
+	"strings"
+	"time"
+
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"strings"
-	"time"
+
+	"github.com/alphabravocompany/constellation/pkg/quarantine"
 )
 
 // Parent resolves a ReplicaSet or Job by namespace/name and verifies its UID.

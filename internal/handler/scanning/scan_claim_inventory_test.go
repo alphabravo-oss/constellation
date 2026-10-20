@@ -2,12 +2,14 @@ package scanning
 
 import (
 	"encoding/json"
-	"github.com/alphabravocompany/constellation/internal/handler"
-	"github.com/google/uuid"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/internal/handler"
 )
 
 func TestScanJobClaimPersistsInventoryAndRefreshesOnRetry(t *testing.T) {

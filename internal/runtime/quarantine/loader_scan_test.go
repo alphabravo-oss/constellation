@@ -2,13 +2,15 @@ package quarantine
 
 import (
 	"context"
-	pkgquar "github.com/alphabravocompany/constellation/pkg/quarantine"
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
-	corev1 "k8s.io/api/core/v1"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+	corev1 "k8s.io/api/core/v1"
+
+	pkgquar "github.com/alphabravocompany/constellation/pkg/quarantine"
 )
 
 func TestPgLoaderPreservesAutomaticScanMatching(t *testing.T) {

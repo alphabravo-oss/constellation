@@ -3,10 +3,12 @@ package runtime
 import (
 	"context"
 	"fmt"
-	"github.com/alphabravocompany/constellation/pkg/response"
-	"github.com/google/uuid"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/pkg/response"
 )
 
 func TestAutomaticResponseProtectionRefusesBeforeAnyWrite(t *testing.T) {

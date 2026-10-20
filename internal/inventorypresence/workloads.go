@@ -3,9 +3,10 @@ package inventorypresence
 import (
 	"context"
 	"encoding/json"
+	"time"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"time"
 )
 
 func StoreWorkloads(ctx context.Context, pool *pgxpool.Pool, org, cluster uuid.UUID, observed, expires time.Time, workloads map[string]string) error {

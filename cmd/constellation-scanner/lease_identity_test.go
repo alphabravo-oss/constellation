@@ -7,8 +7,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/alphabravocompany/constellation/pkg/scanlease"
 	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/pkg/scanlease"
 )
 
 func TestScanLeaseIdentityPropagatesToWorkerRequests(t *testing.T) {

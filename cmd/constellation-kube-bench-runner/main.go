@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/alphabravocompany/constellation/internal/obslog"
+	"github.com/alphabravocompany/constellation/internal/telemetry"
 	compliancepkg "github.com/alphabravocompany/constellation/pkg/compliance"
 	"github.com/alphabravocompany/constellation/pkg/version"
 )
@@ -72,6 +73,18 @@ func runMain() int {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
+	tel, err := telemetry.Init(ctx, telemetry.ConfigFromEnv("constellation-kube-bench-runner"))
+	if err != nil {
+		logger.Error("telemetry init", slog.String("err", err.Error()))
+		return 1
+	}
+	defer func() {
+		sctx, c := context.WithTimeout(context.Background(), 5*time.Second)
+		defer c()
+		_ = tel.Shutdown(sctx)
+	}()
+	// Liveness/readiness/metrics for the Deployment probes and Prometheus (guide ch.05).
+	telemetry.StartAdmin(ctx, telemetry.AdminAddrFromEnv(), tel.AdminHandler(telemetry.AdminOptions{}), logger)
 	if cfg.durableWorker {
 		if err := runExecutionWorker(ctx, http.DefaultClient, cfg, logger); err != nil {
 			logger.Error("durable benchmark worker unavailable", "err", err.Error())

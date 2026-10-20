@@ -4,15 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/alphabravocompany/constellation/internal/handler"
-	"github.com/alphabravocompany/constellation/internal/scanner"
-	"github.com/alphabravocompany/constellation/pkg/audit"
-	"github.com/alphabravocompany/constellation/pkg/responserule"
-	"github.com/google/uuid"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/internal/handler"
+	"github.com/alphabravocompany/constellation/internal/scanner"
+	"github.com/alphabravocompany/constellation/pkg/audit"
+	"github.com/alphabravocompany/constellation/pkg/responserule"
 )
 
 func TestScanCompletionPreservesClaimProvenanceAcrossTargetUpdates(t *testing.T) {

@@ -269,6 +269,9 @@ func (w *worker) refreshVulnDBs(ctx context.Context, offline bool) {
 		w.logger.Info("vuln DB refreshed", "engine", name, "revision", revision, "recovered", recovered)
 	}
 	run("trivy", "image", "--download-db-only", "--quiet")
+	// Scans run with --skip-java-db-update, so the Java (Maven index) DB only ever moves
+	// when this loop refreshes it explicitly. Trivy keeps it separate from the main DB.
+	w.refreshTrivyJavaDB(ctx)
 	run("grype", "db", "update", "-q")
 	if w.engines == nil || w.engines["grype"] {
 		w.pruneGrypeStaging()
@@ -358,4 +361,25 @@ func envDuration(key string, def time.Duration) time.Duration {
 		}
 	}
 	return def
+}
+
+// refreshTrivyJavaDB downloads the Trivy Java DB (trivy-java-db) next to the main DB.
+// Best-effort: a failure is logged and the previous Java DB stays in use; the main DB
+// refresh result is reported separately so a Java-DB outage never masks it.
+func (w *worker) refreshTrivyJavaDB(ctx context.Context) {
+	if w.engines != nil && !w.engines["trivy"] {
+		return
+	}
+	if _, err := exec.LookPath("trivy"); err != nil {
+		return
+	}
+	refreshCtx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+	defer cancel()
+	c := exec.CommandContext(refreshCtx, "trivy", "image", "--download-java-db-only", "--quiet")
+	c.Env = os.Environ()
+	if err := c.Run(); err != nil {
+		w.logger.Warn("trivy java DB refresh failed", "err", err.Error())
+		return
+	}
+	w.logger.Info("trivy java DB refreshed")
 }

@@ -3,11 +3,13 @@ package handler
 import (
 	"encoding/csv"
 	"encoding/json"
-	"github.com/alphabravocompany/constellation/internal/inventorypresence"
-	"github.com/google/uuid"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/internal/inventorypresence"
 )
 
 func TestDeploymentPresenceListCSVAndDashboardParity(t *testing.T) {

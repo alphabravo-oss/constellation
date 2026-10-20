@@ -2,8 +2,9 @@ package main
 
 import (
 	"fmt"
-	"github.com/alphabravocompany/constellation/internal/runtime/hostscan"
 	"testing"
+
+	"github.com/alphabravocompany/constellation/internal/runtime/hostscan"
 )
 
 func TestDPIOptIn(t *testing.T) {

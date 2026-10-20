@@ -3,14 +3,16 @@ package scanning
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/alphabravocompany/constellation/internal/handler"
-	"github.com/alphabravocompany/constellation/pkg/audit"
-	"github.com/google/uuid"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/internal/handler"
+	"github.com/alphabravocompany/constellation/pkg/audit"
 )
 
 func TestImageCompletionRejectsConflictingIdentityBeforeWrites(t *testing.T) {

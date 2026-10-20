@@ -19,7 +19,7 @@ import (
 func TestAuditIngestUsesTokenClusterAndRejectsInvalidBindings(t *testing.T) {
 	databaseURL := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
 	if databaseURL == "" {
-		databaseURL = "postgres://test:test@localhost:15433/constellation_test?sslmode=disable"
+		t.Skip("CONSTELLATION_TEST_DATABASE_URL not set; integration test")
 	}
 	database, err := db.Connect(context.Background(), databaseURL)
 	if err != nil {

@@ -70,6 +70,7 @@ import (
 	compliancehandler "github.com/alphabravocompany/constellation/internal/handler/compliance"
 	"github.com/alphabravocompany/constellation/internal/obslog"
 	"github.com/alphabravocompany/constellation/internal/securefiles"
+	"github.com/alphabravocompany/constellation/internal/telemetry"
 	"github.com/alphabravocompany/constellation/pkg/compliance"
 	"github.com/alphabravocompany/constellation/pkg/report"
 	"github.com/alphabravocompany/constellation/pkg/version"
@@ -104,6 +105,18 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
+	tel, err := telemetry.Init(ctx, telemetry.ConfigFromEnv("constellation-compliance-scheduler"))
+	if err != nil {
+		logger.Error("telemetry init", slog.String("err", err.Error()))
+		os.Exit(1)
+	}
+	defer func() {
+		sctx, c := context.WithTimeout(context.Background(), 5*time.Second)
+		defer c()
+		_ = tel.Shutdown(sctx)
+	}()
+	// Liveness/readiness/metrics for the Deployment probes and Prometheus (guide ch.05).
+	telemetry.StartAdmin(ctx, telemetry.AdminAddrFromEnv(), tel.AdminHandler(telemetry.AdminOptions{}), logger)
 
 	pool, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
@@ -117,7 +130,7 @@ func main() {
 		logger.Warn("cosign key bootstrap failed; signatures will be empty", "err", err.Error())
 	}
 
-	d := &daemon{pool: pool, logger: logger, outDir: *outDir, signer: signer, http: &http.Client{Timeout: 30 * time.Second}}
+	d := &daemon{pool: pool, logger: logger, outDir: *outDir, signer: signer, http: &http.Client{Timeout: 30 * time.Second, Transport: telemetry.HTTPTransport(nil)}}
 	hbCfg := version.HeartbeatConfigFromEnv("compliance-scheduler", version.HeartbeatEnvOptions{
 		TokenEnv:     []string{"CONSTELLATION_COMPLIANCE_SCHEDULER_TOKEN", "SCANNER_TOKEN", "RUNTIME_AGENT_TOKEN"},
 		TokenFileEnv: []string{"CONSTELLATION_COMPLIANCE_SCHEDULER_TOKEN_FILE", "SCANNER_TOKEN_FILE", "RUNTIME_AGENT_TOKEN_FILE"},

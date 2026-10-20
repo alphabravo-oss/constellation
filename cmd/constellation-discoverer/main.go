@@ -46,6 +46,7 @@ import (
 
 	"github.com/alphabravocompany/constellation/internal/imageid"
 	"github.com/alphabravocompany/constellation/internal/obslog"
+	"github.com/alphabravocompany/constellation/internal/telemetry"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -192,6 +193,18 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
+	tel, err := telemetry.Init(ctx, telemetry.ConfigFromEnv("constellation-discoverer"))
+	if err != nil {
+		logger.Error("telemetry init", slog.String("err", err.Error()))
+		os.Exit(1)
+	}
+	defer func() {
+		sctx, c := context.WithTimeout(context.Background(), 5*time.Second)
+		defer c()
+		_ = tel.Shutdown(sctx)
+	}()
+	// Liveness/readiness/metrics for the Deployment probes and Prometheus (guide ch.05).
+	telemetry.StartAdmin(ctx, telemetry.AdminAddrFromEnv(), tel.AdminHandler(telemetry.AdminOptions{}), logger)
 
 	pool, err := openDB(ctx, cfg.databaseURL)
 	if err != nil {

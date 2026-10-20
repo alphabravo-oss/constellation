@@ -24,7 +24,7 @@ func admissionAuditTestDB(t *testing.T) (context.Context, *pgxpool.Pool, uuid.UU
 	t.Helper()
 	databaseURL := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
 	if databaseURL == "" {
-		databaseURL = "postgres://test:test@localhost:15433/constellation_test?sslmode=disable"
+		t.Skip("CONSTELLATION_TEST_DATABASE_URL not set; integration test")
 	}
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, databaseURL)

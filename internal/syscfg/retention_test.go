@@ -39,7 +39,7 @@ func TestEffectiveRetentionRespectsEveryOrgAndFailsClosed(t *testing.T) {
 	ctx := context.Background()
 	url := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
 	if url == "" {
-		url = "postgres://test:test@localhost:15433/constellation_test?sslmode=disable"
+		t.Skip("CONSTELLATION_TEST_DATABASE_URL not set; integration test")
 	}
 	database, err := db.Connect(ctx, url)
 	if err != nil {

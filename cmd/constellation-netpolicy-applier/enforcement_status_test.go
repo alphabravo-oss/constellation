@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/alphabravocompany/constellation/internal/netpolicyapply"
-	"github.com/jackc/pgx/v5/pgconn"
 	"os"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/alphabravocompany/constellation/internal/netpolicyapply"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -16,7 +18,7 @@ import (
 func TestEnforcementStatusCannotOverwriteNewerIntent(t *testing.T) {
 	url := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
 	if url == "" {
-		url = "postgres://test:test@localhost:15433/constellation_test?sslmode=disable"
+		t.Skip("CONSTELLATION_TEST_DATABASE_URL not set; integration test")
 	}
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, url)

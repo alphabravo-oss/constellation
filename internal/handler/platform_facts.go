@@ -301,10 +301,25 @@ UPDATE clusters
 			jsonError(w, http.StatusInternalServerError, "scan evidence: "+err.Error())
 			return
 		}
-		jobID, err = enqueueScanJobIfIdle(r.Context(), tx, orgID, target.ID, nil)
-		if err != nil {
-			jsonError(w, http.StatusInternalServerError, "enqueue scan job: "+err.Error())
+		// The discoverer reports every reconcile interval (30s by default). Only enqueue a
+		// scan when the package inventory actually changed since the last completed scan;
+		// otherwise an already-scanned platform target is re-scanned every 30 seconds.
+		var alreadyScanned bool
+		if err := tx.QueryRow(r.Context(), `
+SELECT EXISTS(
+    SELECT 1 FROM scan_jobs
+     WHERE org_id = $1 AND target_id = $2 AND status = 'completed'
+       AND claimed_inventory_hash = $3
+)`, orgID, target.ID, inventoryHash).Scan(&alreadyScanned); err != nil {
+			jsonError(w, http.StatusInternalServerError, "scan history: "+err.Error())
 			return
+		}
+		if !alreadyScanned {
+			jobID, err = enqueueScanJobIfIdle(r.Context(), tx, orgID, target.ID, nil)
+			if err != nil {
+				jsonError(w, http.StatusInternalServerError, "enqueue scan job: "+err.Error())
+				return
+			}
 		}
 	}
 

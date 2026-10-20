@@ -9,8 +9,9 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 )
 
 func TestConstellationScopeParity(t *testing.T) {

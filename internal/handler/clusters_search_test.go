@@ -3,11 +3,12 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"github.com/alphabravocompany/constellation/internal/inventorypresence"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/inventorypresence"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"

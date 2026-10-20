@@ -9,10 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alphabravocompany/constellation/internal/handler/authctx"
-	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/internal/handler/authctx"
+	"github.com/alphabravocompany/constellation/pkg/audit"
 )
 
 func TestComplianceSchedulePatchRejectsStaleVersion(t *testing.T) {
