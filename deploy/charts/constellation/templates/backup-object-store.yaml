@@ -174,7 +174,7 @@ spec:
       - name: AWS_DEFAULT_REGION
         value: {{ $os.region | quote }}
 ---
-# One-shot bucket creation. Revision-scoped like the migrate Job so a
+# One-shot bucket creation. Revision-scoped like the bootstrap Job so a
 # `helm upgrade` re-runs it (idempotent: head-bucket short-circuits).
 apiVersion: batch/v1
 kind: Job

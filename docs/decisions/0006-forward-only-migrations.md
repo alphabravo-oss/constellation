@@ -44,4 +44,4 @@ binary with a Postgres session lock.
 
 ## Links
 
-- `db/migrations/README.md`.
+- `internal/server/database/migrations/README.md`.

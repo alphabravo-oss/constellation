@@ -612,7 +612,6 @@ production supply an externally managed `ObjectStore` through
 | `image.pullPolicy`                    | `IfNotPresent`                                       | Set to `Always` for floating tags                               |
 | `image.pullSecrets`                   | `[]`                                                 | Required for private registries                                 |
 | `revisionHistoryLimit`                | `3`                                                  | Raise only if you need more in-cluster rollback history          |
-| `migrate.psqlImage`                   | digest-pinned `postgres:16.10-alpine3.22`            | Mirror/pin the Postgres client helper image                     |
 | `security.podSecurityContext.enabled` | `true`                                               | Apply shared pod hardening to non-privileged app workloads      |
 | `security.containerSecurityContext.enabled` | `true`                                        | Drop caps, disallow escalation, run Go/distroless roles as UID/GID 10001, and keep app root filesystems read-only |
 | app workload service account automount | `false` for API/scanner/admission/frontend/importer/archiver | Keep Kubernetes API tokens off pods that do not need them |

@@ -38,13 +38,13 @@ DOCKER_BUILD ?= docker buildx build --platform $(PLATFORMS) \
   --build-arg GO_VERSION=$(GO_VERSION) --build-arg VERSION=$(VERSION) \
   --build-arg COMMIT=$(COMMIT) --build-arg BUILD_TIME=$(DATE) --build-arg FIPS=$(FIPS)
 
-IMAGES := api scanner operator discoverer audit-archiver frontend runtime-agent admission migrate \
+IMAGES := api scanner operator discoverer audit-archiver frontend runtime-agent admission \
   bootstrap postgres compliance-scheduler kube-bench-runner
 # Dockerfile name differs from the image name for these roles.
 dockerfile_audit-archiver := archiver
 
 .PHONY: help dev dev-down dev-status dev-logs build tools-build test test-integration lint vet fmt fmt-fix \
-  generate migrate migrate-status check security updates fips-build fips-test helm-lint helm-template-smoke \
+  generate migrate check security updates fips-build fips-test helm-lint helm-template-smoke \
   e2e frontend-build frontend-lint frontend-test lint-shell check-go-version tools images images-push \
   release-images release-check deploy deploy-dryrun undeploy dp dp-clean vendor-neuvector-diff \
   vendor-neuvector-sync clean $(addprefix image-,$(IMAGES)) image-scanner-airgap
@@ -83,14 +83,20 @@ check-go-version: ## Fail when any Dockerfile hard-codes a Go version that is no
 # ---------------------------------------------------------------------------
 # Quality gates
 # ---------------------------------------------------------------------------
-test: ## Unit tests (no Docker, no shared DB) via gotestsum with JUnit output
+test: ## Unit tests (no Docker) via gotestsum with JUnit output
 	@mkdir -p $(ARTIFACT_DIR)
-	CONSTELLATION_TEST_DATABASE_URL= $(GOTESTSUM) --junitfile $(ARTIFACT_DIR)/unit.xml --jsonfile $(ARTIFACT_DIR)/unit.json \
+	$(GOTESTSUM) --junitfile $(ARTIFACT_DIR)/unit.xml --jsonfile $(ARTIFACT_DIR)/unit.json \
 	  -- -race -shuffle=on -count=1 ./...
 
-test-integration: ## Integration tests against a disposable migrated Postgres (see scripts/test-integration.sh)
+# //go:build integration tests. internal/testutil/pgtest starts one pgvector
+# container per test process (Docker, or CONSTELLATION_TEST_DATABASE_URL) and
+# clones a migrated template database per test, so packages run in parallel.
+TEST_INTEGRATION_P ?= 8
+PKG ?= ./...
+test-integration: ## Integration tests against real Postgres (testcontainers + pgtestdb)
 	@mkdir -p $(ARTIFACT_DIR)
-	ARTIFACT_DIR=$(ARTIFACT_DIR) GOTESTSUM=$(GOTESTSUM) bash scripts/test-integration.sh
+	$(GOTESTSUM) --junitfile $(ARTIFACT_DIR)/integration.xml --jsonfile $(ARTIFACT_DIR)/integration.json \
+	  -- -tags=integration -race -shuffle=on -count=1 -p $(TEST_INTEGRATION_P) $(PKG)
 
 lint: ## golangci-lint (config: .golangci.yml)
 	@mkdir -p $(ARTIFACT_DIR)
@@ -137,12 +143,8 @@ tools: ## Install pinned CI tools into ~/.local/bin
 # ---------------------------------------------------------------------------
 # Database
 # ---------------------------------------------------------------------------
-migrate: ## Apply pending migrations (goose up) to $$DATABASE_URL
-	@command -v goose >/dev/null || (echo "install goose: make tools" && exit 1)
-	goose -dir db/migrations postgres "$$DATABASE_URL" up
-
-migrate-status: ## Show migration status for $$DATABASE_URL
-	goose -dir db/migrations postgres "$$DATABASE_URL" status
+migrate: ## Apply pending embedded migrations to $$DATABASE_URL (same runner the API uses on boot)
+	$(GO) run ./cmd/constellation-api --migrate-only
 
 # ---------------------------------------------------------------------------
 # FIPS (Go native FIPS 140-3 module; see ADR 0004)

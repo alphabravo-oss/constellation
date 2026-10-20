@@ -29,7 +29,7 @@ jobs:
       - run: bash scripts/install-ci-tools.sh goose gotestsum
       - name: Database-backed network policy regression suite
         run: |
-          bash scripts/test-go.sh integration ./internal/netpolicyapply ./cmd/constellation-netpolicy-applier ./pkg/netpolicy ./internal/handler/network
+          make test-integration PKG="./internal/netpolicyapply ./cmd/constellation-netpolicy-applier ./pkg/netpolicy ./internal/handler/network"
       - name: Compile opt-in live fixture helper without local-node compilation
         run: CGO_ENABLED=0 go test -c -o artifacts/netpolicyapply.test ./internal/netpolicyapply
       - if: always()

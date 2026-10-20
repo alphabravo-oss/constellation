@@ -2,8 +2,8 @@
 {{- /*
 CloudNativePG-managed Postgres Cluster. This is a normal chart resource (not a
 hook), so helm creates it AFTER the pre-install credential Secrets
-(postgres-secrets.yaml, weight -8) but BEFORE the post-install migrate (weight
--5) and bootstrap (weight 0/5) hooks. The migrate Job's `until psql select 1`
+(postgres-secrets.yaml, weight -8) but BEFORE the bootstrap (weight 0/5) hooks. The API applies the embedded
+schema migrations on boot (advisory-locked); the bootstrap Job's `until psql select 1`
 wait loop tolerates the longer CNPG bootstrap latency on a fresh cluster.
 
 PREREQUISITE: the CloudNativePG operator must already be installed in the

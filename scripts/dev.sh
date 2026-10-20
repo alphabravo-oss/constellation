@@ -14,11 +14,10 @@ usage() { echo "usage: $0 up|down|status|logs [api|operator|scanner|web|compose]
 
 require_dev_tools() {
   local missing=0 tool hint
-  for tool in docker go air node npx goose; do
+  for tool in docker go air node npx; do
     if ! command -v "$tool" >/dev/null 2>&1; then
       case $tool in
         air) hint="go install github.com/air-verse/air@latest" ;;
-        goose) hint="go install github.com/pressly/goose/v3/cmd/goose@latest" ;;
         docker) hint="https://docs.docker.com/engine/install/" ;;
         node|npx) hint="https://nodejs.org (24 LTS, see .node-version)" ;;
         *) hint="https://go.dev/dl" ;;
@@ -61,7 +60,7 @@ wait_for_pg() {
   echo "postgres did not become ready" >&2; return 1
 }
 
-migrate_db() { goose -dir db/migrations postgres "$DATABASE_URL" "${1:-up}"; }
+migrate_db() { go run ./cmd/constellation-api --migrate-only; }
 
 seed_admin() {
   # Known credentials for the dev loop and the Playwright live spec (DEV_ADMIN_* in .env.dev).
@@ -154,7 +153,7 @@ case "${1:-}" in
   status) cmd_status ;;
   logs) cmd_logs "${2:-}" ;;
   migrate) load_env; migrate_db up ;;
-  migrate-down) echo "migrations are forward-only (db/migrations/README.md); drop and recreate the dev database instead:" >&2
+  migrate-down) echo "migrations are forward-only (internal/server/database/migrations/README.md); drop and recreate the dev database instead:" >&2
                 echo "  $0 down && docker volume rm constellation-dev_pgdata && $0 up" >&2; exit 1 ;;
   seed) load_env; mkdir -p "$LOG_DIR"; seed_admin ;;
   *) usage ;;

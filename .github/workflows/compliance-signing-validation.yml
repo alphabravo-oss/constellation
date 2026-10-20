@@ -47,7 +47,7 @@ jobs:
           mv "$GITHUB_WORKSPACE/artifacts-cosign-dependencies.txt" "$GITHUB_WORKSPACE/artifacts/cosign-dependencies.txt"
       - name: Database-backed compliance scheduler regression suite
         run: |
-          bash scripts/test-go.sh integration ./cmd/constellation-compliance-scheduler ./internal/securefiles ./internal/complianceevidence
+          make test-integration PKG="./cmd/constellation-compliance-scheduler ./internal/securefiles ./internal/complianceevidence"
       - name: Compile actual-tool proof on hosted runner
         run: CGO_ENABLED=0 go test -c -o artifacts/compliance-scheduler.test ./cmd/constellation-compliance-scheduler
       - name: Prove pinned Cosign signing and independent verification without networking

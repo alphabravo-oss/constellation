@@ -42,24 +42,6 @@ spec:
       {{- else }}
       automountServiceAccountToken: false
       {{- end }}
-      initContainers:
-        - name: wait-for-migrations
-          image: {{ include "constellation.roleImage" (dict "ctx" . "role" "api") }}
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
-          {{- include "constellation.containerSecurityContext" . | nindent 10 }}
-          command: ["/usr/local/bin/constellation-api"]
-          args: ["--check-schema"]
-          env:
-            - name: HOME
-              value: /tmp
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "constellation.dsnSecret" . }}
-                  key: {{ include "constellation.dsnSecretKey" . }}
-          volumeMounts:
-            - name: tmp
-              mountPath: /tmp
       containers:
         - name: api
           image: {{ include "constellation.roleImage" (dict "ctx" . "role" "api") }}
