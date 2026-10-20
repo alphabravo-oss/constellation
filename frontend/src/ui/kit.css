@@ -160,52 +160,6 @@
     @apply rounded-sm outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
   }
 
-  /* Name column: full value, wrapping instead of clipping. */
-  .app-data-table td[data-kind="name"],
-  .app-data-table [role="gridcell"][data-kind="name"] {
-    white-space: normal;
-    overflow: visible;
-    text-overflow: clip;
-    overflow-wrap: anywhere;
-  }
-  .app-data-table td[data-kind="name"] [data-cell-clip] {
-    white-space: normal;
-    overflow: visible;
-    text-overflow: clip;
-  }
-  .app-data-table td[data-kind="name"] .truncate {
-    white-space: normal;
-    overflow: visible;
-    text-overflow: clip;
-  }
-
-  /* Selection column: hidden until the row is hovered/focused or a selection
-   * exists; the header checkbox always shows. */
-  .app-data-table[data-selection="idle"] tbody td[data-kind="select"] > *,
-  .app-data-table[data-selection="idle"]
-    [role="gridcell"][data-kind="select"]
-    > * {
-    opacity: 0;
-    transition: opacity var(--motion-fast) var(--motion-ease);
-  }
-  .app-data-table[data-selection="idle"] tbody tr:hover td[data-kind="select"] > *,
-  .app-data-table[data-selection="idle"]
-    tbody
-    tr:focus-within
-    td[data-kind="select"]
-    > *,
-  .app-data-table[data-selection="idle"]
-    [role="row"]:hover
-    [role="gridcell"][data-kind="select"]
-    > *,
-  .app-data-table[data-selection="idle"]
-    [role="row"]:focus-within
-    [role="gridcell"][data-kind="select"]
-    > *,
-  .app-data-table tr[data-selected="true"] td[data-kind="select"] > * {
-    opacity: 1;
-  }
-
   .app-data-table-row-clickable {
     box-shadow: inset 3px 0 0 transparent;
   }
@@ -245,6 +199,61 @@
 }
 
 @layer utilities {
+  /* Table overrides live in the utilities layer on purpose: Tailwind v4
+   * ranks @layer utilities above @layer components regardless of
+   * specificity, so a cell's own `.truncate` would otherwise win. */
+  /* Name column: full value, wrapping instead of clipping. */
+  .app-data-table td[data-kind="name"],
+  .app-data-table [role="gridcell"][data-kind="name"] {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    /* Break at <wbr> joints first; split a long unbroken token only when it
+     * cannot fit at all. */
+    overflow-wrap: break-word;
+  }
+  .app-data-table td[data-kind="name"] [data-cell-clip] {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+  .app-data-table td[data-kind="name"] .truncate {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  /* Selection column: hidden until the row is hovered/focused or a selection
+   * exists; the header checkbox always shows. */
+  .app-data-table[data-selection="idle"] tbody td[data-kind="select"] > *,
+  .app-data-table[data-selection="idle"]
+    [role="gridcell"][data-kind="select"]
+    > * {
+    opacity: 0;
+    transition: opacity var(--motion-fast) var(--motion-ease);
+  }
+  .app-data-table[data-selection="idle"]
+    tbody
+    tr:hover
+    td[data-kind="select"]
+    > *,
+  .app-data-table[data-selection="idle"]
+    tbody
+    tr:focus-within
+    td[data-kind="select"]
+    > *,
+  .app-data-table[data-selection="idle"]
+    [role="row"]:hover
+    [role="gridcell"][data-kind="select"]
+    > *,
+  .app-data-table[data-selection="idle"]
+    [role="row"]:focus-within
+    [role="gridcell"][data-kind="select"]
+    > *,
+  .app-data-table tr[data-selected="true"] td[data-kind="select"] > * {
+    opacity: 1;
+  }
+
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }

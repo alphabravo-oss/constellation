@@ -1,4 +1,9 @@
-import { useState, type ButtonHTMLAttributes, type ReactNode, type Ref } from "react";
+import {
+  useState,
+  type ButtonHTMLAttributes,
+  type ReactNode,
+  type Ref,
+} from "react";
 import {
   Bookmark,
   Check,
@@ -533,7 +538,10 @@ export function RowActions({
           <MoreVertical className="h-4 w-4" />
         </button>
       </MenuTrigger>
-      <MenuContent className="w-52" onClick={(event) => event.stopPropagation()}>
+      <MenuContent
+        className="w-52"
+        onClick={(event) => event.stopPropagation()}
+      >
         {actions.map((action, index) => (
           <div key={`${action.label}-${index}`}>
             {action.separator && index > 0 ? <MenuSeparator /> : null}
@@ -551,6 +559,22 @@ export function RowActions({
       </MenuContent>
     </Menu>
   );
+}
+
+/**
+ * Generated Kubernetes names wrap at their natural joints: a <wbr> after
+ * every "-", "." and "/" so `astronomer-delivery-system` breaks as
+ * `astronomer-delivery-` / `system`, never mid-word.
+ */
+export function breakableName(name: string): ReactNode {
+  const parts = name.split(/(?<=[-./])/);
+  if (parts.length < 2) return name;
+  return parts.map((part, index) => (
+    <span key={index}>
+      {part}
+      {index < parts.length - 1 ? <wbr /> : null}
+    </span>
+  ));
 }
 
 /**
@@ -589,12 +613,12 @@ export function EntityLink({
         to={to}
         onClick={onClick}
         className={cn(
-          "app-table-entity-link inline break-all",
+          "app-table-entity-link inline",
           mono && "font-mono text-13",
           className,
         )}
       >
-        {name}
+        {breakableName(name)}
       </Link>
     </Tooltip>
   );
@@ -611,15 +635,17 @@ export function EntityName({
   className?: string;
 }) {
   return (
-    <Tooltip content={<span className="break-all font-mono text-micro">{name}</span>}>
+    <Tooltip
+      content={<span className="break-all font-mono text-micro">{name}</span>}
+    >
       <span
         className={cn(
-          "inline break-all text-foreground",
+          "inline text-foreground",
           mono && "font-mono text-13",
           className,
         )}
       >
-        {name}
+        {breakableName(name)}
       </span>
     </Tooltip>
   );

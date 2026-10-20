@@ -27,6 +27,8 @@ export interface VerdictNumber {
   label: string;
   value: ReactNode;
   tone?: "default" | "warning" | "error";
+  /** Stable key exposed as `data-verdict-number` (tests, analytics). */
+  id?: string;
 }
 
 /**
@@ -61,7 +63,11 @@ export function VerdictBanner({
         <Icon className={cn("h-5 w-5 shrink-0", toneText[tone])} aria-hidden />
         <p className="min-w-0 flex-1 text-sm text-foreground">{sentence}</p>
         {numbers.slice(0, 4).map((item) => (
-          <span key={item.label} className="flex items-baseline gap-1.5">
+          <span
+            key={item.label}
+            data-verdict-number={item.id}
+            className="flex items-baseline gap-1.5"
+          >
             <span
               className={cn(
                 "text-base font-semibold tabular-nums",
