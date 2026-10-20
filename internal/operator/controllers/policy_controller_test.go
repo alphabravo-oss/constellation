@@ -16,8 +16,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	cv1alpha1 "github.com/alphabravocompany/constellation/deploy/operator/api/v1alpha1"
-	"github.com/alphabravocompany/constellation/deploy/operator/policydb"
+	cv1alpha1 "github.com/alphabravocompany/constellation/internal/operator/api/v1alpha1"
+	"github.com/alphabravocompany/constellation/internal/operator/policydb"
 	"github.com/alphabravocompany/constellation/pkg/responserule"
 )
 

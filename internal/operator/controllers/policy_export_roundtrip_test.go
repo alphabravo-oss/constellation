@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/alphabravocompany/constellation/deploy/operator/policydb"
+	"github.com/alphabravocompany/constellation/internal/operator/policydb"
 	"github.com/alphabravocompany/constellation/pkg/responserule"
 )
 

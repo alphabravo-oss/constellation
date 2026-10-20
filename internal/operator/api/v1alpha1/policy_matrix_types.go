@@ -5,7 +5,6 @@
 //	ConstellationSignatureRule     → runtime_dlp_rules row, category='signature'
 //	                                 (migrations 044/046) — the DPI/WAF replacement surface
 //	ConstellationVulnProfile       → vuln_profiles row (migration 022)          — vuln exception/profile
-//	ConstellationComplianceExemption → compliance_exemptions row (migration 056) — SCAFFOLD, see below
 //
 // Like the existing policy kinds these are Cluster-scoped (Constellation policy is scoped to a
 // Constellation org, not a Kubernetes namespace) and every Spec carries an explicit OrgID.
@@ -155,58 +154,4 @@ type ConstellationVulnProfileList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []ConstellationVulnProfile `json:"items"`
-}
-
-// ----------------------------- ConstellationComplianceExemption ---------------------
-//
-// TODO(matrix): SCAFFOLD ONLY — the API type + CRD ship so compliance exemptions can be
-// declared in GitOps, but the reconciler is not yet wired. Unlike the other policy kinds, the
-// compliance_exemptions table (migration 056) has no (org_id, name) uniqueness to key an
-// idempotent upsert on — its identity is (framework, control_id, cluster_id) with a mandatory
-// expires_at and an approved_by (not created_by) actor column — so the name-keyed upsert +
-// created_by ownership guard the other kinds use does not map cleanly. Finishing this domain
-// needs either a name/source column on compliance_exemptions (an app migration, out of scope
-// for this subsystem) or a synthetic-identity reconcile strategy. See policydb for the matching
-// TODO(matrix).
-
-// ConstellationComplianceExemptionSpec mirrors a `compliance_exemptions` row (migration 056):
-// an approved, time-boxed waiver of a single compliance control.
-type ConstellationComplianceExemptionSpec struct {
-	// OrgID is the Constellation org that owns this exemption (compliance_exemptions.org_id).
-	OrgID string `json:"orgID"`
-	// ClusterID optionally scopes the exemption to one cluster (empty = org-wide).
-	ClusterID string `json:"clusterID,omitempty"`
-	// Framework is the compliance framework id (e.g. "cis-1.8", "pci-4.0").
-	Framework string `json:"framework"`
-	// ControlID is the specific control being exempted.
-	ControlID string `json:"controlID"`
-	// Reason is the required justification for the waiver.
-	Reason string `json:"reason"`
-	// ExpiresAt is the RFC3339 timestamp the exemption expires (required — waivers are time-boxed).
-	ExpiresAt string `json:"expiresAt"`
-}
-
-// +kubebuilder:object:root=true
-// +kubebuilder:subresource:status
-// +kubebuilder:resource:scope=Cluster,shortName=cce
-// +kubebuilder:printcolumn:name="Framework",type=string,JSONPath=`.spec.framework`
-// +kubebuilder:printcolumn:name="Control",type=string,JSONPath=`.spec.controlID`
-// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
-
-// ConstellationComplianceExemption is the Schema for the constellationcomplianceexemptions API.
-// TODO(matrix): reconciler pending — see the scaffold note above.
-type ConstellationComplianceExemption struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-	Spec              ConstellationComplianceExemptionSpec `json:"spec,omitempty"`
-	Status            PolicyStatus                         `json:"status,omitempty"`
-}
-
-// +kubebuilder:object:root=true
-
-// ConstellationComplianceExemptionList contains a list of ConstellationComplianceExemption.
-type ConstellationComplianceExemptionList struct {
-	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []ConstellationComplianceExemption `json:"items"`
 }

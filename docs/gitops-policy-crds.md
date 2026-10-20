@@ -57,7 +57,7 @@ enforced **symmetrically**: the finalizer only deletes `declarative` rows, **and
 conflict path is source-guarded (`DO UPDATE … WHERE source='declarative'`). So a REST/UI
 (`imperative`) row that shares an `(org, name)` identity is never clobbered, relabelled, or orphaned
 — a CR colliding with one is reported `Conflict` on its status and writes nothing. See
-`deploy/operator/policydb/store.go` for the full design rationale (why direct DB upsert, not REST).
+`internal/operator/policydb/store.go` for the full design rationale (why direct DB upsert, not REST).
 
 > **Authorization boundary.** `spec.orgID` is author-asserted; the operator org-scopes every write
 > on it but does not itself authorize *which* org a CR may target (it validates only that the org
@@ -112,8 +112,8 @@ because declarative rows only ever carry the operator-managed columns (admission
 conditions, actions`) — the imperative-only `policies` columns (`cluster_id`, `scopes`,
 `exclusions`, `lifecycle_stages`, `mitre_attack_vectors`, `severity`, `enforcement_actions`,
 `risk_factors`) are never set on a declarative row, so there is nothing to drop. The struct-mapping
-symmetry is enforced by `deploy/operator/controllers/policy_export_roundtrip_test.go`, and the
-declarative-only DB read path by `deploy/operator/policydb/store_export_db_test.go`. The re-applied
+symmetry is enforced by `internal/operator/controllers/policy_export_roundtrip_test.go`, and the
+declarative-only DB read path by `internal/operator/policydb/store_export_db_test.go`. The re-applied
 row matches column-for-column, modulo the DB-assigned `id` (not part of a CR's `(org, name)`
 identity). Legacy declarative rows with an unsupported `tag` or scan
 `suppress_log` action must be

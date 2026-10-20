@@ -26,7 +26,7 @@ import (
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
 
-	"github.com/alphabravocompany/constellation/deploy/operator/policydb"
+	"github.com/alphabravocompany/constellation/internal/operator/policydb"
 	"github.com/alphabravocompany/constellation/internal/securefiles"
 )
 

@@ -23,7 +23,7 @@
 //
 // Two knobs are deliberately NOT in this Provider:
 //   - Scanner autoscaling is owned by the operator: ConstellationCluster.Spec.ScannerAutoscale
-//     drives a real HorizontalPodAutoscaler (deploy/operator reconcileScannerHPA) — the
+//     drives a real HorizontalPodAutoscaler (internal/operator reconcileScannerHPA) — the
 //     K8s-native, runtime-adjustable mechanism — so there is no scanner-pool knob here.
 //   - Server TLS / OIDC discovery / federation-peer TLS verification are read once at startup
 //     by design: they are security-sensitive bootstrap config and are intentionally not

@@ -36,8 +36,8 @@ func TestDLPSensorsHandlerRemoved(t *testing.T) {
 		{"type DLPSensors", "internal/handler/runtime/waf_dlp.go"},
 		{`"/dlp/sensors"`, "internal/server/server.go"},
 		{"dlpSensors.", "internal/server/server.go"},
-		{"UpsertDLPSensor", "deploy/operator/policydb/store_matrix.go"},
-		{"type ConstellationDLPSensor", "deploy/operator/api/v1alpha1/policy_matrix_types.go"},
+		{"UpsertDLPSensor", "internal/operator/policydb/store_matrix.go"},
+		{"type ConstellationDLPSensor", "internal/operator/api/v1alpha1/policy_matrix_types.go"},
 		{"dlp_sensors", "pkg/backup/manifest.go"},
 		{"dlp_sensors", "pkg/backup/configio.go"},
 	}
@@ -59,7 +59,7 @@ func TestDLPSensorCRDFilesRemoved(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, rel := range []string{
-		"deploy/operator/controllers/dlpsensor_controller.go",
+		"internal/operator/controllers/dlpsensor_controller.go",
 		"deploy/charts/constellation/crds/constellationdlpsensor.yaml",
 	} {
 		if _, err := os.Stat(filepath.Join(root, rel)); err == nil {

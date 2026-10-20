@@ -13,7 +13,7 @@ import (
 
 	ctrl "sigs.k8s.io/controller-runtime"
 
-	"github.com/alphabravocompany/constellation/deploy/operator/policydb"
+	"github.com/alphabravocompany/constellation/internal/operator/policydb"
 )
 
 // SignatureRuleStore is the operator's data-access contract for ConstellationSignatureRule

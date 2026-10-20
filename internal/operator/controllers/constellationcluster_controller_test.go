@@ -17,7 +17,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	cv1alpha1 "github.com/alphabravocompany/constellation/deploy/operator/api/v1alpha1"
+	cv1alpha1 "github.com/alphabravocompany/constellation/internal/operator/api/v1alpha1"
 )
 
 func newTestScheme() *runtime.Scheme {

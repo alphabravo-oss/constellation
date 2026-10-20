@@ -27,7 +27,6 @@ func init() {
 	// (ConstellationDLPSensor was removed in P0-01 — orphan surface, never enforced.)
 	SchemeBuilder.Register(&ConstellationSignatureRule{}, &ConstellationSignatureRuleList{})
 	SchemeBuilder.Register(&ConstellationVulnProfile{}, &ConstellationVulnProfileList{})
-	SchemeBuilder.Register(&ConstellationComplianceExemption{}, &ConstellationComplianceExemptionList{})
 	// P0-08 — policy-groups (NvSecurityRule/NvGroupDefinition parity; see group_types.go).
 	SchemeBuilder.Register(&ConstellationGroup{}, &ConstellationGroupList{})
 	SchemeBuilder.Register(&ConstellationNetworkRule{}, &ConstellationNetworkRuleList{})

@@ -6,8 +6,8 @@ import (
 
 	"github.com/google/uuid"
 
-	cv1alpha1 "github.com/alphabravocompany/constellation/deploy/operator/api/v1alpha1"
-	"github.com/alphabravocompany/constellation/deploy/operator/policydb"
+	cv1alpha1 "github.com/alphabravocompany/constellation/internal/operator/api/v1alpha1"
+	"github.com/alphabravocompany/constellation/internal/operator/policydb"
 	"github.com/alphabravocompany/constellation/pkg/group"
 	"github.com/alphabravocompany/constellation/pkg/netpolicy"
 )

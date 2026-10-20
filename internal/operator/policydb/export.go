@@ -13,7 +13,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	cv1alpha1 "github.com/alphabravocompany/constellation/deploy/operator/api/v1alpha1"
+	cv1alpha1 "github.com/alphabravocompany/constellation/internal/operator/api/v1alpha1"
 	"github.com/alphabravocompany/constellation/pkg/responserule"
 )
 

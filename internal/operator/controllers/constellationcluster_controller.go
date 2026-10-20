@@ -15,6 +15,9 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"strings"
+
+	"github.com/alphabravocompany/constellation/pkg/version"
 
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
@@ -31,7 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	cv1alpha1 "github.com/alphabravocompany/constellation/deploy/operator/api/v1alpha1"
+	cv1alpha1 "github.com/alphabravocompany/constellation/internal/operator/api/v1alpha1"
 )
 
 // Reconciler reconciles ConstellationCluster CRs.
@@ -112,11 +115,11 @@ func (r *Reconciler) imageForRole(cc *cv1alpha1.ConstellationCluster, role strin
 	var crImg, opImg, fallback string
 	switch role {
 	case "scanner":
-		crImg, opImg, fallback = cc.Spec.ScannerImage, r.DefaultScannerImage, "ghcr.io/alphabravocompany/constellation-scanner:latest"
+		crImg, opImg, fallback = cc.Spec.ScannerImage, r.DefaultScannerImage, defaultRoleImage("scanner")
 	case "admission":
-		crImg, opImg, fallback = cc.Spec.AdmissionImage, r.DefaultAdmissionImage, "ghcr.io/alphabravocompany/constellation-admission:latest"
+		crImg, opImg, fallback = cc.Spec.AdmissionImage, r.DefaultAdmissionImage, defaultRoleImage("admission")
 	case "runtime-agent":
-		crImg, opImg, fallback = cc.Spec.RuntimeAgentImage, r.DefaultRuntimeAgentImage, "ghcr.io/alphabravocompany/constellation-runtime-agent:latest"
+		crImg, opImg, fallback = cc.Spec.RuntimeAgentImage, r.DefaultRuntimeAgentImage, defaultRoleImage("runtime-agent")
 	}
 	if crImg != "" {
 		return crImg
@@ -480,4 +483,16 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.Service{}).
 		Owns(&batchv1.CronJob{}).
 		Complete(r)
+}
+
+// defaultRoleImage is the last-resort image reference: the published per-role image at the
+// operator's own release version. A floating tag is never used (air-gap first; ch.09).
+func defaultRoleImage(role string) string {
+	v := version.Version
+	if v == "" || v == "dev" {
+		v = "dev"
+	} else if !strings.HasPrefix(v, "v") {
+		v = "v" + v
+	}
+	return "ghcr.io/alphabravo-oss/constellation/" + role + ":" + v
 }
