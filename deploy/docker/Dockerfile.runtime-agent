@@ -32,8 +32,6 @@ ARG GO_IMAGE_DIGEST=sha256:5c3e9b43cfd3bb95c7937462e29d87ada57b481a96fa23ad0eb61
 #   docker buildx imagetools inspect debian:bookworm-slim
 ARG DEBIAN_TAG=bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
 ARG CRICTL_VERSION=v1.36.0
-ARG CRICTL_SHA256_AMD64=83855e114566a8a8c44c548d515670f51de3a5e1da8b2effb59870e2f10c25a3
-ARG CRICTL_SHA256_ARM64=68328594ccf780a80ae2b092d9f6ce484eec7cf540c275242e8fd954bfd95332
 
 # -----------------------------------------------------------------------------
 # Stage 1 — Build the BPF CO-RE object (clang + libbpf + bpftool).
@@ -132,21 +130,16 @@ RUN if [ "${FIPS}" = "1" ] || [ "${FIPS}" = "true" ]; then \
 # crictl download stage — keeps curl (and its libcurl/libssh2 CVE surface) OUT of the
 # runtime image. crictl is the upstream Kubernetes CRI debug CLI used by the host-container
 # inventory collector (internal/runtime/hostscan/containers.go). Pinned + sha256-verified.
-FROM debian:${DEBIAN_TAG} AS crictl-dl
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl && rm -rf /var/lib/apt/lists/*
+FROM golang:${GO_VERSION}-bookworm@${GO_IMAGE_DIGEST} AS crictl-build
+# Third-party Go CLIs rebuilt on the go.mod toolchain with current x/* modules
+# (deploy/docker/go-tools/go.mod); upstream release binaries embed stale ones.
+WORKDIR /go-tools
+COPY deploy/docker/go-tools/ ./
+ENV CGO_ENABLED=0 GOFLAGS="-trimpath -mod=readonly"
 ARG CRICTL_VERSION
-ARG CRICTL_SHA256_AMD64
-ARG CRICTL_SHA256_ARM64
-RUN ARCH="$(uname -m)" && case "$ARCH" in \
-      x86_64)  CRICTL_ARCH=amd64; CRICTL_SHA256="${CRICTL_SHA256_AMD64}" ;; \
-      aarch64) CRICTL_ARCH=arm64; CRICTL_SHA256="${CRICTL_SHA256_ARM64}" ;; \
-      *) echo "unsupported arch for crictl: $ARCH" >&2 && exit 1 ;; \
-    esac \
- && curl -fsSL "https://github.com/kubernetes-sigs/cri-tools/releases/download/${CRICTL_VERSION}/crictl-${CRICTL_VERSION}-linux-${CRICTL_ARCH}.tar.gz" -o /tmp/crictl.tar.gz \
- && echo "${CRICTL_SHA256}  /tmp/crictl.tar.gz" | sha256sum -c - \
- && tar -C /usr/local/bin -xzf /tmp/crictl.tar.gz crictl \
- && rm -f /tmp/crictl.tar.gz \
- && chmod +x /usr/local/bin/crictl
+RUN go build -ldflags="-s -w -X sigs.k8s.io/cri-tools/pkg/version.Version=${CRICTL_VERSION}" \
+      -o /usr/local/bin/crictl sigs.k8s.io/cri-tools/cmd/crictl \
+ && /usr/local/bin/crictl --version
 
 FROM debian:${DEBIAN_TAG} AS runtime
 ARG VERSION=dev
@@ -157,7 +150,7 @@ LABEL org.opencontainers.image.version="${VERSION}" \
 # build-time codegen tool (bpf/Makefile → vmlinux.h) and dragged in ~570 CVEs; the agent
 # loads its BPF object at runtime via the pure-Go cilium/ebpf library, not the CLI. NO curl
 # either — crictl is downloaded in the stage above and copied in.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get upgrade -y --no-install-recommends && apt-get install -y --no-install-recommends \
       ca-certificates tzdata \
       iproute2 iptables conntrack ethtool tcpdump kmod procps \
       libpcap0.8 libpcre2-8-0 \
@@ -166,7 +159,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       liburcu8 \
  && rm -rf /var/lib/apt/lists/*
 
-COPY --from=crictl-dl /usr/local/bin/crictl                        /usr/local/bin/crictl
+COPY --from=crictl-build /usr/local/bin/crictl                        /usr/local/bin/crictl
 COPY --from=go-build  /out/constellation-runtime-agent              /usr/local/bin/constellation-runtime-agent
 COPY --from=bpf-build /src/bpf/runtime.bpf.o                        /opt/constellation/runtime.bpf.o
 COPY --from=dp-build  /src/third_party/neuvector/dp/dp              /usr/local/bin/dp

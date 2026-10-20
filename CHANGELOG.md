@@ -69,6 +69,15 @@ Phase 1 backend foundations) and the C1 "Triage Desk" UI on the shared AlphaBrav
 - Skeleton loading, kit error states with the request id, in-shell 404; axe
   WCAG 2.1 AA clean on the audited pages in both themes.
 
+### Fixed (release)
+- Release image gate (no fixable critical/high): third-party Go CLIs bundled in role
+  images are rebuilt from source on Go 1.27.3 with current golang.org/x modules
+  (`deploy/docker/go-tools`: age, kubectl 1.37.1, crictl 1.36.0, kube-bench 0.10.7);
+  audit-archiver takes cosign from the patched `scanner-tools` build; toolbox ships
+  rclone 1.75.2; Debian runtime stages run `apt-get upgrade`.
+- compliance-scheduler NetworkPolicy (it was unreachable under default-deny), hook-scoped
+  egress for the age-key Job, `backup.offhost.sync.source` for adopted object stores.
+
 ### Fixed (Phase 1)
 - Admission egress NetworkPolicy lacked kube-API egress (RBAC snapshot / namespace
   resolvers failed); the namespace informer wait is bounded.
