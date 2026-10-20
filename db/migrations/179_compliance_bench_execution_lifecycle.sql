@@ -40,14 +40,3 @@ CREATE TABLE compliance_bench_attempts (
     UNIQUE(request_id,attempt_no)
 );
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE compliance_bench_attempts;
-DROP INDEX compliance_bench_v2_queue;
-DROP INDEX compliance_bench_request_key;
-ALTER TABLE compliance_bench_run_requests
-    DROP COLUMN protocol_version, DROP COLUMN request_key, DROP COLUMN request_hash,
-    DROP COLUMN requested_cluster_id, DROP COLUMN revision, DROP COLUMN attempt_count,
-    DROP COLUMN active_attempt_id, DROP COLUMN completed_at;
--- +goose StatementEnd

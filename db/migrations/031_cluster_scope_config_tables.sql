@@ -34,19 +34,3 @@ ALTER TABLE dlp_sensors ADD COLUMN cluster_id UUID
     REFERENCES clusters(id) ON DELETE SET NULL;
 CREATE INDEX idx_dlp_sensors_cluster ON dlp_sensors(cluster_id)
     WHERE cluster_id IS NOT NULL;
-
--- +goose Down
-DROP INDEX IF EXISTS idx_dlp_sensors_cluster;
-ALTER TABLE dlp_sensors DROP COLUMN IF EXISTS cluster_id;
-
-DROP INDEX IF EXISTS idx_waf_groups_cluster;
-ALTER TABLE waf_groups DROP COLUMN IF EXISTS cluster_id;
-
-DROP INDEX IF EXISTS idx_groups_cluster;
-ALTER TABLE groups DROP COLUMN IF EXISTS cluster_id;
-
-DROP INDEX IF EXISTS idx_vuln_profiles_cluster;
-ALTER TABLE vuln_profiles DROP COLUMN IF EXISTS cluster_id;
-
-DROP INDEX IF EXISTS idx_response_rules_v2_cluster;
-ALTER TABLE response_rules_v2 DROP COLUMN IF EXISTS cluster_id;

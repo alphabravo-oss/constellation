@@ -46,11 +46,3 @@ CREATE INDEX IF NOT EXISTS idx_host_facts_cluster
 CREATE INDEX IF NOT EXISTS idx_host_facts_org
     ON host_facts(org_id, observed_at DESC);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_host_facts_org;
-DROP INDEX IF EXISTS idx_host_facts_cluster;
-DROP INDEX IF EXISTS uniq_host_facts_cluster_node;
-DROP TABLE IF EXISTS host_facts;
--- +goose StatementEnd

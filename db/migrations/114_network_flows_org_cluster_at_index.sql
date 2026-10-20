@@ -14,8 +14,3 @@
 CREATE INDEX IF NOT EXISTS idx_flows_org_cluster_at
     ON network_flows (org_id, cluster_id, at DESC);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_flows_org_cluster_at;
--- +goose StatementEnd

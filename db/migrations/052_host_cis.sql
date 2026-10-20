@@ -25,10 +25,3 @@ CREATE UNIQUE INDEX IF NOT EXISTS uniq_host_cis_cluster_node
 CREATE INDEX IF NOT EXISTS idx_host_cis_org
     ON host_cis(org_id, observed_at DESC);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_host_cis_org;
-DROP INDEX IF EXISTS uniq_host_cis_cluster_node;
-DROP TABLE IF EXISTS host_cis;
--- +goose StatementEnd

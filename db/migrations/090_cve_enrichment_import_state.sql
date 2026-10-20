@@ -13,8 +13,3 @@ CREATE TABLE IF NOT EXISTS cve_enrichment_import_state (
     imported_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS cve_enrichment_import_state;
--- +goose StatementEnd

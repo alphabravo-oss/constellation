@@ -35,11 +35,3 @@ CREATE INDEX IF NOT EXISTS idx_file_profile_exceptions_expiry
     ON file_profile_exceptions(org_id, cluster_id, expires_at)
     WHERE expires_at IS NOT NULL;
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_file_profile_exceptions_expiry;
-DROP INDEX IF EXISTS idx_file_profile_exceptions_rule;
-DROP INDEX IF EXISTS idx_file_profile_exceptions_workload;
-DROP TABLE IF EXISTS file_profile_exceptions;
--- +goose StatementEnd

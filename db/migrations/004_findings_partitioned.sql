@@ -50,9 +50,3 @@ CREATE TABLE image_acceptances (
     UNIQUE (org_id, image_digest, accepted_until)
 );
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS image_acceptances;
-DROP TABLE IF EXISTS findings CASCADE;
--- +goose StatementEnd

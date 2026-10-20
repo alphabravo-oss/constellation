@@ -17,8 +17,3 @@ CREATE TABLE finding_comments (
 CREATE INDEX idx_finding_comments_finding_created ON finding_comments(finding_id, created_at DESC) WHERE deleted_at IS NULL;
 CREATE INDEX idx_finding_comments_org             ON finding_comments(org_id);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS finding_comments;
--- +goose StatementEnd

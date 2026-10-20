@@ -28,8 +28,3 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_component_heartbeats_unique_nullsafe
         hostname
     );
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_component_heartbeats_unique_nullsafe;
--- +goose StatementEnd

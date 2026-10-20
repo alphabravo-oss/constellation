@@ -10,10 +10,3 @@ ALTER TABLE groups
   ADD COLUMN IF NOT EXISTS profile_mode TEXT NOT NULL DEFAULT 'monitor'
     CHECK (profile_mode IN ('discover','monitor','protect'));
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-ALTER TABLE groups
-  DROP COLUMN IF EXISTS policy_mode,
-  DROP COLUMN IF EXISTS profile_mode;
--- +goose StatementEnd

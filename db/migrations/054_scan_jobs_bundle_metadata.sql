@@ -6,9 +6,3 @@
 ALTER TABLE scan_jobs
     ADD COLUMN IF NOT EXISTS bundle_metadata JSONB;
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-ALTER TABLE scan_jobs
-    DROP COLUMN IF EXISTS bundle_metadata;
--- +goose StatementEnd

@@ -25,11 +25,3 @@ $$;
 CREATE TRIGGER compliance_artifact_metadata_immutable BEFORE UPDATE ON compliance_runs
     FOR EACH ROW EXECUTE FUNCTION compliance_artifact_metadata_immutable();
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TRIGGER compliance_artifact_metadata_immutable ON compliance_runs;
-DROP FUNCTION compliance_artifact_metadata_immutable();
-ALTER TABLE compliance_runs DROP CONSTRAINT compliance_run_artifact_metadata,
-    DROP COLUMN artifact_format, DROP COLUMN artifact_media_type, DROP COLUMN artifact_filename;
--- +goose StatementEnd

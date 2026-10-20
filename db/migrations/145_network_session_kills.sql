@@ -14,8 +14,3 @@ CREATE TABLE IF NOT EXISTS network_session_kills (
     PRIMARY KEY (org_id, cluster_id, node, session_id)
 );
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS network_session_kills;
--- +goose StatementEnd

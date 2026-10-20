@@ -47,19 +47,3 @@ CREATE INDEX IF NOT EXISTS idx_runtime_pcap_org_cluster_requested
 CREATE INDEX IF NOT EXISTS idx_runtime_pcap_org_cluster_workload_requested
   ON runtime_pcap_captures(org_id, cluster_id, workload, requested_at DESC);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_runtime_pcap_org_cluster_workload_requested;
-DROP INDEX IF EXISTS idx_runtime_pcap_org_cluster_requested;
-
-ALTER TABLE runtime_pcap_captures
-  DROP CONSTRAINT IF EXISTS runtime_pcap_file_size_mb_range,
-  DROP CONSTRAINT IF EXISTS runtime_pcap_file_count_range,
-  DROP CONSTRAINT IF EXISTS runtime_pcap_interface_len,
-  DROP CONSTRAINT IF EXISTS runtime_pcap_bpf_filter_len,
-  DROP COLUMN IF EXISTS file_size_mb,
-  DROP COLUMN IF EXISTS file_count,
-  DROP COLUMN IF EXISTS capture_interface,
-  DROP COLUMN IF EXISTS bpf_filter;
--- +goose StatementEnd

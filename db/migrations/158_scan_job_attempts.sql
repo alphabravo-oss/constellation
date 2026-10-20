@@ -19,9 +19,3 @@ CREATE TABLE IF NOT EXISTS scan_job_attempts (
 CREATE INDEX IF NOT EXISTS idx_scan_job_attempts_job
     ON scan_job_attempts(org_id, job_id, attempt_number);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_scan_job_attempts_job;
-DROP TABLE IF EXISTS scan_job_attempts;
--- +goose StatementEnd

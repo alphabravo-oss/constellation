@@ -35,8 +35,3 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_compliance_checks_hostbench_unique
     ON compliance_checks (org_id, framework, control_id)
     WHERE cluster_id IS NULL;
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_compliance_checks_hostbench_unique;
--- +goose StatementEnd

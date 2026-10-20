@@ -35,18 +35,3 @@ CREATE INDEX IF NOT EXISTS idx_flows_org_threat
   ON network_flows(org_id, threat_id, at DESC)
   WHERE threat_id IS NOT NULL AND threat_id > 0;
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_flows_org_threat;
-ALTER TABLE network_flows
-  DROP COLUMN IF EXISTS client_bytes,
-  DROP COLUMN IF EXISTS server_bytes,
-  DROP COLUMN IF EXISTS sessions,
-  DROP COLUMN IF EXISTS application,
-  DROP COLUMN IF EXISTS policy_action,
-  DROP COLUMN IF EXISTS policy_id,
-  DROP COLUMN IF EXISTS threat_id,
-  DROP COLUMN IF EXISTS severity,
-  DROP COLUMN IF EXISTS ep_mac;
--- +goose StatementEnd

@@ -21,8 +21,3 @@ CREATE INDEX IF NOT EXISTS idx_flows_deny_policy
     ON network_flows (org_id, cluster_id, policy_id, at DESC)
     WHERE verdict = 'deny';
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_flows_deny_policy;
--- +goose StatementEnd

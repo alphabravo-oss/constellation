@@ -44,9 +44,3 @@ UPDATE fed_rule_revisions f
 ALTER TABLE fed_rule_revisions
     ADD CONSTRAINT fed_rule_revisions_org_revision_key UNIQUE (org_id, revision);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-ALTER TABLE fed_rule_revisions
-    DROP CONSTRAINT IF EXISTS fed_rule_revisions_org_revision_key;
--- +goose StatementEnd

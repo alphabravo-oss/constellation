@@ -34,9 +34,3 @@ CREATE TABLE IF NOT EXISTS fed_join_tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_fed_join_tokens_org ON fed_join_tokens(org_id);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS fed_join_tokens;
-ALTER TABLE fed_members DROP COLUMN IF EXISTS kicked_at;
--- +goose StatementEnd

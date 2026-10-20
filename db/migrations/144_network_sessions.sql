@@ -53,8 +53,3 @@ CREATE TABLE IF NOT EXISTS network_sessions (
 CREATE INDEX IF NOT EXISTS idx_network_sessions_updated
     ON network_sessions(org_id, cluster_id, updated_at DESC);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS network_sessions;
--- +goose StatementEnd

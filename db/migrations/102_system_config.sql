@@ -18,8 +18,3 @@ CREATE TABLE IF NOT EXISTS system_config (
     updated_by UUID
 );
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS system_config;
--- +goose StatementEnd

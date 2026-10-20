@@ -46,17 +46,3 @@ CREATE INDEX IF NOT EXISTS idx_pod_ips_owner_lookup
     ON pod_ips(org_id, cluster_id, deployment_id, workload_id)
     WHERE deployment_id IS NOT NULL;
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_pod_ips_owner_lookup;
-DROP INDEX IF EXISTS idx_pod_workload_links_owner_workload;
-DROP INDEX IF EXISTS idx_pod_workload_links_pod;
-DROP INDEX IF EXISTS idx_pod_workload_links_owner;
-ALTER TABLE pod_ips
-    DROP COLUMN IF EXISTS workload_id,
-    DROP COLUMN IF EXISTS deployment_id,
-    DROP COLUMN IF EXISTS owner_uid,
-    DROP COLUMN IF EXISTS pod_uid;
-DROP TABLE IF EXISTS pod_workload_links;
--- +goose StatementEnd

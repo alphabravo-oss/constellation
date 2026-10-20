@@ -61,10 +61,3 @@ CREATE TABLE IF NOT EXISTS fed_joint_secret (
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS fed_joint_secret;
-DROP TABLE IF EXISTS fed_credentials;
-DROP TABLE IF EXISTS fed_signing_keys;
--- +goose StatementEnd

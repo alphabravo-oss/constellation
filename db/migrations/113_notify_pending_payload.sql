@@ -16,9 +16,3 @@
 ALTER TABLE receiver_deliveries
     ADD COLUMN IF NOT EXISTS payload JSONB;
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-ALTER TABLE receiver_deliveries
-    DROP COLUMN IF EXISTS payload;
--- +goose StatementEnd

@@ -20,8 +20,3 @@ CREATE TABLE IF NOT EXISTS vuln_profiles (
 CREATE INDEX IF NOT EXISTS idx_vuln_profiles_org_active
     ON vuln_profiles(org_id, active);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS vuln_profiles;
--- +goose StatementEnd

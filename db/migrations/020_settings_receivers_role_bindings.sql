@@ -108,17 +108,3 @@ ALTER TABLE api_tokens ADD COLUMN IF NOT EXISTS service_account_id UUID
 ALTER TABLE api_tokens ADD COLUMN IF NOT EXISTS scopes JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE api_tokens ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-ALTER TABLE api_tokens DROP COLUMN IF EXISTS service_account_id;
-ALTER TABLE api_tokens DROP COLUMN IF EXISTS scopes;
-ALTER TABLE api_tokens DROP COLUMN IF EXISTS status;
-DROP TABLE IF EXISTS service_accounts;
-DROP TABLE IF EXISTS routing_configs;
-DROP TABLE IF EXISTS role_bindings;
-DROP TABLE IF EXISTS receiver_deliveries;
-DROP TABLE IF EXISTS receivers;
-DROP TABLE IF EXISTS user_settings;
-DROP TABLE IF EXISTS org_settings;
--- +goose StatementEnd

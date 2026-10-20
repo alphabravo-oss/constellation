@@ -74,12 +74,3 @@ ON CONFLICT (org_id, cluster_id, workload_id, image_ref) DO UPDATE SET
     image_digest         = EXCLUDED.image_digest,
     last_seen_at         = EXCLUDED.last_seen_at;
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_image_workload_links_cluster;
-DROP INDEX IF EXISTS idx_image_workload_links_digest;
-DROP INDEX IF EXISTS idx_image_workload_links_normalized;
-DROP INDEX IF EXISTS idx_image_workload_links_ref;
-DROP TABLE IF EXISTS image_workload_links;
--- +goose StatementEnd

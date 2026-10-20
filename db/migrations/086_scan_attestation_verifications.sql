@@ -47,13 +47,3 @@ CREATE TRIGGER scan_attestation_verifications_no_delete
     BEFORE DELETE ON scan_attestation_verifications
     FOR EACH ROW EXECUTE FUNCTION scan_attestation_verifications_no_modify();
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TRIGGER IF EXISTS scan_attestation_verifications_no_delete ON scan_attestation_verifications;
-DROP TRIGGER IF EXISTS scan_attestation_verifications_no_update ON scan_attestation_verifications;
-DROP FUNCTION IF EXISTS scan_attestation_verifications_no_modify();
-DROP INDEX IF EXISTS idx_scan_attestation_verifications_policy;
-DROP INDEX IF EXISTS idx_scan_attestation_verifications_attestation;
-DROP TABLE IF EXISTS scan_attestation_verifications;
--- +goose StatementEnd

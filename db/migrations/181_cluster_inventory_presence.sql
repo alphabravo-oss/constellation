@@ -11,5 +11,3 @@ CREATE TABLE cluster_inventory_presence (
 );
 -- Findings remain immutable evidence of an observation. Presence is a separate
 -- classification, never a claim that a retired asset's vulnerability was fixed.
--- +goose Down
-DROP TABLE cluster_inventory_presence;

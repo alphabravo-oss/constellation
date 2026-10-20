@@ -16,8 +16,3 @@ CREATE TABLE sigstore_roots (
 );
 CREATE INDEX idx_sigstore_roots_org ON sigstore_roots(org_id);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS sigstore_roots;
--- +goose StatementEnd

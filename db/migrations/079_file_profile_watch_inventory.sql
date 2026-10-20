@@ -37,10 +37,3 @@ CREATE INDEX IF NOT EXISTS idx_file_profile_watch_workload
 CREATE INDEX IF NOT EXISTS idx_file_profile_watch_node
     ON file_profile_watch_inventory(org_id, cluster_id, node, observed_at DESC);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_file_profile_watch_node;
-DROP INDEX IF EXISTS idx_file_profile_watch_workload;
-DROP TABLE IF EXISTS file_profile_watch_inventory;
--- +goose StatementEnd

@@ -29,9 +29,3 @@ CREATE INDEX support_bundle_jobs_audit_pending_idx ON support_bundle_jobs (creat
 CREATE INDEX support_bundle_job_audit_idx ON audit_events (org_id, target_id, id DESC)
     WHERE target_kind = 'support_bundle_job';
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX support_bundle_job_audit_idx;
-DROP TABLE support_bundle_jobs;
--- +goose StatementEnd

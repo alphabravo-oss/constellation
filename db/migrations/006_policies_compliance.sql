@@ -52,10 +52,3 @@ CREATE TABLE compliance_checks (
 
 CREATE INDEX idx_compliance_framework ON compliance_checks(org_id, framework, status);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS compliance_checks;
-DROP TABLE IF EXISTS policy_decisions;
-DROP TABLE IF EXISTS policies;
--- +goose StatementEnd

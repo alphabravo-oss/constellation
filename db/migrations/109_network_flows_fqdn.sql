@@ -13,9 +13,3 @@
 ALTER TABLE network_flows
     ADD COLUMN IF NOT EXISTS fqdn TEXT;
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-ALTER TABLE network_flows
-    DROP COLUMN IF EXISTS fqdn;
--- +goose StatementEnd

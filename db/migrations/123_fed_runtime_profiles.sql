@@ -37,9 +37,3 @@ CREATE TABLE IF NOT EXISTS fed_runtime_profiles (
 CREATE INDEX IF NOT EXISTS idx_fed_runtime_profiles_org_kind
     ON fed_runtime_profiles(org_id, rule_kind, updated_at DESC);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_fed_runtime_profiles_org_kind;
-DROP TABLE IF EXISTS fed_runtime_profiles;
--- +goose StatementEnd

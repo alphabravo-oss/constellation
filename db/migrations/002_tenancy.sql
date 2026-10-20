@@ -83,14 +83,3 @@ CREATE TABLE api_tokens (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS api_tokens;
-DROP TABLE IF EXISTS role_assignments;
-DROP TABLE IF EXISTS astronomer_identity_map;
-DROP TABLE IF EXISTS users;
-DROP TABLE IF EXISTS projects;
-DROP TABLE IF EXISTS clusters;
-DROP TABLE IF EXISTS orgs;
--- +goose StatementEnd

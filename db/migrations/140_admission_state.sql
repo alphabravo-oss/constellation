@@ -22,8 +22,3 @@ CREATE TABLE IF NOT EXISTS admission_state (
     PRIMARY KEY (org_id, cluster_id)
 );
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS admission_state;
--- +goose StatementEnd

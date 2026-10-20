@@ -39,10 +39,3 @@ CREATE TABLE IF NOT EXISTS fed_rule_revisions (
 CREATE INDEX IF NOT EXISTS idx_fed_rule_revisions_since
     ON fed_rule_revisions(org_id, revision);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS fed_rule_revisions;
-DROP TABLE IF EXISTS fed_members;
-DROP TABLE IF EXISTS federation_state;
--- +goose StatementEnd

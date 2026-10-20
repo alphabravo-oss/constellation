@@ -47,16 +47,3 @@ CREATE INDEX IF NOT EXISTS idx_scan_result_attestations_trust_policy
     ON scan_result_attestations(org_id, trust_policy_id, verified_at DESC)
     WHERE trust_policy_id IS NOT NULL;
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_scan_result_attestations_trust_policy;
-
-ALTER TABLE scan_result_attestations
-    DROP COLUMN IF EXISTS verification_reason,
-    DROP COLUMN IF EXISTS trust_policy_id;
-
-DROP INDEX IF EXISTS idx_scan_attestation_trust_policies_enabled;
-DROP INDEX IF EXISTS uniq_scan_attestation_trust_policies_name;
-DROP TABLE IF EXISTS scan_attestation_trust_policies;
--- +goose StatementEnd

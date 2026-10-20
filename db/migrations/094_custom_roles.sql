@@ -17,8 +17,3 @@ CREATE TABLE IF NOT EXISTS custom_roles (
     UNIQUE (org_id, name)
 );
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS custom_roles;
--- +goose StatementEnd

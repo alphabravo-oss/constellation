@@ -16,8 +16,3 @@ CREATE TABLE IF NOT EXISTS custom_frameworks (
 
 CREATE INDEX IF NOT EXISTS idx_custom_frameworks_org ON custom_frameworks(org_id);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS custom_frameworks;
--- +goose StatementEnd

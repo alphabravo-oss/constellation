@@ -24,6 +24,3 @@ CREATE TABLE runtime_response_actions_v2 (
  FOREIGN KEY (org_id,cluster_id) REFERENCES clusters(org_id,id) ON DELETE CASCADE
 );
 CREATE INDEX runtime_response_actions_v2_pending ON runtime_response_actions_v2(org_id,cluster_id,node,created_at,id) WHERE state='pending';
--- +goose Down
-DROP TABLE runtime_response_actions_v2;
-ALTER TABLE clusters DROP CONSTRAINT clusters_response_owner_unique;

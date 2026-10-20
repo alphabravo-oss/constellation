@@ -23,8 +23,3 @@ CREATE TABLE IF NOT EXISTS migration_imports (
 CREATE INDEX IF NOT EXISTS idx_migration_imports_org_created ON migration_imports(org_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_migration_imports_org_status ON migration_imports(org_id, status);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS migration_imports;
--- +goose StatementEnd

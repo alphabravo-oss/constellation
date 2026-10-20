@@ -29,8 +29,3 @@ CREATE TABLE IF NOT EXISTS auth_servers (
 );
 CREATE INDEX IF NOT EXISTS auth_servers_org_order_idx ON auth_servers (org_id, auth_order, created_at);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS auth_servers;
--- +goose StatementEnd

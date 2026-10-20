@@ -26,8 +26,3 @@ CREATE TABLE IF NOT EXISTS network_rule_overrides (
 CREATE INDEX IF NOT EXISTS idx_network_rule_overrides_cluster
     ON network_rule_overrides(org_id, cluster_id, priority);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS network_rule_overrides;
--- +goose StatementEnd

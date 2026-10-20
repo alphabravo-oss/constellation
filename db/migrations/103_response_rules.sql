@@ -37,8 +37,3 @@ CREATE TABLE IF NOT EXISTS response_rules (
 CREATE INDEX IF NOT EXISTS idx_response_rules_org_enabled_priority
     ON response_rules(org_id, enabled, priority);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS response_rules;
--- +goose StatementEnd

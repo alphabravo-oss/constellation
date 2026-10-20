@@ -26,11 +26,3 @@ ALTER TABLE runtime_dlp_rules
 CREATE INDEX IF NOT EXISTS idx_runtime_dlp_rules_category
   ON runtime_dlp_rules(org_id, cluster_id, category, mode);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_runtime_dlp_rules_category;
-ALTER TABLE runtime_dlp_rules
-    DROP COLUMN IF EXISTS apply_dir,
-    DROP COLUMN IF EXISTS category;
--- +goose StatementEnd

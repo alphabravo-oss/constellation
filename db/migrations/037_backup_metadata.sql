@@ -45,17 +45,3 @@ CREATE TABLE IF NOT EXISTS backup_schedules (
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS backup_schedules;
-ALTER TABLE backups
-    DROP COLUMN IF EXISTS local_path,
-    DROP COLUMN IF EXISTS org_id,
-    DROP COLUMN IF EXISTS s3_uri,
-    DROP COLUMN IF EXISTS tables_included,
-    DROP COLUMN IF EXISTS signer_identity,
-    DROP COLUMN IF EXISTS signed,
-    DROP COLUMN IF EXISTS format_version,
-    DROP COLUMN IF EXISTS mode;
--- +goose StatementEnd

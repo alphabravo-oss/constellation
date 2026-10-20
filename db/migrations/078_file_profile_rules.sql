@@ -29,10 +29,3 @@ CREATE INDEX IF NOT EXISTS idx_file_profile_rules_workload
 CREATE INDEX IF NOT EXISTS idx_file_profile_rules_behavior
     ON file_profile_rules(org_id, cluster_id, behavior, updated_at DESC);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_file_profile_rules_behavior;
-DROP INDEX IF EXISTS idx_file_profile_rules_workload;
-DROP TABLE IF EXISTS file_profile_rules;
--- +goose StatementEnd

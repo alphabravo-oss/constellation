@@ -38,8 +38,3 @@ CREATE TABLE IF NOT EXISTS network_rule_match_stats (
 CREATE INDEX IF NOT EXISTS idx_rule_match_stats_last_matched
     ON network_rule_match_stats(org_id, cluster_id, last_matched_at);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS network_rule_match_stats;
--- +goose StatementEnd

@@ -11,8 +11,3 @@ CREATE TABLE browser_refresh_tokens (
 CREATE INDEX browser_refresh_tokens_session_idx ON browser_refresh_tokens(session_id);
 CREATE INDEX browser_refresh_tokens_expiry_idx ON browser_refresh_tokens(expires_at);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE browser_refresh_tokens;
--- +goose StatementEnd

@@ -14,8 +14,3 @@ CREATE TABLE IF NOT EXISTS dpi_threat_settings (
     PRIMARY KEY (org_id, cluster_id)
 );
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS dpi_threat_settings;
--- +goose StatementEnd

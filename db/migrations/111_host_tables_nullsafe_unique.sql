@@ -79,28 +79,3 @@ CREATE UNIQUE INDEX IF NOT EXISTS uniq_host_cis_org_cluster_node
     ON host_cis (org_id, COALESCE(cluster_id, '00000000-0000-0000-0000-000000000000'::uuid), node);
 
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-
-DROP INDEX IF EXISTS uniq_host_cis_org_cluster_node;
-CREATE UNIQUE INDEX IF NOT EXISTS uniq_host_cis_cluster_node
-    ON host_cis(cluster_id, node);
-
-DROP INDEX IF EXISTS uniq_host_packages_org_cluster_node;
-CREATE UNIQUE INDEX IF NOT EXISTS uniq_host_packages_cluster_node
-    ON host_packages(cluster_id, node);
-
-DROP INDEX IF EXISTS uniq_host_containers_org_cluster_node;
-CREATE UNIQUE INDEX IF NOT EXISTS uniq_host_containers_cluster_node
-    ON host_containers(cluster_id, node);
-
-DROP INDEX IF EXISTS uniq_host_processes_org_cluster_node;
-CREATE UNIQUE INDEX IF NOT EXISTS uniq_host_processes_cluster_node
-    ON host_processes(cluster_id, node);
-
-DROP INDEX IF EXISTS uniq_host_facts_org_cluster_node;
-CREATE UNIQUE INDEX IF NOT EXISTS uniq_host_facts_cluster_node
-    ON host_facts(cluster_id, node);
-
--- +goose StatementEnd

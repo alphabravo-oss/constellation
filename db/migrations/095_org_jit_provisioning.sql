@@ -6,8 +6,3 @@
 -- FALSE to preserve the existing provision-by-admin behaviour (403 when no user linked).
 ALTER TABLE orgs ADD COLUMN IF NOT EXISTS jit_provisioning BOOLEAN NOT NULL DEFAULT FALSE;
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-ALTER TABLE orgs DROP COLUMN IF EXISTS jit_provisioning;
--- +goose StatementEnd

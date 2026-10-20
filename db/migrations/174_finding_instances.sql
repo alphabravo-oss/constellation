@@ -26,12 +26,3 @@ WHERE target_kind='finding' AND after ? 'finding_first_seen_at';
 CREATE INDEX idx_audit_finding_effective_cluster ON audit_events
 (org_id,(COALESCE(after->>'finding_target_cluster_id',after->>'finding_source_cluster_id')),id DESC)
 WHERE target_kind='finding' AND after ? 'finding_first_seen_at';
-
--- +goose Down
-DROP INDEX IF EXISTS idx_audit_finding_effective_cluster;
-DROP INDEX IF EXISTS idx_audit_finding_source_cluster;
-DROP INDEX IF EXISTS idx_finding_comments_instance;
-ALTER TABLE finding_comments DROP COLUMN finding_first_seen_at;
-DROP TRIGGER IF EXISTS findings_revision_update ON findings;
-DROP FUNCTION IF EXISTS finding_revision_update();
-ALTER TABLE findings DROP COLUMN revision;

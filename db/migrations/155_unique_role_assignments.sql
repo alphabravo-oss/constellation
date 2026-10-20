@@ -34,8 +34,3 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_role_assignments_effective_unique
         COALESCE(expires_at, 'infinity'::timestamptz)
     );
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_role_assignments_effective_unique;
--- +goose StatementEnd

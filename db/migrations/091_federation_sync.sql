@@ -20,9 +20,3 @@ CREATE TABLE IF NOT EXISTS fed_sync_state (
 -- a revision is idempotent. Existing UNIQUE(org_id,name,version) on policies and
 -- the groups UNIQUE already cover the conflict targets used by the poller.
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS fed_sync_state;
-ALTER TABLE policies DROP COLUMN IF EXISTS cfg_type;
--- +goose StatementEnd

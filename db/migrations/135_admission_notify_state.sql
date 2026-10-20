@@ -22,8 +22,3 @@ INSERT INTO admission_notify_state (id, last_dispatched_id)
 VALUES (true, COALESCE((SELECT max(id) FROM audit_events), 0))
 ON CONFLICT (id) DO NOTHING;
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS admission_notify_state;
--- +goose StatementEnd

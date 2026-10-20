@@ -34,9 +34,3 @@ CREATE TABLE IF NOT EXISTS runtime_agent_tokens (
 
 CREATE INDEX IF NOT EXISTS idx_runtime_agent_tokens_org ON runtime_agent_tokens(org_id);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS runtime_agent_tokens;
-ALTER TABLE events DROP COLUMN IF EXISTS namespace;
--- +goose StatementEnd

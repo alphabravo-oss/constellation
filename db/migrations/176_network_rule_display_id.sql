@@ -16,6 +16,3 @@ BEGIN
 END;
 $$;
 -- +goose StatementEnd
-
--- +goose Down
-DROP FUNCTION network_rule_display_id(text,text);

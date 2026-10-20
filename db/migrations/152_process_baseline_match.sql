@@ -17,10 +17,3 @@ ALTER TABLE process_profile_rules
     ADD COLUMN IF NOT EXISTS sha256      TEXT NOT NULL DEFAULT '',
     ADD COLUMN IF NOT EXISTS parent_name TEXT NOT NULL DEFAULT '';
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-ALTER TABLE process_profile_rules
-    DROP COLUMN IF EXISTS parent_name,
-    DROP COLUMN IF EXISTS sha256;
--- +goose StatementEnd

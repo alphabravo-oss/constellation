@@ -31,10 +31,3 @@ CREATE INDEX IF NOT EXISTS idx_asset_vuln_summary_org_risk
 CREATE INDEX IF NOT EXISTS idx_asset_vuln_summary_org_bundle
     ON asset_vuln_summary(org_id, bundle_version);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_asset_vuln_summary_org_bundle;
-DROP INDEX IF EXISTS idx_asset_vuln_summary_org_risk;
-DROP TABLE IF EXISTS asset_vuln_summary;
--- +goose StatementEnd

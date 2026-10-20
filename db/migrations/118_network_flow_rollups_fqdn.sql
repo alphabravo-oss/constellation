@@ -9,8 +9,3 @@
 -- +goose StatementBegin
 ALTER TABLE network_flow_rollups ADD COLUMN IF NOT EXISTS fqdn text NOT NULL DEFAULT '';
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-ALTER TABLE network_flow_rollups DROP COLUMN IF EXISTS fqdn;
--- +goose StatementEnd

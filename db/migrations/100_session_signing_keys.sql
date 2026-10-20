@@ -17,8 +17,3 @@ CREATE TABLE IF NOT EXISTS session_signing_keys (
 CREATE INDEX IF NOT EXISTS session_signing_keys_created_idx
     ON session_signing_keys (created_at DESC);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS session_signing_keys;
--- +goose StatementEnd

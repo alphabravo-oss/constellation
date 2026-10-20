@@ -21,8 +21,3 @@ CREATE TABLE IF NOT EXISTS groups (
 
 CREATE INDEX IF NOT EXISTS idx_groups_org_kind ON groups(org_id, kind);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS groups;
--- +goose StatementEnd

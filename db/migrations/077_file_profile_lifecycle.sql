@@ -48,13 +48,3 @@ CREATE INDEX IF NOT EXISTS idx_events_file_open_path
     ON events(org_id, cluster_id, (payload->>'path'), at DESC)
     WHERE kind = 'file_open';
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_events_file_open_path;
-DROP INDEX IF EXISTS idx_events_file_open_workload;
-DROP INDEX IF EXISTS idx_file_profile_transitions_workload;
-DROP INDEX IF EXISTS idx_file_profile_states_cluster_mode;
-DROP TABLE IF EXISTS file_profile_transitions;
-DROP TABLE IF EXISTS file_profile_states;
--- +goose StatementEnd

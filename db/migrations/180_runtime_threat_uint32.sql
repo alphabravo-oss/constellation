@@ -41,23 +41,3 @@ WHERE s.id=true AND r.bucket>=s.raw_pruned_before AND r.flow_count>0 AND r.flow_
   AND (r.org_id,r.cluster_id,r.src_workload,r.dst_workload,r.protocol,r.l7_protocol,r.dst_port,r.verdict,r.bucket)
     =(f.org_id,f.cluster_id,f.src_workload,f.dst_workload,f.protocol,f.l7_protocol,f.dst_port,f.verdict,f.bucket);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DO $$ BEGIN
-  PERFORM 1 FROM network_flow_rollup_state WHERE id = true FOR UPDATE;
-  LOCK TABLE runtime_threats, network_flows, network_flow_rollups IN ACCESS EXCLUSIVE MODE;
-  IF EXISTS(SELECT 1 FROM runtime_threats WHERE threat_id>2147483647)
-     OR EXISTS(SELECT 1 FROM network_flows WHERE threat_id>2147483647)
-     OR EXISTS(SELECT 1 FROM network_flow_rollups WHERE max_threat_id>2147483647 OR NOT threat_id_complete) THEN
-    RAISE EXCEPTION 'cannot downgrade unsigned threat IDs or incomplete historical maxima; roll forward or restore a qualified backup';
-  END IF;
-END $$;
-ALTER TABLE runtime_threats DROP CONSTRAINT runtime_threat_id_uint32;
-ALTER TABLE network_flows DROP CONSTRAINT network_flow_threat_id_uint32;
-ALTER TABLE network_flow_rollups DROP CONSTRAINT rollup_threat_id_uint32;
-ALTER TABLE runtime_threats ALTER COLUMN threat_id TYPE integer USING threat_id::integer;
-ALTER TABLE network_flows ALTER COLUMN threat_id TYPE integer USING threat_id::integer;
-ALTER TABLE network_flow_rollups ALTER COLUMN max_threat_id TYPE integer USING max_threat_id::integer;
-ALTER TABLE network_flow_rollups DROP COLUMN threat_id_complete;
--- +goose StatementEnd

@@ -34,22 +34,3 @@ ALTER TABLE findings
 CREATE INDEX IF NOT EXISTS idx_policies_lifecycle_stages ON policies USING GIN (lifecycle_stages);
 CREATE INDEX IF NOT EXISTS idx_policies_source ON policies(org_id, source);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_policies_source;
-DROP INDEX IF EXISTS idx_policies_lifecycle_stages;
-ALTER TABLE findings
-    DROP COLUMN IF EXISTS risk_factors;
-ALTER TABLE policies
-    DROP CONSTRAINT IF EXISTS policies_source_chk,
-    DROP COLUMN IF EXISTS enforcement_actions,
-    DROP COLUMN IF EXISTS severity,
-    DROP COLUMN IF EXISTS mitre_vectors_locked,
-    DROP COLUMN IF EXISTS criteria_locked,
-    DROP COLUMN IF EXISTS mitre_attack_vectors,
-    DROP COLUMN IF EXISTS lifecycle_stages,
-    DROP COLUMN IF EXISTS source,
-    DROP COLUMN IF EXISTS exclusions,
-    DROP COLUMN IF EXISTS scopes;
--- +goose StatementEnd

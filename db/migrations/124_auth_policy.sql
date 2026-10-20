@@ -23,8 +23,3 @@ CREATE TABLE IF NOT EXISTS auth_policy (
     updated_by UUID
 );
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS auth_policy;
--- +goose StatementEnd

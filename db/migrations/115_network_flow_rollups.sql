@@ -55,9 +55,3 @@ CREATE TABLE IF NOT EXISTS network_flow_rollup_state (
 );
 INSERT INTO network_flow_rollup_state (id) VALUES (true) ON CONFLICT DO NOTHING;
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS network_flow_rollups;
-DROP TABLE IF EXISTS network_flow_rollup_state;
--- +goose StatementEnd

@@ -79,11 +79,3 @@ CREATE UNIQUE INDEX IF NOT EXISTS uniq_quarantine_active_target
     ON quarantine_entries(org_id, cluster_id, scope, match_key)
     WHERE lifted_at IS NULL;
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS uniq_quarantine_active_target;
-DROP INDEX IF EXISTS idx_quarantine_by_created;
-DROP INDEX IF EXISTS idx_quarantine_active;
-DROP TABLE IF EXISTS quarantine_entries;
--- +goose StatementEnd

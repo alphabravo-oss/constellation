@@ -32,17 +32,3 @@ ALTER TABLE image_scan_artifacts
         'constellation-image-file-risk-v1',
         'constellation-image-config-checks-v1'
     ));
-
--- +goose Down
-ALTER TABLE image_scan_artifacts DROP CONSTRAINT IF EXISTS image_scan_artifacts_format_check;
-ALTER TABLE image_scan_artifacts
-    ADD CONSTRAINT image_scan_artifacts_format_check
-    CHECK (format IN (
-        'constellation-package-inventory-v1',
-        'spdx-2.3',
-        'cyclonedx-1.6',
-        'constellation-image-secrets-v1',
-        'constellation-image-signature-v1',
-        'constellation-image-layers-v1',
-        'constellation-image-file-risk-v1'
-    ));

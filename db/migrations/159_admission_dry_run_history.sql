@@ -27,10 +27,3 @@ CREATE INDEX IF NOT EXISTS idx_admission_dry_run_history_org_cluster_at
 CREATE INDEX IF NOT EXISTS idx_admission_dry_run_history_org_at
     ON admission_dry_run_history(org_id, assessed_at DESC);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_admission_dry_run_history_org_at;
-DROP INDEX IF EXISTS idx_admission_dry_run_history_org_cluster_at;
-DROP TABLE IF EXISTS admission_dry_run_history;
--- +goose StatementEnd

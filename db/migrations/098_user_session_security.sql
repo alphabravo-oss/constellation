@@ -24,12 +24,3 @@ ALTER TABLE users
     ADD COLUMN IF NOT EXISTS block_login_since      TIMESTAMPTZ,
     ADD COLUMN IF NOT EXISTS must_change_password   BOOLEAN     NOT NULL DEFAULT FALSE;
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-ALTER TABLE users
-    DROP COLUMN IF EXISTS session_epoch,
-    DROP COLUMN IF EXISTS failed_login_count,
-    DROP COLUMN IF EXISTS block_login_since,
-    DROP COLUMN IF EXISTS must_change_password;
--- +goose StatementEnd

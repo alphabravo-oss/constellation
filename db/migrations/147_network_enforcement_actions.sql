@@ -29,6 +29,3 @@ CREATE TABLE IF NOT EXISTS network_enforcement_actions (
 );
 CREATE INDEX IF NOT EXISTS idx_net_enforce_cluster_state ON network_enforcement_actions (cluster_id, state);
 CREATE INDEX IF NOT EXISTS idx_net_enforce_org ON network_enforcement_actions (org_id);
-
--- +goose Down
-DROP TABLE IF EXISTS network_enforcement_actions;

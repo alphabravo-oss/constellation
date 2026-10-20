@@ -9,7 +9,3 @@ CREATE TABLE cve_feed_checkpoints (
     row_count bigint NOT NULL CHECK (row_count >= 0),
     updated_at timestamptz NOT NULL DEFAULT now()
 );
-
--- +goose Down
--- Removing checkpoints causes safe re-import on the next sync.
-DROP TABLE cve_feed_checkpoints;

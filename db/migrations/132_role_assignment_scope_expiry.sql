@@ -17,11 +17,3 @@ ALTER TABLE role_assignments
 
 CREATE INDEX IF NOT EXISTS idx_role_assignments_binding ON role_assignments(binding_id);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_role_assignments_binding;
-ALTER TABLE role_assignments
-    DROP COLUMN IF EXISTS binding_id,
-    DROP COLUMN IF EXISTS expires_at;
--- +goose StatementEnd

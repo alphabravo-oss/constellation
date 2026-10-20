@@ -21,10 +21,3 @@ ALTER TABLE api_tokens DROP CONSTRAINT IF EXISTS api_tokens_principal_chk;
 ALTER TABLE api_tokens ADD CONSTRAINT api_tokens_principal_chk
     CHECK ((user_id IS NOT NULL) <> (service_account_id IS NOT NULL));
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-ALTER TABLE api_tokens DROP CONSTRAINT IF EXISTS api_tokens_principal_chk;
-DROP INDEX IF EXISTS user_sessions_last_seen_idx;
-ALTER TABLE user_sessions DROP COLUMN IF EXISTS last_seen_at;
--- +goose StatementEnd

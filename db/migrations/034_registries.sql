@@ -50,11 +50,3 @@ CREATE TABLE IF NOT EXISTS registry_images (
 
 CREATE INDEX IF NOT EXISTS idx_registry_images_org ON registry_images(org_id, last_seen_at DESC);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_registry_images_org;
-DROP TABLE IF EXISTS registry_images;
-DROP INDEX IF EXISTS idx_registries_next_sync;
-DROP TABLE IF EXISTS registries;
--- +goose StatementEnd

@@ -62,12 +62,3 @@ CREATE INDEX IF NOT EXISTS idx_scan_result_attestations_subject_trusted
     ON scan_result_attestations(org_id, subject_kind, subject_digest, observed_at DESC)
     WHERE trusted;
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_scan_result_attestations_subject_trusted;
-DROP INDEX IF EXISTS idx_scan_result_attestations_image_result;
-DROP INDEX IF EXISTS idx_scan_result_attestations_target;
-DROP INDEX IF EXISTS uniq_scan_result_attestations_subject_payload;
-DROP TABLE IF EXISTS scan_result_attestations;
--- +goose StatementEnd

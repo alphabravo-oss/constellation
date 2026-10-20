@@ -31,10 +31,3 @@ CREATE UNIQUE INDEX IF NOT EXISTS uniq_host_processes_cluster_node
 CREATE INDEX IF NOT EXISTS idx_host_processes_org
     ON host_processes(org_id, observed_at DESC);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_host_processes_org;
-DROP INDEX IF EXISTS uniq_host_processes_cluster_node;
-DROP TABLE IF EXISTS host_processes;
--- +goose StatementEnd

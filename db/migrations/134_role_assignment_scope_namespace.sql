@@ -12,9 +12,3 @@
 ALTER TABLE role_assignments
     ADD COLUMN IF NOT EXISTS scope_namespace TEXT NOT NULL DEFAULT '';
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-ALTER TABLE role_assignments
-    DROP COLUMN IF EXISTS scope_namespace;
--- +goose StatementEnd

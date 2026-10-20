@@ -21,8 +21,3 @@ CREATE TABLE IF NOT EXISTS forensics_snapshots (
 CREATE INDEX IF NOT EXISTS idx_forensics_org_at        ON forensics_snapshots(org_id, captured_at DESC);
 CREATE INDEX IF NOT EXISTS idx_forensics_deployment    ON forensics_snapshots(deployment_id) WHERE deployment_id IS NOT NULL;
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS forensics_snapshots;
--- +goose StatementEnd

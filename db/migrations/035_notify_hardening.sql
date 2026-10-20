@@ -23,19 +23,3 @@ CREATE INDEX IF NOT EXISTS idx_receiver_deliveries_pending
     ON receiver_deliveries(next_retry_at)
     WHERE final_state IS NULL;
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_receiver_deliveries_pending;
-ALTER TABLE receiver_deliveries
-    DROP COLUMN IF EXISTS final_state,
-    DROP COLUMN IF EXISTS signed_at,
-    DROP COLUMN IF EXISTS next_retry_at,
-    DROP COLUMN IF EXISTS idempotency_key;
-ALTER TABLE receivers
-    DROP COLUMN IF EXISTS paused,
-    DROP COLUMN IF EXISTS status_message,
-    DROP COLUMN IF EXISTS template_id,
-    DROP COLUMN IF EXISTS rate_per_min,
-    DROP COLUMN IF EXISTS secret_key;
--- +goose StatementEnd

@@ -26,8 +26,3 @@ CREATE TABLE connector_configs (
 
 CREATE INDEX idx_connector_configs_org_type ON connector_configs(org_id, connector_type, updated_at DESC);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS connector_configs;
--- +goose StatementEnd

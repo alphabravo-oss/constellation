@@ -13,9 +13,3 @@ UPDATE network_policy_lifecycle_states
    SET mode_since = updated_at
  WHERE mode_since > updated_at;
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-ALTER TABLE network_policy_lifecycle_states
-    DROP COLUMN IF EXISTS mode_since;
--- +goose StatementEnd

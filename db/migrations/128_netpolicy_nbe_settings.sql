@@ -36,8 +36,3 @@ CREATE TABLE IF NOT EXISTS netpolicy_nbe_settings (
 CREATE INDEX IF NOT EXISTS idx_netpolicy_nbe_org_cluster
     ON netpolicy_nbe_settings(org_id, cluster_id);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS netpolicy_nbe_settings;
--- +goose StatementEnd

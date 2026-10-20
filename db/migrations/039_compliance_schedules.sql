@@ -64,9 +64,3 @@ CREATE TABLE IF NOT EXISTS compliance_runs (
 CREATE INDEX IF NOT EXISTS idx_compliance_runs_schedule ON compliance_runs (schedule_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_compliance_runs_org      ON compliance_runs (org_id, started_at DESC);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS compliance_runs;
-DROP TABLE IF EXISTS compliance_schedules;
--- +goose StatementEnd

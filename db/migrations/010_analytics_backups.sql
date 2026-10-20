@@ -37,9 +37,3 @@ CREATE TABLE IF NOT EXISTS backups (
 
 CREATE INDEX IF NOT EXISTS idx_backups_started ON backups(started_at DESC);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS backups;
-DROP MATERIALIZED VIEW IF EXISTS metrics_daily;
--- +goose StatementEnd

@@ -28,9 +28,3 @@ CREATE TABLE IF NOT EXISTS process_profile_rules (
 CREATE INDEX IF NOT EXISTS idx_process_profile_rules_workload
     ON process_profile_rules(org_id, cluster_id, workload_id, enabled, updated_at DESC);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_process_profile_rules_workload;
-DROP TABLE IF EXISTS process_profile_rules;
--- +goose StatementEnd

@@ -26,11 +26,3 @@ END$$;
 
 CREATE INDEX IF NOT EXISTS idx_response_rules_source ON response_rules(org_id, source);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_response_rules_source;
-ALTER TABLE response_rules
-    DROP CONSTRAINT IF EXISTS response_rules_source_chk,
-    DROP COLUMN IF EXISTS source;
--- +goose StatementEnd

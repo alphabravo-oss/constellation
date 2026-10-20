@@ -10,5 +10,3 @@ CREATE TABLE cluster_workload_presence (
 );
 -- Controller presence is separate from pod presence: a zero-replica controller
 -- still exists. Missing/stale snapshots cannot establish workload absence.
--- +goose Down
-DROP TABLE cluster_workload_presence;

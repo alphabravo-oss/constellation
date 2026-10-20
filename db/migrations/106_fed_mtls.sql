@@ -42,12 +42,3 @@ ALTER TABLE fed_joint_secret ADD COLUMN IF NOT EXISTS client_cert_pem TEXT NOT N
 ALTER TABLE fed_joint_secret ADD COLUMN IF NOT EXISTS client_key_enc  BYTEA;
 ALTER TABLE fed_joint_secret ADD COLUMN IF NOT EXISTS master_ca_pem   TEXT NOT NULL DEFAULT '';
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-ALTER TABLE fed_joint_secret DROP COLUMN IF EXISTS master_ca_pem;
-ALTER TABLE fed_joint_secret DROP COLUMN IF EXISTS client_key_enc;
-ALTER TABLE fed_joint_secret DROP COLUMN IF EXISTS client_cert_pem;
-ALTER TABLE fed_credentials DROP COLUMN IF EXISTS cert_fingerprint;
-DROP TABLE IF EXISTS fed_ca;
--- +goose StatementEnd

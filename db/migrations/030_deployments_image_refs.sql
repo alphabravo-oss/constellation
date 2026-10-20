@@ -6,7 +6,3 @@
 -- deployments only had a paired asset of kind='deployment'.
 ALTER TABLE deployments ADD COLUMN image_refs TEXT[] NOT NULL DEFAULT '{}';
 CREATE INDEX idx_deployments_image_refs ON deployments USING GIN (image_refs);
-
--- +goose Down
-DROP INDEX IF EXISTS idx_deployments_image_refs;
-ALTER TABLE deployments DROP COLUMN IF EXISTS image_refs;

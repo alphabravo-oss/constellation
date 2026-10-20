@@ -36,13 +36,3 @@ CREATE TABLE IF NOT EXISTS group_dpi_sensor_bindings (
 CREATE INDEX IF NOT EXISTS idx_group_dpi_bindings_org
     ON group_dpi_sensor_bindings(org_id);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS group_dpi_sensor_bindings;
-ALTER TABLE runtime_dlp_rules
-    DROP CONSTRAINT IF EXISTS runtime_dlp_rules_category_check;
-ALTER TABLE runtime_dlp_rules
-    ADD CONSTRAINT runtime_dlp_rules_category_check
-        CHECK (category IN ('dlp', 'signature'));
--- +goose StatementEnd

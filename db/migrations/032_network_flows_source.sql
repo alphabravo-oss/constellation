@@ -21,9 +21,3 @@ UPDATE network_flows SET source = 'synthetic' WHERE source = 'bpf';
 CREATE INDEX IF NOT EXISTS idx_flows_org_source_at
   ON network_flows(org_id, source, at DESC);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_flows_org_source_at;
-ALTER TABLE network_flows DROP COLUMN IF EXISTS source;
--- +goose StatementEnd

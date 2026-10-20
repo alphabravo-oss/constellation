@@ -16,8 +16,3 @@ CREATE TABLE IF NOT EXISTS response_rule_overrides (
 CREATE INDEX IF NOT EXISTS idx_response_rule_overrides_org_updated
     ON response_rule_overrides(org_id, updated_at DESC);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS response_rule_overrides;
--- +goose StatementEnd

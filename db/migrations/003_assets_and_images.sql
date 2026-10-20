@@ -51,10 +51,3 @@ CREATE TABLE sbom_documents (
 
 CREATE INDEX idx_sbom_asset ON sbom_documents(asset_id);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS sbom_documents;
-DROP TABLE IF EXISTS images;
-DROP TABLE IF EXISTS assets;
--- +goose StatementEnd

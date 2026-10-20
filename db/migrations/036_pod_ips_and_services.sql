@@ -52,9 +52,3 @@ CREATE TABLE IF NOT EXISTS cluster_services (
 CREATE INDEX IF NOT EXISTS idx_cluster_services_org_ip     ON cluster_services (org_id, cluster_ip);
 CREATE INDEX IF NOT EXISTS idx_cluster_services_cluster_ns ON cluster_services (cluster_id, namespace);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS cluster_services;
-DROP TABLE IF EXISTS pod_ips;
--- +goose StatementEnd

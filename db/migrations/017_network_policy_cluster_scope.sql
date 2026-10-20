@@ -50,25 +50,3 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_network_policy_actions_cluster_idempotency
 CREATE UNIQUE INDEX IF NOT EXISTS idx_network_policy_rollback_refs_org_cluster_ref
     ON network_policy_rollback_refs(org_id, cluster_id, rollback_ref);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_network_policy_rollback_refs_org_cluster_ref;
-DROP INDEX IF EXISTS idx_network_policy_actions_cluster_idempotency;
-DROP INDEX IF EXISTS idx_network_policy_actions_org_cluster_workload;
-DROP INDEX IF EXISTS idx_network_policy_lifecycle_org_cluster_workload;
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_network_policy_actions_idempotency
-    ON network_policy_lifecycle_actions(org_id, idempotency_key)
-    WHERE idempotency_key IS NOT NULL;
-
-ALTER TABLE network_policy_lifecycle_states
-    ADD CONSTRAINT network_policy_lifecycle_states_org_id_workload_key UNIQUE (org_id, workload);
-
-ALTER TABLE network_policy_rollback_refs
-    DROP COLUMN IF EXISTS cluster_id;
-ALTER TABLE network_policy_lifecycle_actions
-    DROP COLUMN IF EXISTS cluster_id;
-ALTER TABLE network_policy_lifecycle_states
-    DROP COLUMN IF EXISTS cluster_id;
--- +goose StatementEnd

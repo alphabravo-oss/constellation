@@ -11,8 +11,3 @@
 CREATE INDEX IF NOT EXISTS idx_flows_at_brin
     ON network_flows USING brin (at);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_flows_at_brin;
--- +goose StatementEnd

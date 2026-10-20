@@ -32,8 +32,3 @@ CREATE TABLE IF NOT EXISTS group_rule_edges (
 CREATE INDEX IF NOT EXISTS idx_group_rule_edges_org_cluster
     ON group_rule_edges(org_id, cluster_id);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS group_rule_edges;
--- +goose StatementEnd

@@ -41,11 +41,3 @@ CREATE INDEX IF NOT EXISTS idx_cluster_init_bundles_active
     ON cluster_init_bundles(org_id, name)
  WHERE revoked_at IS NULL;
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_cluster_init_bundles_active;
-DROP INDEX IF EXISTS idx_cluster_init_bundles_cluster;
-DROP INDEX IF EXISTS idx_cluster_init_bundles_org;
-DROP TABLE IF EXISTS cluster_init_bundles;
--- +goose StatementEnd

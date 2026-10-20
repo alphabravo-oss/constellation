@@ -20,11 +20,3 @@ ALTER TABLE pod_ips ADD CONSTRAINT pod_ips_org_cluster_uid_ip_key
 CREATE INDEX IF NOT EXISTS idx_pod_ips_resolve
     ON pod_ips (org_id, ip, last_seen_at DESC);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_pod_ips_resolve;
-ALTER TABLE pod_ips DROP CONSTRAINT IF EXISTS pod_ips_org_cluster_uid_ip_key;
--- Best-effort restore of the current-only unique (may fail if history rows exist).
--- ALTER TABLE pod_ips ADD CONSTRAINT pod_ips_org_id_cluster_id_ip_key UNIQUE (org_id, cluster_id, ip);
--- +goose StatementEnd

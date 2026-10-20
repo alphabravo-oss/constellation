@@ -54,12 +54,3 @@ ALTER TABLE runtime_policies
 CREATE INDEX IF NOT EXISTS idx_runtime_policies_dp_policy_id
   ON runtime_policies(dp_policy_id);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_runtime_policies_dp_policy_id;
-ALTER TABLE runtime_policies
-    DROP CONSTRAINT IF EXISTS runtime_policies_dp_policy_id_unique,
-    DROP COLUMN IF EXISTS dp_policy_id;
-DROP SEQUENCE IF EXISTS runtime_policies_dp_id_seq;
--- +goose StatementEnd

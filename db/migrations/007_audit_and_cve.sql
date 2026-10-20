@@ -79,13 +79,3 @@ CREATE TABLE cve_bundles (
     published_at   TIMESTAMPTZ
 );
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS cve_bundles;
-DROP TABLE IF EXISTS cve_records;
-DROP TRIGGER IF EXISTS audit_events_no_delete ON audit_events;
-DROP TRIGGER IF EXISTS audit_events_no_update ON audit_events;
-DROP FUNCTION IF EXISTS audit_events_no_modify();
-DROP TABLE IF EXISTS audit_events;
--- +goose StatementEnd

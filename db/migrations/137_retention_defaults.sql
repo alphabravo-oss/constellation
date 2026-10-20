@@ -21,11 +21,3 @@ UPDATE system_config
        revision = revision + 1,
        updated_at = now();
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-UPDATE system_config
-   SET config = config - 'network_flow_retention_days' - 'events_retention_days' - 'scan_job_retention_days',
-       revision = revision + 1,
-       updated_at = now();
--- +goose StatementEnd

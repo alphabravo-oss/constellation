@@ -63,11 +63,3 @@ CREATE TRIGGER trg_runtime_dlp_rules_bump_version
     BEFORE UPDATE ON runtime_dlp_rules
     FOR EACH ROW EXECUTE FUNCTION runtime_dlp_rules_bump_version();
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TRIGGER IF EXISTS trg_runtime_dlp_rules_bump_version ON runtime_dlp_rules;
-DROP FUNCTION IF EXISTS runtime_dlp_rules_bump_version();
-DROP TABLE IF EXISTS runtime_dlp_rules;
-DROP SEQUENCE IF EXISTS runtime_dlp_rules_dp_id_seq;
--- +goose StatementEnd

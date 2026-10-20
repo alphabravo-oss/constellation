@@ -31,11 +31,3 @@ CREATE INDEX IF NOT EXISTS idx_scan_evidence_cluster_target
     ON scan_evidence(org_id, cluster_id, target_type, observed_at DESC)
     WHERE cluster_id IS NOT NULL;
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_scan_evidence_cluster_target;
-DROP INDEX IF EXISTS idx_scan_evidence_target_latest;
-DROP INDEX IF EXISTS uniq_scan_evidence_target_inventory;
-DROP TABLE IF EXISTS scan_evidence;
--- +goose StatementEnd

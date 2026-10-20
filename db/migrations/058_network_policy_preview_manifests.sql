@@ -28,15 +28,3 @@ UPDATE network_policy_rollback_refs
  WHERE preview_yaml <> ''
    AND preview_manifests = '{}'::jsonb;
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-ALTER TABLE network_policy_rollback_refs
-    DROP COLUMN IF EXISTS preview_manifests;
-
-ALTER TABLE network_policy_lifecycle_actions
-    DROP COLUMN IF EXISTS preview_manifests;
-
-ALTER TABLE network_policy_lifecycle_states
-    DROP COLUMN IF EXISTS preview_manifests;
--- +goose StatementEnd

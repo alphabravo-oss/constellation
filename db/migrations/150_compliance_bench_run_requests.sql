@@ -29,8 +29,3 @@ CREATE INDEX IF NOT EXISTS idx_compliance_bench_run_pending
     ON compliance_bench_run_requests (org_id, profile, requested_at)
     WHERE status = 'pending';
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS compliance_bench_run_requests;
--- +goose StatementEnd

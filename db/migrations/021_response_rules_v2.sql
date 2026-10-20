@@ -22,8 +22,3 @@ CREATE TABLE IF NOT EXISTS response_rules_v2 (
 CREATE INDEX IF NOT EXISTS idx_response_rules_v2_org_enabled
     ON response_rules_v2(org_id, enabled);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS response_rules_v2;
--- +goose StatementEnd

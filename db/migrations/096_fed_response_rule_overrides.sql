@@ -8,8 +8,3 @@
 -- rows are owned by the joint poller and replaced/tombstoned on each sync.
 ALTER TABLE response_rule_overrides ADD COLUMN IF NOT EXISTS cfg_type TEXT NOT NULL DEFAULT 'user';
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-ALTER TABLE response_rule_overrides DROP COLUMN IF EXISTS cfg_type;
--- +goose StatementEnd

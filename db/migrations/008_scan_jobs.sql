@@ -41,9 +41,3 @@ CREATE TABLE scanner_tokens (
 
 CREATE INDEX idx_scanner_tokens_org ON scanner_tokens(org_id);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS scanner_tokens;
-DROP TABLE IF EXISTS scan_jobs;
--- +goose StatementEnd

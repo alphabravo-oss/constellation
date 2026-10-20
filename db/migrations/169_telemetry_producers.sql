@@ -13,7 +13,3 @@ CREATE TABLE telemetry_producers (
     PRIMARY KEY (org_id, cluster_id, stream, producer_id)
 );
 CREATE INDEX telemetry_producers_cluster ON telemetry_producers(cluster_id);
-
--- +goose Down
--- Downgrading discards deduplication state; stop/drain all producers first.
-DROP TABLE telemetry_producers;

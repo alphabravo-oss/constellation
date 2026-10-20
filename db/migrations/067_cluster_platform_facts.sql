@@ -23,9 +23,3 @@ CREATE TABLE IF NOT EXISTS cluster_platform_facts (
 CREATE INDEX IF NOT EXISTS idx_cluster_platform_facts_observed
     ON cluster_platform_facts(org_id, observed_at DESC);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_cluster_platform_facts_observed;
-DROP TABLE IF EXISTS cluster_platform_facts;
--- +goose StatementEnd

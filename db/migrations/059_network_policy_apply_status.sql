@@ -27,10 +27,3 @@ CREATE INDEX IF NOT EXISTS idx_network_policy_apply_status_cluster
 CREATE INDEX IF NOT EXISTS idx_network_policy_apply_status_workload
     ON network_policy_apply_status(org_id, cluster_id, workload, updated_at DESC);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_network_policy_apply_status_workload;
-DROP INDEX IF EXISTS idx_network_policy_apply_status_cluster;
-DROP TABLE IF EXISTS network_policy_apply_status;
--- +goose StatementEnd

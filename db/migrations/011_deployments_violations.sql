@@ -42,9 +42,3 @@ CREATE TABLE IF NOT EXISTS violations (
 CREATE INDEX IF NOT EXISTS idx_violations_org_at        ON violations(org_id, at DESC);
 CREATE INDEX IF NOT EXISTS idx_violations_deployment_at ON violations(deployment_id, at DESC);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS violations;
-DROP TABLE IF EXISTS deployments;
--- +goose StatementEnd

@@ -24,8 +24,3 @@ CREATE INDEX IF NOT EXISTS idx_compliance_exemptions_active
 CREATE INDEX IF NOT EXISTS idx_compliance_exemptions_org_created
     ON compliance_exemptions (org_id, created_at DESC);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS compliance_exemptions;
--- +goose StatementEnd

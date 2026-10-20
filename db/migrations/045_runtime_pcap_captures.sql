@@ -67,8 +67,3 @@ CREATE INDEX IF NOT EXISTS idx_runtime_pcap_expires_at
   ON runtime_pcap_captures(expires_at)
   WHERE expires_at IS NOT NULL;
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS runtime_pcap_captures;
--- +goose StatementEnd

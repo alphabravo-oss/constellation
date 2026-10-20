@@ -22,8 +22,3 @@ CREATE TABLE IF NOT EXISTS custom_compliance_checks (
 
 CREATE INDEX IF NOT EXISTS idx_custom_compliance_checks_org ON custom_compliance_checks(org_id);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS custom_compliance_checks;
--- +goose StatementEnd

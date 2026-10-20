@@ -34,9 +34,3 @@ CREATE TABLE IF NOT EXISTS dlp_sensors (
 
 CREATE INDEX IF NOT EXISTS idx_dlp_sensors_org ON dlp_sensors(org_id);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS dlp_sensors;
-DROP TABLE IF EXISTS waf_groups;
--- +goose StatementEnd

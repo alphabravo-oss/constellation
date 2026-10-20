@@ -91,16 +91,3 @@ ON CONFLICT (org_id) DO UPDATE
         )
    );
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_component_restart_events_component_recent;
-DROP INDEX IF EXISTS idx_component_restart_events_recent;
-DROP TABLE IF EXISTS component_restart_events;
-DROP INDEX IF EXISTS idx_component_heartbeats_component_seen;
-DROP INDEX IF EXISTS idx_component_heartbeats_org_cluster_seen;
-DROP TABLE IF EXISTS component_heartbeats;
--- License keys left in org_settings (downgrades shouldn't drop org-level
--- settings the operator may have edited). Operators can remove them manually
--- if absolutely required.
--- +goose StatementEnd

@@ -34,8 +34,3 @@ CREATE TABLE IF NOT EXISTS sso_role_mappings (
 CREATE INDEX IF NOT EXISTS sso_role_mappings_server_idx
     ON sso_role_mappings (auth_server_id, group_value);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS sso_role_mappings;
--- +goose StatementEnd

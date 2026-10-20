@@ -28,12 +28,3 @@ ALTER TABLE image_scan_artifacts
         'package-inventory', 'sbom', 'secret-scan', 'signature-scan',
         'layer-metadata', 'file-risk', 'config-checks'
     ));
-
--- +goose Down
-ALTER TABLE image_scan_artifacts DROP CONSTRAINT IF EXISTS image_scan_artifacts_artifact_type_check;
-ALTER TABLE image_scan_artifacts
-    ADD CONSTRAINT image_scan_artifacts_artifact_type_check
-    CHECK (artifact_type IN (
-        'package-inventory', 'sbom', 'secret-scan', 'signature-scan',
-        'layer-metadata', 'file-risk'
-    ));

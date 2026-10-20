@@ -36,14 +36,3 @@ UPDATE runtime_dlp_rules
 CREATE INDEX IF NOT EXISTS idx_runtime_dlp_rules_provenance
     ON runtime_dlp_rules(org_id, cluster_id, source, cfg_type);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_runtime_dlp_rules_provenance;
-ALTER TABLE runtime_dlp_rules
-    DROP CONSTRAINT IF EXISTS runtime_dlp_rules_cfg_type_check,
-    DROP CONSTRAINT IF EXISTS runtime_dlp_rules_source_check,
-    DROP COLUMN IF EXISTS source_path,
-    DROP COLUMN IF EXISTS cfg_type,
-    DROP COLUMN IF EXISTS source;
--- +goose StatementEnd

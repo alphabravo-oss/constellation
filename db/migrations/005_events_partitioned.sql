@@ -49,9 +49,3 @@ CREATE TABLE network_flows_p_default PARTITION OF network_flows DEFAULT;
 CREATE INDEX idx_flows_src ON network_flows(org_id, src_workload, at DESC);
 CREATE INDEX idx_flows_dst ON network_flows(org_id, dst_workload, at DESC);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS network_flows CASCADE;
-DROP TABLE IF EXISTS events CASCADE;
--- +goose StatementEnd

@@ -72,9 +72,3 @@ CREATE INDEX IF NOT EXISTS idx_image_scan_findings_external
     ON image_scan_findings(org_id, external_id)
     WHERE external_id IS NOT NULL;
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS image_scan_findings;
-DROP TABLE IF EXISTS image_scan_results;
--- +goose StatementEnd

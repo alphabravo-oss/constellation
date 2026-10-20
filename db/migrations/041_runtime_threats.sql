@@ -68,8 +68,3 @@ CREATE INDEX IF NOT EXISTS idx_threats_org_threat_at
 CREATE INDEX IF NOT EXISTS idx_threats_org_epmac_at
   ON runtime_threats(org_id, ep_mac, at DESC) WHERE ep_mac IS NOT NULL;
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS runtime_threats;
--- +goose StatementEnd

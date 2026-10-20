@@ -14,8 +14,3 @@ CREATE TABLE IF NOT EXISTS service_mode_defaults (
     PRIMARY KEY (org_id, cluster_id)
 );
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS service_mode_defaults;
--- +goose StatementEnd

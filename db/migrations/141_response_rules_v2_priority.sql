@@ -19,9 +19,3 @@ UPDATE response_rules_v2 r SET priority = o.p FROM ordered o WHERE o.id = r.id;
 CREATE INDEX IF NOT EXISTS idx_response_rules_v2_org_priority
     ON response_rules_v2(org_id, priority);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_response_rules_v2_org_priority;
-ALTER TABLE response_rules_v2 DROP COLUMN IF EXISTS priority;
--- +goose StatementEnd

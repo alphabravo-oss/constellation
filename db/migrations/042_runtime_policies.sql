@@ -69,10 +69,3 @@ CREATE TRIGGER trg_runtime_policies_bump_version
     BEFORE UPDATE ON runtime_policies
     FOR EACH ROW EXECUTE FUNCTION runtime_policies_bump_version();
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TRIGGER IF EXISTS trg_runtime_policies_bump_version ON runtime_policies;
-DROP FUNCTION IF EXISTS runtime_policies_bump_version();
-DROP TABLE IF EXISTS runtime_policies;
--- +goose StatementEnd

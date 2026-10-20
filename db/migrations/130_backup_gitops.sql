@@ -54,11 +54,3 @@ CREATE TABLE IF NOT EXISTS git_connectors (
     updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS git_connectors;
-ALTER TABLE backup_schedules
-    DROP COLUMN IF EXISTS retention_max_age_days,
-    DROP COLUMN IF EXISTS retention_keep_last;
--- +goose StatementEnd

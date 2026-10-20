@@ -24,16 +24,3 @@ CREATE INDEX IF NOT EXISTS idx_scan_jobs_registry_dedupe
     ON scan_jobs (org_id, registry_id, image_digest, registry_policy_hash, vulndb_bundle_version, status, requested_at DESC)
     WHERE registry_id IS NOT NULL AND image_digest IS NOT NULL;
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_scan_jobs_registry_dedupe;
-ALTER TABLE scan_jobs
-    DROP COLUMN IF EXISTS vulndb_bundle_version,
-    DROP COLUMN IF EXISTS registry_policy_hash,
-    DROP COLUMN IF EXISTS enqueue_reason,
-    DROP COLUMN IF EXISTS image_digest,
-    DROP COLUMN IF EXISTS registry_id;
-ALTER TABLE registry_images DROP COLUMN IF EXISTS digests;
-ALTER TABLE registries DROP COLUMN IF EXISTS scan_policy;
--- +goose StatementEnd

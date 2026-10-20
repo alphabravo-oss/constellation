@@ -66,10 +66,3 @@ CREATE TABLE network_policy_rollback_refs (
 
 CREATE INDEX idx_network_policy_rollback_refs_org_workload ON network_policy_rollback_refs(org_id, workload, created_at DESC);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS network_policy_rollback_refs;
-DROP TABLE IF EXISTS network_policy_lifecycle_actions;
-DROP TABLE IF EXISTS network_policy_lifecycle_states;
--- +goose StatementEnd

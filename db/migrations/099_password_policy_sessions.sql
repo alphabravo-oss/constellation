@@ -32,10 +32,3 @@ CREATE TABLE IF NOT EXISTS user_sessions (
 CREATE INDEX IF NOT EXISTS user_sessions_user_idx
     ON user_sessions (user_id, created_at DESC);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS user_sessions;
-DROP TABLE IF EXISTS password_history;
-ALTER TABLE users DROP COLUMN IF EXISTS password_changed_at;
--- +goose StatementEnd

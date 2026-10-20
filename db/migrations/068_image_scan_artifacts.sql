@@ -20,10 +20,3 @@ CREATE UNIQUE INDEX IF NOT EXISTS uniq_image_scan_artifacts_result_type_format
 CREATE INDEX IF NOT EXISTS idx_image_scan_artifacts_result
     ON image_scan_artifacts(org_id, image_scan_result_id, created_at DESC);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_image_scan_artifacts_result;
-DROP INDEX IF EXISTS uniq_image_scan_artifacts_result_type_format;
-DROP TABLE IF EXISTS image_scan_artifacts;
--- +goose StatementEnd

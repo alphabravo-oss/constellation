@@ -39,11 +39,3 @@ CREATE INDEX IF NOT EXISTS idx_process_baseline_states_cluster_mode
 CREATE INDEX IF NOT EXISTS idx_process_baseline_transitions_workload
     ON process_baseline_transitions(org_id, cluster_id, workload_id, created_at DESC);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_process_baseline_transitions_workload;
-DROP INDEX IF EXISTS idx_process_baseline_states_cluster_mode;
-DROP TABLE IF EXISTS process_baseline_transitions;
-DROP TABLE IF EXISTS process_baseline_states;
--- +goose StatementEnd

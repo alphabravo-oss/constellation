@@ -31,6 +31,3 @@ CREATE TABLE IF NOT EXISTS runtime_response_actions (
 -- The pull-poller selects pending rows for a (cluster_id, node) each interval.
 CREATE INDEX IF NOT EXISTS idx_runtime_response_actions_poll
     ON runtime_response_actions (cluster_id, node, state);
-
--- +goose Down
-DROP TABLE IF EXISTS runtime_response_actions;

@@ -63,8 +63,3 @@ CREATE INDEX IF NOT EXISTS idx_k8s_audit_org_user_at
 CREATE INDEX IF NOT EXISTS idx_k8s_audit_org_namespace_at
   ON k8s_audit_events(org_id, namespace, at DESC) WHERE namespace IS NOT NULL AND namespace <> '';
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP TABLE IF EXISTS k8s_audit_events;
--- +goose StatementEnd

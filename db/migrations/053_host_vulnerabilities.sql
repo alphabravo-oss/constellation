@@ -43,12 +43,3 @@ CREATE INDEX IF NOT EXISTS idx_host_vuln_severity
 CREATE INDEX IF NOT EXISTS idx_host_vuln_node
     ON host_vulnerabilities(cluster_id, node);
 -- +goose StatementEnd
-
--- +goose Down
--- +goose StatementBegin
-DROP INDEX IF EXISTS idx_host_vuln_node;
-DROP INDEX IF EXISTS idx_host_vuln_severity;
-DROP INDEX IF EXISTS idx_host_vuln_org;
-DROP INDEX IF EXISTS uniq_host_vuln_target;
-DROP TABLE IF EXISTS host_vulnerabilities;
--- +goose StatementEnd
