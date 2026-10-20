@@ -461,3 +461,32 @@ twice** on the primary (`SELECT pg_switch_wal();` run twice, or wait two
 `archive_timeout` periods) so the segment holding the target time is archived
 and mirrored; a drill whose target sits in the current, unarchived segment
 recovers to the previous checkpoint instead.
+
+## Operator and plugin images
+
+The CloudNativePG operator and the Barman Cloud plugin are installed outside the Helm
+release (namespace `cnpg-system`), but their images are release artifacts:
+`deploy/cnpg/build-images.sh` rebuilds CNPG 1.30.1 and plugin-barman-cloud 0.15.1 from
+their verified tag commits on the repository Go toolchain (go >= 1.27.3, the eMudhra
+floor), applies the reviewed `golang.org/x` bumps, and runs the release gate,
+`scripts/check-image-go.sh` and cosign signing. The pinned references are in
+`deploy/cnpg/images.env`; the operand is the release `postgres:16.14-v<appVersion>` image.
+
+Roll them in this order (take a `Backup` first; archiving must stay green):
+
+```sh
+. deploy/cnpg/images.env
+# 1. plugin: its Deployment image and the sidecar it injects into instance pods
+kubectl -n cnpg-system set image deploy/barman-cloud barman-cloud="$BARMAN_PLUGIN_IMAGE"
+kubectl -n cnpg-system set env deploy/barman-cloud SIDECAR_IMAGE="$BARMAN_SIDECAR_IMAGE"
+kubectl -n cnpg-system rollout status deploy/barman-cloud
+# 2. operator: image and OPERATOR_IMAGE_NAME must be the identical string
+kubectl -n cnpg-system set image deploy/cnpg-controller-manager manager="$CNPG_OPERATOR_IMAGE"
+kubectl -n cnpg-system set env deploy/cnpg-controller-manager OPERATOR_IMAGE_NAME="$CNPG_OPERATOR_IMAGE"
+kubectl -n cnpg-system rollout status deploy/cnpg-controller-manager
+# 3. operand (restarts the instance; single-instance clusters see a short outage)
+kubectl -n <ns> patch cluster <name> --type merge -p '{"spec":{"imageName":"<registry>/postgres:16.14-v<appVersion>@<digest>"}}'
+```
+
+Verify `pg_stat_archiver` (`failed_count` not increasing after a `pg_switch_wal()`), the
+Cluster `ContinuousArchiving=True` condition, and a fresh `Backup` reaching `completed`.
