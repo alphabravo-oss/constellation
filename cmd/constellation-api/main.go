@@ -17,6 +17,7 @@ import (
 	"github.com/alphabravocompany/constellation/internal/auth"
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/server"
+	migrations "github.com/alphabravocompany/constellation/internal/server/database"
 	"github.com/alphabravocompany/constellation/internal/telemetry"
 	"github.com/alphabravocompany/constellation/pkg/version"
 )
@@ -26,6 +27,7 @@ func main() {
 	rotateJWT := flag.Bool("rotate-jwt-key", false,
 		"A5: mint a new RS256 session-signing keypair, demote the previous to verify-only, then exit")
 	checkSchemaOnly := flag.Bool("check-schema", false, "verify the required database migration, then exit without starting services")
+	migrateOnly := flag.Bool("migrate-only", false, "apply pending schema migrations under the advisory lock, then exit")
 	flag.Parse()
 
 	databaseURL := os.Getenv("DATABASE_URL")
@@ -59,12 +61,24 @@ func main() {
 		_ = tel.Shutdown(shutdownCtx)
 	}()
 
-	database, err := db.Connect(ctx, databaseURL)
+	database, err := connectWithRetry(ctx, databaseURL, envDuration("DB_CONNECT_TIMEOUT", 5*time.Minute), tel.Logger, db.WithTracer(tel.PgxTracer()))
 	if err != nil {
 		tel.Logger.Error("db connect", slog.String("err", err.Error()))
 		os.Exit(1)
 	}
 	defer database.Close()
+	tel.ObservePool(database.Pool())
+
+	// Guide ch.02: the binary ships its migrations and applies them under a
+	// session-level advisory lock before it accepts traffic; a failed migration
+	// is a failed boot. Replicas starting together serialise on the lock.
+	if _, err := migrations.MigratePool(ctx, database.Pool(), tel.Logger); err != nil {
+		tel.Logger.Error("migrate", slog.String("err", err.Error()))
+		os.Exit(1)
+	}
+	if *migrateOnly {
+		return
+	}
 
 	cfg := server.Config{
 		ListenAddr:           *listenAddr,
@@ -166,6 +180,28 @@ func apiHeartbeatURL(listenAddr string) string {
 		port = listenAddr[idx+1:]
 	}
 	return "http://127.0.0.1:" + port
+}
+
+// connectWithRetry waits for the database to accept connections (Postgres may
+// still be starting on a fresh install) instead of relying on an init
+// container; it gives up after timeout so a misconfigured DSN still fails fast.
+func connectWithRetry(ctx context.Context, databaseURL string, timeout time.Duration, logger *slog.Logger, opts ...db.Option) (*db.DB, error) {
+	deadline := time.Now().Add(timeout)
+	for attempt := 1; ; attempt++ {
+		database, err := db.Connect(ctx, databaseURL, opts...)
+		if err == nil {
+			return database, nil
+		}
+		if ctx.Err() != nil || time.Now().After(deadline) {
+			return nil, err
+		}
+		logger.Warn("database not ready; retrying", slog.Int("attempt", attempt), slog.String("err", err.Error()))
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
 }
 
 func env(key, def string) string {

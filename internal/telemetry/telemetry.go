@@ -21,7 +21,10 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/rs/zerolog"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus"
@@ -45,6 +48,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.opentelemetry.io/otel/trace/noop"
 
+	"github.com/alphabravocompany/constellation/internal/logging"
 	"github.com/alphabravocompany/constellation/pkg/version"
 )
 
@@ -122,15 +126,17 @@ func AdminAddrFromEnv() string { return envOr("ADMIN_LISTEN_ADDR", ":9090") }
 // Telemetry is the handle returned by Init. Callers must call Shutdown before process exit.
 type Telemetry struct {
 	ServiceName string
-	Logger      *slog.Logger
-	Registry    *prometheus.Registry
+	// Logger is the slog facade (bridged onto Log) for code that still speaks log/slog.
+	Logger *slog.Logger
+	// Log is the zerolog logger; new and migrated code logs through it (logging.Ctx).
+	Log      zerolog.Logger
+	Registry *prometheus.Registry
 
 	// RED signals for the HTTP surface (bounded cardinality: chi route pattern, method, status).
 	HTTPDuration  *prometheus.HistogramVec
 	Requests      *prometheus.CounterVec
 	RequestErrors *prometheus.CounterVec
 	GRPCDuration  *prometheus.HistogramVec
-	DBDuration    *prometheus.HistogramVec
 	// AdmissionDecisions counts admission-control verdicts by result and rule id.
 	AdmissionDecisions *prometheus.CounterVec
 
@@ -140,6 +146,9 @@ type Telemetry struct {
 	otelHTTPHist   metric.Float64Histogram
 	otelReqCounter metric.Int64Counter
 	shutdowns      []func(context.Context) error
+
+	dbTracerOnce sync.Once
+	dbTracer     *DBQueryTracer
 }
 
 // Init wires the SDK. When metric initialisation fails after the tracer provider was created,
@@ -158,13 +167,17 @@ func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 		cfg.SampleRate = 1
 	}
 
-	logger := newLogger(cfg)
+	zl := newLogger(cfg)
+	logger := logging.NewSlogLogger(zl)
+	// Code that still reaches for slog.Default() emits through the same zerolog logger.
+	slog.SetDefault(logger)
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 
 	t := &Telemetry{
 		ServiceName: cfg.ServiceName,
 		Logger:      logger,
+		Log:         zl,
 		Registry:    reg,
 		HTTPDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "constellation_http_request_duration_seconds",
@@ -184,18 +197,13 @@ func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 			Help:    "gRPC server handler duration in seconds.",
 			Buckets: prometheus.DefBuckets,
 		}, []string{"service", "method", "code"}),
-		DBDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
-			Name:    "constellation_db_query_duration_seconds",
-			Help:    "Postgres query duration in seconds.",
-			Buckets: prometheus.DefBuckets,
-		}, []string{"query", "status"}),
 		AdmissionDecisions: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "admission_decisions_total",
 			Help: "Admission control decisions by result and rule.",
 		}, []string{"result", "rule"}),
 		Tracer: noop.NewTracerProvider().Tracer(cfg.ServiceName),
 	}
-	reg.MustRegister(t.HTTPDuration, t.Requests, t.RequestErrors, t.GRPCDuration, t.DBDuration, t.AdmissionDecisions)
+	reg.MustRegister(t.HTTPDuration, t.Requests, t.RequestErrors, t.GRPCDuration, t.AdmissionDecisions)
 
 	buildInfo := prometheus.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "service_build_info",
@@ -532,15 +540,15 @@ func endpointLogOpt(ep string) otlploggrpc.Option {
 	return otlploggrpc.WithEndpoint(ep)
 }
 
-func newLogger(cfg Config) *slog.Logger {
-	opts := &slog.HandlerOptions{Level: cfg.LogLevel}
-	var h slog.Handler
-	if cfg.LogFormat == "text" || (cfg.LogFormat == "" && cfg.DevMode) {
-		h = slog.NewTextHandler(os.Stderr, opts)
-	} else {
-		h = slog.NewJSONHandler(os.Stderr, opts)
+func newLogger(cfg Config) zerolog.Logger {
+	format := cfg.LogFormat
+	if format == "" && cfg.DevMode {
+		format = "text"
 	}
-	return slog.New(h).With(slog.String("service", cfg.ServiceName))
+	// Guide ch.05: zerolog is the logger; the slog bridge keeps every existing
+	// slog call site emitting through it (one JSON object per line, correlation
+	// and trace ids stamped from the context).
+	return logging.New(logging.Config{Level: cfg.LogLevel.String(), Format: format, Service: cfg.ServiceName})
 }
 
 func parseLevel(raw string, dev bool) slog.Level {

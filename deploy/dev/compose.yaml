@@ -49,6 +49,19 @@ services:
       - ./observability/loki.yaml:/etc/loki/loki.yaml:ro
       - loki:/loki
 
+  # Ships the Air/Vite log files (tmp/dev/logs) into Loki so the request-summary
+  # line is queryable by correlation_id (see observability/alloy.alloy).
+  alloy:
+    image: grafana/alloy:v1.13.0
+    command: ["run", "--server.http.listen-addr=0.0.0.0:12345", "--storage.path=/var/lib/alloy/data", "/etc/alloy/config.alloy"]
+    ports:
+      - "12345:12345"
+    volumes:
+      - ./observability/alloy.alloy:/etc/alloy/config.alloy:ro
+      - ../../tmp/dev/logs:/var/log/constellation:ro
+      - alloy:/var/lib/alloy/data
+    depends_on: [loki]
+
   grafana:
     image: grafana/grafana:13.2.4
     environment:
@@ -66,3 +79,4 @@ volumes:
   pgdata: {}
   tempo: {}
   loki: {}
+  alloy: {}

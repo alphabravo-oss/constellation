@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rs/zerolog"
+
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
@@ -37,6 +39,7 @@ import (
 	"github.com/alphabravocompany/constellation/internal/handler/runtime"
 	"github.com/alphabravocompany/constellation/internal/handler/scanning"
 	"github.com/alphabravocompany/constellation/internal/lifecycle"
+	"github.com/alphabravocompany/constellation/internal/logging"
 	"github.com/alphabravocompany/constellation/internal/syscfg"
 	"github.com/alphabravocompany/constellation/internal/telemetry"
 	"github.com/alphabravocompany/constellation/pkg/audit"
@@ -93,6 +96,7 @@ type Config struct {
 
 // Server holds the HTTP server + its dependencies.
 type Server struct {
+	log      zerolog.Logger
 	cfg      Config
 	tel      *telemetry.Telemetry
 	db       *db.DB
@@ -271,6 +275,7 @@ func New(ctx context.Context, cfg Config, tel *telemetry.Telemetry, database *db
 	s := &Server{
 		cfg:                 cfg,
 		tel:                 tel,
+		log:                 tel.Log,
 		db:                  database,
 		auditLog:            audit.New(database.Pool()),
 		signer:              signer,
@@ -554,11 +559,12 @@ func (s *Server) buildRouter() chi.Router {
 	// (requireVerb) at the route groups.
 	r.Use(chimw.Recoverer)
 	r.Use(chimw.RequestID)
+	r.Use(correlationID)
 	// Resolve the client only through the trusted suffix of X-Forwarded-For;
 	// client-supplied prefixes and alternative headers cannot mint rate buckets.
 	r.Use(s.trustedProxyRealIP())
 	r.Use(s.tel.HTTPMiddleware)
-	r.Use(s.slogMiddleware)
+	r.Use(s.requestSummary)
 	r.Use(s.requestTimeout())
 	r.Use(s.maxBodyBytes())
 	corsOpts := cors.Options{
@@ -1792,33 +1798,38 @@ func (s *Server) runAuthProviderReloader(ctx context.Context) {
 
 // ---------------- middleware ----------------
 
-// slogMiddleware emits exactly one request-summary line per request: route pattern,
-// method, status, bytes, duration, request id and — when the auth middleware ran — the
-// principal and org (read after the handler so the deferred log sees authctx).
-func (s *Server) slogMiddleware(next http.Handler) http.Handler {
+// correlationID carries chi's request id on the context as the logging
+// correlation id, so every line logged during the request (slog or zerolog)
+// and the summary line share correlation_id.
+func correlationID(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(logging.WithCorrelationID(r.Context(), chimw.GetReqID(r.Context()))))
+	})
+}
+
+// requestSummary emits exactly one request-summary line per request (guide
+// ch.05): route pattern, method, status, bytes, duration, correlation id and —
+// when the auth middleware ran — the principal and org (read after the handler
+// so the deferred log sees authctx).
+func (s *Server) requestSummary(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
 		next.ServeHTTP(ww, r)
-		attrs := []slog.Attr{
-			slog.String("method", r.Method),
-			slog.String("path", r.URL.Path),
-			slog.Int("status", ww.Status()),
-			slog.Int("bytes", ww.BytesWritten()),
-			slog.String("request_id", chimw.GetReqID(r.Context())),
-			slog.Duration("dur", time.Since(start)),
+		reqLog := logging.Ctx(r.Context(), s.log)
+		ev := reqLog.Info()
+		if ww.Status() >= http.StatusInternalServerError {
+			ev = reqLog.Error()
 		}
+		ev = ev.Str("method", r.Method).Str("path", r.URL.Path).Int("status", ww.Status()).
+			Int("bytes", ww.BytesWritten()).Dur("duration", time.Since(start))
 		if rc := chi.RouteContext(r.Context()); rc != nil {
-			attrs = append(attrs, slog.String("route", rc.RoutePattern()))
+			ev = ev.Str("route", rc.RoutePattern())
 		}
 		if subj, ok := authctx.SubjectFrom(r.Context()); ok {
-			attrs = append(attrs, slog.String("principal", subj.UserID.String()), slog.String("org_id", subj.OrgID.String()))
+			ev = ev.Str("principal", subj.UserID.String()).Str("org_id", subj.OrgID.String())
 		}
-		level := slog.LevelInfo
-		if ww.Status() >= http.StatusInternalServerError {
-			level = slog.LevelError
-		}
-		s.tel.Logger.LogAttrs(r.Context(), level, "http", attrs...)
+		ev.Msg("http")
 	})
 }
 
@@ -2500,7 +2511,7 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 }
 
 // loadRoleAssignments queries role_assignments for the user. The inline pgx query below is
-// the source of truth; the schema lives in db/migrations.
+// the source of truth; the schema lives in internal/server/database/migrations.
 func loadRoleAssignments(ctx context.Context, database *db.DB, userID uuid.UUID) ([]rbac.RoleAssignment, error) {
 	// P0-11: an assignment mirrored from an expiring role binding stops authorizing once its
 	// expires_at passes. This is the single per-request loader, so filtering here enforces
