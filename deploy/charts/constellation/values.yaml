@@ -165,6 +165,28 @@ discoverer:
     requests: { cpu: 50m,  memory: 64Mi }
 
 # ---------------------------------------------------------------------------
+# Column encryption (guide ch.06): age X25519 key set for registry credentials,
+# git PATs, federation keys and init bundles. Exactly one of:
+#   crypto.ageKey         - identities (AGE-SECRET-KEY-1..., current first, one per
+#                           line) written into Secret <release>-age-key by the chart
+#   crypto.existingSecret - operator-managed Secret with key `age-key`
+#   neither               - a pre-install hook mints one with age-keygen (toolbox
+#                           image) and keeps it across upgrades
+# Rotate: put the new identity first, roll the API, run
+# `constellationctl admin rotate-keys`, drop the old identity.
+# ---------------------------------------------------------------------------
+crypto:
+  ageKey: ""
+  existingSecret: ""
+
+# Operator toolbox image (age + kubectl + rclone, non-root): age-key bootstrap
+# hook and the secrets-backup CronJob.
+toolbox:
+  image: {}
+    # repository: ghcr.io/alphabravo-oss/constellation/toolbox
+    # tag: v0.2.0
+
+# ---------------------------------------------------------------------------
 # Control plane API
 # ---------------------------------------------------------------------------
 api:

@@ -39,7 +39,7 @@ DOCKER_BUILD ?= docker buildx build --platform $(PLATFORMS) \
   --build-arg COMMIT=$(COMMIT) --build-arg BUILD_TIME=$(DATE) --build-arg FIPS=$(FIPS)
 
 IMAGES := api scanner operator discoverer audit-archiver frontend runtime-agent admission \
-  bootstrap postgres compliance-scheduler kube-bench-runner
+  bootstrap postgres compliance-scheduler kube-bench-runner toolbox
 # Dockerfile name differs from the image name for these roles.
 dockerfile_audit-archiver := archiver
 

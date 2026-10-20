@@ -29,6 +29,7 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
+	colcrypto "github.com/alphabravocompany/constellation/internal/crypto"
 	"github.com/alphabravocompany/constellation/internal/server/database"
 )
 
@@ -49,9 +50,22 @@ var (
 // Main wraps testing.M for packages whose tests use this fixture: it runs the
 // tests, terminates the container, and exits with the test status.
 func Main(m *testing.M) {
+	EnsureCryptoKey()
 	code := m.Run()
 	stop()
 	os.Exit(code)
+}
+
+// TestAgeKey is the column-encryption identity integration tests run under
+// when the process has none configured (the same throwaway key as .env.dev).
+const TestAgeKey = "AGE-SECRET-KEY-14LRZKKVJ2PN7LU6DZ9R8DVY3S75337VLXYDJQ9TN5R3R4EL3Q6YSZTK2ML"
+
+// EnsureCryptoKey makes internal/crypto.Default usable for tests that seal
+// registry credentials, PATs or federation keys; an operator-set key wins.
+func EnsureCryptoKey() {
+	if os.Getenv(colcrypto.EnvKey) == "" && os.Getenv(colcrypto.EnvKeyFile) == "" {
+		_ = os.Setenv(colcrypto.EnvKey, TestAgeKey)
+	}
 }
 
 // Pool returns a pgx pool on a fresh, fully migrated database owned by this
@@ -108,6 +122,7 @@ func FreshURL(t testing.TB) string {
 
 func configFor(t testing.TB) *pgtestdb.Config {
 	t.Helper()
+	EnsureCryptoKey()
 	mu.Lock()
 	defer mu.Unlock()
 	name := t.Name()

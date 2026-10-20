@@ -25,11 +25,8 @@ package handler
 
 import (
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/hex"
@@ -37,14 +34,13 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"math/big"
 	"net/http"
-	"os"
 	"strings"
-	"sync"
 	"time"
+
+	colcrypto "github.com/alphabravocompany/constellation/internal/crypto"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -59,96 +55,29 @@ import (
 type ClusterInitBundles struct {
 	db    *db.DB
 	audit *audit.Logger
-	kek   []byte // 32 bytes; resolved once at construction time
+	enc   *colcrypto.Encryptor // nil when no CONSTELLATION_AGE_KEY is configured
 }
 
-// NewClusterInitBundles returns a handler whose KEK is derived from the env var
-// CONSTELLATION_KEK (hex-encoded, must yield 32 bytes after decode) — or, if unset,
-// is generated process-local on first use and persisted to /tmp/constellation.kek so
-// dev restarts can still decrypt bundles minted earlier in the session.
+// NewClusterInitBundles returns a handler sealing bundle contents with the
+// install's age key set (internal/crypto, CONSTELLATION_AGE_KEY or _FILE). A
+// missing key does not fail startup: init-bundle routes answer 503 until it is
+// configured.
 func NewClusterInitBundles(d *db.DB, a *audit.Logger) *ClusterInitBundles {
-	// A KEK resolve failure (crypto-RNG hiccup) must not crash server startup or any
-	// request path. We construct with a nil KEK; the request handlers below detect that
-	// via kekReady and return 503 only for init-bundle routes.
-	kek, _ := resolveKEK()
-	return &ClusterInitBundles{db: d, audit: a, kek: kek}
+	enc, err := colcrypto.Default()
+	if err != nil {
+		slog.Warn("cluster-init-bundles: column-encryption key unavailable; init-bundle routes return 503", slog.String("err", err.Error()))
+		enc = nil
+	}
+	return &ClusterInitBundles{db: d, audit: a, enc: enc}
 }
 
-// kekReady writes a 503 and returns false when this handler has no usable KEK (the
-// process-wide resolveKEK hit a crypto-RNG failure at startup). Guards every route that
-// seals or unseals bundle contents so a KEK gen failure degrades these endpoints instead
-// of taking the API down.
+// kekReady writes a 503 and returns false when this handler has no key set.
 func (h *ClusterInitBundles) kekReady(w http.ResponseWriter) bool {
-	if len(h.kek) != 32 {
-		jsonError(w, http.StatusServiceUnavailable, "init-bundle key unavailable; check control-plane KEK configuration")
+	if h.enc == nil {
+		jsonError(w, http.StatusServiceUnavailable, "init-bundle key unavailable; set "+colcrypto.EnvKey+" or "+colcrypto.EnvKeyFile)
 		return false
 	}
 	return true
-}
-
-// kekResolved is the per-process cached KEK so repeat constructions don't reread/regen.
-var (
-	kekResolvedOnce sync.Once
-	kekResolvedVal  []byte
-	kekResolvedErr  error
-)
-
-// resolveKEK loads or generates the per-install Key Encryption Key. Order:
-//  1. $CONSTELLATION_KEK (hex; must decode to 32 bytes).
-//  2. Read /tmp/constellation.kek if present.
-//  3. Generate a fresh 32-byte KEK and persist to /tmp/constellation.kek (0600).
-//
-// We log the fingerprint (sha256[:16]) at construction so operators can detect when a
-// KEK rotation has happened by accident (previously-minted bundles will fail to decrypt).
-//
-// On a crypto-RNG failure (step 3) it returns a nil KEK + the error rather than
-// panicking: the constructor caches the nil, and the request handlers return 503 for
-// init-bundle routes (D3) instead of crashing the whole API process.
-func resolveKEK() ([]byte, error) {
-	kekResolvedOnce.Do(func() {
-		if v := strings.TrimSpace(os.Getenv("CONSTELLATION_KEK")); v != "" {
-			if b, err := hex.DecodeString(v); err == nil && len(b) == 32 {
-				kekResolvedVal = b
-				slog.Info("cluster-init-bundles: KEK loaded from env",
-					slog.String("fingerprint", kekFingerprint(b)))
-				return
-			}
-			slog.Warn("cluster-init-bundles: CONSTELLATION_KEK set but invalid (not 32 hex bytes); falling back")
-		}
-		const cache = "/tmp/constellation.kek"
-		if b, err := os.ReadFile(cache); err == nil {
-			// File contents are hex-encoded.
-			trimmed := strings.TrimSpace(string(b))
-			if dec, err := hex.DecodeString(trimmed); err == nil && len(dec) == 32 {
-				kekResolvedVal = dec
-				slog.Info("cluster-init-bundles: KEK loaded from cache",
-					slog.String("fingerprint", kekFingerprint(dec)))
-				return
-			}
-		}
-		// Generate fresh.
-		fresh := make([]byte, 32)
-		if _, err := rand.Read(fresh); err != nil {
-			// Crypto-RNG hiccup: record the error, leave kekResolvedVal nil.
-			// Callers degrade to 503 instead of taking the process down.
-			kekResolvedErr = fmt.Errorf("cluster-init-bundles: KEK gen: %w", err)
-			slog.Error("cluster-init-bundles: KEK generation failed; init-bundle routes will return 503",
-				slog.String("err", err.Error()))
-			return
-		}
-		kekResolvedVal = fresh
-		if err := os.WriteFile(cache, []byte(hex.EncodeToString(kekResolvedVal)), 0o600); err != nil {
-			slog.Warn("cluster-init-bundles: KEK cache write failed", slog.String("err", err.Error()))
-		}
-		slog.Warn("cluster-init-bundles: KEK auto-generated (set CONSTELLATION_KEK in prod)",
-			slog.String("fingerprint", kekFingerprint(kekResolvedVal)))
-	})
-	return kekResolvedVal, kekResolvedErr
-}
-
-func kekFingerprint(k []byte) string {
-	sum := sha256.Sum256(k)
-	return hex.EncodeToString(sum[:8])
 }
 
 // ---------------- DTOs ----------------
@@ -334,11 +263,7 @@ SELECT id, org_id, cluster_id, name, distro, COALESCE(region,''),
 	}
 	s.Region = region
 	s.Status = statusOf(s.ExpiresAt, s.RevokedAt)
-	if kekFP != kekFingerprint(h.kek) {
-		jsonError(w, http.StatusFailedDependency, "KEK fingerprint mismatch; bundle was minted under a different control-plane key")
-		return
-	}
-	plaintext, err := decrypt(h.kek, ciphertext)
+	plaintext, err := h.enc.Decrypt(colcrypto.Sealed{KeyID: kekFP, Algorithm: colcrypto.Algorithm, Ciphertext: ciphertext})
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, fmt.Errorf("decrypt: %w", err).Error())
 		return
@@ -533,7 +458,7 @@ RETURNING id`, subj.OrgID, args.Name, args.Distro, args.Region).Scan(&clusterID)
 	if err != nil {
 		return nil, fmt.Errorf("yaml marshal: %w", err)
 	}
-	ciphertext, err := encrypt(h.kek, yml)
+	sealed, err := h.enc.Encrypt(yml)
 	if err != nil {
 		return nil, fmt.Errorf("encrypt: %w", err)
 	}
@@ -542,10 +467,10 @@ RETURNING id`, subj.OrgID, args.Name, args.Distro, args.Region).Scan(&clusterID)
 	if _, err := h.db.Pool().Exec(ctx, `
 INSERT INTO cluster_init_bundles
   (id, org_id, cluster_id, name, distro, region, expires_at, created_by,
-   scanner_token_id, runtime_agent_token_id, kek_fingerprint, contents_encrypted)
-VALUES ($1, $2, $3, $4, $5, NULLIF($6,''), $7, $8, $9, $10, $11, $12)`,
+   scanner_token_id, runtime_agent_token_id, kek_fingerprint, contents_encrypted, key_id, algorithm)
+VALUES ($1, $2, $3, $4, $5, NULLIF($6,''), $7, $8, $9, $10, $11::text, $12, $11::text, $13::text)`,
 		bundleID, subj.OrgID, clusterID, args.Name, args.Distro, args.Region, expiresAt, subj.UserID,
-		scannerID, agentID, kekFingerprint(h.kek), ciphertext,
+		scannerID, agentID, sealed.KeyID, sealed.Ciphertext, sealed.Algorithm,
 	); err != nil {
 		return nil, fmt.Errorf("insert bundle: %w", err)
 	}
@@ -759,41 +684,4 @@ func generateBundleTLS(clusterName string) (caPEM, serverCertPEM, serverKeyPEM s
 	serverCertPEM = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srvDER}))
 	serverKeyPEM = string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: srvKeyDER}))
 	return
-}
-
-// ---------------- AES-256-GCM helpers ----------------
-
-// encrypt produces nonce(12) || ciphertext(plaintext||tag). The KEK is the 32-byte key.
-func encrypt(kek, plaintext []byte) ([]byte, error) {
-	block, err := aes.NewCipher(kek)
-	if err != nil {
-		return nil, err
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, err
-	}
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
-		return nil, err
-	}
-	ct := gcm.Seal(nil, nonce, plaintext, nil)
-	return append(nonce, ct...), nil
-}
-
-// decrypt is the inverse of encrypt.
-func decrypt(kek, ciphertext []byte) ([]byte, error) {
-	block, err := aes.NewCipher(kek)
-	if err != nil {
-		return nil, err
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, err
-	}
-	ns := gcm.NonceSize()
-	if len(ciphertext) < ns {
-		return nil, errors.New("ciphertext too short")
-	}
-	return gcm.Open(nil, ciphertext[:ns], ciphertext[ns:], nil)
 }

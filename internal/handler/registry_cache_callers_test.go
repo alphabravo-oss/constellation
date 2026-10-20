@@ -268,7 +268,7 @@ func newRegistryCacheCallerFixture(t *testing.T, database *db.DB, responses ...r
 func (f *registryCacheCallerFixture) replace(org, id uuid.UUID, account string, insert bool) {
 	f.t.Helper()
 	spoof := registryCredentialCacheScope(f.orgs[0], f.ids[0])
-	sealed, err := sealCredentials(f.t.Context(), f.database.Pool(), "gcp-service-account", map[string]string{
+	sealed, _, err := sealCredentials(f.t.Context(), f.database.Pool(), "gcp-service-account", map[string]string{
 		"service_account_json": account, "resource_path": cacheCallerResource,
 		"CredentialCacheScope": spoof, "credential_cache_scope": spoof, "cache_scope": spoof,
 	})

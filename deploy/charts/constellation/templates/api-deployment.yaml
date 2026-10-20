@@ -65,6 +65,11 @@ spec:
               value: ":8080"
             - name: ADMIN_LISTEN_ADDR
               value: ":9090"
+            - name: CONSTELLATION_AGE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "constellation.cryptoSecretName" . }}
+                  key: age-key
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:

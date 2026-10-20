@@ -16,6 +16,7 @@ import (
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 
 	"github.com/alphabravocompany/constellation/internal/auth"
+	colcrypto "github.com/alphabravocompany/constellation/internal/crypto"
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/findings"
 	"github.com/alphabravocompany/constellation/internal/handler/network"
@@ -23,7 +24,6 @@ import (
 	"github.com/alphabravocompany/constellation/internal/lifecycle"
 	"github.com/alphabravocompany/constellation/internal/syscfg"
 	"github.com/alphabravocompany/constellation/pkg/backup"
-	regsecrets "github.com/alphabravocompany/constellation/pkg/registry/secrets"
 )
 
 // startBackgroundWork starts the singleton background loops, optionally gated
@@ -67,7 +67,7 @@ func (s *Server) startSingletonLoops(ctx context.Context) {
 	// presents its per-joint client cert (mutual auth). A cipher failure leaves the
 	// poller on the D1 bearer-only path (nil sealer) rather than blocking startup.
 	var fedSealer auth.Sealer
-	if cipher, cerr := regsecrets.Default(ctx, s.db.Pool(), s.tel.Logger); cerr == nil {
+	if cipher, cerr := colcrypto.Default(); cerr == nil {
 		fedSealer = cipher
 	}
 	go handler.ReconcileFedSyncLoop(ctx, s.db.Pool(), fedSealer,

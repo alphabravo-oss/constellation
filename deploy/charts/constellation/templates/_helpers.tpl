@@ -426,3 +426,12 @@ constellation.apiURL is the API base URL used by in-cluster components.
 {{- $names := concat (list .ctx.Release.Namespace "kube-system" "kube-public" "kube-node-lease") $shared (default (list) .extra) | uniq | sortAlpha -}}
 {{- toJson $names -}}
 {{- end -}}
+
+{{/* Secret holding the age column-encryption key set (key: age-key). */}}
+{{- define "constellation.cryptoSecretName" -}}
+{{- if .Values.crypto.existingSecret -}}
+{{- .Values.crypto.existingSecret -}}
+{{- else -}}
+{{- printf "%s-age-key" (include "constellation.fullname" .) -}}
+{{- end -}}
+{{- end -}}

@@ -45,7 +45,7 @@ func runCLI() error {
 		Use:   "constellationctl",
 		Short: "Constellation operator CLI",
 	}
-	root.AddCommand(loginCmd(), imageCheckCmd(), auditCmd(), versionCmd(), iacCheckCmd(), modelCheckCmd(), policyCmd(), clusterCmd(), tokensCmd(), networkFlowsCmd(), backupCmd(), vulndbCmd(), serverlessCmd(), repositoryCmd(), federationCmd())
+	root.AddCommand(loginCmd(), imageCheckCmd(), auditCmd(), versionCmd(), iacCheckCmd(), modelCheckCmd(), policyCmd(), clusterCmd(), tokensCmd(), networkFlowsCmd(), backupCmd(), vulndbCmd(), serverlessCmd(), repositoryCmd(), federationCmd(), adminCmd())
 	return root.ExecuteContext(ctx)
 }
 
