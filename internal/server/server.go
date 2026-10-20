@@ -1820,6 +1820,8 @@ func (s *Server) requestSummary(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
+		ctx, slot := authctx.WithSlot(r.Context())
+		r = r.WithContext(ctx)
 		next.ServeHTTP(ww, r)
 		reqLog := logging.Ctx(r.Context(), s.log)
 		ev := reqLog.Info()
@@ -1831,7 +1833,7 @@ func (s *Server) requestSummary(next http.Handler) http.Handler {
 		if rc := chi.RouteContext(r.Context()); rc != nil {
 			ev = ev.Str("route", rc.RoutePattern())
 		}
-		if subj, ok := authctx.SubjectFrom(r.Context()); ok {
+		if subj, ok := slot.Subject(); ok {
 			ev = ev.Str("principal", subj.UserID.String()).Str("org_id", subj.OrgID.String())
 		}
 		ev.Msg("http")
