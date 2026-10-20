@@ -7,7 +7,7 @@ import { useNavigate } from "@tanstack/react-router";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  AlertTriangle,
+  TriangleAlert,
   Boxes,
   Clock,
   Database,
@@ -15,10 +15,10 @@ import {
   RotateCw,
   Trash2,
   Beaker,
-  PlayCircle,
-  MoreHorizontal,
+  CirclePlay,
+  Ellipsis,
   X,
-  StopCircle,
+  CircleStop,
 } from "lucide-react";
 
 import {
@@ -280,7 +280,7 @@ function RegistriesWorkspace({
                       data-testid={`registry-actions-${r.id}`}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <MoreHorizontal className="h-4 w-4" />
+                      <Ellipsis className="h-4 w-4" />
                     </button>
                   </DropdownMenu.Trigger>
                   <DropdownMenu.Portal>
@@ -296,13 +296,13 @@ function RegistriesWorkspace({
                         Test
                       </Item>
                       <Item
-                        icon={<PlayCircle className="h-3.5 w-3.5" />}
+                        icon={<CirclePlay className="h-3.5 w-3.5" />}
                         onSelect={() => sync.mutate(r.id)}
                       >
                         Sync now
                       </Item>
                       <Item
-                        icon={<StopCircle className="h-3.5 w-3.5" />}
+                        icon={<CircleStop className="h-3.5 w-3.5" />}
                         destructive
                         disabled={
                           !counts ||
@@ -451,7 +451,7 @@ function RegistriesWorkspace({
         <StatCard
           label="Successful last sync"
           value={registryReady ? summary.healthy : "—"}
-          icon={<PlayCircle className="h-3.5 w-3.5" />}
+          icon={<CirclePlay className="h-3.5 w-3.5" />}
           tone={summary.failedSync > 0 ? "medium" : "neutral"}
           hint={
             registryReady
@@ -474,7 +474,7 @@ function RegistriesWorkspace({
         <StatCard
           label="Failed image jobs (organization)"
           value={imageJobs?.failed ?? "—"}
-          icon={<AlertTriangle className="h-3.5 w-3.5" />}
+          icon={<TriangleAlert className="h-3.5 w-3.5" />}
           tone={imageJobs?.failed ? "high" : "neutral"}
         />
       </StatGrid>

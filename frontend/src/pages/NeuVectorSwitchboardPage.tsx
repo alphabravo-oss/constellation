@@ -7,7 +7,7 @@ import {
   Database,
   FileText,
   GitBranch,
-  Globe2,
+  Earth,
   KeyRound,
   Layers,
   Network,
@@ -19,7 +19,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   UsersRound,
-  Wand2,
+  WandSparkles,
   Waypoints,
 } from "lucide-react";
 
@@ -199,7 +199,7 @@ export function NeuVectorSwitchboardPage() {
         actions={
           <Button asChild variant="primary">
             <Link to="/settings/migration">
-              <Wand2 className="h-4 w-4" />
+              <WandSparkles className="h-4 w-4" />
               Migration Imports
             </Link>
           </Button>
@@ -211,7 +211,7 @@ export function NeuVectorSwitchboardPage() {
       <StatGrid>
         <StatCard label="NV areas mapped" value={mappings.length} hint="Primary console areas" icon={<ClipboardCheck className="h-3.5 w-3.5" />} />
         <StatCard label="Parity+ areas" value={mappings.filter((m) => m.status === "better").length} hint="Stronger than NV today" tone="accent" icon={<BadgeCheck className="h-3.5 w-3.5" />} />
-        <StatCard label="Migration path" value="Apply" hint="Preview, apply, rollback" tone="medium" href="/settings/migration" icon={<Wand2 className="h-3.5 w-3.5" />} />
+        <StatCard label="Migration path" value="Apply" hint="Preview, apply, rollback" tone="medium" href="/settings/migration" icon={<WandSparkles className="h-3.5 w-3.5" />} />
       </StatGrid>
 
       <PageSection title="Navigation Map" description="Use the NeuVector term on the left and jump to the Constellation equivalent on the right.">
@@ -271,10 +271,10 @@ export function NeuVectorSwitchboardPage() {
 
         <Card title="Migration Runway" description="Cutover tasks that should be completed before a production switch.">
           <ul className="space-y-2 text-sm">
-            <RunwayLink icon={<Wand2 />} label="Preview NeuVector export" to="/settings/migration" />
+            <RunwayLink icon={<WandSparkles />} label="Preview NeuVector export" to="/settings/migration" />
             <RunwayLink icon={<ServerCog />} label="Verify components and agents" to={c("components")} />
             <RunwayLink icon={<Database />} label="Check scanner and CVE sources" to="/settings/scanner" />
-            <RunwayLink icon={<Globe2 />} label="Confirm proxy and SIEM settings" to="/settings/network" />
+            <RunwayLink icon={<Earth />} label="Confirm proxy and SIEM settings" to="/settings/network" />
             <RunwayLink icon={<SlidersHorizontal />} label="Review effective system config" to="/settings/effective-config" />
             <RunwayLink icon={<UsersRound />} label="Review access and SSO mappings" to="/settings/access" />
           </ul>

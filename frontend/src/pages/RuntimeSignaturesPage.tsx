@@ -7,7 +7,7 @@ import {
   ShieldCheck,
   ListChecks,
   Plus,
-  Edit3,
+  PenLine,
   Trash2,
 } from "lucide-react";
 
@@ -221,7 +221,7 @@ function SignatureActions({ clusterID, disabled, r, onEdit }: { clusterID: strin
         </Button>
       )}
       <Button size="sm" variant="ghost" disabled={busy} aria-label={`Edit ${r.name}`} onClick={onEdit} data-testid={`runtime-signature-edit-${r.id}`}>
-        <Edit3 className="h-3.5 w-3.5" />
+        <PenLine className="h-3.5 w-3.5" />
       </Button>
       <Button
         size="sm"

@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { LoadingState, ErrorState } from "@/components/ui/states";
 import {
   Activity,
-  CheckCircle2,
+  CircleCheck,
   Search,
   Server,
   ShieldAlert,
@@ -184,7 +184,7 @@ export function NodesPage() {
       <StatCard label="Matching nodes" value={total!} icon={<Server className="h-3.5 w-3.5" />} />
       <StatCard label="Healthy agents" value={summary!.runtime_agent_healthy} icon={<Activity className="h-3.5 w-3.5" />} hint={`${summary!.runtime_agent_stale} stale · ${summary!.runtime_agent_missing} missing`} />
       <StatCard label="Critical / high" value={summary!.critical_vulns + summary!.high_vulns} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={summary!.critical_vulns + summary!.high_vulns > 0 ? "high" : "neutral"} />
-      <StatCard label="CIS failures" value={summary!.cis_failed} icon={<CheckCircle2 className="h-3.5 w-3.5" />} />
+      <StatCard label="CIS failures" value={summary!.cis_failed} icon={<CircleCheck className="h-3.5 w-3.5" />} />
       <StatCard label="Scan gaps" value={summary!.scan_gaps} />
     </StatGrid>}
     <section className="rounded-lg border border-border bg-card p-3"><div className="flex flex-wrap gap-3">

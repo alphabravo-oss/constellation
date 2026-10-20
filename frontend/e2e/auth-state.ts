@@ -12,10 +12,15 @@ export type AuthState = {
 };
 
 // Parallel local acceptance runs keep their short-lived sessions separate.
-export const authStatePath = path.resolve(process.env.PLAYWRIGHT_AUTH_STATE_DIR ?? ".playwright-auth", "state.json");
+const authStateDir = path.resolve(process.env.PLAYWRIGHT_AUTH_STATE_DIR ?? ".playwright-auth");
+export const authStatePath = path.join(authStateDir, "state.json");
+// Real Playwright storageState (cookies for the API host), consumed by playwright.config.ts
+// `use.storageState` so every chromium spec starts with a browser session already attached.
+export const storageStatePath = path.join(authStateDir, "storage-state.json");
 
+// The `setup` project always runs before `chromium` (playwright.config.ts dependencies), so the
+// file is expected to exist; a missing file is a misconfiguration worth failing loudly on.
 export function readAuthState(): AuthState | null {
-  if (process.env.PLAYWRIGHT_AUTH_SETUP !== "1") return null;
   try {
     return JSON.parse(readFileSync(authStatePath, "utf8")) as AuthState;
   } catch (error) {

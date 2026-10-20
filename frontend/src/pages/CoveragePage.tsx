@@ -8,10 +8,10 @@ import { useMemo, isValidElement, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowUpRight,
-  CheckCircle2,
+  CircleCheck,
   CircleDot,
   Clock3,
-  MinusCircle,
+  CircleMinus,
   Radio,
 } from "lucide-react";
 
@@ -861,8 +861,8 @@ export function CoveragePage() {
 
       <VerdictBanner status={rows.some(row => row.status === "unavailable") ? "degraded" : "info"} title={rows.some(row => row.status === "unavailable") ? "Some posture evidence is unavailable" : "Review reported capability evidence"} detail="Records and configured modes do not prove policy delivery, enforcement or protection. Organization-wide sources remain separate from the selected cluster." />
       <StatGrid data-testid="coverage-stats">
-        <StatCard label="Rows with evidence" value={rows.filter(row => row.status === "active" || row.status === "partial" || row.status === "idle").length} icon={<CheckCircle2 className="h-3.5 w-3.5" />} />
-        <StatCard label="Unavailable capability rows" value={rows.filter(row => row.status === "unavailable").length} icon={<MinusCircle className="h-3.5 w-3.5" />} />
+        <StatCard label="Rows with evidence" value={rows.filter(row => row.status === "active" || row.status === "partial" || row.status === "idle").length} icon={<CircleCheck className="h-3.5 w-3.5" />} />
+        <StatCard label="Unavailable capability rows" value={rows.filter(row => row.status === "unavailable").length} icon={<CircleMinus className="h-3.5 w-3.5" />} />
         <StatCard label="Loaded audit records · 24h" value={audit24} valueKind={typeof audit24 === "number" ? "number" : "text"} hint="Up to 100 loaded audit records" />
         <StatCard label="Loaded runtime records · 24h" value={runtime24} valueKind={typeof runtime24 === "number" ? "number" : "text"} hint="Up to 50 loaded runtime records" icon={<Radio className="h-3.5 w-3.5" />} />
         <StatCard label="Loaded scan jobs · 24h" value={scans24} valueKind={typeof scans24 === "number" ? "number" : "text"} hint="Up to 200 loaded scan jobs" icon={<Clock3 className="h-3.5 w-3.5" />} />

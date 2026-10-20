@@ -10,7 +10,7 @@ import { clusterCacheReady } from "@/lib/cluster-evidence";
 import { useState } from "react";
 import { useRouteSearchParams } from "@/lib/route-search";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Flame, Layers, RefreshCw, ShieldAlert } from "lucide-react";
+import { TriangleAlert, Flame, Layers, RefreshCw, ShieldAlert } from "lucide-react";
 import { deployments, type Deployment } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { DataTable, type Column } from "@/components/ui/data-table";
@@ -199,7 +199,7 @@ export function DeploymentsPage() {
 
       <StatGrid data-testid="deployments-summary">
         <StatCard label="Deployments" value={summary?.total.toLocaleString() ?? "—"} icon={<Layers className="h-3.5 w-3.5" />} />
-        <StatCard label="At risk" value={summary?.at_risk.toLocaleString() ?? "—"} icon={<AlertTriangle className="h-3.5 w-3.5" />} tone={(summary?.at_risk ?? 0) > 0 ? "high" : "neutral"} hint="risk score ≥ 60" />
+        <StatCard label="At risk" value={summary?.at_risk.toLocaleString() ?? "—"} icon={<TriangleAlert className="h-3.5 w-3.5" />} tone={(summary?.at_risk ?? 0) > 0 ? "high" : "neutral"} hint="risk score ≥ 60" />
         <StatCard label="Critical findings" value={summary?.critical_count.toLocaleString() ?? "—"} icon={<Flame className="h-3.5 w-3.5" />} tone={(summary?.critical_count ?? 0) > 0 ? "critical" : "neutral"} />
         <StatCard label="High findings" value={summary?.high_count.toLocaleString() ?? "—"} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={(summary?.high_count ?? 0) > 0 ? "high" : "neutral"} />
       </StatGrid>

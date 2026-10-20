@@ -12,7 +12,7 @@ import {
   ShieldOff,
   ListChecks,
   Plus,
-  Edit3,
+  PenLine,
   Trash2,
   X,
 } from "lucide-react";
@@ -196,7 +196,7 @@ function PolicyActions({ p, owner, available, recheck, onEdit, onPromoteClick }:
         </Button>
       )}
       <Button size="sm" variant="ghost" aria-label={`Edit ${p.name}`} onClick={() => { if (recheck()) onEdit(); }} disabled={busy} data-testid={`runtime-policy-edit-${p.id}`}>
-        <Edit3 className="h-3.5 w-3.5" />
+        <PenLine className="h-3.5 w-3.5" />
       </Button>
       <Button
         size="sm"

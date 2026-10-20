@@ -3,21 +3,21 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
-  AlertTriangle,
+  TriangleAlert,
   ArrowLeft,
   Save,
-  CheckCircle2,
+  CircleCheck,
   Circle,
   Clock,
   Database,
   Eye,
   HardDrive,
-  PauseCircle,
+  CirclePause,
   Pencil,
-  PlayCircle,
+  CirclePlay,
   RefreshCw,
   RotateCcw,
-  XCircle,
+  CircleX,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -387,10 +387,10 @@ export function ScannerSourcesPage() {
       {refreshNow.isError && <p role="alert" className="text-sm text-destructive">Could not request a database refresh. Try again after refreshing scanner configuration.</p>}
       {jobAction.isError && jobAction.variables?.context === jobContext && <p role="alert" className="text-sm text-destructive">Could not update scan job {jobAction.variables?.reviewed.id}. Refresh the job and try again.</p>}
       <StatGrid data-testid="scanner-operator-summary">
-        <StatCard label="Scanned" value={lifecycle ? lifecycle.scanned.toLocaleString() : "—"} icon={<CheckCircle2 className="h-3.5 w-3.5" />} tone="accent" />
+        <StatCard label="Scanned" value={lifecycle ? lifecycle.scanned.toLocaleString() : "—"} icon={<CircleCheck className="h-3.5 w-3.5" />} tone="accent" />
         <StatCard label="Scheduled" value={lifecycle ? lifecycle.scheduled.toLocaleString() : scanJobList.isSuccess ? pendingTotal.toLocaleString() : "—"} icon={<Clock className="h-3.5 w-3.5" />} tone={pendingTotal > 0 ? "medium" : "neutral"} hint={typeof lifecycle?.paused === "number" ? `${lifecycle.paused} paused` : "Paused count unavailable"} />
         <StatCard label="Running" value={lifecycle ? lifecycle.scanning.toLocaleString() : scanJobList.isSuccess ? runningTotal.toLocaleString() : "—"} icon={<RefreshCw className="h-3.5 w-3.5" />} tone={runningTotal > 0 ? "low" : "neutral"} />
-        <StatCard label="Failed" value={lifecycle ? lifecycle.failed.toLocaleString() : "—"} icon={<AlertTriangle className="h-3.5 w-3.5" />} tone={failedTotal > 0 ? "high" : "neutral"} />
+        <StatCard label="Failed" value={lifecycle ? lifecycle.failed.toLocaleString() : "—"} icon={<TriangleAlert className="h-3.5 w-3.5" />} tone={failedTotal > 0 ? "high" : "neutral"} />
         <StatCard label="Scanners" value={scannerWorkers.isSuccess ? workers.length.toLocaleString() : "—"} icon={<Database className="h-3.5 w-3.5" />} hint="last 24h" />
       </StatGrid>
 
@@ -508,7 +508,7 @@ export function ScannerSourcesPage() {
                       <div className="mt-0.5 font-mono text-xs text-muted-foreground">{selectedScannerID}</div>
                     </div>
                     <Button type="button" variant="ghost" size="sm" onClick={() => setSelectedScannerID("")}>
-                      <XCircle className="h-3.5 w-3.5" />
+                      <CircleX className="h-3.5 w-3.5" />
                       Close
                     </Button>
                   </div>
@@ -674,12 +674,12 @@ function ScanJobActions({
     <div className="flex justify-end gap-1">
       {canPause && (
         <JobActionButton label="Pause" pending={pending} onClick={() => onAction("pause")}>
-          <PauseCircle className="h-3.5 w-3.5" />
+          <CirclePause className="h-3.5 w-3.5" />
         </JobActionButton>
       )}
       {canResume && (
         <JobActionButton label="Resume" pending={pending} onClick={() => onAction("resume")}>
-          <PlayCircle className="h-3.5 w-3.5" />
+          <CirclePlay className="h-3.5 w-3.5" />
         </JobActionButton>
       )}
       {canRetry && (
@@ -689,7 +689,7 @@ function ScanJobActions({
       )}
       {canCancel && (
         <JobActionButton label="Cancel" pending={pending} onClick={() => onAction("cancel")} destructive>
-          <XCircle className="h-3.5 w-3.5" />
+          <CircleX className="h-3.5 w-3.5" />
         </JobActionButton>
       )}
     </div>

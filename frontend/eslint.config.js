@@ -1,8 +1,13 @@
-// Minimal ESLint v9 flat config. We rely on tsc for type-checking and ESLint mostly for
+// Minimal ESLint flat config. We rely on tsc for type-checking and ESLint mostly for
 // hook-rules + react-refresh hygiene. The TS plugin's typed rules require a parserOptions.project
 // pointer which we deliberately omit (vitest+vite tsconfig juggling is more pain than it's worth
 // at v1; tsc --noEmit catches type errors).
+//
+// Globals come from the `globals` package: the previous hand-written list drifted behind the DOM
+// surface the app actually uses (17 no-undef errors), and js.configs.recommended keeps no-undef on
+// even for TS files.
 import js from "@eslint/js";
+import globals from "globals";
 import tsParser from "@typescript-eslint/parser";
 import tsPlugin from "@typescript-eslint/eslint-plugin";
 import reactHooks from "eslint-plugin-react-hooks";
@@ -23,53 +28,16 @@ export default [
         ecmaFeatures: { jsx: true },
       },
       globals: {
-        document: "readonly",
-        BroadcastChannel: "readonly",
-        HTMLSpanElement: "readonly",
-        RequestInit: "readonly",
-        structuredClone: "readonly",
-        window: "readonly",
-        navigator: "readonly",
-        console: "readonly",
-        fetch: "readonly",
-        localStorage: "readonly",
-        sessionStorage: "readonly",
-        process: "readonly",
-        URL: "readonly",
-        URLSearchParams: "readonly",
-        setTimeout: "readonly",
-        clearTimeout: "readonly",
-        setInterval: "readonly",
-        clearInterval: "readonly",
-        HTMLElement: "readonly",
-        HTMLInputElement: "readonly",
-        HTMLDivElement: "readonly",
-        HTMLButtonElement: "readonly",
-        HTMLTextAreaElement: "readonly",
-        HTMLAnchorElement: "readonly",
-        AbortController: "readonly",
-        Blob: "readonly",
-        Event: "readonly",
-        EventTarget: "readonly",
-        File: "readonly",
-        FormData: "readonly",
-        MouseEvent: "readonly",
-        KeyboardEvent: "readonly",
-        CustomEvent: "readonly",
-        ReadableStream: "readonly",
-        Response: "readonly",
-        TextDecoder: "readonly",
-        TextEncoder: "readonly",
-        atob: "readonly",
-        crypto: "readonly",
-        prompt: "readonly",
-        confirm: "readonly",
-        alert: "readonly",
+        ...globals.browser,
+        ...globals.node,
+        ...globals.es2024,
         React: "readonly",
-        __dirname: "readonly",
-        __filename: "readonly",
-        global: "readonly",
-        Buffer: "readonly",
+        // Type-only fetch global that the `globals` package does not list.
+        RequestInit: "readonly",
+        // Build-time constants stamped by vite.config.ts `define`.
+        __APP_VERSION__: "readonly",
+        __APP_COMMIT__: "readonly",
+        __APP_BUILD_DATE__: "readonly",
       },
     },
     plugins: {

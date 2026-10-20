@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import { Activity, ArrowRight, Clock3, Copy, Database, Download, Globe2, Mail, ScanSearch, SlidersHorizontal } from "lucide-react";
+import { Activity, ArrowRight, Clock3, Copy, Database, Download, Earth, Mail, ScanSearch, SlidersHorizontal } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { systemConfigApi, type ConfigProvenance } from "@/api/client";
@@ -91,7 +91,7 @@ export function EffectiveConfigPage() {
               Export JSON
             </Button>
             <Button asChild variant="outline">
-              <Link to="/settings/network"><Globe2 className="h-4 w-4" />Network & Proxy</Link>
+              <Link to="/settings/network"><Earth className="h-4 w-4" />Network & Proxy</Link>
             </Button>
             <Button asChild variant="outline">
               <Link to="/settings/scanner"><ScanSearch className="h-4 w-4" />Scanner</Link>
@@ -213,7 +213,7 @@ function buildConfigItems(config: Record<string, unknown>, provenance?: Record<s
 
 function buildGroups(items: ConfigItem[]): ConfigGroup[] {
   const definitions = [
-    { title: "Network & TLS", icon: <Globe2 />, editTo: "/settings/network", matches: (key: string) => key.startsWith("egress_proxy.") || key === "tls_verify" || key === "ca_bundle_pem" },
+    { title: "Network & TLS", icon: <Earth />, editTo: "/settings/network", matches: (key: string) => key.startsWith("egress_proxy.") || key === "tls_verify" || key === "ca_bundle_pem" },
     { title: "Syslog / SIEM", icon: <Activity />, editTo: "/settings/network", matches: (key: string) => key.startsWith("syslog_siem_target.") },
     { title: "Scanner & CVE Sources", icon: <ScanSearch />, editTo: "/settings/scanner", matches: (key: string) => key.startsWith("scanner_") || key.startsWith("nvd_") },
     { title: "SMTP", icon: <Mail />, editTo: "/settings/integrations/smtp/edit", matches: (key: string) => key.startsWith("smtp.") },

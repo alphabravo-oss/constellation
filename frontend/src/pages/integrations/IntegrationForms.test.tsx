@@ -1,4 +1,3 @@
-/* global HTMLSelectElement */
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -12,6 +11,9 @@ const route = vi.hoisted(() => ({ index: "0" as string | undefined, search: "rev
 vi.mock("@/api/client", () => ({ routing: { get: vi.fn(), put: vi.fn() }, receivers: { list: vi.fn() }, systemConfigApi: { get: vi.fn(), patch: vi.fn() } }));
 vi.mock("@/lib/route-search", () => ({ useRouteSearchParams: () => [new URLSearchParams(route.search), vi.fn()] }));
 vi.mock("@tanstack/react-router", () => ({ useParams: () => ({ routeIndex: route.index }), useNavigate: () => route.navigate, Link: ({ children, href }: { children: ReactNode; href?: string }) => <a href={href}>{children}</a> }));
+// monaco-editor ships only an ESM `module` entry (no `main`/`exports`), which vitest's node-side
+// resolver cannot see; the loader wiring in src/lib/monaco is irrelevant with the editor mocked.
+vi.mock("@/lib/monaco", () => ({}));
 vi.mock("@monaco-editor/react", () => ({ default: ({ value, onChange, options }: { value: string; onChange: (value: string) => void; options?: { readOnly?: boolean } }) => <textarea aria-label="Routing YAML" value={value} disabled={options?.readOnly} onChange={(e) => onChange(e.target.value)} /> }));
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const saved = { yaml: "route:\n  receiver: external-default\n  group_wait: 30s\n  routes:\n    - receiver: external-sink\n      match: {severity: critical}\n      matchers: ['owner=platform']\n      group_interval: 5m\ninhibit_rules: []\n", revision: 4, updated_at: "" };

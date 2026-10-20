@@ -1,4 +1,3 @@
-// @ts-expect-error - js-yaml ships no type declarations in this project.
 import yaml from "js-yaml";
 import { expect, it } from "vitest";
 import { parseRouting, routeIndex, routingRevision, routingYamlError, serializeRouting } from "./integration-routing";
@@ -6,7 +5,7 @@ const original = `global:\n  resolve_timeout: 5m\nroute:\n  receiver: external-d
 it("preserves all unmanaged YAML fields, matchers and external receiver names when editing one route", () => {
   const parsed = parseRouting(original); expect(parsed.ok).toBe(true); if (!parsed.ok) throw new Error(parsed.reason);
   const edited = serializeRouting({ ...parsed.model, routes: parsed.model.routes.map((rule) => ({ ...rule, match: { ...rule.match, owner: "oncall" } })) });
-  const expected = yaml.load(original); expected.route.routes[0].match.owner = "oncall"; expect(yaml.load(edited)).toEqual(expected);
+  const expected = yaml.load(original) as { route: { routes: Array<{ match: Record<string, string> }> } }; expected.route.routes[0].match.owner = "oncall"; expect(yaml.load(edited)).toEqual(expected);
 });
 it("preserves nested routing through the raw editor and refuses lossy flat editing", () => {
   const nested = "route:\n  receiver: default\n  routes:\n    - receiver: outer\n      routes:\n        - receiver: inner\n          matchers: ['severity=critical']\n";

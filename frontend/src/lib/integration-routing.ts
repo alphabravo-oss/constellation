@@ -1,4 +1,3 @@
-// @ts-expect-error - js-yaml ships no type declarations in this project.
 import yaml from "js-yaml";
 
 export interface RoutingRule {

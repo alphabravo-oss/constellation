@@ -113,7 +113,7 @@ function RuntimePolicyEditor({ clusterID, policyID, initial, latest, unavailable
       try {
         parsedRules = parseRules();
       } catch (e) {
-        throw new Error("Rules JSON invalid: " + (e as Error).message);
+        throw new Error("Rules JSON invalid: " + (e as Error).message, { cause: e });
       }
       if (!policyID) {
         throw new Error("Save the policy first; simulation runs against the workload it's bound to.");

@@ -6,8 +6,8 @@ import { toast } from "sonner";
 import {
   ArrowLeft,
   BadgeCheck,
-  CheckCircle2,
-  Edit2,
+  CircleCheck,
+  Pen,
   Fingerprint,
   Plus,
   RefreshCw,
@@ -124,7 +124,7 @@ export function AttestationTrustPage() {
       cell: (policy) => (
         <div className="flex justify-end gap-1">
           <IconButton label={policy.enabled ? "Disable policy" : "Enable policy"} disabled={busy} onClick={() => quickUpdate.mutate({ id: policy.id, patch: { enabled: !policy.enabled } })}>
-            <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
+            <CircleCheck className="h-3.5 w-3.5" aria-hidden />
           </IconButton>
           <IconButton label={policy.auto_verify ? "Disable auto verify" : "Enable auto verify"} disabled={busy} onClick={() => quickUpdate.mutate({ id: policy.id, patch: { auto_verify: !policy.auto_verify } })}>
             <BadgeCheck className="h-3.5 w-3.5" aria-hidden />
@@ -133,7 +133,7 @@ export function AttestationTrustPage() {
             <RefreshCw className="h-3.5 w-3.5" aria-hidden />
           </IconButton>
           <IconButton label="Edit policy" disabled={busy} onClick={() => navigate({ href: `/settings/attestation-trust/${policy.id}` })}>
-            <Edit2 className="h-3.5 w-3.5" aria-hidden />
+            <Pen className="h-3.5 w-3.5" aria-hidden />
           </IconButton>
           <IconButton label="Delete policy" disabled={busy} onClick={() => { if (window.confirm(`Delete "${policy.name}"? Existing attestation links will no longer satisfy admission.`)) { removePolicy.mutate(policy.id); } }}>
             <Trash2 className="h-3.5 w-3.5" aria-hidden />
@@ -174,7 +174,7 @@ export function AttestationTrustPage() {
 
       <StatGrid>
         <StatCard label="Policies" value={policiesQ.isSuccess ? stats.total : "—"} icon={<Fingerprint className="h-3.5 w-3.5" aria-hidden />} />
-        <StatCard label="Enabled" value={policiesQ.isSuccess ? stats.enabled : "—"} tone="accent" icon={<CheckCircle2 className="h-3.5 w-3.5" aria-hidden />} />
+        <StatCard label="Enabled" value={policiesQ.isSuccess ? stats.enabled : "—"} tone="accent" icon={<CircleCheck className="h-3.5 w-3.5" aria-hidden />} />
         <StatCard label="Auto verify" value={policiesQ.isSuccess ? stats.autoVerify : "—"} icon={<BadgeCheck className="h-3.5 w-3.5" aria-hidden />} />
       </StatGrid>
 

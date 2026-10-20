@@ -31,8 +31,8 @@ import {
   Radio,
   Lock,
   X,
-  AlertTriangle,
-  CheckCircle2,
+  TriangleAlert,
+  CircleCheck,
   Ban,
   ChevronUp,
   ChevronDown,
@@ -171,9 +171,9 @@ const VERDICT_LABEL: Record<VerdictGroup, string> = {
   block: "Block",
 };
 
-const VERDICT_ICON: Record<VerdictGroup, typeof CheckCircle2> = {
-  allow: CheckCircle2,
-  alert: AlertTriangle,
+const VERDICT_ICON: Record<VerdictGroup, typeof CircleCheck> = {
+  allow: CircleCheck,
+  alert: TriangleAlert,
   block: Ban,
 };
 
@@ -943,7 +943,7 @@ function NetworkMapInner() {
         ) : q.isError ? (
           <div className="flex h-full items-center justify-center" data-testid="network-map-error">
             <EmptyState
-              icon={<AlertTriangle className="h-8 w-8" aria-hidden />}
+              icon={<TriangleAlert className="h-8 w-8" aria-hidden />}
               title="Couldn’t load the traffic map"
               hint={(q.error as Error | null)?.message ?? "The network map request failed."}
               action={
@@ -1461,7 +1461,7 @@ function NetworkSessionsWorkspaceTab({
         >
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 font-medium text-foreground">
-              <CheckCircle2 className="h-3.5 w-3.5 text-[color:var(--color-status-success)]" aria-hidden />
+              <CircleCheck className="h-3.5 w-3.5 text-[color:var(--color-status-success)]" aria-hidden />
               <span>Kill queued for session {lastKill.session_id}</span>
             </div>
             <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
@@ -1692,7 +1692,7 @@ export function NetworkThreatsWorkspaceTab({
       <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-card px-3 py-2">
         <div className="flex flex-wrap items-center gap-2">
           <StatPill icon={<ShieldAlert className="h-3 w-3" />} label="threats" value={total} tone={total > 0 ? "critical" : "neutral"} />
-          <StatPill icon={<AlertTriangle className="h-3 w-3" />} label="critical" value={critical} tone={critical > 0 ? "critical" : "neutral"} />
+          <StatPill icon={<TriangleAlert className="h-3 w-3" />} label="critical" value={critical} tone={critical > 0 ? "critical" : "neutral"} />
           <StatPill icon={<Ban className="h-3 w-3" />} label="blocked" value={blocked} tone={blocked > 0 ? "critical" : "neutral"} />
         </div>
         <WeakTLSStatus configured={weakTLS} unavailable={settingsUnavailable} loading={settingsLoading} href={settingsHref} testId="network-threats-weak-tls"/>

@@ -1,9 +1,10 @@
+import { BUILD_INFO } from "@/lib/build-info";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import {
-  AlertTriangle,
-  CheckCircle2,
+  TriangleAlert,
+  CircleCheck,
   Clock,
   Download,
   RefreshCcw,
@@ -314,6 +315,7 @@ export function SystemHealthPage() {
       {cp.commit_short && (
         <p className="text-xs text-muted-foreground">
           API build <span className="font-mono">{cp.commit_short}</span> · v{cp.version} · up {formatUptime(Number(cp.uptime_s || 0))}
+          {" · "}UI v{BUILD_INFO.version}{BUILD_INFO.commit ? <> (<span className="font-mono">{BUILD_INFO.commit.slice(0, 12)}</span>)</> : null}
         </p>
       )}
 
@@ -331,7 +333,7 @@ export function SystemHealthPage() {
         <StatCard
           label="Healthy components"
           value={data.summary.healthy ?? 0}
-          icon={<CheckCircle2 className="h-3.5 w-3.5" />}
+          icon={<CircleCheck className="h-3.5 w-3.5" />}
           tone={(data.summary.healthy ?? 0) > 0 ? "accent" : "neutral"}
           hint={`${heartbeats.length} reporting`}
         />
@@ -359,7 +361,7 @@ export function SystemHealthPage() {
         <StatCard
           label="Crashlooping"
           value={data.summary.crashlooping ?? 0}
-          icon={<AlertTriangle className="h-3.5 w-3.5" />}
+          icon={<TriangleAlert className="h-3.5 w-3.5" />}
           tone={(data.summary.crashlooping ?? 0) > 0 ? "critical" : "neutral"}
           hint=">3 restarts/hour"
         />

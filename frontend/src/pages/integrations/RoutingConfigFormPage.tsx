@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import Editor from "@monaco-editor/react";
+import "@/lib/monaco";
 import { ArrowLeft, Save } from "lucide-react";
 import { receivers, routing } from "@/api/client";
 import { isRevisionConflict, parseRouting, routingYamlError, serializeRouting, validRoutingSnapshot, type RoutingSnapshot } from "@/lib/integration-routing";

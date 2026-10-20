@@ -1,4 +1,3 @@
-/* global HTMLTableRowElement */
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { TestRouter } from "@/test/router";

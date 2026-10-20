@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation, useParams } from "@tanstack/react-router";
-import { Activity, Boxes, KeyRound, ShieldCheck, UploadCloud } from "lucide-react";
+import { Activity, Boxes, KeyRound, ShieldCheck, CloudUpload } from "lucide-react";
 import { clusters } from "@/api/client";
 import { PageHeader, PageContainer } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
@@ -87,7 +87,7 @@ export function ClusterHealthPage() {
           </dl>
           <a href={`/clusters/${selected.id}/dashboard?tab=operations`} className="mt-4 inline-block text-sm text-primary hover:underline">Inspect platform package evidence</a>
         </section> },
-        { value: "registration", label: "Registration", content: healthUnavailable ? <ErrorState title="Registration evidence unavailable" error={health.error} action={retryHealth} /> : !h ? <LoadingState /> : <section className="space-y-4"><p className="text-sm text-muted-foreground">Last check-in {formatDate(h.summary.last_check_in)} · {h.summary.registration_state}</p><CommandBlock icon={UploadCloud} label="Install / upgrade" value={h.registration.helm_command} /><CommandBlock icon={KeyRound} label="Rotate token" value={h.registration.rotate_command} /></section> },
+        { value: "registration", label: "Registration", content: healthUnavailable ? <ErrorState title="Registration evidence unavailable" error={health.error} action={retryHealth} /> : !h ? <LoadingState /> : <section className="space-y-4"><p className="text-sm text-muted-foreground">Last check-in {formatDate(h.summary.last_check_in)} · {h.summary.registration_state}</p><CommandBlock icon={CloudUpload} label="Install / upgrade" value={h.registration.helm_command} /><CommandBlock icon={KeyRound} label="Rotate token" value={h.registration.rotate_command} /></section> },
         { value: "clusters", label: "Other clusters", content: <div className="grid gap-4 md:grid-cols-2" data-testid="clusters-list">{clusterList.map(cluster => <a key={cluster.id} href={`/clusters/${cluster.id}/health${location.searchStr}${location.hash ? `#${location.hash}` : ""}`} className="rounded-md border border-border bg-card p-4 hover:bg-accent" data-testid="cluster-card" data-cluster-id={cluster.id}><span className="font-medium" data-testid="cluster-health-card-name">{cluster.name}</span><p className="mt-2 text-xs text-muted-foreground">{cluster.distro} · {cluster.cloud_provider || "onprem"}</p></a>)}</div> },
       ]} />
       </>}
@@ -104,7 +104,7 @@ function MiniStat({ label, value }: { label: string; value: number | string }) {
   );
 }
 
-function CommandBlock({ icon: Icon, label, value }: { icon: typeof UploadCloud; label: string; value?: string }) {
+function CommandBlock({ icon: Icon, label, value }: { icon: typeof CloudUpload; label: string; value?: string }) {
   return (
     <div className="rounded-md border border-border p-3">
       <div className="mb-2 flex items-center gap-2 text-xs font-medium">

@@ -1,4 +1,3 @@
-/* global HTMLSelectElement, HTMLTableRowElement */
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { createMemoryHistory, type RouterHistory } from "@tanstack/react-router";

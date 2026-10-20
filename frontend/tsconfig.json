@@ -1,4 +1,9 @@
 {
+  // TypeScript 6.0.x, not 7.0.2: the 7.x npm package is the native (Go) compiler and only ships
+  // `tsc`; its JS entry has no createProgram/createSourceFile, so @typescript-eslint/parser cannot
+  // load it (its peer range is also `typescript <6.1`). Re-evaluate once typescript-eslint
+  // supports 7.x. `baseUrl` was dropped because TS 6 deprecates it; `paths` resolve relative to
+  // this file. TS 6 no longer auto-includes @types/*, hence the explicit `types`.
   "compilerOptions": {
     "target": "ES2022",
     "useDefineForClassFields": true,
@@ -15,8 +20,8 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "baseUrl": ".",
-    "paths": { "@/*": ["src/*"] }
+    "types": ["node", "vite/client"],
+    "paths": { "@/*": ["./src/*"] }
   },
   "include": ["src"]
 }

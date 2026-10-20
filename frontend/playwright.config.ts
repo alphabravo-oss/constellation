@@ -1,14 +1,16 @@
 import { defineConfig, devices } from "@playwright/test";
+import { storageStatePath } from "./e2e/auth-state";
 
 const PORT = 5179;
 const API = process.env.VITE_API_URL ?? "http://localhost:18080";
 const chromiumExecutablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
-const recordVideo = process.env.CI || process.env.PLAYWRIGHT_RECORD_VIDEO === "1";
+// Set PLAYWRIGHT_BASE_URL (e.g. http://localhost:5173 for the Vite dev server) to target an
+// already-running frontend instead of the production-bundle preview started below.
 const externalBaseURL = process.env.PLAYWRIGHT_BASE_URL;
-const authSetup = process.env.PLAYWRIGHT_AUTH_SETUP === "1";
 
 export default defineConfig({
   testDir: "./e2e",
+  outputDir: "test-results",
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: 0,
@@ -20,16 +22,19 @@ export default defineConfig({
     baseURL: externalBaseURL ?? `http://localhost:${PORT}`,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
-    video: recordVideo ? "retain-on-failure" : "off",
+    video: "retain-on-failure",
   },
   projects: [
-    ...(authSetup ? [{ name: "setup", testMatch: /auth\.setup\.ts/ }] : []),
+    // auth.setup.ts logs in once over the API and writes both the shared auth state used by
+    // e2e/utils.ts and the Playwright storageState consumed by the chromium project.
+    { name: "setup", testMatch: /auth\.setup\.ts/ },
     {
       name: "chromium",
       testIgnore: /auth\.setup\.ts/,
-      dependencies: authSetup ? ["setup"] : [],
+      dependencies: ["setup"],
       use: {
         ...devices["Desktop Chrome"],
+        storageState: storageStatePath,
         ...(chromiumExecutablePath ? { launchOptions: { executablePath: chromiumExecutablePath } } : {}),
       },
     },

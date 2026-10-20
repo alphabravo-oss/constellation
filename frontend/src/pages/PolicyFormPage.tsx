@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { FileJson } from "lucide-react";
 import Editor from "@monaco-editor/react";
+import "@/lib/monaco";
 import { policies, type Policy } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { useEditorVisit } from "@/hooks/useEditorVisit";

@@ -10,6 +10,9 @@ vi.mock("@/api/client", () => ({ policies: { list: vi.fn(), update: vi.fn() } })
 vi.mock("@/hooks/useCluster", () => ({ useCluster: () => ({ clusterId: route.clusterId }) }));
 vi.mock("@/lib/route-search", () => ({ useRouteSearchParams: () => [new URLSearchParams("from=admission"), vi.fn()] }));
 vi.mock("@tanstack/react-router", () => ({ useParams: () => ({ policyId: route.policyId }), useNavigate: () => route.navigate, Link: ({ children }: { children: ReactNode }) => <span>{children}</span> }));
+// monaco-editor ships only an ESM `module` entry (no `main`/`exports`), which vitest's node-side
+// resolver cannot see; the loader wiring in src/lib/monaco is irrelevant with the editor mocked.
+vi.mock("@/lib/monaco", () => ({}));
 vi.mock("@monaco-editor/react", () => ({ default: ({ value, onChange }: { value: string; onChange: (value: string) => void }) => <textarea value={value} onChange={(e) => onChange(e.target.value)} /> }));
 let owner = { org_id: "org", user_id: "user" };
 let root: Root; let host: HTMLDivElement; let client: QueryClient;

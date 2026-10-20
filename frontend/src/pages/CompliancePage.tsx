@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { Download, PlayCircle, Plus, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
+import { Download, CirclePlay, Plus, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
 import { compliance, type ComplianceCheck, type ComplianceChecksParams, type ComplianceChecksResponse, type ComplianceExemption, type ComplianceScheduleDB } from "@/api/client";
 import { BenchmarksWorkspace } from "./BenchmarksWorkspace";
 import { ComplianceEvidenceInventory } from "./ComplianceEvidenceInventory";
@@ -413,7 +413,7 @@ function ScheduleRow({
             data-testid={`schedule-run-${schedule.id}`}
           >
             <span className="inline-flex items-center gap-1.5">
-              <PlayCircle className="h-3.5 w-3.5" aria-hidden />
+              <CirclePlay className="h-3.5 w-3.5" aria-hidden />
               {schedule.enabled ? "Request run" : "Enable and request run"}
             </span>
           </Button>

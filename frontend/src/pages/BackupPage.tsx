@@ -6,13 +6,13 @@ import {
   ArrowLeft,
   Save,
   Download,
-  UploadCloud,
+  CloudUpload,
   Clock,
   RefreshCw,
   Calendar,
-  CheckCircle2,
-  AlertTriangle,
-  PlayCircle,
+  CircleCheck,
+  TriangleAlert,
+  CirclePlay,
   Pencil,
   Cloud,
   HardDrive,
@@ -289,7 +289,7 @@ export function BackupPage() {
         <>
           {b.status === "succeeded" && (
             <span className="inline-flex items-center gap-1 text-status-success">
-              <CheckCircle2 className="h-3.5 w-3.5" />
+              <CircleCheck className="h-3.5 w-3.5" />
               succeeded
             </span>
           )}
@@ -301,7 +301,7 @@ export function BackupPage() {
           )}
           {b.status === "failed" && (
             <span className="inline-flex items-center gap-1 text-destructive">
-              <AlertTriangle className="h-3.5 w-3.5" />
+              <TriangleAlert className="h-3.5 w-3.5" />
               failed
             </span>
           )}
@@ -387,7 +387,7 @@ export function BackupPage() {
             {activePending ? (
               <RefreshCw className="h-4 w-4 animate-spin" />
             ) : (
-              <PlayCircle className="h-4 w-4" />
+              <CirclePlay className="h-4 w-4" />
             )}
             {activePending ? "Backing up…" : "Take backup now"}
           </Button>
@@ -788,7 +788,7 @@ function RestoreCard() {
       <Card
         title={
           <span className="flex items-center gap-2">
-            <UploadCloud className="h-4 w-4" aria-hidden /> Restore
+            <CloudUpload className="h-4 w-4" aria-hidden /> Restore
           </span>
         }
         description={
@@ -804,7 +804,7 @@ function RestoreCard() {
             size="sm"
             onClick={() => navigate({ href: "/settings/backup/restore" })}
           >
-            <UploadCloud className="h-3.5 w-3.5" /> Restore from backup
+            <CloudUpload className="h-3.5 w-3.5" /> Restore from backup
           </Button>
         }
       >

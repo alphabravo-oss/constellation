@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ListChecks, Pencil, Play, Plus, Power, RefreshCw, ShieldCheck, UploadCloud } from "lucide-react";
+import { ListChecks, Pencil, Play, Plus, Power, RefreshCw, ShieldCheck, CloudUpload } from "lucide-react";
 import { policies, type Policy, type PolicySimulation } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { useRouteSearchParams } from "@/lib/route-search";
@@ -80,7 +80,7 @@ function PolicyCatalog({ clusterId }: { clusterId: string }) {
   </div>;
   return <div className="space-y-6" data-testid="policies-page" data-cluster-id={clusterId}>
     <PageHeader title="Policies" description="Review policies available to this cluster, including organization defaults. Open a policy to change its configuration, or test a manifest before enforcing it."
-      actions={<><Button disabled={q.isFetching} onClick={() => void q.refetch()}><RefreshCw className="h-4 w-4" /> Refresh</Button><Button onClick={() => void navigate({ href: `/clusters/${clusterId}/admission/import` })}><UploadCloud className="h-4 w-4" /> Import profile</Button><Button variant="primary" disabled={q.isError || !q.data} data-testid="policies-create-cta" onClick={() => void navigate({ href: `/clusters/${clusterId}/policies/new` })}><Plus className="h-4 w-4" /> Create policy</Button></>} />
+      actions={<><Button disabled={q.isFetching} onClick={() => void q.refetch()}><RefreshCw className="h-4 w-4" /> Refresh</Button><Button onClick={() => void navigate({ href: `/clusters/${clusterId}/admission/import` })}><CloudUpload className="h-4 w-4" /> Import profile</Button><Button variant="primary" disabled={q.isError || !q.data} data-testid="policies-create-cta" onClick={() => void navigate({ href: `/clusters/${clusterId}/policies/new` })}><Plus className="h-4 w-4" /> Create policy</Button></>} />
     {q.isPending ? <LoadingState label="Loading policies…" /> : !q.data ? <ErrorState title="Could not load policies for this cluster." action={<Button onClick={() => void q.refetch()}>Retry</Button>} /> : <>
       <VerdictBanner detailMode={q.isError ? "inline" : "disclosure"} status={q.isError ? "degraded" : "info"} title={q.isError ? "Policies could not be refreshed" : `${enabledCount} of ${list.length} loaded policies are enabled`} detail={q.isError ? "Showing the last loaded configuration. Refresh before editing." : "These counts describe configuration. They do not confirm enforcement or webhook health."} />
       <StatGrid><StatCard label="Loaded policies" value={list.length} icon={<ListChecks className="h-4 w-4" />} /><StatCard label="Enabled policies" value={enabledCount} icon={<Power className="h-4 w-4" />} /><StatCard label="Enabled · enforce" value={enforceCount} icon={<ShieldCheck className="h-4 w-4" />} /><StatCard label="Enabled · monitor" value={enabledCount - enforceCount} /></StatGrid>

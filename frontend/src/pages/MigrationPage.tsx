@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, CheckCircle2, Download, RotateCcw, ShieldCheck, Wand2 } from "lucide-react";
+import { ArrowRight, CircleCheck, Download, RotateCcw, ShieldCheck, WandSparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { clusters as clustersApi, enterprise, type MigrationImportListItem, type MigrationPreview, type MigrationUnsupported } from "@/api/client";
@@ -503,7 +503,7 @@ export function MigrationPage() {
             disabled={!historyReady || !canApplyImport(item) || applyImport.isPending || rollbackImport.isPending}
             data-testid={`migration-import-apply-${item.id}`}
           >
-            <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
+            <CircleCheck className="h-3.5 w-3.5" aria-hidden />
             Apply
           </Button>
           <Button
@@ -592,7 +592,7 @@ export function MigrationPage() {
                 disabled={preview.isPending || !targetReady || !sourceReady || exportText.trim().length === 0}
                 data-testid="migration-preview-submit"
               >
-                <Wand2 className="h-4 w-4" aria-hidden />
+                <WandSparkles className="h-4 w-4" aria-hidden />
                 Preview import
               </Button>
             </div>
@@ -664,7 +664,7 @@ export function MigrationPage() {
                 disabled={!canApplyActive || applyImport.isPending}
                 data-testid="migration-import-apply-active"
               >
-                <CheckCircle2 className="h-4 w-4" aria-hidden />
+                <CircleCheck className="h-4 w-4" aria-hidden />
                 Apply import
               </Button>
             </div>

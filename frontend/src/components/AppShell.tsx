@@ -11,7 +11,7 @@ import { toast } from "sonner";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
   LayoutDashboard,
-  AlertTriangle,
+  TriangleAlert,
   Boxes,
   ShieldCheck,
   Activity,
@@ -35,7 +35,7 @@ import {
   Command as CmdIcon,
   Layers,
   Compass,
-  Globe2,
+  Earth,
   BellRing,
   Server,
   ServerCog,
@@ -107,7 +107,7 @@ export const CLUSTER_NAV: NavGroup[] = [
     id: "risks",
     label: "Security Risks",
     items: [
-      { path: "findings",      icon: AlertTriangle,   label: "Findings" },
+      { path: "findings",      icon: TriangleAlert,   label: "Findings" },
       { path: "vuln-profiles", icon: FileWarning,     label: "Vuln Profiles" },
       { path: "exceptions",    icon: FileWarning,     label: "Exceptions" },
       { path: "compliance",    icon: ShieldCheck,     label: "Compliance" },
@@ -169,7 +169,7 @@ const SCOPE_NAV: NavGroup[] = [
       { path: "/cve",          icon: Database,        label: "CVE Database" },
       { path: "/posture",      icon: ClipboardCheck,  label: "Posture" },
       { path: "/organization/audit", icon: ScrollText, label: "Audit Log" },
-      { path: "/federation",   icon: Globe2,          label: "Federation" },
+      { path: "/federation",   icon: Earth,          label: "Federation" },
       { path: "/settings/access", icon: UsersRound, label: "Access Control" },
       { path: "/settings/api-tokens", icon: FileText, label: "API Tokens" },
       { path: "/settings/security-policy", icon: ShieldCheck, label: "Security Policy" },

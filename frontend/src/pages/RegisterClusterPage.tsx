@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useBlocker, useNavigate, useParams } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { Copy, Check, Download, Globe2 } from "lucide-react";
+import { Copy, Check, Download, Earth } from "lucide-react";
 
 import { clusterInitBundles, type ClusterInitBundleMint } from "@/api/client";
 import { PageHeader } from "@/components/ui/page";
@@ -109,7 +109,7 @@ kubectl -n constellation-system create secret generic constellation-init-bundle 
         </Card>
       ) : (
         <div className="space-y-6">
-          <Card title={<span className="flex items-center gap-2"><Globe2 className="h-4 w-4" /> Cluster registered</span>}>
+          <Card title={<span className="flex items-center gap-2"><Earth className="h-4 w-4" /> Cluster registered</span>}>
             <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
               <dt className="text-muted-foreground">Name</dt><dd>{mint.name}</dd>
               <dt className="text-muted-foreground">Control plane</dt><dd className="font-mono break-all">{mint.server_url}</dd>

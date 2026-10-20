@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useIsFetching, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Edit3, Plus, Trash2 } from "lucide-react";
+import { PenLine, Plus, Trash2 } from "lucide-react";
 import { fileProfiles, type FileProfileDetail, type FileProfileRule, type FileProfileInventoryRow, type FileProfileInventoryResponse, type FileProfileInventoryParams } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
@@ -78,7 +78,7 @@ mutationFn: async (target: NonNullable<typeof pendingDelete>) => {
     { id: "behavior", header: "Behavior", kind: "status", cell: r => r.behavior === "block_access" ? "Block access" : "Observe changes", exportValue: r => r.behavior },
     { id: "enabled", header: "Rule status", kind: "status", cell: r => r.enabled ? "Enabled" : "Disabled", exportValue: r => r.enabled },
     { id: "recursive", header: "Subdirectories", kind: "status", cell: r => r.recursive ? "Included" : "Excluded", exportValue: r => r.recursive },
-    { id: "actions", header: "Actions", kind: "actions", hideable: false, exportable: false, cell: r => <div className="flex justify-end gap-2"><Button variant="ghost" size="sm" disabled={!detailReady || delMut.isPending} aria-label={`Edit rule ${r.filter}`} onClick={() => gotoForm(r.id)}><Edit3 className="h-4 w-4" /></Button><Button variant="ghost" size="sm" disabled={!detailReady || delMut.isPending} aria-label={`Delete rule ${r.filter}`} onClick={() => { delMut.reset(); setPendingDelete({ workload: activeWorkload!, cluster: clusterId!, owner, rule: r, context: detailContext }); }}><Trash2 className="h-4 w-4" /></Button></div> },
+    { id: "actions", header: "Actions", kind: "actions", hideable: false, exportable: false, cell: r => <div className="flex justify-end gap-2"><Button variant="ghost" size="sm" disabled={!detailReady || delMut.isPending} aria-label={`Edit rule ${r.filter}`} onClick={() => gotoForm(r.id)}><PenLine className="h-4 w-4" /></Button><Button variant="ghost" size="sm" disabled={!detailReady || delMut.isPending} aria-label={`Delete rule ${r.filter}`} onClick={() => { delMut.reset(); setPendingDelete({ workload: activeWorkload!, cluster: clusterId!, owner, rule: r, context: detailContext }); }}><Trash2 className="h-4 w-4" /></Button></div> },
   ];
   const totals = available ? listQ.data!.summary : undefined;
   const refresh = () => { void listQ.refetch(); if(activeWorkload) void detailQ.refetch(); };

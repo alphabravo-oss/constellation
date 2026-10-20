@@ -2,7 +2,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { Search, Database, Crown, Activity, AlertTriangle } from "lucide-react";
+import { Search, Database, Crown, Activity, TriangleAlert } from "lucide-react";
 
 import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
 import { useExportGuard, exportQueryReady } from "@/hooks/useExportGuard";
@@ -242,7 +242,7 @@ export function CVEPage() {
           label="CVSS ≥ 7.0"
           value={statsData ? statsData.cvss_gt_70.toLocaleString() : "—"}
           tone="high"
-          icon={<AlertTriangle className="h-3 w-3" />}
+          icon={<TriangleAlert className="h-3 w-3" />}
           hint="High / critical severity"
         />
       </StatGrid>

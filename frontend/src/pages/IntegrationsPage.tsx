@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { Copy, Pencil, Plus, PauseCircle, PlayCircle, RefreshCw, Send, Trash2, X } from "lucide-react";
+import { Copy, Pencil, Plus, CirclePause, CirclePlay, RefreshCw, Send, Trash2, X } from "lucide-react";
 import { integrationDeliveries, receivers as receiversApi, routing as routingApi, type IntegrationDeliveryOverview, type Receiver, type ReceiverDelivery } from "@/api/client";
 import { isRevisionConflict, parseRouting, serializeRouting, validRoutingSnapshot, type RoutingRule } from "@/lib/integration-routing";
 import { DataTable, type Column } from "@/components/ui/data-table";
@@ -236,7 +236,7 @@ function ReceiversTab() {
 
 function PauseToggle({ receiver, disabled, onChange }: { receiver: Receiver; disabled: boolean; onChange: () => void }) {
   const mutation = useMutation({ mutationFn: () => receiver.paused ? receiversApi.unpause(receiver.id) : receiversApi.pause(receiver.id), onSuccess: onChange });
-  return <div><Button disabled={disabled || mutation.isPending} onClick={() => mutation.mutate()} size="sm" variant="outline">{receiver.paused ? <PlayCircle className="h-4 w-4" /> : <PauseCircle className="h-4 w-4" />}{receiver.paused ? "Resume" : "Pause"}</Button>{mutation.isError && <p role="alert" className="text-xs text-status-error">Could not change delivery state.</p>}</div>;
+  return <div><Button disabled={disabled || mutation.isPending} onClick={() => mutation.mutate()} size="sm" variant="outline">{receiver.paused ? <CirclePlay className="h-4 w-4" /> : <CirclePause className="h-4 w-4" />}{receiver.paused ? "Resume" : "Pause"}</Button>{mutation.isError && <p role="alert" className="text-xs text-status-error">Could not change delivery state.</p>}</div>;
 }
 
 function ReceiverDetail({ receiver, deliveries, disabled, onRotationChange, onClose, onEdit, onMutated }: {

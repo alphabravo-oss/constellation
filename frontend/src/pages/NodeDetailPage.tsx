@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import type { ReactNode } from "react";
 import { useParams } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Boxes, ChevronLeft, Database, Layers, Server, ShieldAlert, ShieldCheck, TerminalSquare, RefreshCw } from "lucide-react";
+import { Boxes, ChevronLeft, Database, Layers, Server, ShieldAlert, ShieldCheck, SquareTerminal, RefreshCw } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import { nodes as nodesApi, type NodeSummary, type NodeDetail } from "@/api/client";
@@ -86,7 +86,7 @@ function NodeEvidence({ owner, detail, clusterId, backPath, refreshing, refresh,
       <StatCard label="Open host findings" value={node.last_scanned_at ? node.open_vulns : "Not scanned"} valueKind={node.last_scanned_at ? "number" : "text"} tone={node.open_vulns > 0 ? "high" : "neutral"} icon={<ShieldAlert className="h-3.5 w-3.5" />} />
       <StatCard label="Packages reported" value={node.packages_observed_at ? node.package_count : "Not collected"} valueKind={node.packages_observed_at ? "number" : "text"} icon={<Database className="h-3.5 w-3.5" />} />
       <StatCard label="Containers reported" value={node.containers_observed_at ? node.container_count : "Not collected"} valueKind={node.containers_observed_at ? "number" : "text"} icon={<Layers className="h-3.5 w-3.5" />} />
-      <StatCard label="Processes reported" value={node.processes_observed_at ? node.process_count : "Not collected"} valueKind={node.processes_observed_at ? "number" : "text"} icon={<TerminalSquare className="h-3.5 w-3.5" />} />
+      <StatCard label="Processes reported" value={node.processes_observed_at ? node.process_count : "Not collected"} valueKind={node.processes_observed_at ? "number" : "text"} icon={<SquareTerminal className="h-3.5 w-3.5" />} />
       <StatCard label="CIS failures reported" value={node.cis_observed_at ? node.cis_failed : "Not collected"} valueKind={node.cis_observed_at ? "number" : "text"} tone={node.cis_failed > 0 ? "critical" : "neutral"} icon={<ShieldCheck className="h-3.5 w-3.5" />} />
     </StatGrid>
     {refreshing && <p role="status" className="text-sm text-muted-foreground">Refreshing node evidence; previously loaded evidence remains visible until the request settles.</p>}
@@ -213,7 +213,7 @@ function NodeProcessesTable({ processes, observedAt, exportScope }: { processes?
   return (
     <section className="overflow-hidden rounded-lg border border-border bg-card">
       <header className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
-        <div className="flex items-center gap-2"><TerminalSquare className="h-3.5 w-3.5 text-muted-foreground" /><h2 className="text-sm font-semibold">Processes</h2></div>
+        <div className="flex items-center gap-2"><SquareTerminal className="h-3.5 w-3.5 text-muted-foreground" /><h2 className="text-sm font-semibold">Processes</h2></div>
         <span className="text-mono text-xs text-muted-foreground">{items.length}{observedAt ? ` · ${formatDate(observedAt)}` : ""}</span>
       </header>
       {items.length === 0 ? <p className="px-3 py-6 text-center text-xs text-muted-foreground">No process inventory recorded.</p>

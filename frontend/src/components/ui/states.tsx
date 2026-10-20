@@ -10,7 +10,7 @@
 // Keep these dumb and presentational. EmptyState already lived in empty-state.tsx;
 // it is re-exported so pages can import all three from one module.
 import { type ReactNode } from "react";
-import { AlertTriangle, Loader2 } from "lucide-react";
+import { TriangleAlert, LoaderCircle } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 export { EmptyState } from "./empty-state";
@@ -30,7 +30,7 @@ export function LoadingState({
       aria-busy="true"
       data-testid="loading-state"
     >
-      <Loader2 className="mb-2 h-4 w-4 animate-spin text-muted-foreground/70" aria-hidden />
+      <LoaderCircle className="mb-2 h-4 w-4 animate-spin text-muted-foreground/70" aria-hidden />
       <div className="text-xs text-muted-foreground">{label}</div>
     </div>
   );
@@ -59,7 +59,7 @@ export function ErrorState({
       role="alert"
       data-testid="error-state"
     >
-      <AlertTriangle className="mb-2 h-4 w-4 text-[color:var(--color-status-error)]" aria-hidden />
+      <TriangleAlert className="mb-2 h-4 w-4 text-[color:var(--color-status-error)]" aria-hidden />
       <div className="text-sm font-medium text-foreground">{title}</div>
       {message && <p className="mt-1 max-w-sm text-xs text-muted-foreground">{message}</p>}
       {action && <div className="mt-3">{action}</div>}

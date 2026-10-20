@@ -12,11 +12,11 @@ import { useRouteSearchParams } from "@/lib/route-search";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  AlertOctagon,
-  AlertTriangle,
+  OctagonAlert,
+  TriangleAlert,
   ArrowRight,
   Database,
-  Globe2,
+  Earth,
   Layers,
   Plus,
   RotateCw,
@@ -308,13 +308,13 @@ export function ClusterTile({ cluster }: { cluster: ClusterSummary }) {
 
       <div className="grid grid-cols-2 gap-2 text-xs">
         <Stat
-          icon={<AlertOctagon className="h-3 w-3" aria-hidden />}
+          icon={<OctagonAlert className="h-3 w-3" aria-hidden />}
           label="Current critical"
           value={freshExposure ? exposure.current_critical : "—"}
           tone={hasCritical ? "critical" : "muted"}
         />
         <Stat
-          icon={<AlertTriangle className="h-3 w-3" aria-hidden />}
+          icon={<TriangleAlert className="h-3 w-3" aria-hidden />}
           label="Current high"
           value={freshExposure ? exposure.current_high : "—"}
           tone={hasHigh ? "high" : "muted"}
@@ -432,7 +432,7 @@ function Stat({
 function OrgOverviewCallout() {
   const items: Array<{ to: string; label: string; description: string; icon: React.ReactNode }> = [
     { to: "/cve", label: "CVE DB", description: "Org-wide vulnerability catalog", icon: <Database className="h-4 w-4" /> },
-    { to: "/federation", label: "Federation", description: "Multi-cluster joins", icon: <Globe2 className="h-4 w-4" /> },
+    { to: "/federation", label: "Federation", description: "Multi-cluster joins", icon: <Earth className="h-4 w-4" /> },
     { to: "/posture", label: "Posture", description: "Feature & connector matrix", icon: <ShieldCheck className="h-4 w-4" /> },
     { to: "/settings/health", label: "System Health", description: "Platform components", icon: <Activity className="h-4 w-4" /> },
     { to: "/settings", label: "Settings", description: "Org configuration", icon: <SettingsIcon className="h-4 w-4" /> },

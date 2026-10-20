@@ -1,6 +1,6 @@
 import { useState, useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Activity, AlertTriangle, ShieldCheck, Sparkles, Clock3 } from "lucide-react";
+import { Activity, TriangleAlert, ShieldCheck, Sparkles, Clock3 } from "lucide-react";
 import { baselines as baselinesApi, type BaselineSummary, type BaselineMode, type BaselineInventoryRow, type BaselineInventoryResponse } from "@/api/client";
 import { PageHeader } from "@/components/ui/page";
 import { StatusPill, ModePill } from "@/components/ui/status-pill";
@@ -21,7 +21,7 @@ import { BASELINE_INVENTORY_SORTS, baselineInventoryMatches } from "./baselines/
 
 const COLUMNS: Array<{ mode: BaselineMode; title: string; tagline: string; tone: "info" | "warning" | "success"; icon: typeof Activity }> = [
  { mode: "learn", title: "Learn", tagline: "Configured to learn observed processes.", tone: "info", icon: Activity },
- { mode: "monitor", title: "Monitor", tagline: "Configured to report baseline deviations.", tone: "warning", icon: AlertTriangle },
+ { mode: "monitor", title: "Monitor", tagline: "Configured to report baseline deviations.", tone: "warning", icon: TriangleAlert },
  { mode: "enforce", title: "Enforce", tagline: "Configured to block deviations; check agent evidence.", tone: "success", icon: ShieldCheck },
 ];
 export function BaselinesPage() {

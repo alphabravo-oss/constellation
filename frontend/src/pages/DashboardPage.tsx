@@ -9,7 +9,7 @@ import { clusterCacheReady } from "@/lib/cluster-evidence";
 import { downloadCsv } from "@/lib/csv";
 import { Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
 import {
-  AlertOctagon, AlertTriangle, ShieldAlert, ShieldCheck, Activity,
+  OctagonAlert, TriangleAlert, ShieldAlert, ShieldCheck, Activity,
   TrendingUp, ArrowUpRight, ExternalLink, Database, FileWarning,
   ServerCog, PackageCheck, RefreshCw, ScanSearch, GitBranch,
 } from "lucide-react";
@@ -348,7 +348,7 @@ export function DashboardPage() {
           title="Security Events"
           rightSlot={<a href={eventEvidencePath} className="text-xs text-primary hover:underline">View matching events</a>}
           subtitle="High + critical alerts · last 14 days"
-          icon={<AlertTriangle className="h-3.5 w-3.5" />}
+          icon={<TriangleAlert className="h-3.5 w-3.5" />}
         >
           {(() => {
             if (eventsTimelineQ.isError) return <ErrorState title="Could not load event history." />;
@@ -415,8 +415,8 @@ export function DashboardPage() {
         </div>
         <div className="flex flex-col justify-between gap-5">
           <StatGrid>
-            <StatCard label="Critical" value={summaryData ? counts.critical : "—"} tone="critical" icon={<AlertOctagon className="h-3 w-3" />} href={clusterPath("/findings?severity=critical&lifecycle=open")} trend={trends.critical} />
-            <StatCard label="High" value={summaryData ? counts.high : "—"} tone="high" icon={<AlertTriangle className="h-3 w-3" />} href={clusterPath("/findings?severity=high&lifecycle=open")} trend={trends.high} />
+            <StatCard label="Critical" value={summaryData ? counts.critical : "—"} tone="critical" icon={<OctagonAlert className="h-3 w-3" />} href={clusterPath("/findings?severity=critical&lifecycle=open")} trend={trends.critical} />
+            <StatCard label="High" value={summaryData ? counts.high : "—"} tone="high" icon={<TriangleAlert className="h-3 w-3" />} href={clusterPath("/findings?severity=high&lifecycle=open")} trend={trends.high} />
             <StatCard label="Open" value={summaryData ? counts.open : "—"} tone="accent" icon={<Activity className="h-3 w-3" />} href={clusterPath("/findings?view=instances&lifecycle=open")} trend={trends.open} />
             <StatCard label="Accepted" value={summaryData ? counts.accepted : "—"} tone="neutral" icon={<ShieldCheck className="h-3 w-3" />} href={clusterPath("/findings?lifecycle=accepted")} />
           </StatGrid>
@@ -452,8 +452,8 @@ export function DashboardPage() {
         <StatCard label="Runtime · 24h" value={runtimeToday.isPending ? "…" : (runtimeThreats?.alerts ?? "—")}
           tone={(runtimeThreats?.alerts ?? 0) > 0 ? "critical" : "neutral"} icon={<ShieldAlert className="h-3 w-3" />} href={runtimeEvidencePath}
           hint={runtimeThreats ? `${runtimeThreats.blocks} blocked` : "Unavailable"} />
-        <StatCard label="Image CVEs" value={posture?.vulns_by_location?.image ?? "—"} tone="accent" icon={<AlertTriangle className="h-3 w-3" />} href={clusterPath("/findings?view=instances&kind=vulnerability&lifecycle=open&target_type=image-workload")} hint="Open image CVE records" />
-        <StatCard label="Host CVEs" value={posture?.vulns_by_location?.host ?? "—"} tone={(posture?.vulns_by_location?.host ?? 0) > 0 ? "high" : "neutral"} icon={<AlertTriangle className="h-3 w-3" />} href={clusterPath("/findings?view=instances&kind=vulnerability&lifecycle=open&target_type=host")} hint="Open host CVE records" />
+        <StatCard label="Image CVEs" value={posture?.vulns_by_location?.image ?? "—"} tone="accent" icon={<TriangleAlert className="h-3 w-3" />} href={clusterPath("/findings?view=instances&kind=vulnerability&lifecycle=open&target_type=image-workload")} hint="Open image CVE records" />
+        <StatCard label="Host CVEs" value={posture?.vulns_by_location?.host ?? "—"} tone={(posture?.vulns_by_location?.host ?? 0) > 0 ? "high" : "neutral"} icon={<TriangleAlert className="h-3 w-3" />} href={clusterPath("/findings?view=instances&kind=vulnerability&lifecycle=open&target_type=host")} hint="Open host CVE records" />
         <StatCard label="Fixable now" value={posture?.vuln_signals?.fixable ?? "—"} tone="low" icon={<ShieldCheck className="h-3 w-3" />} href={clusterPath("/findings?view=instances&kind=vulnerability&lifecycle=open&fixable=true")} hint="patched version exists" />
         <StatCard label="Privileged facts" value={posture?.hardening?.privileged ?? "—"} tone={(posture?.hardening?.privileged ?? 0) > 0 ? "critical" : "low"} icon={<ShieldAlert className="h-3 w-3" />} href={clusterPath("/deployments?hide_platform=false&risk_fact=privileged")} hint="Workloads reporting this risk-factor key" />
         <StatCard label="Root facts" value={posture?.hardening?.run_as_root ?? "—"} tone={(posture?.hardening?.run_as_root ?? 0) > 0 ? "high" : "low"} icon={<ShieldAlert className="h-3 w-3" />} href={clusterPath("/deployments?hide_platform=false&risk_fact=run_as_root")} hint="Workloads reporting this risk-factor key" />
@@ -563,7 +563,7 @@ export function DashboardPage() {
             })()}
           </div>
         </Panel>
-        <Panel title="Top Vulnerable Assets" subtitle="Up to six reported workloads ranked by critical/high inventory counts" icon={<AlertOctagon className="h-3.5 w-3.5" />}
+        <Panel title="Top Vulnerable Assets" subtitle="Up to six reported workloads ranked by critical/high inventory counts" icon={<OctagonAlert className="h-3.5 w-3.5" />}
           rightSlot={(posture?.top_vulnerable?.length ?? 0) > 0 ? (
             <button type="button"
               onClick={() => downloadCsv("constellation-vulnerable-workloads", ["Deployment ID", "Cluster ID", "Namespace", "Workload", "Platform Role", "Critical", "High"],
@@ -727,7 +727,7 @@ export function DashboardPage() {
   const trendsView = <div className="space-y-5">
       {/* Bottom row: distribution · CVE DB · trend */}
       <section className="c-rise c-rise-5 grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Panel title="Severity Distribution" icon={<AlertTriangle className="h-3.5 w-3.5" />}>
+        <Panel title="Severity Distribution" icon={<TriangleAlert className="h-3.5 w-3.5" />}>
           {sum.isError ? <ErrorState title="Could not load severity totals." /> : sum.isPending ? <p className="p-3 text-xs text-muted-foreground">Loading severity totals…</p> : severityCounts.length === 0 ? (
             <EmptyState title="No open findings" />
           ) : (

@@ -8,7 +8,7 @@ import { Command } from "cmdk";
 import {
   Search,
   LayoutDashboard,
-  AlertTriangle,
+  TriangleAlert,
   Boxes,
   Network,
   Database,
@@ -19,7 +19,7 @@ import {
   ArrowRight,
   Sun,
   Moon,
-  HelpCircle,
+  CircleHelp,
   Compass,
   Bug,
   Server,
@@ -226,7 +226,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
                 <Item icon={theme === "dark" ? <Sun /> : <Moon />} onSelect={() => { toggleTheme(); onOpenChange(false); }}>
                   Toggle theme · currently <span className="text-mono ml-1">{theme}</span>
                 </Item>
-                <Item icon={<HelpCircle />} onSelect={() => { onOpenChange(false); window.dispatchEvent(new CustomEvent("constellation:show-hotkeys")); }} shortcut="?">
+                <Item icon={<CircleHelp />} onSelect={() => { onOpenChange(false); window.dispatchEvent(new CustomEvent("constellation:show-hotkeys")); }} shortcut="?">
                   Show keyboard shortcuts
                 </Item>
                 <Item icon={<Compass />} onSelect={() => go("/posture", "Posture")}>
@@ -237,7 +237,7 @@ export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenCh
               {findingsQ.data?.findings && findingsQ.data.findings.length > 0 && (
                 <Group heading="Findings">
                   {findingsQ.data.findings.slice(0, 8).map((f) => (
-                    <Item key={findingRowKey(f)} value={`${f.title} ${f.external_id ?? ""} ${findingRowKey(f)}`} icon={<AlertTriangle />} onSelect={() => go(findingHref(f, f.cluster_id || clusterId || undefined), f.title, findingRowKey(f))}>
+                    <Item key={findingRowKey(f)} value={`${f.title} ${f.external_id ?? ""} ${findingRowKey(f)}`} icon={<TriangleAlert />} onSelect={() => go(findingHref(f, f.cluster_id || clusterId || undefined), f.title, findingRowKey(f))}>
                       <span className="flex-1 truncate">{f.title}</span>
                       <span className="ml-2 text-[10px] text-mono text-muted-foreground">{f.external_id ?? f.id.slice(0, 6)}</span>
                     </Item>
@@ -400,7 +400,7 @@ const NAV_ITEMS: NavSearchItem[] = [
   { icon: <ServerCog />, label: "Clusters", href: "/clusters", keywords: ["cluster", "fleet", "scope"] },
   { icon: <LayoutDashboard />, label: "Dashboard",   href: "/dashboard",  shortcut: "g d", keywords: ["home", "overview", "risk"] },
   { icon: <ArrowLeftRight />,  label: "NeuVector Switchboard", href: "/neuvector", keywords: ["nv", "migration", "switch", "map", "compatibility"] },
-  { icon: <AlertTriangle />,   label: "Findings",    href: "/findings",   shortcut: "g f", keywords: ["security risks", "vulnerabilities", "violations", "cve", "risk"] },
+  { icon: <TriangleAlert />,   label: "Findings",    href: "/findings",   shortcut: "g f", keywords: ["security risks", "vulnerabilities", "violations", "cve", "risk"] },
   { icon: <Server />,          label: "Nodes",       href: "/nodes",      shortcut: "g h", keywords: ["hosts", "host", "node", "agent", "enforcer"] },
   { icon: <PackageSearch />,   label: "Images",      href: "/images",     shortcut: "g i", keywords: ["registry images", "containers", "image scan", "vulnerability"] },
   { icon: <Boxes />,           label: "Assets",      href: "/assets",     shortcut: "g a", keywords: ["inventory", "services", "workloads", "containers"] },

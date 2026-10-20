@@ -4,7 +4,7 @@ import { useIsFetching, useMutation, useQuery, useQueryClient } from "@tanstack/
 import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
 import { useInventoryRoute, ScanInventoryExport } from "./inventory-workspace";
 import { Pager } from "@/components/ui/pager";
-import { Activity, AlertTriangle, Clock, Gauge, Search, ServerCog, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { Activity, TriangleAlert, Clock, Gauge, Search, ServerCog, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -249,7 +249,7 @@ export function ComponentsPage() {
         <StatCard label="Healthy" value={summary?.healthy ?? "—"} icon={<Activity className="h-3.5 w-3.5" />} />
         <StatCard label="Needs attention" value={summary ? attention : "—"} tone={attention ? "medium" : "neutral"} hint="Unhealthy instances and missing expected component families." />
         <StatCard label="Crashlooping" value={summary?.crashlooping ?? "—"} tone={(summary?.crashlooping ?? 0) ? "critical" : "neutral"} />
-        <StatCard label="Missing" value={summary?.missing ?? "—"} tone={(summary?.missing ?? 0) ? "critical" : "neutral"} icon={<AlertTriangle className="h-3.5 w-3.5" />} />
+        <StatCard label="Missing" value={summary?.missing ?? "—"} tone={(summary?.missing ?? 0) ? "critical" : "neutral"} icon={<TriangleAlert className="h-3.5 w-3.5" />} />
       </StatGrid>}
       {inventoryAvailable && q.isFetching && <p role="status" className="text-sm text-muted-foreground">Refreshing component inventory…</p>}
       <Tabs value={tab} onValueChange={(value) => updateURL({ tab: value === "inventory" ? null : value })} items={[

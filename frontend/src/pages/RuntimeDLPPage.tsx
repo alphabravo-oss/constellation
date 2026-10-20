@@ -7,7 +7,7 @@ import {
   ShieldCheck,
   ListChecks,
   Plus,
-  Edit3,
+  PenLine,
   Trash2,
 } from "lucide-react";
 
@@ -201,7 +201,7 @@ function DLPActions({ clusterID, disabled, r, onEdit }: { clusterID: string; dis
         </Button>
       )}
       <Button size="sm" variant="ghost" disabled={busy} aria-label={`Edit ${r.name}`} onClick={onEdit} data-testid={`runtime-dlp-edit-${r.id}`}>
-        <Edit3 className="h-3.5 w-3.5" />
+        <PenLine className="h-3.5 w-3.5" />
       </Button>
       <Button
         size="sm"

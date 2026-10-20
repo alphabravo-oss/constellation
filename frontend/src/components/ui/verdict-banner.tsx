@@ -1,14 +1,14 @@
 import { useId, useState, type ReactNode } from "react";
-import { CheckCircle2, AlertTriangle, XCircle, Info, ChevronDown } from "lucide-react";
+import { CircleCheck, TriangleAlert, CircleX, Info, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/cn";
 
 /** Compact page status. Supporting context is available on demand. */
 export type VerdictStatus = "ok" | "degraded" | "critical" | "info";
 
 const STATUS = {
-  ok: { icon: CheckCircle2, color: "var(--color-status-success)" },
-  degraded: { icon: AlertTriangle, color: "var(--color-severity-medium)" },
-  critical: { icon: XCircle, color: "var(--color-severity-critical)" },
+  ok: { icon: CircleCheck, color: "var(--color-status-success)" },
+  degraded: { icon: TriangleAlert, color: "var(--color-severity-medium)" },
+  critical: { icon: CircleX, color: "var(--color-severity-critical)" },
   info: { icon: Info, color: "var(--color-primary)" },
 } as const;
 

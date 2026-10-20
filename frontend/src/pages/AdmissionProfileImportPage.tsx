@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Download, Eye, UploadCloud } from "lucide-react";
+import { ArrowLeft, Download, Eye, CloudUpload } from "lucide-react";
 import { policies, type AdmissionProfile, type AdmissionProfileBundle, type AdmissionProfileImportResponse, type Policy } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { useRouteSearchParams } from "@/lib/route-search";
@@ -134,7 +134,7 @@ function AdmissionProfileImporter({ backTo }: { backTo: string }) {
         {importProfile.isError && <p role="alert" className="text-sm text-status-error">Could not import this profile. Your draft is preserved. Try again.</p>}
         <div className="space-y-3" data-testid="admission-profile-compare"><h3 className="text-sm font-semibold">{matchingPreview ? "Preview compared with installed policies" : "Profile rules compared with installed policies"}</h3><p className="text-xs text-muted-foreground">New rules are added. Changed rules replace the matching installed policy configuration. Installed rules already match. Comparison covers the loaded organization policies.</p><DataTable rows={compareRows} columns={columns} rowKey={(row) => row.policy.policy_name} preferencesKey="admission-profile-comparison" exportFileName="admission-profile-comparison.csv" emptyState={<p className="p-6 text-center text-sm text-muted-foreground">Choose a profile or preview a bundle to compare its rules.</p>} /></div>
         {matchingPreview && <p role="status" className="text-sm">Preview ready: {matchingPreview.policies.length} rules from {matchingPreview.profile_id}. Changing any input requires a new preview.</p>}
-        <div className="flex flex-wrap justify-end gap-3 border-t border-border pt-5"><Button type="button" variant="ghost" disabled={busy} onClick={() => void navigate({ href: backTo })}>Cancel</Button><Button type="button" disabled={!canPreview} onClick={() => { if (body && canPreview) preview.mutate({ body, key: inputKey }); }} data-testid="admission-profile-preview"><Eye className="h-4 w-4" />{preview.isPending ? "Previewing…" : "Preview"}</Button><Button type="submit" variant="primary" disabled={!canImport} data-testid="admission-profile-import"><UploadCloud className="h-4 w-4" />{importProfile.isPending ? "Importing…" : "Import profile"}</Button></div>
+        <div className="flex flex-wrap justify-end gap-3 border-t border-border pt-5"><Button type="button" variant="ghost" disabled={busy} onClick={() => void navigate({ href: backTo })}>Cancel</Button><Button type="button" disabled={!canPreview} onClick={() => { if (body && canPreview) preview.mutate({ body, key: inputKey }); }} data-testid="admission-profile-preview"><Eye className="h-4 w-4" />{preview.isPending ? "Previewing…" : "Preview"}</Button><Button type="submit" variant="primary" disabled={!canImport} data-testid="admission-profile-import"><CloudUpload className="h-4 w-4" />{importProfile.isPending ? "Importing…" : "Import profile"}</Button></div>
       </form>
     </Card>
   </>;
