@@ -23,7 +23,7 @@ async function render(search=""){history=createMemoryHistory({initialEntries:[`/
 async function rerender(){await act(async()=>root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{...identity}}><TestRouter history={history}><ComponentsPage /></TestRouter></TablePreferencesProvider></QueryClientProvider>));}
 async function settle(check:()=>void){await vi.waitFor(async()=>{await act(async()=>{});check();});}
 const rows=()=>host.querySelectorAll('[data-testid="component-inventory-table"] tbody tr');
-const button=(label:string)=>[...host.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.trim() === label || item.getAttribute("aria-label") === label)!;
+const button=(label:string)=>[...host.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.trim() === label || item.getAttribute("aria-label") === label || item.getAttribute("data-export-label") === label)!;
 async function click(label:string){await act(async()=>{const target=button(label);if(target.getAttribute("role")==="tab")target.dispatchEvent(new MouseEvent("mousedown",{bubbles:true,button:0}));else target.click();});}
 async function search(value:string){await act(async()=>{const input=host.querySelector<HTMLInputElement>('[aria-label="Search components"]')!;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")!.set!.call(input,value);input.dispatchEvent(new Event("input",{bubbles:true}));});}
 it("continues beyond the old1000 cap with full health/role totals and matching export",async()=>{

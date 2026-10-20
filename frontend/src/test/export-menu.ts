@@ -25,7 +25,7 @@ export function exportItem(label: string): HTMLElement | undefined {
 }
 
 function singleExport(label: string, root: Root): HTMLButtonElement | undefined {
-  return [...root.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.getAttribute("aria-label") === label && button.getAttribute("aria-haspopup") !== "menu");
+  return [...root.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.getAttribute("aria-label") === label || button.getAttribute("data-export-label") === label && button.getAttribute("aria-haspopup") !== "menu");
 }
 
 /** Open the Export menu and choose the option whose text contains `label`

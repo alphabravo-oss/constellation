@@ -15,7 +15,7 @@ describe("severityOrder", () => {
 describe("severityBg", () => {
   it("provides a class string for every canonical severity", () => {
     for (const s of ["info", "low", "medium", "high", "critical"] as const) {
-      expect(severityBg[s]).toMatch(/bg-severity-/);
+      expect(severityBg[s]).toMatch(/text-severity-/);
     }
   });
 });

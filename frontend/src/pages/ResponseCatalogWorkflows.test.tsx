@@ -35,7 +35,7 @@ async function renderPage(page = "form") {
 }
 async function rerenderPage(page = "form") { await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{ ...owner }}>{page === "outside" ? <p>Outside response override</p> : page === "form" ? <ResponseCatalogOverrideFormPage /> : page === "v2" ? <ResponseRulesPage /> : <ResponsePage />}</TablePreferencesProvider></QueryClientProvider>)); }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
-function button(label: string) { return [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === label || b.getAttribute("aria-label") === label)!; }
+function button(label: string) { return [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === label || b.getAttribute("aria-label") === label || b.getAttribute("data-export-label") === label)!; }
 async function click(label: string) { await act(async () => button(label).click()); }
 async function change(selector: string, value: string) { await act(async () => { const input = (nativeSelect(host, selector) ?? host.querySelector<HTMLSelectElement | HTMLTextAreaElement | HTMLInputElement>(selector))!; const proto = input instanceof HTMLSelectElement ? HTMLSelectElement.prototype : input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(input, value); input.dispatchEvent(new Event(input instanceof HTMLSelectElement ? "change" : "input", { bubbles: true })); }); }
 async function ready() { await settled(() => expect(button("Preview")?.disabled).toBe(false)); }

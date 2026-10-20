@@ -3083,8 +3083,8 @@ function NodeLabel({ workload, kind }: { workload: NetworkWorkload; kind?: Netwo
             )}
             {modeColor && (
               <span
-                className="shrink-0 rounded-sm px-1 text-micro  font-medium"
-                style={{ background: `color-mix(in oklab, ${modeColor} 18%, transparent)`, color: modeColor }}
+                className="shrink-0 rounded-sm border px-1 text-micro font-medium text-foreground"
+                style={{ borderColor: modeColor }}
                 title={`Policy mode: ${mode}${mode === "discover" ? " (unprotected — learning only)" : ""}`}
                 data-testid={`network-node-mode-${mode}`}
               >

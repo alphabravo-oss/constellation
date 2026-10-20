@@ -38,7 +38,7 @@ const tree = () => <QueryClientProvider client={client}><TablePreferencesProvide
 async function render(search = "") { history = createMemoryHistory({ initialEntries: [`/clusters/cluster/risk/node/node${search}`] }); await act(async () => root.render(tree())); }
 async function settle(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
 const rows = () => host.querySelectorAll('[data-testid="node-host-findings-table"] tbody tr');
-const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.trim() === label || item.getAttribute("aria-label") === label)!;
+const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.trim() === label || item.getAttribute("aria-label") === label || item.getAttribute("data-export-label") === label)!;
 async function click(label: string) { await act(async () => button(label).click()); }
 async function field(selector: string, value: string) { await act(async () => { const input = host.querySelector<HTMLInputElement | HTMLSelectElement>(selector)!; Object.getOwnPropertyDescriptor(input.tagName === "SELECT" ? HTMLSelectElement.prototype : HTMLInputElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event(input.tagName === "SELECT" ? "change" : "input", { bubbles: true })); }); }
 

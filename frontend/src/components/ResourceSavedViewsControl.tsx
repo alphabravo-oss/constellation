@@ -6,7 +6,6 @@ import {
   captureResourceView,
   resourceViewHref,
   resourceViewKey,
-  resourceViewLabel,
   resourceViewSummary,
   resourceViewValidator,
   resourceFilterEntries,
@@ -56,7 +55,6 @@ export function ResourceSavedViewsControl({
         <Button
           size="sm"
           variant="ghost"
-          aria-label={`Save ${resourceViewLabel[inventory]} view`}
           title={payload ? resourceFilterEntries(payload).map(([key, value]) => `${key}: ${value}`).join(" · ") : undefined}
           disabled={!ready || !payload || !canPersist}
           onClick={() =>

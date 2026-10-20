@@ -51,7 +51,7 @@ async function settled(check: () => void) { await vi.waitFor(async () => { await
 it("downloads cluster-scoped HTML and invalidates its pending download when scope changes", async () => {
   vi.mocked(downloadExecutiveReport).mockResolvedValue(undefined);
   await renderPage(); await settled(() => expect(host.textContent).toContain("Security risk: 27/100"));
-  const button = [...host.querySelectorAll("button")].find((item) => item.textContent?.trim() === "Report for entire cluster (HTML)" || item.getAttribute("aria-label") === "Report for entire cluster (HTML)")!;
+  const button = [...host.querySelectorAll("button")].find((item) => item.textContent?.trim() === "Report for entire cluster (HTML)" || item.getAttribute("aria-label") === "Report for entire cluster (HTML)" || item.getAttribute("data-export-label") === "Report for entire cluster (HTML)")!;
   expect(button.disabled).toBe(false); await act(async () => button.click());
   expect(downloadExecutiveReport).toHaveBeenCalledWith("org", "cluster", expect.any(Function));
   const guard = vi.mocked(downloadExecutiveReport).mock.calls[0][2]!; expect(guard()).toBe(true);
@@ -62,7 +62,7 @@ it("exports the exact top-workload identity and reported platform role", async (
   route.params = new URLSearchParams("tab=network");
   vi.mocked(dashboard.summary).mockResolvedValue({ findings_by_severity: {}, recent_activity: [], posture: { security_score: 27, top_vulnerable: [{ id:"deployment",cluster_id:"cluster",namespace:"custom-install",name:"controller",platform_role:"core",critical:2,high:3 }] } } as unknown as Awaited<ReturnType<typeof dashboard.summary>>);
   await renderPage(); await settled(() => expect(host.textContent).toContain("controller"));
-  const panel = [...host.querySelectorAll("h2")].find((item) => item.textContent === "Top vulnerable assets" || item.getAttribute("aria-label") === "Top vulnerable assets")!.closest("section")!;
+  const panel = [...host.querySelectorAll("h2")].find((item) => item.textContent === "Top vulnerable assets" || item.getAttribute("aria-label") === "Top vulnerable assets" || item.getAttribute("data-export-label") === "Top vulnerable assets")!.closest("section")!;
   await act(async () => panel.querySelector("button")!.click());
   expect(downloadCsv).toHaveBeenCalledWith("constellation-vulnerable-workloads", ["Deployment ID", "Cluster ID", "Namespace", "Workload", "Platform Role", "Critical", "High"], [["deployment", "cluster", "custom-install", "controller", "core", 2, 3]]);
 });
@@ -85,8 +85,8 @@ it("honors the network deep link and exports server platform-role evidence", asy
   route.params = new URLSearchParams("tab=network");
   vi.mocked(network.exposure).mockResolvedValue({ ingress: [{ workload: "app", name: "app", protocols: [], ports: [], namespace: "ns", platform_role: "controller", external_peers: 2, sessions: 3, policy_mode: "monitor", critical: 0, high: 0 }], egress: [] } as unknown as Awaited<ReturnType<typeof network.exposure>>);
   await renderPage(); await settled(() => expect(host.textContent).toContain("Exposed services"));
-  await settled(() => expect([...host.querySelectorAll("button")].find((b) => b.textContent === "Export CSV" || b.getAttribute("aria-label") === "Export CSV")?.disabled).toBe(false));
-  await act(async () => { [...host.querySelectorAll("button")].find((b) => b.textContent === "Export CSV" || b.getAttribute("aria-label") === "Export CSV")!.click(); });
+  await settled(() => expect([...host.querySelectorAll("button")].find((b) => b.textContent === "Export CSV" || b.getAttribute("aria-label") === "Export CSV" || b.getAttribute("data-export-label") === "Export CSV")?.disabled).toBe(false));
+  await act(async () => { [...host.querySelectorAll("button")].find((b) => b.textContent === "Export CSV" || b.getAttribute("aria-label") === "Export CSV" || b.getAttribute("data-export-label") === "Export CSV")!.click(); });
   expect(downloadCsv).toHaveBeenCalledWith("constellation-exposure", expect.arrayContaining(["Platform role"]), [["ingress", "app", "ns", "controller", 2, 3, "monitor"]]);
   expect(host.querySelector('a[href="/clusters/cluster/groups/settings"]')).not.toBeNull(); expect(host.querySelector("select")).toBeNull();
 });
@@ -97,7 +97,7 @@ const platformFacts = (count = 9): PlatformFactsResponse => ({
   evidence: { id: "evidence", inventory_hash: "hash", observed_at: "2026-10-12T00:00:00Z", package_count: count, packages: Array.from({ length: count }, (_, index) => ({ name: `package-${String(index + 1).padStart(3, "0")}`, version: "1.0", ecosystem: "generic", namespace_name: "platform" })) },
   findings_summary: { open: 2, critical: 1, high: 1, medium: 0, low: 0 }, findings: [],
 } as PlatformFactsResponse);
-const button = (text: string) => [...host.querySelectorAll("button")].find((element) => element.textContent?.trim() === text || element.getAttribute("aria-label") === text)!;
+const button = (text: string) => [...host.querySelectorAll("button")].find((element) => element.textContent?.trim() === text || element.getAttribute("aria-label") === text || element.getAttribute("data-export-label") === text)!;
 async function rerender() { await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{org_id:"org",user_id:"user"}}><DashboardPage /></TablePreferencesProvider></QueryClientProvider>)); }
 
 it.each(["loading", "missing", "wrong", "error", "transition"])("blocks queries and cached metrics for %s cluster scope", async (condition) => {
@@ -288,7 +288,7 @@ it("links returned organization activity IDs without narrowing to the active clu
  const activity=Array.from({length:20},(_,i)=>({id:String(100-i),at:"2026-10-12T00:00:00Z",action:`selected-${i}`,target_kind:"settings",target_id:"org"}));
  vi.mocked(dashboard.summary).mockResolvedValue({findings_by_severity:{},recent_activity:activity,posture:{security_score:0}} as unknown as Awaited<ReturnType<typeof dashboard.summary>>);
  await renderPage();await settled(()=>expect(host.textContent).toContain("selected-0"));
- const link=[...host.querySelectorAll("a")].find((a) => a.textContent === "View selected activity" || a.getAttribute("aria-label") === "View selected activity")!; const target=new URL(link.href,"http://localhost");expect(target.pathname).toBe("/organization/audit");expect(target.searchParams.get("event_ids")).toBe(activity.map(r=>r.id).join(","));expect(target.searchParams.has("cluster")).toBe(false);expect(host.querySelector('a[href="/organization/audit?event_id=100"]')).not.toBeNull();expect(host.textContent).not.toContain("selected-8");
+ const link=[...host.querySelectorAll("a")].find((a) => a.textContent === "View selected activity" || a.getAttribute("aria-label") === "View selected activity" || a.getAttribute("data-export-label") === "View selected activity")!; const target=new URL(link.href,"http://localhost");expect(target.pathname).toBe("/organization/audit");expect(target.searchParams.get("event_ids")).toBe(activity.map(r=>r.id).join(","));expect(target.searchParams.has("cluster")).toBe(false);expect(host.querySelector('a[href="/organization/audit?event_id=100"]')).not.toBeNull();expect(host.textContent).not.toContain("selected-8");
 });
 
 it("carries source time bounds to exact event-only destinations and graded compliance", async () => {

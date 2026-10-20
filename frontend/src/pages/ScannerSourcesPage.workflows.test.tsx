@@ -52,7 +52,7 @@ async function render(kind: "form" | "list" = "form", entry = kind === "form" ? 
 function input() { return host.querySelector<HTMLInputElement>('[data-testid="scanner-db-refresh-minutes"]')!; }
 function save() { return host.querySelector<HTMLButtonElement>('[data-testid="scanner-db-refresh-save"]')!; }
 async function edit(value: string) { await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input(), value); input().dispatchEvent(new Event("input", { bubbles: true })); }); }
-async function click(label: string) { const button = [...document.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent === label || item.getAttribute("aria-label") === label)!; expect(button).toBeDefined(); await act(async () => button.click()); }
+async function click(label: string) { const button = [...document.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent === label || item.getAttribute("aria-label") === label || item.getAttribute("data-export-label") === label)!; expect(button).toBeDefined(); await act(async () => button.click()); }
 async function openJob() { await settled(() => expect(host.querySelector('[aria-label="Inspect scan job"]')).not.toBeNull()); await click("Inspect scan job"); }
 
 it("shows read-only database configuration with a dedicated edit link", async () => {
@@ -142,7 +142,7 @@ it("sends literal search and server status/type sorting while preserving tab and
   await click("failed");await settled(()=>expect(scanJobs.list).toHaveBeenLastCalledWith(expect.objectContaining({status:"failed",q:"%_needle"})));
   await settled(()=>expect(host.querySelector('[data-testid="scanner-recent-jobs"]')).not.toBeNull());
   const table=host.querySelector('[data-testid="scanner-recent-jobs"]')!;
-  await act(async()=>[...table.querySelectorAll<HTMLButtonElement>('th[data-column-id="target"] button')].find((button) => button.textContent === "Target" || button.getAttribute("aria-label") === "Target")!.click());
+  await act(async()=>[...table.querySelectorAll<HTMLButtonElement>('th[data-column-id="target"] button')].find((button) => button.textContent === "Target" || button.getAttribute("aria-label") === "Target" || button.getAttribute("data-export-label") === "Target")!.click());
   await settled(()=>expect(scanJobs.list).toHaveBeenLastCalledWith(expect.objectContaining({sort:"target",order:"desc"})));
   await settled(()=>expect(host.querySelector('[data-testid="scanner-recent-jobs"]')).not.toBeNull());
   expect(host.querySelector('[data-testid="scanner-recent-jobs"] th[data-column-id="worker"] [aria-sort]')).toBeNull();
@@ -174,7 +174,7 @@ it("blocks a stale action from invalidated cache before React rerenders", async 
 it("hides refreshed queue and selected evidence on failure while preserving selection for Retry", async () => {
   const queue={target_type:"image",pending:9,retry_delayed:0,running:0,stale_running:0,exhausted:0,failed:0,paused:0,canceled:0,completed_last_hour:0,oldest_pending_seconds:5};
   vi.mocked(scanJobs.list).mockImplementation(async request=>({...inventory([job()],request),queue_metrics:[queue]}));
-  await render("list");await openJob();await act(async()=>[...host.querySelectorAll<HTMLElement>("summary")].find((item) => item.textContent === "Queue depth by target type" || item.getAttribute("aria-label") === "Queue depth by target type")!.click());await settled(()=>expect(host.querySelector('[data-testid="scanner-queue-metrics"] tbody')?.textContent).toContain("9"));
+  await render("list");await openJob();await act(async()=>[...host.querySelectorAll<HTMLElement>("summary")].find((item) => item.textContent === "Queue depth by target type" || item.getAttribute("aria-label") === "Queue depth by target type" || item.getAttribute("data-export-label") === "Queue depth by target type")!.click());await settled(()=>expect(host.querySelector('[data-testid="scanner-queue-metrics"] tbody')?.textContent).toContain("9"));
   const read=deferred<Awaited<ReturnType<typeof scanJobs.list>>>();vi.mocked(scanJobs.list).mockReturnValue(read.promise);
   await act(async()=>{void client.refetchQueries({queryKey:["scan-jobs","scanner-sources","org-a:user-a"]});});
   await settled(()=>expect(host.querySelector('[data-testid="scanner-queue-metrics"] tbody')?.textContent).not.toContain("9"));

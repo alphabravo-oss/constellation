@@ -57,7 +57,7 @@ async function render(url = "/clusters/cluster-a/runtime", seed?: (client: Query
 }
 async function rerender() { await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={identity}><TestRouter path="/clusters/$id/runtime" history={history}><RuntimePage /></TestRouter></TablePreferencesProvider></QueryClientProvider>)); }
 async function tab(label: string) {
-  const trigger = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((item) => item.textContent === label || item.getAttribute("aria-label") === label)!;
+  const trigger = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((item) => item.textContent === label || item.getAttribute("aria-label") === label || item.getAttribute("data-export-label") === label)!;
   await act(async () => trigger.focus());
   await settled(() => expect(trigger.getAttribute('aria-selected')).toBe("true"));
 }
@@ -170,7 +170,7 @@ it.each(["live","evidence","workloads"])("retains server role metadata and expli
  const data=overview();data.recent_events=[{...evidenceEvent(),platform_role:"core"},{...evidenceEvent("cluster-a","unknown"),platform_role:""}];data.workloads=[{...data.workloads[0],platform_role:"core"},{...data.workloads[0],workload_id:"prod/customer",platform_role:""}];
  vi.mocked(enterprise.runtime).mockResolvedValue(data);vi.mocked(runtimeEvents.list).mockResolvedValue(historyResponse({},[{...rawEvent(),cluster_id:"cluster-a",platform_role:"core"},{...rawEvent(),id:"unknown",workload_id:"prod/customer",platform_role:""}]));
  await render(`/clusters/cluster-a/runtime?tab=${workspace}`);await settled(()=>expect(host.textContent).toContain("core"));
- if(workspace==="live"){await chooseExport("This table",host);}else{const exportButton=[...host.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Export CSV" || button.getAttribute("aria-label") === "Export CSV")!;await act(async()=>exportButton.click());}
+ if(workspace==="live"){await chooseExport("This table",host);}else{const exportButton=[...host.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Export CSV" || button.getAttribute("aria-label") === "Export CSV" || button.getAttribute("data-export-label") === "Export CSV")!;await act(async()=>exportButton.click());}
  const [,headers,rows]=vi.mocked(downloadCsv).mock.calls.at(-1)!;const column=headers.indexOf("platform_role");expect(column).toBeGreaterThanOrEqual(0);expect(rows.map(row=>row[column])).toEqual(["core",""]);expect(rows.flat()).not.toContain("Not classified");
 });
 it("rejects foreign-cluster raw event metadata instead of exporting it",async()=>{
@@ -182,7 +182,7 @@ it("lets the operator change the initially compact live-event density",async()=>
 });
 
 const historyRows = () => Array.from({length:205},(_,index)=>({...rawEvent(),id:index<2?"shared-uuid":`event-${index}`,at:new Date(Date.UTC(2026,9,10,12,0,index)).toISOString(),workload_id:`operations/service-${index}`,namespace:"operations",kind:index%2?"file_open":"exec",source:"ebpf",verdict:index%2?"observed":"alert",severity:"high" as const,payload:{message:`Evidence ${index}`}}));
-const findButton=(text:string)=>[...host.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === text || button.getAttribute("aria-label") === text)!;
+const findButton=(text:string)=>[...host.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === text || button.getAttribute("aria-label") === text || button.getAttribute("data-export-label") === text)!;
 async function selectHistory(id:string,value:string){await act(async()=>{const input=host.querySelector<HTMLSelectElement>(id)!;Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype,"value")!.set!.call(input,value);input.dispatchEvent(new Event("change",{bubbles:true}));});}
 it("continues beyond the old latest100 cap and exports every matching record with server page counts",async()=>{
  vi.mocked(runtimeEvents.list).mockImplementation(async request=>historyResponse(request,historyRows()));

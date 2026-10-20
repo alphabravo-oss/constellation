@@ -21,7 +21,7 @@ async function renderPage() {
 it("cancels new registration without creating a cluster", async () => {
   await renderPage();
   expect(host.querySelector("details")?.open).toBe(false);
-  await act(async () => [...host.querySelectorAll("button")].find((b) => b.textContent === "Cancel" || b.getAttribute("aria-label") === "Cancel")!.click());
+  await act(async () => [...host.querySelectorAll("button")].find((b) => b.textContent === "Cancel" || b.getAttribute("aria-label") === "Cancel" || b.getAttribute("data-export-label") === "Cancel")!.click());
   expect(route.navigate).toHaveBeenCalledWith({ href: "/clusters" });
   expect(clusterInitBundles.create).not.toHaveBeenCalled();
 });

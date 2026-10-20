@@ -38,7 +38,7 @@ async function renderPage(page: ReactNode) {
 async function rerenderPage(page: ReactNode = <AdmissionSettingsPage />) { await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{ ...owner }}>{page}</TablePreferencesProvider></QueryClientProvider>)); }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
 async function change(selector: string, value: string) { await act(async () => { const input = (nativeSelect(host, selector) ?? host.querySelector<HTMLInputElement | HTMLSelectElement>(selector))!; Object.getOwnPropertyDescriptor(input instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event(input instanceof HTMLSelectElement ? "change" : "input", { bubbles: true })); }); }
-async function click(label: string) { await act(async () => { [...host.querySelectorAll("button")].find((button) => button.textContent?.trim() === label || button.getAttribute("aria-label") === label)!.click(); }); }
+async function click(label: string) { await act(async () => { [...host.querySelectorAll("button")].find((button) => button.textContent?.trim() === label || button.getAttribute("aria-label") === label || button.getAttribute("data-export-label") === label)!.click(); }); }
 it.each(["failed", "foreign"])("does not edit %s admission settings", async (scenario) => {
   if (scenario === "failed") vi.mocked(policies.admissionState).mockRejectedValue(new Error("private"));
   else vi.mocked(policies.admissionState).mockResolvedValue({ ...state, cluster_id: "other" });

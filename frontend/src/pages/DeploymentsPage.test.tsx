@@ -35,7 +35,7 @@ async function input(testId: string, value: string) {
  const field = host.querySelector<HTMLInputElement>(`[data-testid="${testId}"]`)!;
  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(field, value); field.dispatchEvent(new Event("input", { bubbles: true })); });
 }
-const button = (label: string) => Array.from(host.querySelectorAll("button")).find((element) => element.textContent?.trim() === label || element.getAttribute("aria-label") === label)!;
+const button = (label: string) => Array.from(host.querySelectorAll("button")).find((element) => element.textContent?.trim() === label || element.getAttribute("aria-label") === label || element.getAttribute("data-export-label") === label)!;
 
 it("sends URL search/namespace/visibility/page to the server and uses matching totals", async () => {
  await render("/clusters/cluster/deployments?q=customer-0605&namespace=payments&hide_platform=false&page=3"); await settled();

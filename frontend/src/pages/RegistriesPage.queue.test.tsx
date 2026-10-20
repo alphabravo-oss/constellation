@@ -149,7 +149,7 @@ async function settled(check: () => void) {
 }
 const button = (text: string) =>
   [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-    (b) => b.textContent?.trim() === text || b.getAttribute("aria-label") === text,
+    (b) => b.textContent?.trim() === text || b.getAttribute("aria-label") === text || b.getAttribute("data-export-label") === text,
   )!;
 const jobCell = () => host.querySelector('td[data-column-id="scan-jobs"]')!;
 async function openActions() {

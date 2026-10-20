@@ -231,7 +231,7 @@ async function settled(check: () => void) {
 }
 const button = (text: string) =>
   [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-    (item) => item.textContent?.trim() === text || item.getAttribute("aria-label") === text,
+    (item) => item.textContent?.trim() === text || item.getAttribute("aria-label") === text || item.getAttribute("data-export-label") === text,
   )!;
 const stats = () =>
   [
@@ -242,7 +242,7 @@ const stats = () =>
 async function tab(text: string) {
   await act(async () => {
     [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
-      .find((item) => item.textContent === text || item.getAttribute("aria-label") === text)!
+      .find((item) => item.textContent === text || item.getAttribute("aria-label") === text || item.getAttribute("data-export-label") === text)!
       .focus();
   });
   await settled(() =>

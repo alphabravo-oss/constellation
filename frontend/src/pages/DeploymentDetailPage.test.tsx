@@ -24,8 +24,8 @@ async function render(search = "", seed?: (client: QueryClient) => void) {
  await act(async () => root!.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{org_id:"org",user_id:"operator"}}><TestRouter history={history} path="/clusters/$clusterId/deployments/$did"><DeploymentDetailPage /></TestRouter></TablePreferencesProvider></QueryClientProvider>));
 }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
-async function tab(name: string) { await act(async () => [...host.querySelectorAll('[role="tab"]')].find((item) => item.textContent === name || item.getAttribute("aria-label") === name)!.dispatchEvent(new MouseEvent("mousedown", { button: 0, bubbles: true }))); }
-const button = (label: string) => [...host.querySelectorAll("button")].find((item) => item.textContent?.trim() === label || item.getAttribute("aria-label") === label)!;
+async function tab(name: string) { await act(async () => [...host.querySelectorAll('[role="tab"]')].find((item) => item.textContent === name || item.getAttribute("aria-label") === name || item.getAttribute("data-export-label") === name)!.dispatchEvent(new MouseEvent("mousedown", { button: 0, bubbles: true }))); }
+const button = (label: string) => [...host.querySelectorAll("button")].find((item) => item.textContent?.trim() === label || item.getAttribute("aria-label") === label || item.getAttribute("data-export-label") === label)!;
 it.each(["loading", "missing", "wrong", "error", "transition"])("blocks queries and cached deployment evidence for %s cluster", async condition => {
  if (condition === "loading") scope.isLoading = true; if (condition === "missing") scope.cluster = undefined; if (condition === "wrong") scope.cluster = { id: "other" }; if (condition === "error") scope.error = new Error("unavailable"); if (condition === "transition") scope.clusterId = undefined;
  await render("", qc => qc.setQueryData(["deployment", scope.clusterId, "deployment"], fixtureDeployment()));

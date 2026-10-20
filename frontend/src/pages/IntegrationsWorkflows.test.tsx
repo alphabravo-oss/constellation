@@ -17,7 +17,7 @@ beforeEach(() => { route.search = ""; vi.mocked(receivers.list).mockResolvedValu
 afterEach(() => { act(() => root?.unmount()); client?.clear(); host?.remove(); vi.resetAllMocks(); localStorage.clear(); });
 async function renderPage() { host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host); client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); await act(async () => root.render(<QueryClientProvider client={client}><IntegrationsPage /></QueryClientProvider>)); }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
-function button(label: string) { return [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === label || b.getAttribute("aria-label") === label)!; }
+function button(label: string) { return [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === label || b.getAttribute("aria-label") === label || b.getAttribute("data-export-label") === label)!; }
 async function click(label: string) { await act(async () => button(label).click()); }
 async function select(id: string) { await act(async () => host.querySelector<HTMLElement>(`[data-testid="receiver-row-${id}"]`)!.click()); }
 

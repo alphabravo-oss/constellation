@@ -41,7 +41,7 @@ async function render(search = "") { history = createMemoryHistory({ initialEntr
 async function rerender() { await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={identity}><TestRouter history={history}><TestPage /></TestRouter></TablePreferencesProvider></QueryClientProvider>)); if (updatePage) await act(async () => updatePage!({cluster, ready})); }
 async function settle(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
 function rows() { return host.querySelectorAll('[data-testid="compliance-source-evidence-table"] tbody tr'); }
-function button(text: string) { return [...host.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.trim() === text || item.getAttribute("aria-label") === text)!; }
+function button(text: string) { return [...host.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.trim() === text || item.getAttribute("aria-label") === text || item.getAttribute("data-export-label") === text)!; }
 async function select(selector: string, value: string) { await act(async () => { const input = nativeSelect(host, selector)!; Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event("change", { bubbles: true })); }); }
 it("reads past the old source cap with full matching counts and independent server pages", async () => {
  await render("&evidence_page=12&status=graded&page=4&context=a&context=b"); await settle(() => expect(rows()).toHaveLength(100));

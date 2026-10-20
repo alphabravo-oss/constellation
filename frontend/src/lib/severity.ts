@@ -6,11 +6,11 @@ import type { Severity } from "@/api/client";
  * text color, AA on both themes.
  */
 export const severityBg: Record<Severity, string> = {
-  info:     "bg-severity-info/12 text-severity-info",
-  low:      "bg-severity-low/12 text-severity-low",
-  medium:   "bg-severity-medium/14 text-severity-medium",
-  high:     "bg-severity-high/14 text-severity-high",
-  critical: "bg-severity-critical/14 text-severity-critical",
+  info:     "border border-severity-info/45 text-severity-info",
+  low:      "border border-severity-low/45 text-severity-low",
+  medium:   "border border-severity-medium/45 text-severity-medium",
+  high:     "border border-severity-high/45 text-severity-high",
+  critical: "border border-severity-critical/45 text-severity-critical",
 };
 
 export function severityOrder(sev: Severity): number {

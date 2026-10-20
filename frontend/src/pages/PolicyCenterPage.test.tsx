@@ -271,7 +271,7 @@ describe("PolicyCenterPage", () => {
     expect(host?.querySelector('[data-testid="migration-other-cluster-diagnostics"]')?.textContent).toContain("sibling");
     expect(enterprise.migrationImportsPage).toHaveBeenCalledWith({ limit: 25 });
 
-    const button = Array.from(host?.querySelectorAll("button") ?? []).find((candidate) => candidate.textContent === "Load more imports" || candidate.getAttribute("aria-label") === "Load more imports");
+    const button = Array.from(host?.querySelectorAll("button") ?? []).find((candidate) => candidate.textContent === "Load more imports" || candidate.getAttribute("aria-label") === "Load more imports" || candidate.getAttribute("data-export-label") === "Load more imports");
     expect(button).toBeTruthy();
     await act(async () => { button?.click(); });
     await settle();
@@ -289,7 +289,7 @@ describe("PolicyCenterPage", () => {
     await render(<PolicyCenterPage />, "migration");
     await settle();
 
-    const button = Array.from(host?.querySelectorAll("button") ?? []).find((candidate) => candidate.textContent === "Load more imports" || candidate.getAttribute("aria-label") === "Load more imports");
+    const button = Array.from(host?.querySelectorAll("button") ?? []).find((candidate) => candidate.textContent === "Load more imports" || candidate.getAttribute("aria-label") === "Load more imports" || candidate.getAttribute("data-export-label") === "Load more imports");
     await act(async () => { button?.click(); });
     await settle();
 
@@ -359,7 +359,7 @@ function familyElement(slug: string) {
 }
 
 async function selectTab(label: string) {
-  const tab = Array.from(host?.querySelectorAll('[role="tab"]') ?? []).find((element) => element.textContent === label || element.getAttribute("aria-label") === label)!;
+  const tab = Array.from(host?.querySelectorAll('[role="tab"]') ?? []).find((element) => element.textContent === label || element.getAttribute("aria-label") === label || element.getAttribute("data-export-label") === label)!;
   await act(async () => { tab.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })); });
   await vi.waitFor(async () => { await act(async () => {}); expect(tab.getAttribute("aria-selected")).toBe("true"); });
   await settle();

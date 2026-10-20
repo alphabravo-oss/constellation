@@ -32,7 +32,7 @@ const tree = () => <QueryClientProvider client={client}><TablePreferencesProvide
 async function render(search = "") { history = createMemoryHistory({ initialEntries: [`/settings/connectors?tab=scan-jobs${search}`] }); await act(async () => root.render(tree())); }
 async function settle(check: () => void | Promise<void>) { await vi.waitFor(async () => { await act(async () => {}); await check(); }); }
 const rows = () => host.querySelectorAll('[data-testid="scan-jobs-table"] tbody tr');
-const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === label || b.getAttribute("aria-label") === label)!;
+const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === label || b.getAttribute("aria-label") === label || b.getAttribute("data-export-label") === label)!;
 async function click(label: string) { await act(async () => button(label).click()); }
 async function field(selector: string, value: string) { await act(async () => { const input = host.querySelector<HTMLInputElement | HTMLSelectElement>(selector)!; Object.getOwnPropertyDescriptor(input.tagName === "SELECT" ? HTMLSelectElement.prototype : HTMLInputElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event(input.tagName === "SELECT" ? "change" : "input", { bubbles: true })); }); }
 const header = (id: string) => host.querySelector(`th[data-column-id="${id}"]`)!;

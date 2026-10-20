@@ -223,7 +223,7 @@ it("cancels a new draft without writing a rule", async () => {
   await renderPage();
   await act(async () => {
     [...host.querySelectorAll("button")]
-      .find((button) => button.textContent === "Cancel" || button.getAttribute("aria-label") === "Cancel")!
+      .find((button) => button.textContent === "Cancel" || button.getAttribute("aria-label") === "Cancel" || button.getAttribute("data-export-label") === "Cancel")!
       .click();
   });
   expect(networkRules.inventory).not.toHaveBeenCalled();
@@ -268,7 +268,7 @@ it("hydrates exact endpoint edits beyond the legacy cap and keeps the filtered r
   );
   await act(async () =>
     [...host.querySelectorAll("button")]
-      .find((button) => button.textContent === "Cancel" || button.getAttribute("aria-label") === "Cancel")!
+      .find((button) => button.textContent === "Cancel" || button.getAttribute("aria-label") === "Cancel" || button.getAttribute("data-export-label") === "Cancel")!
       .click(),
   );
   expect(route.navigate).toHaveBeenCalledWith({ href: returnURL });
@@ -324,7 +324,7 @@ it("requires explicit review of changed saved fields while preserving candidate 
   vi.mocked(networkRules.inventory).mockResolvedValue(latest);
   await act(async () =>
     [...host.querySelectorAll("button")]
-      .find((button) => button.textContent === "Review saved rule" || button.getAttribute("aria-label") === "Review saved rule")!
+      .find((button) => button.textContent === "Review saved rule" || button.getAttribute("aria-label") === "Review saved rule" || button.getAttribute("data-export-label") === "Review saved rule")!
       .click(),
   );
   await settled(() =>

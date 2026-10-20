@@ -37,7 +37,7 @@ async function render(url = "/clusters/cluster/timeline") {
   await act(async () => new Promise(resolve => setTimeout(resolve, 20)));
 }
 async function settled(check: () => void | Promise<void>) { await vi.waitFor(async () => { await act(async () => {}); await check(); }); }
-function click(label: string) { const button = [...host.querySelectorAll("button")].find((el) => el.textContent?.trim() === label || el.getAttribute("aria-label") === label)!; act(() => { if (label.startsWith("Views (")) button.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })); else button.click(); }); }
+function click(label: string) { const button = [...host.querySelectorAll("button")].find((el) => el.textContent?.trim() === label || el.getAttribute("aria-label") === label || el.getAttribute("data-export-label") === label)!; act(() => { if (label.startsWith("Views (")) button.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })); else button.click(); }); }
 
 it("restores source, severity, text, time and page filters from a shared URL", async () => {
   await render("/clusters/cluster/timeline?tab=custom&type=audit,runtime_event&severity=critical,high&q=exec&namespace=prod&workload=api&ref=rule&from=2026-10-10T00:00&to=2026-10-12T00:00&page=3");

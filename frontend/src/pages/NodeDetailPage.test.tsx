@@ -32,7 +32,7 @@ const tree = () => <QueryClientProvider client={client}><TablePreferencesProvide
 async function render(search = "") { history = createMemoryHistory({ initialEntries: [`/clusters/cluster/nodes/node${search}`] }); await act(async () => root.render(tree())); }
 async function settle(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
 const rows = () => host.querySelectorAll('[data-testid="node-host-findings-table"] tbody tr');
-const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.trim() === label || item.getAttribute("aria-label") === label)!;
+const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.trim() === label || item.getAttribute("aria-label") === label || item.getAttribute("data-export-label") === label)!;
 async function click(label: string) { await act(async () => button(label).click()); }
 async function field(selector: string, value: string) { await act(async () => { const input = host.querySelector<HTMLInputElement | HTMLSelectElement>(selector)!; Object.getOwnPropertyDescriptor(input.tagName === "SELECT" ? HTMLSelectElement.prototype : HTMLInputElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event(input.tagName === "SELECT" ? "change" : "input", { bubbles: true })); }); }
 const header = (id: string) => host.querySelector(`th[data-column-id="${id}"]`)!;
@@ -40,7 +40,7 @@ const header = (id: string) => host.querySelector(`th[data-column-id="${id}"]`)!
 async function showIdentifiers() {
  await act(async () => { host.querySelector<HTMLButtonElement>('[aria-label="Columns"]')!.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 })); });
  for (const name of ["Instance row ID", "Finding ID"]) {
-  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((value) => value.textContent === name || value.getAttribute("aria-label") === name)!;
+  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((value) => value.textContent === name || value.getAttribute("aria-label") === name || value.getAttribute("data-export-label") === name)!;
   expect(item).toBeDefined();
   await act(async () => item.click());
  }
@@ -118,7 +118,7 @@ it("does not reuse finding evidence after node, cluster or owner navigation", as
  await render("?selected=finding-2104%3A1791763200.000000"); await settle(() => expect(rows()).toHaveLength(100)); await act(async () => history.push("/clusters/other/nodes/node%252Fa")); await settle(() => expect(nodes.vulnerabilities).toHaveBeenLastCalledWith("other", "node%2Fa", expect.anything())); await settle(() => expect(rows()).toHaveLength(100)); expect(host.querySelector('a[href^="/clusters/cluster/"]')).toBeNull(); identity = { org_id: "new-org", user_id: "new-user" }; vi.mocked(nodes.get).mockRejectedValueOnce(new Error("new owner unavailable")); await act(async () => root.render(tree())); await settle(() => expect(button("Retry node")).toBeDefined()); expect(rows()).toHaveLength(0); expect(button("Export matching CSV")).toBeUndefined();
 });
 it("loads host inventory only in its URL tab and restores it after peer evidence browsing", async () => {
- await render("?tab=cis&context=keep"); await settle(() => expect(host.textContent).toContain("No CIS benchmark results")); expect(nodes.vulnerabilities).not.toHaveBeenCalled(); const tab = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((item) => item.textContent === "Host vulnerabilities" || item.getAttribute("aria-label") === "Host vulnerabilities")!; await act(async () => tab.focus()); await settle(() => expect(rows()).toHaveLength(100)); expect(history.location.search).toContain("context=keep"); await act(async () => history.back()); await settle(() => expect(host.textContent).toContain("No CIS benchmark results")); expect(rows()).toHaveLength(0);
+ await render("?tab=cis&context=keep"); await settle(() => expect(host.textContent).toContain("No CIS benchmark results")); expect(nodes.vulnerabilities).not.toHaveBeenCalled(); const tab = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((item) => item.textContent === "Host vulnerabilities" || item.getAttribute("aria-label") === "Host vulnerabilities" || item.getAttribute("data-export-label") === "Host vulnerabilities")!; await act(async () => tab.focus()); await settle(() => expect(rows()).toHaveLength(100)); expect(history.location.search).toContain("context=keep"); await act(async () => history.back()); await settle(() => expect(host.textContent).toContain("No CIS benchmark results")); expect(rows()).toHaveLength(0);
 });
 
 it("hides malformed cached finding rows before any refresh can label them current evidence", async () => {
@@ -146,5 +146,5 @@ it("removes repeated advisory descriptions, retains distinct aliases and collaps
  const items = [{ ...finding(0), summary: " CVE-shared ", aliases: ["CVE-shared"] }, { ...finding(1), summary: "CVE-shared", aliases: ["CVE-shared", "GHSA-distinct"] }, { ...finding(2), summary: "A useful vulnerability explanation" }];
  vi.mocked(nodes.vulnerabilities).mockImplementation(async (cluster, name, params) => response(cluster, name, params, items)); await render("?order=asc"); await settle(() => expect(rows()).toHaveLength(3));
  expect(rows()[0].querySelector('td[data-column-id="cve"]')!.textContent).toBe("CVE-shared"); expect(rows()[1].querySelector('td[data-column-id="cve"]')!.textContent).toBe("CVE-sharedGHSA-distinct"); expect(rows()[2].textContent).toContain("A useful vulnerability explanation");
- const summary = [...host.querySelectorAll("summary")].find((item) => item.textContent === "Inventory details" || item.getAttribute("aria-label") === "Inventory details")!; expect(summary).toBeDefined(); expect(summary.parentElement?.getAttribute("open")).toBeNull(); expect(host.textContent).toContain("3 matching finding instances");
+ const summary = [...host.querySelectorAll("summary")].find((item) => item.textContent === "Inventory details" || item.getAttribute("aria-label") === "Inventory details" || item.getAttribute("data-export-label") === "Inventory details")!; expect(summary).toBeDefined(); expect(summary.parentElement?.getAttribute("open")).toBeNull(); expect(host.textContent).toContain("3 matching finding instances");
 });

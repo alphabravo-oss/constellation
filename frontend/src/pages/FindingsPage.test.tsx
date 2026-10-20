@@ -64,7 +64,7 @@ async function exportItem(label: string): Promise<HTMLButtonElement> {
 }
 async function exportButton(label: string) { return exportItem(EXPORT_ITEMS[label]); }
 function button(label: string) {
-  return [...document.querySelectorAll<HTMLButtonElement>("button")].find((element) => element.textContent?.trim() === label || element.getAttribute("aria-label") === label)!;
+  return [...document.querySelectorAll<HTMLButtonElement>("button")].find((element) => element.textContent?.trim() === label || element.getAttribute("aria-label") === label || element.getAttribute("data-export-label") === label)!;
 }
 async function click(label: string) { if (EXPORT_ITEMS[label]) { const item = await exportItem(EXPORT_ITEMS[label]); await act(async () => item.click()); return; } await act(async () => { if (label.startsWith("Views (")) button(label).dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })); else button(label).click(); }); }
 async function search(value: string) {
@@ -308,7 +308,7 @@ it("retains reported and explicitly unknown roles in the visible-column page exp
   expect(host.querySelector('[data-testid="findings-table"] thead')?.textContent).not.toContain("Platform role");
   await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="findings-table-columns-trigger"]')!.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 })));
   await settled(() => expect(document.querySelector('[role="menuitemcheckbox"]')).not.toBeNull());
-  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((item) => item.textContent === "Platform role" || item.getAttribute("aria-label") === "Platform role")!.click());
+  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((item) => item.textContent === "Platform role" || item.getAttribute("aria-label") === "Platform role" || item.getAttribute("data-export-label") === "Platform role")!.click());
   expect(host.textContent).toContain("Core"); expect(host.textContent).toContain("Unclassified"); expect(host.textContent).toContain("Not reported");
   await click("Export this page CSV");
   const [, headers, rows] = vi.mocked(downloadCsv).mock.calls.at(-1)!;

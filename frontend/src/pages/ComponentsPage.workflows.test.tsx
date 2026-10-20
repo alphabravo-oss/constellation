@@ -29,7 +29,7 @@ async function renderPage(search = "", beforeRender?: (queryClient: QueryClient)
   await act(async () => root.render(<QueryClientProvider client={client}><TestRouter history={history}><ComponentsPage /></TestRouter></QueryClientProvider>));
 }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }, { timeout: 3000 }); }
-const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.trim() === label || item.getAttribute("aria-label") === label)!;
+const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.trim() === label || item.getAttribute("aria-label") === label || item.getAttribute("data-export-label") === label)!;
 async function click(label: string) { await act(async () => { const element = button(label); if (element.getAttribute("role") === "tab") element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })); else element.click(); }); }
 async function selectComponent(id: string) { const row = [...host.querySelectorAll<HTMLTableRowElement>('[data-testid="component-inventory-table"] tbody tr')].find((item) => item.textContent?.includes(`Component ${id}`))!; await act(async () => row.click()); }
 async function search(value: string) { await act(async () => { const input = host.querySelector<HTMLInputElement>('[aria-label="Search components"]')!; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); }); }

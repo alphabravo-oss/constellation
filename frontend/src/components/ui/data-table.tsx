@@ -445,7 +445,8 @@ function DataTableView<T>({
               <ToolbarButton
                 onClick={allExportOptions[0].onSelect}
                 disabled={allExportOptions[0].disabled}
-                aria-label={allExportOptions[0].label}
+                aria-label={/^export\b/i.test(allExportOptions[0].label) ? allExportOptions[0].label : `Export ${allExportOptions[0].label.charAt(0).toLowerCase()}${allExportOptions[0].label.slice(1)}`}
+                data-export-label={allExportOptions[0].label}
                 title={allExportOptions[0].description}
                 data-testid={testId ? `${testId}-export-csv` : undefined}
               >

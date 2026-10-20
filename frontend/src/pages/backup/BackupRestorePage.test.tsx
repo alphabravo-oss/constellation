@@ -34,7 +34,7 @@ async function render() {
 }
 
 function applyButton() {
-  return Array.from(host.querySelectorAll("button")).find((button) => button.textContent === "Apply restore" || button.getAttribute("aria-label") === "Apply restore")!;
+  return Array.from(host.querySelectorAll("button")).find((button) => button.textContent === "Apply restore" || button.getAttribute("aria-label") === "Apply restore" || button.getAttribute("data-export-label") === "Apply restore")!;
 }
 
 async function selectFile(name: string) {

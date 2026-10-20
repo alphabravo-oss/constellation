@@ -70,7 +70,7 @@ describe("retention form", () => {
     const event = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(true);
-    await act(async () => { Array.from(host.querySelectorAll("button")).find((button) => button.textContent === "Reload current settings" || button.getAttribute("aria-label") === "Reload current settings")!.click(); });
+    await act(async () => { Array.from(host.querySelectorAll("button")).find((button) => button.textContent === "Reload current settings" || button.getAttribute("aria-label") === "Reload current settings" || button.getAttribute("data-export-label") === "Reload current settings")!.click(); });
     expect(host.querySelector<HTMLInputElement>("input")!.value).toBe("21");
   });
   it("preserves edits after a conflict", async () => {

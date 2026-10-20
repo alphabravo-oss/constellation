@@ -19,7 +19,7 @@ async function renderPage(search = "") {
   await act(async () => root.render(<QueryClientProvider client={client}><TestRouter history={history} next={{ path: "/clusters/cluster/admission/import", element: <div>Import route</div> }}><PoliciesPage /></TestRouter></QueryClientProvider>));
 }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
-function button(label: string) { return [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === label || b.getAttribute("aria-label") === label)!; }
+function button(label: string) { return [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === label || b.getAttribute("aria-label") === label || b.getAttribute("data-export-label") === label)!; }
 it.each(["loading", "missing"])("does not query policy data for a %s cluster", async (scenario) => {
   if (scenario === "loading") cluster.isLoading = true; else { cluster.clusterId = undefined; cluster.cluster = undefined; }
   await renderPage(); await settled(() => expect(host.querySelector("table")).toBeNull()); expect(policies.list).not.toHaveBeenCalled();

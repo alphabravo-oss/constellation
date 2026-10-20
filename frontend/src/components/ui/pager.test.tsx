@@ -13,7 +13,7 @@ beforeEach(() => {
   root = createRoot(host);
 });
 afterEach(() => { act(() => root.unmount()); host.remove(); });
-const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent === label || item.getAttribute("aria-label") === label)!;
+const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent === label || item.getAttribute("aria-label") === label || item.getAttribute("data-export-label") === label)!;
 async function click(label: string) { await act(async () => button(label).click()); }
 
 function TotalPages({ initialPage = 0, total = 250 }: { initialPage?: number; total?: number }) {

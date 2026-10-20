@@ -27,7 +27,7 @@ async function rerender() { await act(async () => root.render(<QueryClientProvid
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
 async function submit() { await act(async () => host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }))); }
 function saveButton() { return host.querySelector<HTMLButtonElement>('[data-testid="create-receiver-save"]')!; }
-function button(name: string) { return [...host.querySelectorAll("button")].find((item) => item.textContent?.trim() === name || item.getAttribute("aria-label") === name)!; }
+function button(name: string) { return [...host.querySelectorAll("button")].find((item) => item.textContent?.trim() === name || item.getAttribute("aria-label") === name || item.getAttribute("data-export-label") === name)!; }
 async function input(selector: string, value: string) { const control = host.querySelector<HTMLInputElement>(selector)!; await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(control, value); control.dispatchEvent(new Event("input", { bubbles: true })); }); }
 async function textarea(selector: string, value: string) { const control = host.querySelector<HTMLTextAreaElement>(selector)!; await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(control, value); control.dispatchEvent(new Event("input", { bubbles: true })); }); }
 async function select(selector: string, value: string) { const control = nativeSelect(host, selector)!; await act(async () => { control.value = value; control.dispatchEvent(new Event("change", { bubbles: true })); }); }

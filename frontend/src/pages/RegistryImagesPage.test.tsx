@@ -133,7 +133,7 @@ async function settled(check: () => void | Promise<void>) {
 }
 const button = (text: string) =>
   [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-    (b) => b.textContent?.trim() === text || b.getAttribute("aria-label") === text,
+    (b) => b.textContent?.trim() === text || b.getAttribute("aria-label") === text || b.getAttribute("data-export-label") === text,
   )!;
 async function select(label: string, value: string) {
   await act(async () => {
@@ -317,8 +317,11 @@ it("controls server vulnerability ordering and restores URL sort", async () => {
     "registry",
     expect.objectContaining({ sort: "vulnerabilities", order: "desc" }),
   );
-  expect(host.querySelector("tbody tr")?.textContent).toContain(
-    "repo-source-first",
+  // The table stays mounted while the re-sorted page loads; wait for its rows.
+  await settled(() =>
+    expect(host.querySelector("tbody tr")?.textContent).toContain(
+      "repo-source-first",
+    ),
   );
   await act(async () => button("Vulnerabilities").click());
   await settled(() =>

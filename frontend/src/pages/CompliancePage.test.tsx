@@ -45,7 +45,7 @@ async function render(search="") {history=createMemoryHistory({initialEntries:[`
 async function rerender(){await act(async()=>root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{...identity}}><TestRouter history={history}><CompliancePage /></TestRouter></TablePreferencesProvider></QueryClientProvider>));}
 async function settle(check:()=>void){await vi.waitFor(async()=>{await act(async()=>{});check();});}
 function rows(){return host.querySelectorAll('[data-testid="compliance-controls-table"] tbody tr');}
-function button(text:string){return [...host.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.trim() === text || item.getAttribute("aria-label") === text)!;}
+function button(text:string){return [...host.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.trim() === text || item.getAttribute("aria-label") === text || item.getAttribute("data-export-label") === text)!;}
 async function select(selector:string,value:string){await act(async()=>{const input=nativeSelect(host, selector)!;Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,"value")!.set!.call(input,value);input.dispatchEvent(new Event("change",{bubbles:true}));});}
 it("opens the dashboard graded cross-framework cohort with its exact denominator and duplicate control rows",async()=>{
  await render("?tab=controls&framework=all&status=graded");await settle(()=>expect(rows()).toHaveLength(3));

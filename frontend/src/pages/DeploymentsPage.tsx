@@ -112,9 +112,9 @@ export function DeploymentsPage() {
           </a>
           <span className="ml-1 text-xs text-muted-foreground">· {d.kind}</span>
           {/* Security-context posture chips (NeuVector surfaces privileged/root as columns). */}
-          {Number(d.risk_factors?.privileged) > 0 && <span className="ml-1.5 rounded px-1 py-px text-micro font-semibold " style={{ background: "color-mix(in oklab, var(--color-severity-critical) 16%, transparent)", color: "var(--color-severity-critical)" }} title="privileged container">priv</span>}
-          {Number(d.risk_factors?.run_as_root) > 0 && <span className="ml-1 rounded px-1 py-px text-micro font-semibold " style={{ background: "color-mix(in oklab, var(--color-severity-high) 16%, transparent)", color: "var(--color-severity-high)" }} title="runs as root">root</span>}
-          {Number(d.risk_factors?.host_network) > 0 && <span className="ml-1 rounded px-1 py-px text-micro font-semibold " style={{ background: "color-mix(in oklab, var(--color-severity-high) 16%, transparent)", color: "var(--color-severity-high)" }} title="host network">hostnet</span>}
+          {Number(d.risk_factors?.privileged) > 0 && <span className="ml-1.5 rounded border border-severity-critical/50 px-1 py-px text-micro font-semibold text-foreground" title="privileged container">priv</span>}
+          {Number(d.risk_factors?.run_as_root) > 0 && <span className="ml-1 rounded border border-severity-high/50 px-1 py-px text-micro font-semibold text-foreground" title="runs as root">root</span>}
+          {Number(d.risk_factors?.host_network) > 0 && <span className="ml-1 rounded border border-severity-high/50 px-1 py-px text-micro font-semibold text-foreground" title="host network">hostnet</span>}
           <a
             href={`/clusters/${clusterId}/risk/deployment/${encodeURIComponent(d.id)}`}
             className="ml-2 text-micro text-muted-foreground hover:text-foreground hover:underline"

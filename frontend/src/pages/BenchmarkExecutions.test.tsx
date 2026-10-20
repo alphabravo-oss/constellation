@@ -142,7 +142,7 @@ async function settle(check: () => void) {
 }
 function button(label: string) {
   return [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-    (node) => node.textContent?.trim() === label || node.getAttribute("aria-label") === label,
+    (node) => node.textContent?.trim() === label || node.getAttribute("aria-label") === label || node.getAttribute("data-export-label") === label,
   )!;
 }
 async function click(label: string) {
