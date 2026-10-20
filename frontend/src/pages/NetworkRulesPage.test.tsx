@@ -233,7 +233,7 @@ it("exports matching server scope with a fresh post-response guard and distingui
   await ready();
   await act(async () =>
     [...host.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.textContent === "Export matching CSV")!
+      .find((button) => button.textContent === "Export matching CSV" || button.getAttribute("aria-label") === "Export matching CSV")!
       .click(),
   );
   await settle(() =>
@@ -262,7 +262,7 @@ it("exports matching server scope with a fresh post-response guard and distingui
   expect(current()).toBe(false);
   const pageButton = [
     ...host.querySelectorAll<HTMLButtonElement>("button"),
-  ].find((button) => button.textContent === "Export page CSV");
+  ].find((button) => button.textContent === "Export page CSV" || button.getAttribute("aria-label") === "Export page CSV");
   await act(async () => pageButton?.click());
   expect(downloadCsv).not.toHaveBeenCalled();
 });

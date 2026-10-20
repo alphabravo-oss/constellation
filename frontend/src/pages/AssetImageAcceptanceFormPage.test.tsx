@@ -33,7 +33,7 @@ async function render(action: 'create' | 'revoke' = 'create', url?: string, seed
 async function rationale(value = 'Reviewed compensating controls') { await act(async () => { const el = host.querySelector<HTMLTextAreaElement>('#image-accept-rationale')!; Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(el, value); el.dispatchEvent(new Event('input', { bubbles: true })); }); }
 async function expiry(value: string) { await act(async () => { const el = host.querySelector<HTMLInputElement>('#image-accept-until')!; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(el, value); el.dispatchEvent(new Event('input', { bubbles: true })); }); }
 async function submit() { await act(async () => host.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))); }
-const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent === label)!;
+const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent === label || item.getAttribute("aria-label") === label)!;
 
 it('requires reason and future bounded expiry before recording a reviewed organization-wide digest', async () => {
  await render(); await settled(() => expect(host.querySelector('form')).not.toBeNull()); expect(button('Save acceptance').disabled).toBe(true); expect(host.textContent).toContain('organization-wide scope'); expect(host.textContent).toContain('sha256:reviewed');

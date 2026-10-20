@@ -38,6 +38,7 @@ import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { useRouteSearchParams } from "@/lib/route-search";
 import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
 import { sortClustersByActivity } from "@/lib/clusters";
+import { Select } from "@/components/ui/form";
 
 // --- types -----------------------------------------------------------------
 
@@ -791,7 +792,7 @@ export function CoveragePage() {
       cell: (r) => (
         <div className="flex flex-col gap-0.5">
           <span className="font-medium text-foreground">{r.name}</span>
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+          <span className="text-micro  text-muted-foreground">
             {r.pillar} · {r.scope === "cluster" ? "selected cluster" : "organization-wide"}
           </span>
         </div>
@@ -871,8 +872,8 @@ export function CoveragePage() {
       {selectedCluster && !clusterReady && !qClusters.isFetching && !qClusters.isPending && <ErrorState title="The requested cluster is not available in the current organization." />}
       <div className="flex min-w-0 flex-col gap-3 rounded-md border border-border bg-card p-3 lg:flex-row lg:items-start">
         <div className="flex min-w-0 flex-1 flex-col gap-2">
-          <label htmlFor="coverage-cluster-select" className="text-[10px] uppercase tracking-wider text-muted-foreground">Cluster scope</label>
-          <select
+          <label htmlFor="coverage-cluster-select" className="text-micro  text-muted-foreground">Cluster scope</label>
+          <Select
             id="coverage-cluster-select"
             className="h-8 w-full min-w-0 max-w-full rounded-md border border-border bg-background px-2 text-sm"
             value={clusterId ?? ""}
@@ -885,12 +886,12 @@ export function CoveragePage() {
             {clusterList.map((c) => (
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
-          </select>
-          <span className="text-[11px] text-muted-foreground">applies to network · auto-netpolicy · process baseline</span>
+          </Select>
+          <span className="text-micro text-muted-foreground">applies to network · auto-netpolicy · process baseline</span>
         </div>
         <div className="flex min-w-0 flex-col gap-2 lg:w-48 lg:flex-none">
-          <label htmlFor="coverage-pillar-select" className="text-[10px] uppercase tracking-wider text-muted-foreground">Pillar</label>
-          <select
+          <label htmlFor="coverage-pillar-select" className="text-micro  text-muted-foreground">Pillar</label>
+          <Select
             id="coverage-pillar-select"
             className="h-8 w-full min-w-0 max-w-full rounded-md border border-border bg-background px-2 text-sm"
             value={pillarFilter}
@@ -901,14 +902,14 @@ export function CoveragePage() {
             {pillars.map((p) => (
               <option key={p} value={p}>{p}</option>
             ))}
-          </select>
+          </Select>
         </div>
       </div>
 
       {pillarFilter && !pillars.includes(pillarFilter) && <ErrorState title="The requested pillar filter is invalid." action={<Button onClick={() => update("pillar", "")}>Clear pillar filter</Button>} />}
       <Tabs value={tab} onValueChange={setTab} items={[{ value: "all", label: "All sources", content: workspace }, { value: "organization", label: "Organization", content: workspace }, { value: "cluster", label: "Selected cluster", content: workspace }]} />
       {!['all', 'organization', 'cluster'].includes(tab) && <ErrorState title="The requested workspace tab is invalid." action={<Button onClick={() => setTab("all")}>Show all sources</Button>} />}
-      <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+      <div className="flex items-center gap-3 text-micro text-muted-foreground">
         <CircleDot className="h-3 w-3" />
         <span>
           Source limits: audit 100, runtime 50, scan jobs 200, AI assets 50. These are samples, not complete 24-hour totals. Source records may overlap. Status: <strong>Evidence reported</strong> = source-specific records or activity ·{" "}

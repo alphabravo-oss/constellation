@@ -156,7 +156,7 @@ function OperationsTab() {
               <div className="flex items-center justify-between gap-2">
                 <span>
                   <span className="font-medium">{receiverName(overview, retry.receiver_id)}</span>
-                  <span className="ml-2 font-mono text-[10px] text-muted-foreground">{receiverRoutingKey(overview, retry.receiver_id)}</span>
+                  <span className="ml-2 font-mono text-micro text-muted-foreground">{receiverRoutingKey(overview, retry.receiver_id)}</span>
                 </span>
                 <Badge>{retry.queued_retries} queued</Badge>
               </div>
@@ -310,14 +310,14 @@ function RoutesTab() {
 function Info({ label, value }: { label: string; value: string | ReactNode }) {
   return (
     <div className="rounded-md bg-muted/60 p-2">
-      <div className="text-[10px] uppercase text-muted-foreground">{label}</div>
+      <div className="text-micro  text-muted-foreground">{label}</div>
       <div className="mt-1 break-all font-medium">{value}</div>
     </div>
   );
 }
 
 function Badge({ children }: { children: ReactNode }) {
-  return <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{children}</span>;
+  return <span className="rounded-md bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">{children}</span>;
 }
 
 function Status({ value }: { value: string }) {

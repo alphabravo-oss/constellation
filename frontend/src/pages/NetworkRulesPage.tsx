@@ -36,6 +36,7 @@ import {
   networkRuleInventoryMatches,
   networkRuleFingerprint,
 } from "./network-rule-inventory";
+import { Select } from "@/components/ui/form";
 
 const RULE_METADATA_MIGRATION = {
   id: "network-rule-metadata-v1",
@@ -523,7 +524,7 @@ export function NetworkRulesPage() {
             ).map(([name, label, values]) => (
               <label className="text-xs" key={name}>
                 {label}
-                <select
+                <Select
                   aria-label={label}
                   className="mt-1 block rounded border border-border bg-background p-2"
                   value={filter(name)}
@@ -535,12 +536,12 @@ export function NetworkRulesPage() {
                       {value}
                     </option>
                   ))}
-                </select>
+                </Select>
               </label>
             ))}
             <label className="text-xs">
               Sort
-              <select
+              <Select
                 aria-label="Sort network rules"
                 className="mt-1 block rounded border border-border bg-background p-2"
                 value={sort}
@@ -551,11 +552,11 @@ export function NetworkRulesPage() {
                     {value === "evaluation" ? "Evaluation order" : value}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
             <label className="text-xs">
               Order
-              <select
+              <Select
                 aria-label="Sort direction"
                 className="mt-1 block rounded border border-border bg-background p-2"
                 value={order}
@@ -565,7 +566,7 @@ export function NetworkRulesPage() {
               >
                 <option value="asc">Ascending</option>
                 <option value="desc">Descending</option>
-              </select>
+              </Select>
             </label>
             <label className="flex items-center gap-2 text-xs">
               <input

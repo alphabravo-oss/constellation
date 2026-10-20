@@ -9,6 +9,7 @@ import { Pager } from "@/components/ui/pager";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 import { useInventoryRoute, ScanInventoryExport, scanInventoryResponseValid } from "./inventory-workspace";
 import type { useAssetDetailScope } from "./asset-detail-scope";
+import { Select } from "@/components/ui/form";
 
 const severities = ["critical", "high", "medium", "low", "info", "unknown"];
 const lifecycles = ["open", "triaged", "in_progress", "resolved", "suppressed", "accepted"];
@@ -55,9 +56,9 @@ export function AssetFindingsInventory({ inventory: i }: { inventory: Inventory 
   ];
   return <section className="space-y-3" data-testid="asset-findings">
     <div className="flex flex-wrap gap-2"><input aria-label="Search asset findings" placeholder="Search findings" className="min-w-0 basis-64 flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm" value={route.query} onChange={e => route.setQuery(e.target.value)} />
-      <select aria-label="Finding severity" value={request.severity ?? ""} onChange={e => route.update({ severity: e.target.value })} className="rounded-md border border-border bg-background p-2 text-sm"><option value="">All severities</option>{severities.map(s => <option key={s}>{s}</option>)}</select>
-      <select aria-label="Finding lifecycle" value={request.lifecycle ?? ""} onChange={e => route.update({ lifecycle: e.target.value })} className="rounded-md border border-border bg-background p-2 text-sm"><option value="">All lifecycles</option>{lifecycles.map(s => <option key={s}>{s}</option>)}</select>
-      <select aria-label="Finding source" value={request.source ?? ""} onChange={e => route.update({ source: e.target.value })} className="rounded-md border border-border bg-background p-2 text-sm"><option value="">All evidence sources</option><option value="asset">Asset findings</option><option value="image_scan">Digest image scan</option></select>
+      <Select aria-label="Finding severity" value={request.severity ?? ""} onChange={e => route.update({ severity: e.target.value })} className="rounded-md border border-border bg-background p-2 text-sm"><option value="">All severities</option>{severities.map(s => <option key={s}>{s}</option>)}</Select>
+      <Select aria-label="Finding lifecycle" value={request.lifecycle ?? ""} onChange={e => route.update({ lifecycle: e.target.value })} className="rounded-md border border-border bg-background p-2 text-sm"><option value="">All lifecycles</option>{lifecycles.map(s => <option key={s}>{s}</option>)}</Select>
+      <Select aria-label="Finding source" value={request.source ?? ""} onChange={e => route.update({ source: e.target.value })} className="rounded-md border border-border bg-background p-2 text-sm"><option value="">All evidence sources</option><option value="asset">Asset findings</option><option value="image_scan">Digest image scan</option></Select>
       <Button variant="outline" onClick={() => route.update({ q: null, severity: null, lifecycle: null, source: null, sort: null, order: null, page: null })}>Reset filters</Button>
     </div>
     {i.invalid ? <ErrorState title="Choose supported finding filters and sorting." /> : q.isError || i.invalidResponse ? <ErrorState title="Asset findings are unavailable or could not be refreshed." action={<Button onClick={() => void q.refetch()}>Retry findings</Button>} /> : !available || !q.data ? <LoadingState label="Loading asset findings…" /> : <>

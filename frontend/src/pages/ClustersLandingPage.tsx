@@ -149,10 +149,10 @@ function InitBundlesPanel() {
   }
   return (
     <section className="rounded-md border border-border bg-card p-4" data-testid="init-bundles-panel">
-      <header className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
+      <header className="flex items-center gap-2 text-xs  text-muted-foreground">
         <ShieldCheck className="h-3.5 w-3.5" />
         Init bundles
-        <span className="ml-auto text-[10px] normal-case tracking-normal text-muted-foreground">
+        <span className="ml-auto text-micro normal-case tracking-normal text-muted-foreground">
           {bundles.filter((b) => b.status === "active").length} active ·{" "}
           {bundles.filter((b) => b.status === "expired").length} expired ·{" "}
           {bundles.filter((b) => b.status === "revoked").length} revoked
@@ -190,7 +190,7 @@ function InitBundlesPanel() {
       {
         id: "cluster", kind: "id", size: 128, minSize: 112,
         header: "Cluster ID",
-        className: "text-mono text-[10px] text-muted-foreground",
+        className: "text-mono text-micro text-muted-foreground",
         cell: (b) => <>{b.cluster_id.slice(0, 8)}…</>,
       },
       {
@@ -200,7 +200,7 @@ function InitBundlesPanel() {
           const tone = bundleTone(b.status);
           return (
             <span
-              className="rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider"
+              className="rounded px-1.5 py-0.5 text-micro "
               style={{
                 backgroundColor: `color-mix(in oklab, ${tone} 18%, transparent)`,
                 color: tone,
@@ -288,7 +288,7 @@ export function ClusterTile({ cluster }: { cluster: ClusterSummary }) {
               {cluster.name}
             </h2>
           </div>
-          <p className="mt-1 truncate text-[11px] text-mono text-muted-foreground">
+          <p className="mt-1 truncate text-micro text-mono text-muted-foreground">
             {cluster.distro}
             {cluster.region ? ` · ${cluster.region}` : ""}
             {cluster.platform?.kubernetes_git_version ? ` · k8s ${cluster.platform.kubernetes_git_version}` : ""}
@@ -296,7 +296,7 @@ export function ClusterTile({ cluster }: { cluster: ClusterSummary }) {
           </p>
         </div>
         <span
-          className="rounded px-2 py-0.5 text-[10px] uppercase tracking-wider"
+          className="rounded px-2 py-0.5 text-micro "
           style={{
             backgroundColor: `color-mix(in oklab, ${stateTone} 18%, transparent)`,
             color: stateTone,
@@ -321,7 +321,7 @@ export function ClusterTile({ cluster }: { cluster: ClusterSummary }) {
         />
       </div>
 
-      <details className="text-[11px] text-muted-foreground">
+      <details className="text-micro text-muted-foreground">
         <summary className="flex cursor-pointer items-center justify-between gap-2 rounded py-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
           <span className={!freshExposure || (exposure?.unverified_occurrences ?? 0) > 0 ? "text-status-warning" : undefined}>
             {!freshExposure
@@ -343,9 +343,9 @@ export function ClusterTile({ cluster }: { cluster: ClusterSummary }) {
         </div>
       </details>
 
-      <div className="grid grid-cols-2 gap-2 text-[11px]">
+      <div className="grid grid-cols-2 gap-2 text-micro">
         <div className="rounded border border-border bg-muted/30 px-2 py-1.5">
-          <div className="text-[9px] uppercase tracking-wider text-muted-foreground">
+          <div className="text-micro  text-muted-foreground">
             Top risk workload
           </div>
           <div className="mt-0.5 flex items-center gap-1.5">
@@ -364,7 +364,7 @@ export function ClusterTile({ cluster }: { cluster: ClusterSummary }) {
           </div>
         </div>
         <div className="rounded border border-border bg-muted/30 px-2 py-1.5">
-          <div className="text-[9px] uppercase tracking-wider text-muted-foreground">
+          <div className="text-micro  text-muted-foreground">
             Platform facts
           </div>
           <div className="mt-0.5 truncate text-mono">
@@ -374,7 +374,7 @@ export function ClusterTile({ cluster }: { cluster: ClusterSummary }) {
       </div>
 
       <footer className="mt-1 flex items-center justify-between gap-2">
-        <span className="text-[10px] text-muted-foreground">
+        <span className="text-micro text-muted-foreground">
           {cluster.deployments} workloads · {stats.open_findings} open findings
         </span>
         <Link
@@ -415,7 +415,7 @@ function Stat({
       className="rounded border border-border bg-muted/30 px-2 py-1.5"
       style={tone !== "muted" ? { borderColor: `color-mix(in oklab, ${color} 30%, var(--color-border))` } : undefined}
     >
-      <div className="flex items-center gap-1 text-[9px] uppercase tracking-wider text-muted-foreground">
+      <div className="flex items-center gap-1 text-micro  text-muted-foreground">
         {icon}
         {label}
       </div>
@@ -439,7 +439,7 @@ function OrgOverviewCallout() {
   ];
   return (
     <section className="rounded-md border border-dashed border-border bg-card/50 p-4">
-      <header className="flex items-center gap-2 text-xs uppercase tracking-wider text-muted-foreground">
+      <header className="flex items-center gap-2 text-xs  text-muted-foreground">
         <Layers className="h-3.5 w-3.5" />
         Org overview
       </header>
@@ -453,7 +453,7 @@ function OrgOverviewCallout() {
               <span className="text-muted-foreground">{item.icon}</span>
               <span className="min-w-0">
                 <span className="block font-medium truncate">{item.label}</span>
-                <span className="block text-[10px] text-muted-foreground truncate">
+                <span className="block text-micro text-muted-foreground truncate">
                   {item.description}
                 </span>
               </span>

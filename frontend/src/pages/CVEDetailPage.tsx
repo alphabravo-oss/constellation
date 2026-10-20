@@ -29,6 +29,7 @@ import {
   affectedSorts,
 } from "@/lib/cve-affected-inventory";
 import { ScanInventoryExport } from "./inventory-workspace";
+import { Select } from "@/components/ui/form";
 
 interface CVEDetail {
   cve_id: string;
@@ -299,7 +300,7 @@ export function CVEDetailPage() {
         </label>
         <label className="text-xs">
           Finding severity
-          <select
+          <Select
             aria-label="Affected severity"
             className="block rounded-md border border-border bg-background p-2 text-sm"
             value={severity}
@@ -316,7 +317,7 @@ export function CVEDetailPage() {
                 {level}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <Button
           variant="outline"

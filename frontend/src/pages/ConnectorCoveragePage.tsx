@@ -327,7 +327,7 @@ export function ConnectorCoveragePage() {
                 </div>
               ) : null}
               {cacheScannerID ? (
-                <div className="mt-3 rounded-md border border-border bg-background p-3 text-[11px]" data-testid="scanner-cache-data">
+                <div className="mt-3 rounded-md border border-border bg-background p-3 text-micro" data-testid="scanner-cache-data">
                   <div className="flex items-center justify-between gap-2">
                     <div>
                       <div className="font-medium">Cache records</div>
@@ -339,7 +339,7 @@ export function ConnectorCoveragePage() {
                     </div>
                     <button
                       type="button"
-                      className="rounded-md border border-border px-2 py-1 text-[10px] hover:bg-accent"
+                      className="rounded-md border border-border px-2 py-1 text-micro hover:bg-accent"
                       onClick={() => setCacheScannerID("")}
                     >
                       Close
@@ -453,14 +453,14 @@ export function ConnectorCoveragePage() {
 function Info({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-md bg-muted p-2">
-      <div className="text-[10px] uppercase text-muted-foreground">{label}</div>
+      <div className="text-micro  text-muted-foreground">{label}</div>
       <div className="mt-1 truncate font-medium">{value || "-"}</div>
     </div>
   );
 }
 
 function Badge({ children }: { children: ReactNode }) {
-  return <span className="rounded-md bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">{children}</span>;
+  return <span className="rounded-md bg-background px-1.5 py-0.5 text-micro text-muted-foreground">{children}</span>;
 }
 
 function formatDateTime(value: string) {

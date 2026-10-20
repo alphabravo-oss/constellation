@@ -92,7 +92,7 @@ export function RuntimePage() {
           <button type="button" className="text-left font-medium hover:underline" onClick={(click) => { click.stopPropagation(); selectEvent(event.id, event.at); }}>
             {event.workload_id}
           </button>
-          <div className="mt-1 text-[11px] text-muted-foreground">{event.cluster_name || event.cluster_id}</div>
+          <div className="mt-1 text-micro text-muted-foreground">{event.cluster_name || event.cluster_id}</div>
         </>
       ),
     },
@@ -130,7 +130,7 @@ export function RuntimePage() {
       cell: (event) => (
         <div className="flex flex-wrap gap-1">
           {event.attack_techniques.map((technique) => (
-            <span key={technique} className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+            <span key={technique} className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-micro text-muted-foreground">
               {technique}
             </span>
           ))}
@@ -149,7 +149,7 @@ export function RuntimePage() {
       cell: (event) => (
         <>
           <div>{event.message || new Date(event.at).toLocaleTimeString()}</div>
-          {event.rule_name && <div className="mt-1 font-mono text-[11px]">{event.rule_name}</div>}
+          {event.rule_name && <div className="mt-1 font-mono text-micro">{event.rule_name}</div>}
         </>
       ),
     },
@@ -227,9 +227,9 @@ export function RuntimePage() {
       <StatCard label={tab === "live" ? "Identified workloads" : "Affected workloads"} value={primary?.affected_workloads ?? "—"} icon={<RadioTower className="h-3.5 w-3.5" />} />
     </StatGrid>
     {tab !== "live" && <label className="flex flex-wrap items-center gap-2 text-sm"><Clock3 className="h-4 w-4 text-muted-foreground" aria-hidden /> Evidence time window
-      <select className="rounded-md border border-border bg-background px-3 py-2" value={hours} data-testid="runtime-window-select" onChange={(event) => setParams((previous) => { const next = new URLSearchParams(previous); next.set("hours", event.target.value); return next; })}>
+      <Select className="rounded-md border border-border bg-background px-3 py-2" value={hours} data-testid="runtime-window-select" onChange={(event) => setParams((previous) => { const next = new URLSearchParams(previous); next.set("hours", event.target.value); return next; })}>
         {WINDOWS.map((window) => <option key={window} value={window}>{window === 168 ? "7d" : `${window}h`}</option>)}
-      </select><span className="text-xs text-muted-foreground">Applies to window totals and secondary evidence, not event history.</span>
+      </Select><span className="text-xs text-muted-foreground">Applies to window totals and secondary evidence, not event history.</span>
     </label>}
     <Tabs value={tab} onValueChange={setTab} items={[
       { value: "live", label: "Live events", content: liveView },
@@ -278,7 +278,7 @@ const liveColumns: Column<RuntimeEvent>[] = [
     maxSize: 240,
     sort: () => 0,
     exportValue: event => event.at,
-    cell: (e) => <span className="font-mono text-[11px]">{new Date(e.at).toLocaleString()}</span>,
+    cell: (e) => <span className="font-mono text-micro">{new Date(e.at).toLocaleString()}</span>,
   },
   {
     id: "kind",
@@ -305,7 +305,7 @@ const liveColumns: Column<RuntimeEvent>[] = [
           <div className="font-medium">{e.workload_id || pod || "—"}</div>
           {pod && e.workload_id && <div className="mt-0.5 text-xs text-muted-foreground">{pod}</div>}
           {e.container_id && (
-            <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">{e.container_id.slice(0, 12)}</div>
+            <div className="mt-0.5 font-mono text-micro text-muted-foreground">{e.container_id.slice(0, 12)}</div>
           )}
         </div>
       );
@@ -333,7 +333,7 @@ const liveColumns: Column<RuntimeEvent>[] = [
           <span className="text-xs text-muted-foreground">—</span>
         ) : (
           e.attack_techniques.map((t) => (
-            <span key={t} className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+            <span key={t} className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-micro text-muted-foreground">
               {t}
             </span>
           ))
@@ -350,7 +350,7 @@ const liveColumns: Column<RuntimeEvent>[] = [
     sort: () => 0,
     cell: (e) => (
       <span
-        className={`rounded-md px-2 py-0.5 text-[10px] font-medium ${
+        className={`rounded-md px-2 py-0.5 text-micro font-medium ${
           e.severity === "critical" || e.severity === "high"
             ? "bg-destructive/15 text-destructive"
             : e.severity === "medium"
@@ -440,7 +440,7 @@ function RuntimeEventInspector({ event }: { event: RuntimeOverview["recent_event
       <p className="mt-3 text-xs text-muted-foreground">{event.message}</p>
       <div className="mt-3 flex flex-wrap gap-1">
         {event.attack_techniques.map((technique) => (
-          <span key={technique} className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+          <span key={technique} className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-micro text-muted-foreground">
             {technique}
           </span>
         ))}

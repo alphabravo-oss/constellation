@@ -11,6 +11,7 @@ import { ErrorState, LoadingState } from "@/components/ui/states";
 import { useInventoryRoute, ScanInventoryExport } from "./inventory-workspace";
 import { scanJobInventoryResponseValid } from "@/lib/scan-job-inventory";
 import { fmtRelative } from "@/lib/format";
+import { Select } from "@/components/ui/form";
 
 const statuses = ["pending", "running", "paused", "completed", "failed", "canceled"];
 const types = ["image", "workload", "host", "platform", "registry", "repository", "serverless"];
@@ -98,8 +99,8 @@ export function ScanJobsInventory() {
   return <section className="space-y-3" data-testid="recent-scan-jobs">
     <div className="flex flex-wrap gap-2">
       <input aria-label="Search scan jobs" placeholder="Search target, source, worker or error" className="min-w-0 basis-64 flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm" value={route.query} onChange={e => route.setQuery(e.target.value)} />
-      <select aria-label="Scan job status" value={status} onChange={e => route.update({ status: e.target.value })} className="rounded-md border border-border bg-background p-2 text-sm"><option value="">All statuses</option>{statuses.map(s => <option key={s}>{s}</option>)}</select>
-      <select aria-label="Scan target type" value={type} onChange={e => route.update({ target_type: e.target.value })} className="rounded-md border border-border bg-background p-2 text-sm"><option value="">All target types</option>{types.map(s => <option key={s}>{s}</option>)}</select>
+      <Select aria-label="Scan job status" value={status} onChange={e => route.update({ status: e.target.value })} className="rounded-md border border-border bg-background p-2 text-sm"><option value="">All statuses</option>{statuses.map(s => <option key={s}>{s}</option>)}</Select>
+      <Select aria-label="Scan target type" value={type} onChange={e => route.update({ target_type: e.target.value })} className="rounded-md border border-border bg-background p-2 text-sm"><option value="">All target types</option>{types.map(s => <option key={s}>{s}</option>)}</Select>
       <Button disabled={!owner || q.isFetching || invalid || route.debouncing} onClick={() => void q.refetch()}>Refresh jobs</Button>
       <Button variant="outline" onClick={() => route.update({ q: null, status: null, target_type: null, cluster_id: null, registry_id: null, sort: null, order: null, page: null })}>Reset filters</Button>
     </div>

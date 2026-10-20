@@ -38,7 +38,7 @@ export function EntityHeader({
   return (
     <header className={cn("space-y-4", className)}>
       {breadcrumbs && breadcrumbs.length > 0 && (
-        <nav aria-label="Breadcrumbs" className="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
+        <nav aria-label="Breadcrumbs" className="flex flex-wrap items-center gap-1 text-micro text-muted-foreground">
           {breadcrumbs.map((b, i) => (
             <span key={i} className="flex items-center gap-1">
               {b.to ? (
@@ -74,7 +74,7 @@ export function EntityHeader({
               {subfactors && subfactors.length > 0 && (
                 <div className="hidden md:block">
                   <RiskScore score={riskScore} subfactors={subfactors} size="md" />
-                  <div className="mt-1 text-[10px] uppercase tracking-wider text-muted-foreground">hover for breakdown</div>
+                  <div className="mt-1 text-micro  text-muted-foreground">hover for breakdown</div>
                 </div>
               )}
             </div>

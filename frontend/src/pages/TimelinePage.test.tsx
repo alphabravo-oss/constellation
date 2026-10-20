@@ -36,7 +36,7 @@ async function render(url = "/clusters/cluster/timeline") {
   await act(async () => new Promise(resolve => setTimeout(resolve, 20)));
 }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
-function click(label: string) { const button = [...host.querySelectorAll("button")].find(el => el.textContent?.trim() === label)!; act(() => { if (label.startsWith("Views (")) button.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })); else button.click(); }); }
+function click(label: string) { const button = [...host.querySelectorAll("button")].find((el) => el.textContent?.trim() === label || el.getAttribute("aria-label") === label)!; act(() => { if (label.startsWith("Views (")) button.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })); else button.click(); }); }
 
 it("restores source, severity, text, time and page filters from a shared URL", async () => {
   await render("/clusters/cluster/timeline?tab=custom&type=audit,runtime_event&severity=critical,high&q=exec&namespace=prod&workload=api&ref=rule&from=2026-10-10T00:00&to=2026-10-12T00:00&page=3");
@@ -169,7 +169,7 @@ it.each(["cluster","boundary"])("rejects wrong %s evidence and disables matching
  vi.mocked(securityTimeline.list).mockResolvedValue({...exactResponse(),...(mismatch==="cluster"?{items:[{...item,cluster_id:"other"}]}:{from:"2026-10-11T12:34:56.123455Z"})});
  await render(`/clusters/cluster/timeline?tab=event&after=${encodeURIComponent(boundary)}`);
  await settled(()=>expect(host.textContent).toContain("does not match the selected cluster and event window"));expect(host.querySelector('[data-testid="timeline-summary"]')).toBeNull();
- const exportButton=[...document.querySelectorAll<HTMLButtonElement>("button")].find(button=>button.textContent==="Export matching events (up to 10,000)")!;expect(exportButton.disabled).toBe(true);
+ const exportButton=[...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Export matching events (up to 10,000)" || button.getAttribute("aria-label") === "Export matching events (up to 10,000)")!;expect(exportButton.disabled).toBe(true);
 });
 it("reports full matching export caps and errors, and blocks duplicate requests while downloading",async()=>{
  vi.mocked(securityTimeline.list).mockResolvedValue(exactResponse(200,12000));
@@ -177,7 +177,7 @@ it("reports full matching export caps and errors, and blocks duplicate requests 
  await settled(()=>expect(host.textContent).toContain("12,000 matching event records"));
  let resolve!: (value:{total:number;exported:number;limit:number;truncated:boolean})=>void;
  vi.mocked(securityTimeline.exportCSV).mockReturnValue(new Promise(done=>{resolve=done;}));
- const button=[...document.querySelectorAll<HTMLButtonElement>("button")].find(button=>button.textContent==="Export matching events (up to 10,000)")!;
+ const button=[...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Export matching events (up to 10,000)" || button.getAttribute("aria-label") === "Export matching events (up to 10,000)")!;
  await act(async()=>{button.click();button.click();});expect(securityTimeline.exportCSV).toHaveBeenCalledTimes(1);expect(button.disabled).toBe(true);
  expect(securityTimeline.exportCSV).toHaveBeenCalledWith(expect.objectContaining({cluster_id:"cluster",type:"runtime_event",after:boundary,verdict:"alert,block,quarantine"}), expect.any(Function));
  await act(async()=>resolve({total:12000,exported:10000,limit:10000,truncated:true}));

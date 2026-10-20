@@ -27,6 +27,7 @@ import { cn } from "@/lib/cn";
 import { DigestDisclosure } from "@/components/ui/digest-disclosure";
 import { Pager } from "@/components/ui/pager";
 import { usePlatformComponentVisibility } from "@/hooks/usePlatformComponentVisibility";
+import { Select } from "@/components/ui/form";
 
 export function ContainersPage() {
   const qc = useQueryClient();
@@ -192,7 +193,7 @@ export function ContainersPage() {
           <span className="text-xs font-medium">{c.name || "—"}</span>
           {c.privileged && (
             <span
-              className="ml-1.5 rounded px-1 py-px text-[9px] font-semibold uppercase"
+              className="ml-1.5 rounded px-1 py-px text-micro font-semibold "
               style={{
                 background:
                   "color-mix(in oklab, var(--color-severity-critical) 16%, transparent)",
@@ -205,7 +206,7 @@ export function ContainersPage() {
           )}
           {c.run_as_root && (
             <span
-              className="ml-1 rounded px-1 py-px text-[9px] font-semibold uppercase"
+              className="ml-1 rounded px-1 py-px text-micro font-semibold "
               style={{
                 background:
                   "color-mix(in oklab, var(--color-severity-high) 16%, transparent)",
@@ -232,13 +233,13 @@ export function ContainersPage() {
         c.workload && clusterId ? (
           <a
             href={`/clusters/${clusterId}/deployments?q=${encodeURIComponent(c.workload)}&namespace=${encodeURIComponent(c.namespace)}&hide_platform=false`}
-            className="text-mono text-[11px] text-[color:var(--color-primary)] hover:underline"
+            className="text-mono text-micro text-[color:var(--color-primary)] hover:underline"
             title={`${c.namespace}/${c.pod_name}`}
           >
             {c.namespace}/{c.pod_name}
           </a>
         ) : (
-          <span className="text-mono text-[11px] text-muted-foreground">
+          <span className="text-mono text-micro text-muted-foreground">
             {c.namespace}/{c.pod_name}
           </span>
         ),
@@ -257,7 +258,7 @@ export function ContainersPage() {
       wrap: true,
       cell: (c) => (
         <div>
-          <span className="text-[11px]">{displayImage(c.image)}</span>
+          <span className="text-micro">{displayImage(c.image)}</span>
           <DigestDisclosure digest={imageDigest(c.image)} />
         </div>
       ),
@@ -274,12 +275,12 @@ export function ContainersPage() {
         clusterId ? (
           <a
             href={`/clusters/${clusterId}/nodes/${encodeURIComponent(c.node)}`}
-            className="text-mono text-[11px] text-[color:var(--color-primary)] hover:underline"
+            className="text-mono text-micro text-[color:var(--color-primary)] hover:underline"
           >
             {c.node}
           </a>
         ) : (
-          <span className="text-mono text-[11px]">
+          <span className="text-mono text-micro">
             {c.node || "Not reported"}
           </span>
         ),
@@ -296,12 +297,12 @@ export function ContainersPage() {
       numeric: true,
       cell: (c) =>
         c.critical + c.high === 0 ? (
-          <span className="text-[11px] text-muted-foreground">—</span>
+          <span className="text-micro text-muted-foreground">—</span>
         ) : (
           <span className="flex items-center justify-end gap-1">
             {c.critical > 0 && (
               <span
-                className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white"
+                className="rounded px-1.5 py-0.5 text-micro text-mono font-semibold text-white"
                 style={{ background: "var(--color-severity-critical)" }}
               >
                 {c.critical}C
@@ -309,7 +310,7 @@ export function ContainersPage() {
             )}
             {c.high > 0 && (
               <span
-                className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white"
+                className="rounded px-1.5 py-0.5 text-micro text-mono font-semibold text-white"
                 style={{ background: "var(--color-severity-high)" }}
               >
                 {c.high}H
@@ -329,7 +330,7 @@ export function ContainersPage() {
         return (
           <span
             className={cn(
-              "rounded px-1.5 py-0.5 text-[10px] font-medium",
+              "rounded px-1.5 py-0.5 text-micro font-medium",
               st === "running"
                 ? "bg-[color-mix(in_oklab,var(--color-severity-low)_16%,transparent)] text-[color:var(--color-severity-low)]"
                 : "bg-muted text-muted-foreground",
@@ -468,7 +469,7 @@ export function ContainersPage() {
         </label>
         <label className="text-xs">
           Platform role
-          <select
+          <Select
             aria-label="Container platform role"
             value={role}
             onChange={(event) => {
@@ -484,7 +485,7 @@ export function ContainersPage() {
             <option value="all">Any role</option>
             <option value="core">Platform</option>
             <option value="none">Customer</option>
-          </select>
+          </Select>
         </label>
         <Button variant="outline" onClick={reset}>
           Reset filters

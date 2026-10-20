@@ -315,7 +315,7 @@ export function DashboardPage() {
           title="Action Items"
           subtitle="Top 10 critical/high findings from 250 open findings ranked by risk"
           icon={<ShieldAlert className="h-3.5 w-3.5" />}
-          rightSlot={<a href={clusterPath("/findings?view=instances&lifecycle=open")} className="text-[11px] text-muted-foreground hover:text-foreground">view all <ArrowUpRight className="inline h-3 w-3" /></a>}
+          rightSlot={<a href={clusterPath("/findings?view=instances&lifecycle=open")} className="text-micro text-muted-foreground hover:text-foreground">view all <ArrowUpRight className="inline h-3 w-3" /></a>}
         >
           {open.isError ? <ErrorState title="Could not load action items." action={<Button onClick={() => void open.refetch()}>Retry</Button>} /> : open.isPending ? <p className="p-3 text-sm text-muted-foreground">Loading action items…</p> : topActions.length === 0 ? (
             <EmptyState
@@ -332,7 +332,7 @@ export function DashboardPage() {
                     <a href={findingHref(f, clusterId)} className="text-sm hover:underline truncate block" title={f.title}>
                       {f.title}
                     </a>
-                    <div className="text-[10px] text-mono text-muted-foreground">
+                    <div className="text-micro text-mono text-muted-foreground">
                       {f.external_id ?? f.id.slice(0, 10)} · {f.kind} · {fmtRelative(f.last_seen_at)}
                     </div>
                   </div>
@@ -386,10 +386,10 @@ export function DashboardPage() {
               {recent.slice(0, 8).map((r, i) => (
                 <li key={i} className="px-3 py-2 text-xs">
                   <div className="flex items-center gap-1.5">
-                    <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-mono">{r.id ? <a href={`/organization/audit?event_id=${encodeURIComponent(r.id)}`} className="hover:underline">{r.action}</a> : r.action}</span>
-                    <span className="text-muted-foreground text-[10px]">{r.target_kind}</span>
+                    <span className="rounded bg-muted px-1.5 py-0.5 text-micro text-mono">{r.id ? <a href={`/organization/audit?event_id=${encodeURIComponent(r.id)}`} className="hover:underline">{r.action}</a> : r.action}</span>
+                    <span className="text-muted-foreground text-micro">{r.target_kind}</span>
                   </div>
-                  <div className="mt-0.5 text-mono text-[10px] text-muted-foreground truncate">
+                  <div className="mt-0.5 text-mono text-micro text-muted-foreground truncate">
                     {r.target_id} · {fmtRelative(r.at)}
                   </div>
                 </li>
@@ -410,7 +410,7 @@ export function DashboardPage() {
             <div className="text-display text-sm font-semibold leading-none" style={{ color: risk <= 20 ? "var(--color-severity-low)" : risk <= 50 ? "var(--color-severity-medium)" : "var(--color-severity-critical)" }}>
               {!posture ? "—" : risk <= 20 ? "Good" : risk <= 50 ? "Fair" : "Poor"}
             </div>
-            <div className="mt-1 text-[11px] text-muted-foreground">{summaryData?.open_findings ?? "—"} open findings</div>
+            <div className="mt-1 text-micro text-muted-foreground">{summaryData?.open_findings ?? "—"} open findings</div>
           </div>
         </div>
         <div className="flex flex-col justify-between gap-5">
@@ -422,13 +422,13 @@ export function DashboardPage() {
           </StatGrid>
           {/* Risk factors — NV's 6 weighted contributors (bar = share of its cap). */}
           <div>
-            <div className="mb-2 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Risk factors · points of 100</div>
+            <div className="mb-2 text-micro  tracking-[0.14em] text-muted-foreground">Risk factors · points of 100</div>
             <div className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2 xl:grid-cols-3">
               {SCORE_FACTORS.map(({ k, label, cap }) => {
                 const v = posture?.score_breakdown?.[k] ?? 0;
                 const ratio = v / cap;
                 return (
-                  <div key={k} className="flex items-center gap-2 text-[11px]">
+                  <div key={k} className="flex items-center gap-2 text-micro">
                     <span className="w-[104px] shrink-0 text-muted-foreground">{label}</span>
                     <div className="h-1.5 flex-1 rounded-full bg-muted overflow-hidden">
                       <div className="h-full rounded-full" style={{ width: `${Math.round(ratio * 100)}%`, background: ratio >= 0.66 ? "var(--color-severity-critical)" : ratio >= 0.33 ? "var(--color-severity-high)" : "var(--color-severity-medium)" }} />
@@ -487,7 +487,7 @@ export function DashboardPage() {
             title="Top Network Denies"
             subtitle="Top blocked service pairs in the loaded last-24h sample (up to 5,000 pairs)"
             icon={<ShieldAlert className="h-3.5 w-3.5" />}
-            rightSlot={<a href={clusterPath("/network?tab=conversations&hours=24&verdict_group=blocked&hide_platform=false")} className="text-[11px] text-muted-foreground hover:text-foreground">view conversations <ArrowUpRight className="inline h-3 w-3" /></a>}
+            rightSlot={<a href={clusterPath("/network?tab=conversations&hours=24&verdict_group=blocked&hide_platform=false")} className="text-micro text-muted-foreground hover:text-foreground">view conversations <ArrowUpRight className="inline h-3 w-3" /></a>}
           >
             <div data-testid="dashboard-network-denies">
               {conversationsQ.isError ? <ErrorState title="Could not load network conversations." /> : conversationsQ.isPending ? (
@@ -505,13 +505,13 @@ export function DashboardPage() {
                             <span className="px-1.5 text-muted-foreground">→</span>
                             <span className="font-mono">{row.to}</span>
                           </div>
-                          <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
+                          <div className="mt-0.5 truncate text-micro text-muted-foreground">
                             {fmtBytes(row.bytes)} · {row.packets.toLocaleString()} packets
                             {(row.apps?.length ?? 0) > 0 && ` · ${row.apps?.slice(0, 3).join(", ")}`}
                             {row.last_seen && ` · ${fmtRelative(row.last_seen)}`}
                           </div>
                         </div>
-                        <span className="shrink-0 rounded bg-[color-mix(in_oklab,var(--color-status-error)_16%,transparent)] px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-[color:var(--color-status-error)]">
+                        <span className="shrink-0 rounded bg-[color-mix(in_oklab,var(--color-status-error)_16%,transparent)] px-1.5 py-0.5 text-micro font-medium  text-[color:var(--color-status-error)]">
                           {row.verdict || "deny"}
                         </span>
                       </a>
@@ -568,7 +568,7 @@ export function DashboardPage() {
             <button type="button"
               onClick={() => downloadCsv("constellation-vulnerable-workloads", ["Deployment ID", "Cluster ID", "Namespace", "Workload", "Platform Role", "Critical", "High"],
                 (posture?.top_vulnerable ?? []).map((t) => [t.id ?? "", t.cluster_id ?? "", t.namespace, t.name, t.platform_role ?? "Unknown", t.critical, t.high]))}
-              className="rounded-md border border-border bg-card px-2 py-1 text-[10px] font-medium hover:bg-accent">
+              className="rounded-md border border-border bg-card px-2 py-1 text-micro font-medium hover:bg-accent">
               Export CSV
             </button>
           ) : undefined}
@@ -582,10 +582,10 @@ export function DashboardPage() {
                   <a href={t.id ? clusterPath(`/deployments/${encodeURIComponent(t.id)}`) : clusterPath(`/deployments?q=${encodeURIComponent(t.name)}&namespace=${encodeURIComponent(t.namespace)}&hide_platform=false`)} className="flex items-center gap-2 px-3 py-2 hover:bg-muted/40 transition-colors">
                     <div className="min-w-0 flex-1">
                       <div className="text-xs font-medium truncate">{t.name}</div>
-                      <div className="text-[10px] text-muted-foreground truncate">{t.namespace}{t.inventory_presence === "scaled_to_zero" ? " · scaled to zero" : t.inventory_presence === "unverified" ? " · presence unverified" : ""}{!t.id && " · namespace + name search"}</div>
+                      <div className="text-micro text-muted-foreground truncate">{t.namespace}{t.inventory_presence === "scaled_to_zero" ? " · scaled to zero" : t.inventory_presence === "unverified" ? " · presence unverified" : ""}{!t.id && " · namespace + name search"}</div>
                     </div>
-                    {t.critical > 0 && <span className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white" style={{ background: "var(--color-severity-critical)" }}>{t.critical}C</span>}
-                    {t.high > 0 && <span className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white" style={{ background: "var(--color-severity-high)" }}>{t.high}H</span>}
+                    {t.critical > 0 && <span className="rounded px-1.5 py-0.5 text-micro text-mono font-semibold text-white" style={{ background: "var(--color-severity-critical)" }}>{t.critical}C</span>}
+                    {t.high > 0 && <span className="rounded px-1.5 py-0.5 text-micro text-mono font-semibold text-white" style={{ background: "var(--color-severity-high)" }}>{t.high}H</span>}
                   </a>
                 </li>
               ))}
@@ -637,7 +637,7 @@ export function DashboardPage() {
             >
               <div className="mb-3 flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                  <div className="flex items-center gap-1.5 text-micro  text-muted-foreground">
                     <Database className="h-3 w-3" />
                     Organization Scanner DB
                   </div>
@@ -677,7 +677,7 @@ export function DashboardPage() {
               >
                 <div className="mb-3 flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                    <div className="flex items-center gap-1.5 text-micro  text-muted-foreground">
                       <GitBranch className="h-3 w-3" />
                       Organization Federation
                     </div>
@@ -795,7 +795,7 @@ export function DashboardPage() {
                   <Row k="Bundle records" v={<span className="text-mono text-muted-foreground">{Number(bundle.data.record_count).toLocaleString()}</span>} />
                   <Row k="Signed"  v={
                     bundle.data.signed ? (
-                      <span className="rounded bg-[color-mix(in_oklab,var(--color-status-success)_18%,transparent)] px-1.5 py-0.5 text-[10px] text-[color:var(--color-status-success)] text-mono">cosign · {String(bundle.data.signer_identity ?? "—")}</span>
+                      <span className="rounded bg-[color-mix(in_oklab,var(--color-status-success)_18%,transparent)] px-1.5 py-0.5 text-micro text-[color:var(--color-status-success)] text-mono">cosign · {String(bundle.data.signer_identity ?? "—")}</span>
                     ) : <span className="text-muted-foreground">unsigned</span>
                   } />
                   <Row k="Imported" v={<span className="text-mono text-muted-foreground">{new Date(String(bundle.data.imported_at)).toLocaleString()}</span>} />
@@ -815,11 +815,11 @@ export function DashboardPage() {
         <Panel title="Loaded findings · 14 day trend" icon={<TrendingUp className="h-3.5 w-3.5" />}>
           <div className="px-2">
             <Sparkline data={trends.openSeries} width={300} height={80} color="var(--color-primary)" />
-            <div className="mt-2 flex items-center justify-between text-[10px] text-muted-foreground">
+            <div className="mt-2 flex items-center justify-between text-micro text-muted-foreground">
               <span>250 open findings ranked by risk · 14d ago</span>
               <span>today</span>
             </div>
-            <div className="mt-2 text-mono text-[11px]">
+            <div className="mt-2 text-mono text-micro">
               <span className="text-foreground">Records in loaded sample with first-seen dates in this window: </span>
               <span className="text-foreground">{trends.openSeries.reduce((a, b) => a + b, 0)}</span>
               <span className="text-muted-foreground"> · peak {Math.max(0, ...trends.openSeries)}</span>
@@ -953,13 +953,13 @@ const COMPONENT_ROLES: Array<{ id: ComponentRoleID; label: string; icon: React.R
 function ExposedRow({ s, dir, clusterPath }: { s: import("@/api/client").ExposedService; dir: "ingress" | "egress"; clusterPath: (p: string) => string }) {
   return (
     <a href={clusterPath(`/network?tab=conversations&hours=168&from=${encodeURIComponent(dir === "ingress" ? "external" : s.workload)}&to=${encodeURIComponent(dir === "ingress" ? s.workload : "external")}&hide_platform=false`)} className="flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors">
-      <span className={cn("shrink-0 rounded px-1.5 py-0.5 text-[9px] uppercase tracking-wide font-medium",
+      <span className={cn("shrink-0 rounded px-1.5 py-0.5 text-micro  font-medium",
         dir === "ingress" ? "bg-[color-mix(in_oklab,var(--color-severity-high)_16%,transparent)] text-[color:var(--color-severity-high)]" : "bg-muted text-muted-foreground")}>
         {dir === "ingress" ? "in" : "out"}
       </span>
       <div className="min-w-0 flex-1">
         <div className="text-xs font-medium truncate">{s.namespace ? `${s.namespace}/` : ""}{s.name}</div>
-        <div className="text-[10px] text-muted-foreground truncate">
+        <div className="text-micro text-muted-foreground truncate">
           {s.external_peers} external {dir === "ingress" ? "clients" : "dests"}
           {s.protocols.length > 0 && ` · ${s.protocols.join("/")}`}
           {s.ports.length > 0 && ` · :${s.ports.slice(0, 6).join(", :")}`}
@@ -969,16 +969,16 @@ function ExposedRow({ s, dir, clusterPath }: { s: import("@/api/client").Exposed
       <div className="flex shrink-0 items-center gap-1">
         {s.policy_mode && (
           <span title={`Network policy mode: ${s.policy_mode}`}
-            className={cn("rounded px-1.5 py-0.5 text-[9px] uppercase tracking-wide font-medium",
+            className={cn("rounded px-1.5 py-0.5 text-micro  font-medium",
               s.policy_mode === "protect" ? "bg-[color-mix(in_oklab,var(--color-severity-low)_18%,transparent)] text-[color:var(--color-severity-low)]"
                 : s.policy_mode === "monitor" ? "bg-[color-mix(in_oklab,var(--color-severity-medium)_18%,transparent)] text-[color:var(--color-severity-medium)]"
                 : "bg-[color-mix(in_oklab,var(--color-severity-high)_18%,transparent)] text-[color:var(--color-severity-high)]")}>
             {s.policy_mode}
           </span>
         )}
-        {s.critical > 0 && <span className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white" style={{ background: "var(--color-severity-critical)" }}>{s.critical}C</span>}
-        {s.high > 0 && <span className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white" style={{ background: "var(--color-severity-high)" }}>{s.high}H</span>}
-        {s.critical === 0 && s.high === 0 && <span className="text-[10px] text-muted-foreground">no crit/high</span>}
+        {s.critical > 0 && <span className="rounded px-1.5 py-0.5 text-micro text-mono font-semibold text-white" style={{ background: "var(--color-severity-critical)" }}>{s.critical}C</span>}
+        {s.high > 0 && <span className="rounded px-1.5 py-0.5 text-micro text-mono font-semibold text-white" style={{ background: "var(--color-severity-high)" }}>{s.high}H</span>}
+        {s.critical === 0 && s.high === 0 && <span className="text-micro text-muted-foreground">no crit/high</span>}
       </div>
     </a>
   );
@@ -997,13 +997,13 @@ function ModeMaturity({ label, groups, discover, monitor, protect }: {
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
-        <span className="text-[11px] font-medium text-foreground">{label}</span>
+        <span className="text-micro font-medium text-foreground">{label}</span>
 
       </div>
       <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-muted">
         {modes.map((m) => m.v > 0 && <div key={m.label} style={{ width: `${(m.v / total) * 100}%`, background: m.color }} title={`${m.label}: ${m.v}`} />)}
       </div>
-      <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+      <div className="flex items-center gap-3 text-micro text-muted-foreground">
         {modes.map((m) => <span key={m.label} className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full" style={{ background: m.color }} />{m.label} {m.v}</span>)}
       </div>
     </div>
@@ -1027,7 +1027,7 @@ function Panel({
           {icon && <span className="text-muted-foreground">{icon}</span>}
           <div className="min-w-0">
             <h2 className="text-display text-sm font-semibold tracking-tight truncate">{title}</h2>
-            {subtitle && <p className="text-[10px] text-muted-foreground truncate">{subtitle}</p>}
+            {subtitle && <p className="text-micro text-muted-foreground truncate">{subtitle}</p>}
           </div>
         </div>
         {rightSlot}
@@ -1040,7 +1040,7 @@ function Panel({
 function Row({ k, v }: { k: string; v: React.ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-3">
-      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">{k}</dt>
+      <dt className="text-micro  text-muted-foreground">{k}</dt>
       <dd className="text-right">{v}</dd>
     </div>
   );
@@ -1138,7 +1138,7 @@ function StatusChip({ value }: { value: string }) {
         : "var(--color-status-error)";
   return (
     <span
-      className="rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider"
+      className="rounded px-1.5 py-0.5 text-micro "
       style={{
         backgroundColor: `color-mix(in oklab, ${tone} 18%, transparent)`,
         color: tone,

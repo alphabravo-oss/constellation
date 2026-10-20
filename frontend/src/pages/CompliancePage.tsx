@@ -106,7 +106,7 @@ export function CompliancePage() {
             </div>
           )}
           {c.remediation && c.effective_status === "fail" && (
-            <div className="mt-1 rounded border-l-2 border-[color:var(--color-severity-medium)] bg-muted/40 px-2 py-1 text-[11px] text-muted-foreground">
+            <div className="mt-1 rounded border-l-2 border-[color:var(--color-severity-medium)] bg-muted/40 px-2 py-1 text-micro text-muted-foreground">
               <span className="font-medium text-foreground">Remediation: </span>{c.remediation}
             </div>
           )}
@@ -115,7 +115,7 @@ export function CompliancePage() {
               {Object.entries(c.tags_v2).map(([std, meta]) => {
                 const ref = meta?.references?.[0];
                 return (
-                  <span key={std} className="rounded bg-muted px-1.5 py-px text-[9px] font-medium text-muted-foreground" title={meta?.description || std}>
+                  <span key={std} className="rounded bg-muted px-1.5 py-px text-micro font-medium text-muted-foreground" title={meta?.description || std}>
                     {regLabel(std)}{ref ? ` ${ref}` : ""}
                   </span>
                 );
@@ -469,7 +469,7 @@ function ScheduleRow({
               sourceLimit={25} sourceCount={runs.data.runs.length}
               columns={[
                 { id: "started", exportValue: run => run.started_at, header: "Started", kind: "date", size: 192, minSize: 176, cell: (run) => new Date(run.started_at).toLocaleString() },
-                { id: "status", exportValue: run => run.status, header: "Status", kind: "status", size: 144, minSize: 128, cell: (run) => <span className={`rounded-md px-1.5 py-0.5 text-[10px] ${run.status === "succeeded" ? "bg-[color:var(--color-status-success)]/15 text-[color:var(--color-status-success)]" : run.status === "failed" ? "bg-[color:var(--color-status-error)]/15 text-[color:var(--color-status-error)]" : "bg-muted text-muted-foreground"}`}>{run.status}</span> },
+                { id: "status", exportValue: run => run.status, header: "Status", kind: "status", size: 144, minSize: 128, cell: (run) => <span className={`rounded-md px-1.5 py-0.5 text-micro ${run.status === "succeeded" ? "bg-[color:var(--color-status-success)]/15 text-[color:var(--color-status-success)]" : run.status === "failed" ? "bg-[color:var(--color-status-error)]/15 text-[color:var(--color-status-error)]" : "bg-muted text-muted-foreground"}`}>{run.status}</span> },
                 { id: "summary", exportValue: run => `${run.summary.pass ?? 0} / ${run.summary.fail ?? 0} / ${run.summary.manual ?? 0}`, header: "Pass / Fail / Manual", kind: "count", numeric: true, size: 184, minSize: 176, cell: (run) => `${run.summary.pass ?? 0} / ${run.summary.fail ?? 0} / ${run.summary.manual ?? 0}` },
                 { id: "signature", exportValue: run => run.artifact_signature || "Not recorded", header: "Signature", kind: "status", size: 176, minSize: 160, cell: (run) => run.artifact_signature ? <span title={run.artifact_signature} className="rounded bg-[color:var(--color-status-success)]/15 px-1.5 py-0.5 text-[color:var(--color-status-success)]">Signature recorded</span> : <span className="text-muted-foreground">—</span> },
                 { id: "format", header: "Artifact format", kind: "status", cell: run => run.artifact_metadata_known && run.artifact_format ? run.artifact_format.toUpperCase() : "Not recorded", exportValue: run => run.artifact_metadata_known ? run.artifact_format ?? "" : "Not recorded" },
@@ -486,7 +486,7 @@ function ScheduleRow({
 function Info({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <div className="text-[10px] uppercase text-muted-foreground">{label}</div>
+      <div className="text-micro  text-muted-foreground">{label}</div>
       <div className="mt-1 break-words">{value}</div>
     </div>
   );

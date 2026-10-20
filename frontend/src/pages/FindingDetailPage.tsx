@@ -87,7 +87,7 @@ function FindingDetail({ finding: f, clusterId, listPath, unavailable }: { findi
           className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5 text-xs"
           data-testid="finding-affected-asset"
         >
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Affected asset</span>
+          <span className="text-micro  text-muted-foreground">Affected asset</span>
           <span className="font-mono">{f.asset_id.slice(0, 24)}</span>
           <div className="ml-auto flex items-center gap-2">
             <a
@@ -281,7 +281,7 @@ function formatRangeNamespace(range: AffectedRange) {
 function DetailField({ label, value, mono, wide }: { label: string; value: string; mono?: boolean; wide?: boolean }) {
   return (
     <div className={wide ? "sm:col-span-2" : undefined}>
-      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</dt>
+      <dt className="text-micro  text-muted-foreground">{label}</dt>
       <dd className={mono ? "mt-1 break-all font-mono text-xs" : "mt-1 text-xs"}>{value}</dd>
     </div>
   );

@@ -15,7 +15,7 @@ import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
-import { TextInput } from "@/components/ui/form";
+import { TextInput, Select } from "@/components/ui/form";
 import { useRouteSearchParams } from "@/lib/route-search";
 import { groupSearchText } from "@/lib/group-picker";
 
@@ -103,10 +103,10 @@ function GroupModeBulkActions({ clusterId, onChanged }: { clusterId: string; onC
   });
   return <div className="space-y-3">
     <div className="flex flex-wrap items-end gap-3">
-      <label className="space-y-1 text-xs">Mode dimension<select aria-label="Mode dimension" className="block h-9 rounded-md border border-border bg-background px-3 text-sm" value={dimension} disabled={mut.isPending} onChange={(event) => setDimension(event.target.value as "policy" | "profile")}><option value="policy">Network</option><option value="profile">Process/File</option></select></label>
-      <label className="space-y-1 text-xs">From mode<select aria-label="From mode" className="block h-9 rounded-md border border-border bg-background px-3 text-sm" value={from} disabled={mut.isPending} onChange={(event) => setFrom(event.target.value as GroupMode)}>{GROUP_MODES.map((mode) => <option key={mode} value={mode}>{mode}</option>)}</select></label>
+      <label className="space-y-1 text-xs">Mode dimension<Select aria-label="Mode dimension" className="block h-9 rounded-md border border-border bg-background px-3 text-sm" value={dimension} disabled={mut.isPending} onChange={(event) => setDimension(event.target.value as "policy" | "profile")}><option value="policy">Network</option><option value="profile">Process/File</option></Select></label>
+      <label className="space-y-1 text-xs">From mode<Select aria-label="From mode" className="block h-9 rounded-md border border-border bg-background px-3 text-sm" value={from} disabled={mut.isPending} onChange={(event) => setFrom(event.target.value as GroupMode)}>{GROUP_MODES.map((mode) => <option key={mode} value={mode}>{mode}</option>)}</Select></label>
       <ArrowRight className="mb-2 h-4 w-4 text-muted-foreground" aria-hidden />
-      <label className="space-y-1 text-xs">To mode<select aria-label="To mode" className="block h-9 rounded-md border border-border bg-background px-3 text-sm" value={to} disabled={mut.isPending} onChange={(event) => setTo(event.target.value as GroupMode)}>{GROUP_MODES.map((mode) => <option key={mode} value={mode}>{mode}</option>)}</select></label>
+      <label className="space-y-1 text-xs">To mode<Select aria-label="To mode" className="block h-9 rounded-md border border-border bg-background px-3 text-sm" value={to} disabled={mut.isPending} onChange={(event) => setTo(event.target.value as GroupMode)}>{GROUP_MODES.map((mode) => <option key={mode} value={mode}>{mode}</option>)}</Select></label>
       <Button variant="primary" size="lg" disabled={from === to || mut.isPending} onClick={() => { if (window.confirm(`Change every ${from} group in this cluster to ${to} for ${dimension === "policy" ? "network" : "process/file"} enforcement?`)) mut.mutate(); }}><ArrowUpDown className="h-4 w-4" />{mut.isPending ? "Applying…" : "Apply"}</Button>
     </div>
     {mut.isError && <p role="alert" className="text-sm text-status-error">Could not change group modes. Refresh the groups to verify their current modes, then try again.</p>}

@@ -44,9 +44,9 @@ async function render(url = "/clusters/cluster-a/assets/asset-a", seed?: (client
   history = createMemoryHistory({ initialEntries: [url] });
   await act(async () => root.render(<QueryClientProvider client={client}><TestRouter path="/clusters/$id/assets/$aid" history={history}><AssetDetailPage /></TestRouter></QueryClientProvider>));
 }
-async function tab(label: string) { const trigger = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((item) => item.textContent === label)!; await act(async () => trigger.focus()); await settled(() => expect(trigger.getAttribute('aria-selected')).toBe("true")); }
+async function tab(label: string) { const trigger = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((item) => item.textContent === label || item.getAttribute("aria-label") === label)!; await act(async () => trigger.focus()); await settled(() => expect(trigger.getAttribute('aria-selected')).toBe("true")); }
 const stats = () => [...host.querySelectorAll('[data-testid="asset-stats"] .app-stat-value')].map((item) => item.textContent);
-const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent === label)!;
+const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent === label || item.getAttribute("aria-label") === label)!;
 
 it("shows a complete evidence verdict, four matching KPIs and findings as the sole primary workspace", async () => {
   await render(); await settled(() => expect(host.querySelector('[data-testid="asset-findings-table"]')).not.toBeNull());
@@ -174,7 +174,7 @@ it("exports the asset finding inventory's actual roles in the visible page colum
   expect(host.querySelector('[data-testid="asset-findings-table"] thead')?.textContent).not.toContain("Platform role");
   await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="asset-findings-table-columns-trigger"]')!.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 })));
   await settled(() => expect(document.querySelector('[role="menuitemcheckbox"]')).not.toBeNull());
-  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find(item => item.textContent === "Platform role")!.click());
+  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((item) => item.textContent === "Platform role" || item.getAttribute("aria-label") === "Platform role")!.click());
   expect(host.textContent).toContain("Unclassified");
   await act(async () => button("Export this page CSV").click());
   const [, headers, rows] = vi.mocked(downloadCsv).mock.calls.at(-1)!;

@@ -242,7 +242,7 @@ const stats = () =>
 async function tab(text: string) {
   await act(async () => {
     [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
-      .find((item) => item.textContent === text)!
+      .find((item) => item.textContent === text || item.getAttribute("aria-label") === text)!
       .focus();
   });
   await settled(() =>

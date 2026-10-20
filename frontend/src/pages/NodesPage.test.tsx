@@ -23,7 +23,7 @@ async function render(search=""){history=createMemoryHistory({initialEntries:[`/
 async function rerender(){await act(async()=>root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{...identity}}><TestRouter history={history}><NodesPage /></TestRouter></TablePreferencesProvider></QueryClientProvider>));}
 async function settle(check:()=>void){await vi.waitFor(async()=>{await act(async()=>{});check();});}
 const rows=()=>host.querySelectorAll('[data-testid="nodes-table"] tbody tr');
-const button=(label:string)=>[...host.querySelectorAll<HTMLButtonElement>("button")].find(item=>item.textContent?.trim()===label)!;
+const button=(label:string)=>[...host.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.trim() === label || item.getAttribute("aria-label") === label)!;
 async function click(label:string){await act(async()=>button(label).click());}
 async function field(selector:string,value:string){await act(async()=>{const input=host.querySelector<HTMLInputElement|HTMLSelectElement>(selector)!;Object.getOwnPropertyDescriptor(input.tagName==="SELECT"?HTMLSelectElement.prototype:HTMLInputElement.prototype,"value")!.set!.call(input,value);input.dispatchEvent(new Event(input.tagName==="SELECT"?"change":"input",{bubbles:true}));});}
 it("pages past500 nodes with full matching summary and matching CSV",async()=>{

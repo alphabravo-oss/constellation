@@ -13,6 +13,7 @@ import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { ErrorState, LoadingState } from "@/components/ui/states";
+import { Select } from "@/components/ui/form";
 
 type ImportBody = Parameters<typeof policies.importAdmissionProfile>[0];
 
@@ -108,9 +109,9 @@ function AdmissionProfileImporter({ backTo }: { backTo: string }) {
         <fieldset disabled={busy} className="space-y-5">
           <Tabs value={source} onValueChange={chooseSource} items={[
             { value: "catalog", label: "Catalog", content: <div className="space-y-4">
-              <label className="block space-y-2 text-sm"><span className="font-medium">Profile</span><select id="admission-profile" data-testid="admission-profile-select" className="h-10 w-full rounded-md border border-border bg-background px-3" value={selectedID} onChange={(e) => { resetPreview(); setProfileSelection(e.target.value); }} disabled={profilesQ.isPending || profilesQ.isError}>
+              <label className="block space-y-2 text-sm"><span className="font-medium">Profile</span><Select id="admission-profile" data-testid="admission-profile-select" className="h-10 w-full rounded-md border border-border bg-background px-3" value={selectedID} onChange={(e) => { resetPreview(); setProfileSelection(e.target.value); }} disabled={profilesQ.isPending || profilesQ.isError}>
                 {!profiles.length && <option value="">No admission profiles available</option>}{profileSelection && !selected && <option value={profileSelection}>Unavailable profile: {profileSelection}</option>}{profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select></label>
+              </Select></label>
               {selected && <p className="text-sm text-muted-foreground">{selected.description} · {selected.rules.length} rules · Failure policy: {selected.failure_policy}</p>}
               <Button type="button" disabled={!selected || profilesQ.isError || profilesQ.isPending} onClick={() => exportProfile.mutate(selectedID)} data-testid="admission-profile-export"><Download className="h-4 w-4" /> Export bundle</Button>
             </div> },
@@ -125,8 +126,8 @@ function AdmissionProfileImporter({ backTo }: { backTo: string }) {
             </div> },
           ]} />
           <Collapse label="Advanced import overrides"><div className="grid grid-cols-1 gap-5 rounded-md border border-border p-4 sm:grid-cols-2">
-            <label className="block space-y-2 text-sm"><span className="font-medium">Mode override</span><select id="admission-profile-mode" className="h-10 w-full rounded-md border border-border bg-background px-3" value={mode} onChange={(event) => { resetPreview(); setMode(event.target.value as typeof mode); }}><option value="">Keep profile modes</option><option value="monitor">Monitor</option><option value="enforce">Enforce</option></select></label>
-            <label className="block space-y-2 text-sm"><span className="font-medium">Enabled override</span><select id="admission-profile-enabled" className="h-10 w-full rounded-md border border-border bg-background px-3" value={enabled} onChange={(event) => { resetPreview(); setEnabled(event.target.value as typeof enabled); }}><option value="">Keep profile status</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option></select></label>
+            <label className="block space-y-2 text-sm"><span className="font-medium">Mode override</span><Select id="admission-profile-mode" className="h-10 w-full rounded-md border border-border bg-background px-3" value={mode} onChange={(event) => { resetPreview(); setMode(event.target.value as typeof mode); }}><option value="">Keep profile modes</option><option value="monitor">Monitor</option><option value="enforce">Enforce</option></Select></label>
+            <label className="block space-y-2 text-sm"><span className="font-medium">Enabled override</span><Select id="admission-profile-enabled" className="h-10 w-full rounded-md border border-border bg-background px-3" value={enabled} onChange={(event) => { resetPreview(); setEnabled(event.target.value as typeof enabled); }}><option value="">Keep profile status</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option></Select></label>
           </div></Collapse>
         </fieldset>
         {exportProfile.isError && <p role="alert" className="text-sm text-status-error">Could not export this profile. Try again.</p>}

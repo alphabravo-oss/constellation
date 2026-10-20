@@ -192,7 +192,7 @@ function GroupPickerOption({ option, selected, onSelect }: { option: GroupOption
           <ModePill label="net" value={group.policy_mode} />
           <ModePill label="profile" value={group.profile_mode} />
         </span>
-        <span className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+        <span className="mt-1 flex flex-wrap items-center gap-2 text-micro text-muted-foreground">
           <span className="capitalize">{group.kind}</span>
           <span className="inline-flex items-center gap-1">
             <UsersRound className="h-3 w-3" aria-hidden />
@@ -213,7 +213,7 @@ function GroupPickerOption({ option, selected, onSelect }: { option: GroupOption
 function ModePill({ label, value }: { label: string; value?: string }) {
   const mode = (value || "discover").toLowerCase();
   return (
-    <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+    <span className="rounded bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
       {label}:{mode}
     </span>
   );

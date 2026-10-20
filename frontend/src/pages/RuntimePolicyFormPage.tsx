@@ -180,7 +180,7 @@ function RuntimePolicyEditor({ clusterID, policyID, initial, latest, unavailable
             <Field label="Name" value={name} onChange={setName} placeholder="block-egress-to-internet" />
             <label htmlFor="runtime-policy-rules" className="text-sm text-muted-foreground">Rules (JSON)</label>
             <textarea id="runtime-policy-rules"
-              className="h-[300px] w-full rounded border border-input bg-card p-2 font-mono text-[11px] outline-none focus:border-[color:var(--color-primary)]"
+              className="h-[300px] w-full rounded border border-input bg-card p-2 font-mono text-micro outline-none focus:border-[color:var(--color-primary)]"
               value={rulesText}
               onChange={(e) => { setRulesText(e.target.value); setSimStats(undefined); setGenResult(undefined); }}
               spellCheck={false}
@@ -188,7 +188,7 @@ function RuntimePolicyEditor({ clusterID, policyID, initial, latest, unavailable
             />
             {!rulesValid && <p role="alert">Rules must be a valid JSON array.</p>}
             {err && (
-              <div className="rounded border border-[color:var(--color-status-error)] bg-card p-2 text-[11px] text-[color:var(--color-status-error)]" role="alert" data-testid="runtime-policies-editor-error">
+              <div className="rounded border border-[color:var(--color-status-error)] bg-card p-2 text-micro text-[color:var(--color-status-error)]" role="alert" data-testid="runtime-policies-editor-error">
                 {err}
               </div>
             )}
@@ -215,7 +215,7 @@ function RuntimePolicyEditor({ clusterID, policyID, initial, latest, unavailable
                 {generate.isPending ? "Generating…" : "Generate from traffic"}
               </Button>
               <Button type="button" variant="ghost" onClick={goBack}>Cancel</Button>
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-micro text-muted-foreground">
                 New policies always start in <b>monitor</b>. Promote separately to enforce.
               </span>
             </div>
@@ -224,15 +224,15 @@ function RuntimePolicyEditor({ clusterID, policyID, initial, latest, unavailable
           <p className="mb-2 text-xs">Reviewed mode: {reviewed?.mode ?? "New · monitor"} · revision {policyRevision(reviewed) ?? "Not created"}</p>
           {reviewed && <div className="mb-3 space-y-2 text-xs"><p>Saved name: {reviewed.name}. Applying the retained draft replaces its name and rules.</p><pre className="max-h-56 overflow-auto rounded border border-border p-2">{JSON.stringify(policyRules(reviewed), null, 2)}</pre></div>}
           <div className="space-y-2" data-testid="runtime-policies-editor-preview">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Live preview</div>
-            <pre className="h-[280px] overflow-auto rounded border border-border bg-background/40 p-2 font-mono text-[10px] leading-snug">
+            <div className="text-micro  text-muted-foreground">Live preview</div>
+            <pre className="h-[280px] overflow-auto rounded border border-border bg-background/40 p-2 font-mono text-micro leading-snug">
               {JSON.stringify({ cluster_id: clusterID, workload, namespace, name, rules: tryParse(rulesText) }, null, 2)}
             </pre>
           </div>
           </Collapse>
             {simStats && (
               <>
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Simulation</div>
+                <div className="text-micro  text-muted-foreground">Simulation</div>
                 <MatchStatsPane stats={simStats} />
               </>
             )}
@@ -264,8 +264,8 @@ function GenerateResultPane({ result }: { result: GeneratePolicyResponse }) {
   };
   return (
     <div className="space-y-2" data-testid="runtime-policies-generate-result">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Auto-generated from traffic</div>
-      <div className="rounded border border-border bg-card/50 p-2 text-[11px]">
+      <div className="text-micro  text-muted-foreground">Auto-generated from traffic</div>
+      <div className="rounded border border-border bg-card/50 p-2 text-micro">
         <div>
           Window: <span className="text-mono">{result.window_hours}h</span> ·
           Flows seen: <span className="text-mono">{result.flows_seen}</span> ·
@@ -277,16 +277,16 @@ function GenerateResultPane({ result }: { result: GeneratePolicyResponse }) {
           </div>
         )}
       </div>
-      <details className="text-[11px]">
+      <details className="text-micro">
         <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
           Rule summary ({result.summary.length})
         </summary>
-        <ul className="mt-1 space-y-0.5 rounded border border-border bg-background/40 p-2 font-mono text-[10px]">
+        <ul className="mt-1 space-y-0.5 rounded border border-border bg-background/40 p-2 font-mono text-micro">
           {result.summary.map((s, i) => <li key={i}>{s}</li>)}
         </ul>
       </details>
       <div>
-        <div className="mb-1 flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+        <div className="mb-1 flex items-center gap-1.5 text-micro  text-muted-foreground">
           NetworkPolicy YAML
           {(["native", "cilium", "calico"] as const).map((f) => (
             <button
@@ -311,7 +311,7 @@ function GenerateResultPane({ result }: { result: GeneratePolicyResponse }) {
             Download
           </button>
         </div>
-        <pre className="h-[180px] overflow-auto rounded border border-border bg-background/40 p-2 font-mono text-[10px]">
+        <pre className="h-[180px] overflow-auto rounded border border-border bg-background/40 p-2 font-mono text-micro">
           {yaml}
         </pre>
       </div>
@@ -363,7 +363,7 @@ function Field({
  *  from /match-stats or /simulate. The "deny" column is the one operators
  *  care about — that's what would be dropped if (or when) enforce is on. */
 function MatchStatsPane({ stats, loading }: { stats?: PolicyMatchStats; loading?: boolean }) {
-  if (loading) return <div className="mt-3 text-[11px] text-muted-foreground">Loading match preview…</div>;
+  if (loading) return <div className="mt-3 text-micro text-muted-foreground">Loading match preview…</div>;
   if (!stats) return null;
   const cards: Array<{ key: "allow" | "monitor" | "deny"; label: string; tone: string; n: number }> = [
     { key: "allow",   label: "Allow",        tone: "var(--color-status-success)", n: stats.allow },
@@ -372,7 +372,7 @@ function MatchStatsPane({ stats, loading }: { stats?: PolicyMatchStats; loading?
   ];
   return (
     <div className="mt-3 space-y-2" data-testid="runtime-policy-match-stats">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+      <div className="text-micro  text-muted-foreground">
         Last {stats.window_hours}h · {stats.total} flows matched · workload <span className="text-mono text-foreground">{stats.workload}</span>
       </div>
       <div className="grid grid-cols-3 gap-2">
@@ -382,17 +382,17 @@ function MatchStatsPane({ stats, loading }: { stats?: PolicyMatchStats; loading?
             className="rounded border border-border bg-card/50 p-2 text-center"
             data-testid={`match-stats-${c.key}`}
           >
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{c.label}</div>
+            <div className="text-micro  text-muted-foreground">{c.label}</div>
             <div className="text-mono text-2xl font-semibold tabular-nums" style={{ color: c.tone }}>{c.n}</div>
           </div>
         ))}
       </div>
       {stats.deny > 0 && stats.samples?.deny && stats.samples.deny.length > 0 && (
-        <details className="text-[11px]">
+        <details className="text-micro">
           <summary className="cursor-pointer text-muted-foreground hover:text-foreground" data-testid="runtime-policy-match-stats-samples-toggle">
             Sample of would-be-blocked flows ({stats.samples.deny.length})
           </summary>
-          <ul className="mt-1 space-y-0.5 rounded border border-border bg-background/40 p-2 font-mono text-[10px]">
+          <ul className="mt-1 space-y-0.5 rounded border border-border bg-background/40 p-2 font-mono text-micro">
             {stats.samples.deny.map((s, i) => (
               <li key={i} className="truncate">
                 {s.src} → {s.dst}:{s.dst_port} · {s.protocol.toUpperCase()}
@@ -404,7 +404,7 @@ function MatchStatsPane({ stats, loading }: { stats?: PolicyMatchStats; loading?
         </details>
       )}
       {stats.default > 0 && (
-        <div className="text-[10px] text-muted-foreground">
+        <div className="text-micro text-muted-foreground">
           {stats.default} of these matched no rule and fell through to the policy's default action.
         </div>
       )}

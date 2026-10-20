@@ -47,7 +47,7 @@ export function ScannerDbCapacity({ heartbeats, unavailable = false, loading = f
 function Status({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</dt>
+      <dt className="text-micro  text-muted-foreground">{label}</dt>
       <dd className="mt-0.5 break-all font-mono text-foreground">{value}</dd>
     </div>
   );

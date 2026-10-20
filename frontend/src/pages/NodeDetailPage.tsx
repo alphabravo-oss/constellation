@@ -149,7 +149,7 @@ function ScanState({ node }: { node: NodeSummary; }) {
         <Field label="CIS observed" value={formatDate(node.cis_observed_at)} />
       </dl>
       <div className="mt-4">
-        <h3 className="text-xs font-semibold uppercase text-muted-foreground">Coverage gaps</h3>
+        <h3 className="text-xs font-semibold  text-muted-foreground">Coverage gaps</h3>
         {node.coverage_gaps?.length ? (
           <div className="mt-2 flex flex-wrap gap-2">
             {node.coverage_gaps.map((gap) => <Pill key={gap} tone="warn">{gap}</Pill>)}
@@ -174,15 +174,15 @@ function NodeContainersTable({ containers, observedAt, clusterId, exportScope }:
     {
       id: "pod", header: "Pod", kind: "text", code: true, wrap: true, size: 240, minSize: 176, maxSize: 360, cell: (c) => (
         clusterId && c.pod_name
-          ? <a href={`/clusters/${clusterId}/deployments?q=${encodeURIComponent(String(c.pod_name).replace(/-[a-z0-9]+-[a-z0-9]+$/, ""))}`} className="text-mono text-[11px] text-[color:var(--color-primary)] hover:underline">{String(c.pod_namespace ?? "")}/{String(c.pod_name ?? "")}</a>
-          : <span className="text-mono text-[11px] text-muted-foreground">{String(c.pod_namespace ?? "")}/{String(c.pod_name ?? "—")}</span>
+          ? <a href={`/clusters/${clusterId}/deployments?q=${encodeURIComponent(String(c.pod_name).replace(/-[a-z0-9]+-[a-z0-9]+$/, ""))}`} className="text-mono text-micro text-[color:var(--color-primary)] hover:underline">{String(c.pod_namespace ?? "")}/{String(c.pod_name ?? "")}</a>
+          : <span className="text-mono text-micro text-muted-foreground">{String(c.pod_namespace ?? "")}/{String(c.pod_name ?? "—")}</span>
       )
     },
-    { id: "image", header: "Image", kind: "text", code: true, wrap: true, size: 240, minSize: 176, maxSize: 360, cell: (c) => <span className="text-mono text-[11px] text-muted-foreground block" title={String(c.image_ref ?? c.image ?? "")}>{String(c.image_ref ?? c.image ?? "—")}</span> },
+    { id: "image", header: "Image", kind: "text", code: true, wrap: true, size: 240, minSize: 176, maxSize: 360, cell: (c) => <span className="text-mono text-micro text-muted-foreground block" title={String(c.image_ref ?? c.image ?? "")}>{String(c.image_ref ?? c.image ?? "—")}</span> },
     {
       id: "state", header: "State", kind: "status", cell: (c) => {
         const st = String(c.state ?? "").replace("CONTAINER_", "").toLowerCase();
-        return <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", st === "running" ? "bg-[color-mix(in_oklab,var(--color-severity-low)_16%,transparent)] text-[color:var(--color-severity-low)]" : "bg-muted text-muted-foreground")}>{st || "—"}</span>;
+        return <span className={cn("rounded px-1.5 py-0.5 text-micro font-medium", st === "running" ? "bg-[color-mix(in_oklab,var(--color-severity-low)_16%,transparent)] text-[color:var(--color-severity-low)]" : "bg-muted text-muted-foreground")}>{st || "—"}</span>;
       }, sort: (a, b) => String(a.state ?? "").localeCompare(String(b.state ?? ""))
     },
   ];
@@ -205,10 +205,10 @@ function NodeProcessesTable({ processes, observedAt, exportScope }: { processes?
     return Array.isArray(raw) ? raw : [];
   }, [processes]);
   const columns: Column<Record<string, unknown>>[] = [
-    { id: "pid", header: "PID", kind: "count", numeric: true, cell: (p) => <span className="text-mono text-[11px]">{String(p.pid ?? "—")}</span>, sort: (a, b) => Number(a.pid ?? 0) - Number(b.pid ?? 0) },
+    { id: "pid", header: "PID", kind: "count", numeric: true, cell: (p) => <span className="text-mono text-micro">{String(p.pid ?? "—")}</span>, sort: (a, b) => Number(a.pid ?? 0) - Number(b.pid ?? 0) },
     { id: "comm", header: "Process", kind: "name", wrap: true, code: true, cell: (p) => <span className="text-xs font-medium">{String(p.comm ?? "—")}</span>, sort: (a, b) => String(a.comm ?? "").localeCompare(String(b.comm ?? "")) },
-    { id: "uid", header: "User", kind: "text", wrap: true, size: 104, minSize: 88, maxSize: 144, cell: (p) => <span className={cn("text-mono text-[11px]", Number(p.uid) === 0 && "text-[color:var(--color-severity-high)]")}>{Number(p.uid) === 0 ? "root" : String(p.uid ?? "—")}</span>, sort: (a, b) => Number(a.uid ?? 0) - Number(b.uid ?? 0) },
-    { id: "cmdline", header: "Command line", kind: "text", code: true, wrap: true, size: 320, minSize: 240, maxSize: 640, grow: true, cell: (p) => <span className="text-mono text-[10px] text-muted-foreground block" title={String(p.cmdline ?? "")}>{String(p.cmdline ?? "—")}</span> },
+    { id: "uid", header: "User", kind: "text", wrap: true, size: 104, minSize: 88, maxSize: 144, cell: (p) => <span className={cn("text-mono text-micro", Number(p.uid) === 0 && "text-[color:var(--color-severity-high)]")}>{Number(p.uid) === 0 ? "root" : String(p.uid ?? "—")}</span>, sort: (a, b) => Number(a.uid ?? 0) - Number(b.uid ?? 0) },
+    { id: "cmdline", header: "Command line", kind: "text", code: true, wrap: true, size: 320, minSize: 240, maxSize: 640, grow: true, cell: (p) => <span className="text-mono text-micro text-muted-foreground block" title={String(p.cmdline ?? "")}>{String(p.cmdline ?? "—")}</span> },
   ];
   return (
     <section className="overflow-hidden rounded-lg border border-border bg-card">
@@ -239,7 +239,7 @@ function CisBenchmarkTable({ cis, observedAt, exportScope }: { cis?: unknown; ob
     },
     { id: "id", header: "Control", kind: "id", size: 144, minSize: 112, maxSize: 192, cell: (c) => <span className="text-mono text-xs">{c.id || "—"}</span>, sort: (a, b) => (a.id || "").localeCompare(b.id || "") },
     { id: "title", header: "Title", kind: "name", wrap: true, cell: (c) => <span className="text-xs">{c.title || "—"}</span>, sort: (a, b) => (a.title || "").localeCompare(b.title || "") },
-    { id: "detail", header: "Remediation / detail", kind: "text", wrap: true, size: 320, minSize: 240, maxSize: 560, grow: true, cell: (c) => <span className="block text-[11px] text-muted-foreground" title={c.detail}>{c.detail || "—"}</span> },
+    { id: "detail", header: "Remediation / detail", kind: "text", wrap: true, size: 320, minSize: 240, maxSize: 560, grow: true, cell: (c) => <span className="block text-micro text-muted-foreground" title={c.detail}>{c.detail || "—"}</span> },
   ];
   const fails = checks.filter((c) => (c.result || "").toLowerCase() === "fail").length;
   return (
@@ -274,7 +274,7 @@ function NodePackagesTable({ payload, observedAt, exportScope }: { payload: unkn
 function CisResultBadge({ result }: { result?: string; }) {
   const r = (result || "").toLowerCase();
   const color = r === "fail" ? "var(--color-severity-critical)" : r === "warn" ? "var(--color-severity-high)" : r === "pass" ? "var(--color-severity-low)" : "var(--color-severity-medium)";
-  return <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase" style={{ background: `color-mix(in oklab, ${color} 16%, transparent)`, color }}>{result || "—"}</span>;
+  return <span className="rounded px-1.5 py-0.5 text-micro font-semibold " style={{ background: `color-mix(in oklab, ${color} 16%, transparent)`, color }}>{result || "—"}</span>;
 }
 
 function JsonPanel({ title, payload, observedAt, icon: Icon }: { title: string; payload: unknown; observedAt?: string; icon: LucideIcon; }) {
@@ -289,7 +289,7 @@ function JsonPanel({ title, payload, observedAt, icon: Icon }: { title: string; 
         <Icon className="h-4 w-4 text-muted-foreground" aria-hidden />
       </div>
       {preview ? (
-        <pre className="mt-3 max-h-[360px] overflow-auto rounded-md border border-border bg-background p-3 text-[11px] leading-5 text-muted-foreground">
+        <pre className="mt-3 max-h-[360px] overflow-auto rounded-md border border-border bg-background p-3 text-micro leading-5 text-muted-foreground">
           {preview}
         </pre>
       ) : (
@@ -303,7 +303,7 @@ function StatusMetric({ label, value, tone }: { label: string; value: number; to
   return (
     <div className={cn("rounded-md border border-border p-2", tone === "ok" && "border-status-ok/30 bg-status-ok/10", tone === "warn" && "border-status-warn/30 bg-status-warn/10", tone === "danger" && "border-status-error/30 bg-status-error/10")}>
       <div className="text-lg font-semibold">{value.toLocaleString()}</div>
-      <div className="text-[10px] uppercase text-muted-foreground">{label}</div>
+      <div className="text-micro  text-muted-foreground">{label}</div>
     </div>
   );
 }
@@ -311,7 +311,7 @@ function StatusMetric({ label, value, tone }: { label: string; value: number; to
 function Field({ label, value, wide }: { label: string; value: ReactNode; wide?: boolean; }) {
   return (
     <div className={cn("grid gap-1", wide && "sm:col-span-2")}>
-      <dt className="text-[10px] uppercase text-muted-foreground">{label}</dt>
+      <dt className="text-micro  text-muted-foreground">{label}</dt>
       <dd className="break-all font-mono text-xs">{value}</dd>
     </div>
   );
@@ -339,7 +339,7 @@ function Pill({ tone, children }: { tone: "neutral" | "ok" | "warn" | "danger"; 
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium",
+        "inline-flex items-center rounded-md px-2 py-0.5 text-micro font-medium",
         tone === "neutral" && "bg-muted text-muted-foreground",
         tone === "ok" && "bg-status-ok/10 text-status-ok",
         tone === "warn" && "bg-status-warn/10 text-status-warn",

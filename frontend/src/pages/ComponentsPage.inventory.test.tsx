@@ -42,7 +42,7 @@ it("shows an inventory error without zero statistics or empty-state claims, and 
   expect(host.querySelector('[data-testid="component-summary"]')).toBeNull();
   expect(host.querySelector('[data-testid="component-inventory-table"]')).toBeNull();
   expect(host.textContent).not.toContain("No component instances");
-  const retry = [...host.querySelectorAll('button')].find((button) => button.textContent === "Retry")!;
+  const retry = [...host.querySelectorAll('button')].find((button) => button.textContent === "Retry" || button.getAttribute("aria-label") === "Retry")!;
   await act(async () => retry.click());
   await settle();
   expect(componentsInventory.list).toHaveBeenCalledTimes(2);

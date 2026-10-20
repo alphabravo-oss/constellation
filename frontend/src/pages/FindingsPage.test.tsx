@@ -46,7 +46,7 @@ async function renderPage() {
 }
 async function rerenderPage() { await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={identity}><FindingsPage /></TablePreferencesProvider></QueryClientProvider>)); }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }, { timeout: 3000 }); }
-function button(label: string) { return [...document.querySelectorAll<HTMLButtonElement>("button")].find((element) => element.textContent?.trim() === label)!; }
+function button(label: string) { return [...document.querySelectorAll<HTMLButtonElement>("button")].find((element) => element.textContent?.trim() === label || element.getAttribute("aria-label") === label)!; }
 async function click(label: string) { await act(async () => { if (label.startsWith("Views (")) button(label).dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })); else button(label).click(); }); }
 async function search(value: string) {
   await act(async () => { const input = host.querySelector<HTMLInputElement>('[aria-label="Search findings"]')!; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); });
@@ -286,7 +286,7 @@ it("retains reported and explicitly unknown roles in the visible-column page exp
   expect(host.querySelector('[data-testid="findings-table"] thead')?.textContent).not.toContain("Platform role");
   await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="findings-table-columns-trigger"]')!.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 })));
   await settled(() => expect(document.querySelector('[role="menuitemcheckbox"]')).not.toBeNull());
-  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find(item => item.textContent === "Platform role")!.click());
+  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((item) => item.textContent === "Platform role" || item.getAttribute("aria-label") === "Platform role")!.click());
   expect(host.textContent).toContain("Core"); expect(host.textContent).toContain("Unclassified"); expect(host.textContent).toContain("Not reported");
   await click("Export this page CSV");
   const [, headers, rows] = vi.mocked(downloadCsv).mock.calls.at(-1)!;

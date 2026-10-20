@@ -104,7 +104,7 @@ async function click(testId: string) {
 
 
 async function tab(label: string) {
-  const trigger = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(item => item.textContent === label);
+  const trigger = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((item) => item.textContent === label || item.getAttribute("aria-label") === label);
   expect(trigger, label).toBeDefined();
   await act(async () => trigger!.focus());
   await vi.waitFor(() => expect(trigger!.getAttribute("aria-selected")).toBe("true"));
@@ -122,7 +122,7 @@ async function previewExport() {
 
 function statistic(label: string) {
   const labels = Array.from(element("migration-preview-result").querySelectorAll("div"));
-  const labelElement = labels.find((candidate) => candidate.textContent === label);
+  const labelElement = labels.find((candidate) => candidate.textContent === label || candidate.getAttribute("aria-label") === label);
   expect(labelElement, label).toBeDefined();
   return labelElement!.parentElement!.querySelector("span")?.textContent;
 }

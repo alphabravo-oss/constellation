@@ -155,7 +155,7 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
         cell: (rule) => (
           <div className="min-w-0">
             <div className="font-medium text-foreground" title={rule.name}>{rule.name}</div>
-            <div className="mt-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">{rule.category || "admission"}</div>
+            <div className="mt-0.5 text-micro  text-muted-foreground">{rule.category || "admission"}</div>
           </div>
         ),
         sort: (a, b) => a.name.localeCompare(b.name),
@@ -172,7 +172,7 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
         header: "Group", kind: "text", code: true, size: 176, minSize: 128, maxSize: 240,
 
         cell: (rule) => rule.group ? (
-          <span className="inline-flex max-w-full rounded bg-muted px-1.5 py-px font-mono text-[10px] text-muted-foreground" title={rule.group}>
+          <span className="inline-flex max-w-full rounded bg-muted px-1.5 py-px font-mono text-micro text-muted-foreground" title={rule.group}>
             {rule.group}
           </span>
         ) : (
@@ -203,7 +203,7 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
           ) : (
             <span className="flex flex-wrap gap-1">
               {rule.criteria.map((criterion, index) => (
-                <span key={`${rule.id}-${index}`} className="rounded bg-muted px-1.5 py-px text-[10px] text-muted-foreground">
+                <span key={`${rule.id}-${index}`} className="rounded bg-muted px-1.5 py-px text-micro text-muted-foreground">
                   {criterion}
                 </span>
               ))}
@@ -254,7 +254,7 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
         cell: (option) => (
           <div className="min-w-0">
             <div className="font-medium text-foreground">{option.label}</div>
-            <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">{option.key}</div>
+            <div className="mt-0.5 font-mono text-micro text-muted-foreground">{option.key}</div>
           </div>
         ),
         sort: (a, b) => a.label.localeCompare(b.label),
@@ -297,7 +297,7 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
         cell: (entry) => (
           <div className="min-w-0">
             <div className="font-mono text-xs text-foreground" title={entry.image}>{entry.image}</div>
-            <div className="mt-0.5 text-[10px] text-muted-foreground">{entry.namespace}</div>
+            <div className="mt-0.5 text-micro text-muted-foreground">{entry.namespace}</div>
           </div>
         ),
         sort: (a, b) => a.image.localeCompare(b.image),
@@ -370,7 +370,7 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
               {groupedCriteria.map((group) => (
                 <div key={group.family} className="rounded-md border border-border bg-background px-3 py-2">
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{group.family}</div>
+                  <div className="text-micro  text-muted-foreground">{group.family}</div>
                   <div className="mt-1 text-lg font-semibold tabular-nums text-foreground">{group.count}</div>
                 </div>
               ))}
@@ -421,11 +421,11 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
           }}
         >
           <div className="min-w-[260px] flex-1">
-            <label className="mb-1 block text-[10px] uppercase tracking-wide text-muted-foreground" htmlFor="admission-assess-image">Image</label>
+            <label className="mb-1 block text-micro  text-muted-foreground" htmlFor="admission-assess-image">Image</label>
             <TextInput id="admission-assess-image" placeholder="ghcr.io/org/app:1.2.3" value={image} disabled={assess.isPending} onChange={(event) => { assess.reset(); setImage(event.target.value); }} />
           </div>
           <div className="w-[180px]">
-            <label className="mb-1 block text-[10px] uppercase tracking-wide text-muted-foreground" htmlFor="admission-assess-namespace">Namespace</label>
+            <label className="mb-1 block text-micro  text-muted-foreground" htmlFor="admission-assess-namespace">Namespace</label>
             <TextInput id="admission-assess-namespace" placeholder="default" value={namespace} disabled={assess.isPending} onChange={(event) => { assess.reset(); setNamespace(event.target.value); }} />
           </div>
           <Button type="submit" variant="primary" size="sm" disabled={!image.trim() || assess.isPending}>

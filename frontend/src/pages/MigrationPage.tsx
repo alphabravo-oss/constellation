@@ -278,7 +278,7 @@ const unsupportedColumns: Column<MigrationUnsupported>[] = [
     header: "Source", kind: "text", code: true, wrap: true, size: 264, minSize: 192, maxSize: 400,
     exportValue: (item) => item.source ? JSON.stringify(item.source) : "",
     cell: (item) => (
-      <code className="block rounded bg-muted px-1.5 py-1 text-[11px] text-muted-foreground">
+      <code className="block rounded bg-muted px-1.5 py-1 text-micro text-muted-foreground">
         {item.source ? JSON.stringify(item.source) : "-"}
       </code>
     ),
@@ -447,8 +447,8 @@ export function MigrationPage() {
       cell: (item) => (
         <div>
           <div className="font-medium">{migrationSourceLabel(item.source)}</div>
-          <div className="font-mono text-[11px] text-muted-foreground">{item.id}</div>
-          <div className="text-[11px] text-muted-foreground">Target: {item.target_cluster_id ?? "unknown or unspecified"}</div>
+          <div className="font-mono text-micro text-muted-foreground">{item.id}</div>
+          <div className="text-micro text-muted-foreground">Target: {item.target_cluster_id ?? "unknown or unspecified"}</div>
         </div>
       ),
     },

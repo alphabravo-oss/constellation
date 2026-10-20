@@ -71,8 +71,8 @@ async function render(kind: "node" | "function" | "cve" | "global-cve", url?: st
  await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{ org_id: "org", user_id: "user" }}><TestRouter path={path} history={history}>{kind === 'node' ? <NodeDetailPage /> : kind === 'function' ? <ServerlessFunctionDetailPage /> : <CVEDetailPage />}</TestRouter></TablePreferencesProvider></QueryClientProvider>));
 }
 const stats = (name: string) => [...host.querySelectorAll(`[data-testid="${name}"] .app-stat-value`)].map((item) => item.textContent);
-const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent === label)!;
-async function tab(label: string) { const trigger = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((item) => item.textContent === label)!; await act(async () => trigger.focus()); await settled(() => expect(trigger.getAttribute('aria-selected')).toBe('true')); }
+const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent === label || item.getAttribute("aria-label") === label)!;
+async function tab(label: string) { const trigger = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((item) => item.textContent === label || item.getAttribute("aria-label") === label)!; await act(async () => trigger.focus()); await settled(() => expect(trigger.getAttribute('aria-selected')).toBe('true')); }
 
 it('shows five reported node KPIs with a server-scoped host finding workspace', async () => {
  await render('node'); await settled(() => expect(host.textContent).toContain('1 matching finding instances')); expect(stats('node-stats')).toEqual(['2401', '4', '1', '1', '1']);

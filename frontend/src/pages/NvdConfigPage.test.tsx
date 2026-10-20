@@ -68,7 +68,7 @@ describe("NVD settings form", () => {
     await submit();
     expect(systemConfigApi.patch).not.toHaveBeenCalled();
     expect(host.querySelector<HTMLInputElement>('input[name="nvd_mirror_url"]')!.value).toBe("https://draft.test/api");
-    await act(async () => { Array.from(host.querySelectorAll("button")).find((button) => button.textContent === "Reload current settings")!.click(); });
+    await act(async () => { Array.from(host.querySelectorAll("button")).find((button) => button.textContent === "Reload current settings" || button.getAttribute("aria-label") === "Reload current settings")!.click(); });
     expect(host.querySelector<HTMLInputElement>('input[name="nvd_mirror_url"]')!.value).toBe("https://remote.test/api");
   });
   it("does not render a writable default form after a failed initial load", async () => {

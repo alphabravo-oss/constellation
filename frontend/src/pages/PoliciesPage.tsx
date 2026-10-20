@@ -128,12 +128,12 @@ function SimulationMatchCard({ match }: { match: PolicySimulation["matches"][num
                 ) : (
                   <span className="font-medium">{label}</span>
                 )}
-                {meta && <div className="mt-0.5 text-[11px] text-muted-foreground">{meta}</div>}
-                {findingPackage && <div className="mt-0.5 text-[11px] text-muted-foreground">{findingPackage}</div>}
-                {detail.finding?.fixed_version && <div className="mt-0.5 text-[11px] text-muted-foreground">fixed in {detail.finding.fixed_version}</div>}
-                {scanSource && <div className="mt-0.5 break-all text-[11px] text-muted-foreground">{scanSource}</div>}
-                {detail.artifact?.path && <div className="mt-0.5 break-all font-mono text-[10px] text-muted-foreground">{detail.artifact.path}</div>}
-                {imageRef && <div className="mt-0.5 break-all font-mono text-[10px] text-muted-foreground">{imageRef}</div>}
+                {meta && <div className="mt-0.5 text-micro text-muted-foreground">{meta}</div>}
+                {findingPackage && <div className="mt-0.5 text-micro text-muted-foreground">{findingPackage}</div>}
+                {detail.finding?.fixed_version && <div className="mt-0.5 text-micro text-muted-foreground">fixed in {detail.finding.fixed_version}</div>}
+                {scanSource && <div className="mt-0.5 break-all text-micro text-muted-foreground">{scanSource}</div>}
+                {detail.artifact?.path && <div className="mt-0.5 break-all font-mono text-micro text-muted-foreground">{detail.artifact.path}</div>}
+                {imageRef && <div className="mt-0.5 break-all font-mono text-micro text-muted-foreground">{imageRef}</div>}
               </div>
             );
           })}
@@ -178,14 +178,14 @@ function safeInternalHref(href?: string) {
 function Info({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-md bg-muted p-2">
-      <div className="text-[10px] uppercase text-muted-foreground">{label}</div>
+      <div className="text-micro  text-muted-foreground">{label}</div>
       <div className="mt-1 truncate font-medium">{value}</div>
     </div>
   );
 }
 
 function Badge({ children }: { children: string }) {
-  return <span className="rounded-md bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">{children}</span>;
+  return <span className="rounded-md bg-background px-1.5 py-0.5 text-micro text-muted-foreground">{children}</span>;
 }
 
 function Status({ value }: { value: string }) {

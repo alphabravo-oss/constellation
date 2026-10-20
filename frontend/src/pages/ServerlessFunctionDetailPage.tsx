@@ -159,7 +159,7 @@ const packageColumns: Column<ScanPackage>[] = [
     cell: (pkg) => (
       <div>
         <div className="break-all font-mono text-xs">{pkg.name || "-"}</div>
-        {pkg.purl ? <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{pkg.purl}</div> : null}
+        {pkg.purl ? <div className="mt-1 break-all font-mono text-micro text-muted-foreground">{pkg.purl}</div> : null}
       </div>
     ),
     sort: (a, b) => (a.name || "").localeCompare(b.name || ""),
@@ -208,7 +208,7 @@ function FindingsTable({ findings, exportScope }: { findings: ServerlessFinding[
             <SeverityBadge severity={finding.severity} size="xs" />
             <span className="font-medium">{finding.title}</span>
           </div>
-          <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{finding.external_id || finding.kind} · {finding.id}</div>
+          <div className="mt-1 break-all font-mono text-micro text-muted-foreground">{finding.external_id || finding.kind} · {finding.id}</div>
         </div>
       ),
       sort: (a, b) => a.title.localeCompare(b.title),
@@ -298,7 +298,7 @@ function Pill({ children, tone }: { children: ReactNode; tone: "neutral" | "acce
   return (
     <span
       className={cn(
-        "inline-flex h-5 items-center rounded px-1.5 text-[10px] font-medium",
+        "inline-flex h-5 items-center rounded px-1.5 text-micro font-medium",
         tone === "neutral" && "bg-muted text-muted-foreground",
         tone === "accent" && "bg-primary/10 text-primary",
         tone === "warn" && "bg-status-warning/10 text-status-warning",

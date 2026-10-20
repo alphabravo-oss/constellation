@@ -98,7 +98,7 @@ export function ScopeBar({ className }: { className?: string }) {
       )}
       data-testid="scope-bar"
     >
-      <span className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+      <span className="flex items-center gap-1 text-micro  text-muted-foreground">
         <Filter className="h-3 w-3" /> Scope
       </span>
 
@@ -131,7 +131,7 @@ export function ScopeBar({ className }: { className?: string }) {
         <button
           type="button"
           onClick={() => setScope(emptyScope())}
-          className="ml-auto rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground hover:bg-accent"
+          className="ml-auto rounded px-1.5 py-0.5 text-micro  text-muted-foreground hover:text-foreground hover:bg-accent"
         >
           clear all
         </button>
@@ -159,7 +159,7 @@ function Chip({
         type="button"
         onClick={() => setOpen((o) => !o)}
         className={cn(
-          "flex items-center gap-1.5 rounded h-6 px-2 text-[11px] border transition-colors",
+          "flex items-center gap-1.5 rounded h-6 px-2 text-micro border transition-colors",
           active
             ? "bg-[color-mix(in_oklab,var(--color-primary)_18%,transparent)] border-[color-mix(in_oklab,var(--color-primary)_36%,transparent)] text-[color:var(--color-primary)]"
             : "bg-card border-border hover:bg-accent",
@@ -181,7 +181,7 @@ function Chip({
           {values.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-1">
               {values.map((v) => (
-                <span key={v} className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] text-mono">
+                <span key={v} className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-micro text-mono">
                   {v}
                   <button type="button" onClick={() => onRemove(v)} aria-label={`remove ${v}`} className="hover:text-foreground">
                     <X className="h-2.5 w-2.5" />

@@ -30,6 +30,7 @@ import { Tabs } from "@/components/ui/tabs";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorState, LoadingState } from "@/components/ui/states";
+import { Select } from "@/components/ui/form";
 
 const statuses = ["all", "healthy", "degraded", "stale", "drift", "crashlooping", "missing", "not-observed"];
 
@@ -119,7 +120,7 @@ export function ComponentsPage() {
             <Pill tone="neutral">{item.role}</Pill>
           </div>
           <div className="mt-2 font-medium">{item.display_name}</div>
-          <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{item.hostname}</div>
+          <div className="mt-1 break-all font-mono text-micro text-muted-foreground">{item.hostname}</div>
         </>
       ),
     },
@@ -182,7 +183,7 @@ export function ComponentsPage() {
             <StatusPill status={row.status} />
           </div>
           <div className="mt-1 text-xs font-medium" title={row.displayName}>{row.displayName}</div>
-          <div className="mt-0.5 font-mono text-[10px] text-muted-foreground" title={row.component}>{row.component}</div>
+          <div className="mt-0.5 font-mono text-micro text-muted-foreground" title={row.component}>{row.component}</div>
         </div>
       ),
       sort: (a, b) => a.roleRank - b.roleRank || a.displayName.localeCompare(b.displayName),
@@ -274,7 +275,7 @@ export function ComponentsPage() {
                 )}
               >
                 <span>{item.label}</span>
-                <span className="font-mono text-[10px]">{count}</span>
+                <span className="font-mono text-micro">{count}</span>
               </button>
             );
           })}
@@ -291,7 +292,7 @@ export function ComponentsPage() {
               data-testid="component-search"
             />
           </label>
-          <select
+          <Select
             value={status}
             aria-label="Component status"
             onChange={(event) => updateURL({ status: event.target.value === "all" ? null : event.target.value })}
@@ -301,7 +302,7 @@ export function ComponentsPage() {
             {statuses.map((item) => (
               <option key={item} value={item}>{item === "all" ? "All statuses" : item}</option>
             ))}
-          </select>
+          </Select>
         </div>
       </section>
 
@@ -719,7 +720,7 @@ function DiagnosticList({ checks }: { checks: ComponentDiagnosticCheck[] }) {
             </div>
             <StatusPill status={check.status} />
           </div>
-          {check.value !== undefined ? <div className="mt-2 break-all font-mono text-[11px]">{formatDiagnosticValue(check.value)}</div> : null}
+          {check.value !== undefined ? <div className="mt-2 break-all font-mono text-micro">{formatDiagnosticValue(check.value)}</div> : null}
           {check.reason ? <div className="mt-2 break-all text-muted-foreground">{check.reason}</div> : null}
         </div>
       ))}
@@ -780,7 +781,7 @@ function CounterMini({ item }: { item: ComponentInstance }) {
 function Mini({ label, value }: { label: string; value: number }) {
   return (
     <div>
-      <div className="text-[10px] uppercase text-muted-foreground">{label}</div>
+      <div className="text-micro  text-muted-foreground">{label}</div>
       <div className="font-semibold">{value}</div>
     </div>
   );
@@ -804,12 +805,12 @@ function StatusPill({ status }: { status: string }) {
     : status === "missing" || status === "crashlooping"
         ? "bg-[color:var(--color-status-error)]/15 text-[color:var(--color-status-error)]"
         : "bg-muted text-muted-foreground";
-  return <span className={cn("inline-flex h-5 items-center rounded px-1.5 text-[10px] font-medium", tone)}>{status}</span>;
+  return <span className={cn("inline-flex h-5 items-center rounded px-1.5 text-micro font-medium", tone)}>{status}</span>;
 }
 
 function Pill({ children, tone }: { children: ReactNode; tone: "neutral" | "accent" }) {
   return (
-    <span className={cn("inline-flex h-5 items-center rounded px-1.5 text-[10px] font-medium", tone === "neutral" && "bg-muted text-muted-foreground", tone === "accent" && "bg-primary/10 text-primary")}>
+    <span className={cn("inline-flex h-5 items-center rounded px-1.5 text-micro font-medium", tone === "neutral" && "bg-muted text-muted-foreground", tone === "accent" && "bg-primary/10 text-primary")}>
       {children}
     </span>
   );

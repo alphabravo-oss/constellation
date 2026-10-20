@@ -73,7 +73,7 @@ export function ApiTokensPage() {
       cell: (t) => (
         <div className="flex flex-wrap gap-1">
           {t.scopes.map((s) => (
-            <span key={s} className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[10px]">{s}</span>
+            <span key={s} className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-micro">{s}</span>
           ))}
         </div>
       ),
@@ -84,7 +84,7 @@ export function ApiTokensPage() {
       cell: (t) => (
         <>
           <div>{t.attached_to_kind}</div>
-          {t.attached_to_label && <div className="font-mono text-[10px]">{t.attached_to_label}</div>}
+          {t.attached_to_label && <div className="font-mono text-micro">{t.attached_to_label}</div>}
         </>
       ),
       className: "text-xs text-muted-foreground",
@@ -94,7 +94,7 @@ export function ApiTokensPage() {
     {
       id: "status",
       header: "Status", exportValue: (t) => t.status, kind: "status",
-      cell: (t) => <span className={`rounded-md px-2 py-0.5 text-[10px] ${statusClasses(t.status)}`}>{t.status}</span>,
+      cell: (t) => <span className={`rounded-md px-2 py-0.5 text-micro ${statusClasses(t.status)}`}>{t.status}</span>,
     },
     {
       id: "actions",

@@ -22,7 +22,7 @@ async function renderPage(page: ReactNode) { host = document.createElement("div"
 async function rerenderForm() { await act(async () => root.render(<QueryClientProvider client={client}><VulnProfileFormPage /></QueryClientProvider>)); }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
 async function submit() { await act(async () => host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }))); }
-function button(text: string) { return [...host.querySelectorAll("button")].find((item) => item.textContent?.trim() === text)!; }
+function button(text: string) { return [...host.querySelectorAll("button")].find((item) => item.textContent?.trim() === text || item.getAttribute("aria-label") === text)!; }
 async function input(selector: string, value: string) { const control = host.querySelector<HTMLInputElement>(selector)!; await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(control, value); control.dispatchEvent(new Event("input", { bubbles: true })); }); }
 async function textarea(selector: string, value: string) { const control = host.querySelector<HTMLTextAreaElement>(selector)!; await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(control, value); control.dispatchEvent(new Event("input", { bubbles: true })); }); }
 

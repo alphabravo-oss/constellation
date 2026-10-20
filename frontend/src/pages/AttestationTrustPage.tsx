@@ -81,8 +81,8 @@ export function AttestationTrustPage() {
           <div className="mt-2 flex flex-wrap gap-1">
             <StatusPill active={policy.enabled} label={policy.enabled ? "enabled" : "disabled"} />
             <StatusPill active={policy.auto_verify} label={policy.auto_verify ? "auto" : "manual"} />
-            <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px]">{policy.verifier_mode || "keyless"}</span>
-            {policy.require_rekor ? <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px]">rekor</span> : null}
+            <span className="rounded-md bg-muted px-1.5 py-0.5 text-micro">{policy.verifier_mode || "keyless"}</span>
+            {policy.require_rekor ? <span className="rounded-md bg-muted px-1.5 py-0.5 text-micro">rekor</span> : null}
           </div>
         </>
       ),
@@ -214,7 +214,7 @@ export function AttestationTrustPage() {
 
 function StatusPill({ active, label }: { active: boolean; label: string }) {
   return (
-    <span className={`rounded-md px-1.5 py-0.5 text-[10px] ${active ? "bg-status-success/10 text-status-success" : "bg-muted text-muted-foreground"}`}>
+    <span className={`rounded-md px-1.5 py-0.5 text-micro ${active ? "bg-status-success/10 text-status-success" : "bg-muted text-muted-foreground"}`}>
       {label}
     </span>
   );

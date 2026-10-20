@@ -13,6 +13,7 @@ import { ErrorState } from "@/components/ui/states";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { Collapse } from "@/components/ui/collapse";
 import { cn } from "@/lib/cn";
+import { Select } from "@/components/ui/form";
 
 const postureLevels = ["all", "critical", "high", "medium", "low", "info", "unknown"];
 
@@ -55,7 +56,7 @@ export function ServerlessFunctionsPage() {
           <a href={`/clusters/${clusterId}/serverless/${item.id}`} className="mt-2 block break-all font-mono text-xs font-medium hover:underline">
             {item.function_name || item.function_ref}
           </a>
-          <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{item.function_ref}</div>
+          <div className="mt-1 break-all font-mono text-micro text-muted-foreground">{item.function_ref}</div>
         </div>
       ),
       sort: (a, b) => (a.function_name || a.function_ref).localeCompare(b.function_name || b.function_ref),
@@ -83,7 +84,7 @@ export function ServerlessFunctionsPage() {
         <div className="text-xs">
           <div className="font-medium">{item.latest_job_status || "not queued"}</div>
           <div className="mt-1 text-muted-foreground">{formatDate(item.latest_observed_at || item.last_seen_at)}</div>
-          <div className="mt-1 truncate font-mono text-[10px] text-muted-foreground">{item.inventory_hash || "hash pending"}</div>
+          <div className="mt-1 truncate font-mono text-micro text-muted-foreground">{item.inventory_hash || "hash pending"}</div>
         </div>
       ),
     },
@@ -133,7 +134,7 @@ export function ServerlessFunctionsPage() {
               data-testid="serverless-search"
             />
           </label>
-          <select
+          <Select
             value={posture}
             onChange={(event) => setPosture(event.target.value)}
             className="rounded-md border border-border bg-background p-2 text-sm"
@@ -142,7 +143,7 @@ export function ServerlessFunctionsPage() {
             {postureLevels.map((item) => (
               <option key={item} value={item}>{item === "all" ? "All posture" : item}</option>
             ))}
-          </select>
+          </Select>
         </div>
       </section>
 
@@ -249,7 +250,7 @@ function PostureBadge({ level }: { level?: string }) {
 function MiniMetric({ label, value, tone }: { label: string; value: number; tone: "normal" | "warn" | "danger" }) {
   return (
     <div className={cn("rounded-md border border-border p-2", tone === "danger" && "border-destructive/40 bg-destructive/10", tone === "warn" && "border-status-warning/40 bg-status-warning/10")}>
-      <div className="text-[10px] text-muted-foreground">{label}</div>
+      <div className="text-micro text-muted-foreground">{label}</div>
       <div className="mt-1 text-lg font-semibold">{value}</div>
     </div>
   );
@@ -268,7 +269,7 @@ function Pill({ children, tone }: { children: ReactNode; tone: "neutral" | "acce
   return (
     <span
       className={cn(
-        "inline-flex h-5 items-center rounded px-1.5 text-[10px] font-medium",
+        "inline-flex h-5 items-center rounded px-1.5 text-micro font-medium",
         tone === "neutral" && "bg-muted text-muted-foreground",
         tone === "accent" && "bg-primary/10 text-primary",
         tone === "warn" && "bg-status-warning/10 text-status-warning",

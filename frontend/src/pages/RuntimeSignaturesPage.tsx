@@ -75,7 +75,7 @@ export function RuntimeSignaturesPage() {
       id: "direction",
       header: "Direction", kind: "status", size: 136, minSize: 112, maxSize: 176,
       exportValue: (r) => APPLY_DIR_LABEL[r.apply_dir] ?? "Unknown",
-      cell: (r) => <span className="text-mono text-[10px] text-muted-foreground">{APPLY_DIR_LABEL[r.apply_dir] ?? "—"}</span>,
+      cell: (r) => <span className="text-mono text-micro text-muted-foreground">{APPLY_DIR_LABEL[r.apply_dir] ?? "—"}</span>,
       sort: (a, b) => (APPLY_DIR_LABEL[a.apply_dir] ?? "").localeCompare(APPLY_DIR_LABEL[b.apply_dir] ?? ""),
     },
     {

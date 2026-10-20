@@ -384,7 +384,7 @@ export function AccessControlPage() {
 }
 
 function Badge({ children }: { children: React.ReactNode }) {
-  return <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{children}</span>;
+  return <span className="rounded-md bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">{children}</span>;
 }
 
 function Status({ value }: { value: string }) {

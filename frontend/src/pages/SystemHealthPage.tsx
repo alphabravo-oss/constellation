@@ -403,7 +403,7 @@ function LicenseBanner({ license }: { license: SystemHealthLicense }) {
       <ShieldAlert className="h-4 w-4" />
       <div className="flex-1">
         <div className="font-medium">{license.message}</div>
-        <div className="text-[11px] opacity-80">
+        <div className="text-micro opacity-80">
           {license.kind} · expires {license.expires_at ?? "n/a"} · {license.days_to_expiry}d remaining
         </div>
       </div>
@@ -422,7 +422,7 @@ function ClusterCard({ cluster }: { cluster: SystemHealthClusterDrift }) {
       <div className="flex items-center justify-between gap-2">
         <div className="text-sm font-semibold">{cluster.cluster_name}</div>
         <span
-          className={`rounded-md px-2 py-0.5 text-[10px] ${
+          className={`rounded-md px-2 py-0.5 text-micro ${
             trouble === 0
               ? "bg-[color:var(--color-status-success)]/15 text-[color:var(--color-status-success)]"
               : "bg-[color:var(--color-severity-high)]/15 text-[color:var(--color-severity-high)]"
@@ -431,21 +431,21 @@ function ClusterCard({ cluster }: { cluster: SystemHealthClusterDrift }) {
           {trouble === 0 ? "in sync" : `${trouble} issue${trouble === 1 ? "" : "s"}`}
         </span>
       </div>
-      <div className="mt-2 grid grid-cols-5 gap-2 text-[10px]">
+      <div className="mt-2 grid grid-cols-5 gap-2 text-micro">
         <Stat label="healthy" value={cluster.healthy} tone="success" />
         <Stat label="degraded" value={degraded} tone="warning" />
         <Stat label="drift" value={cluster.drift} tone="warning" />
         <Stat label="stale" value={cluster.stale} tone="warning" />
         <Stat label="crash" value={cluster.crashlooping} tone="error" />
       </div>
-      <div className="mt-2 text-[10px] text-muted-foreground">
+      <div className="mt-2 text-micro text-muted-foreground">
         control build <span className="font-mono">{cluster.control_commit || "—"}</span>
       </div>
       <details className="mt-1">
-        <summary className="cursor-pointer text-[10px] text-muted-foreground hover:text-foreground">
+        <summary className="cursor-pointer text-micro text-muted-foreground hover:text-foreground">
           versions ({cluster.versions.length})
         </summary>
-        <ul className="mt-1 space-y-0.5 text-[10px] text-muted-foreground">
+        <ul className="mt-1 space-y-0.5 text-micro text-muted-foreground">
           {cluster.versions.map((v) => (
             <li key={`${v.component}-${v.commit}`} className="flex items-center justify-between gap-2">
               <span>{v.component}</span>
@@ -473,7 +473,7 @@ function StatusPill({ status, reason }: { status: SystemHealthHeartbeat["status"
       ? "bg-[color:var(--color-severity-critical)]/20 text-[color:var(--color-severity-critical)]"
       : "bg-muted text-muted-foreground";
   return (
-    <span className={`rounded-md px-2 py-0.5 text-[10px] ${cls}`} title={reason ?? undefined}>
+    <span className={`rounded-md px-2 py-0.5 text-micro ${cls}`} title={reason ?? undefined}>
       {status}
     </span>
   );
@@ -491,7 +491,7 @@ function HeartbeatDetails({ hb }: { hb: SystemHealthHeartbeat }) {
   const activeTargets = compactCountMap(hb.metadata.active_jobs_by_target_type);
   const targetCapacity = compactCountMap(hb.metadata.target_capacity);
   return (
-    <div className="text-[11px] text-muted-foreground">
+    <div className="text-micro text-muted-foreground">
       <span className="font-mono text-foreground">{hb.metadata.active_jobs ?? 0}/{hb.metadata.max_concurrent ?? "?"}</span>
       <span> busy</span>
       <span> · idle </span>
@@ -551,7 +551,7 @@ function Stat({ label, value, tone }: { label: string; value: number; tone: "suc
       <div className="text-sm font-semibold tabular-nums" style={{ color: value > 0 ? color : undefined }}>
         {value}
       </div>
-      <div className="text-[9px] text-muted-foreground">{label}</div>
+      <div className="text-micro text-muted-foreground">{label}</div>
     </div>
   );
 }

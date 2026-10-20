@@ -79,14 +79,14 @@ function WorkloadPosture({ detail }: { detail: DeploymentDetail }) {
 
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         <div>
-          <h3 className="text-xs font-semibold uppercase text-muted-foreground">Risk factors</h3>
+          <h3 className="text-xs font-semibold  text-muted-foreground">Risk factors</h3>
           <div className="mt-2 flex flex-wrap gap-2">
             {riskFactors.map(([key, value]) => <Pill key={key} tone={Number(value) >= 20 ? "warn" : "neutral"}>{key}: {String(value)}</Pill>)}
             {riskFactors.length === 0 ? <span className="text-xs text-muted-foreground">No positive risk factors.</span> : null}
           </div>
         </div>
         <div>
-          <h3 className="text-xs font-semibold uppercase text-muted-foreground">Labels</h3>
+          <h3 className="text-xs font-semibold  text-muted-foreground">Labels</h3>
           <div className="mt-2 flex flex-wrap gap-2">
             {labels.map(([key, value]) => <Pill key={key} tone="neutral">{key}={value}</Pill>)}
             {labels.length === 0 ? <span className="text-xs text-muted-foreground">No labels reported.</span> : null}
@@ -126,7 +126,7 @@ function ThreatPivotsPanel({ pivots }: { pivots: DeploymentThreatPivot[] }) {
       cell: (pivot) => (
         <>
           <div className="text-xs font-medium">{pivot.title}</div>
-          <div className="mt-1 font-mono text-[11px] text-muted-foreground">{pivot.workload_id}</div>
+          <div className="mt-1 font-mono text-micro text-muted-foreground">{pivot.workload_id}</div>
         </>
       ),
     },
@@ -218,7 +218,7 @@ function ThreatPivotPanel({ pivot, onClose }: { pivot: DeploymentThreatPivot; on
           </section>
           {pivot.kind === "file" && pivot.file ? (
             <section className="rounded-md border border-border p-3" data-testid="deployment-threat-file-evidence">
-              <h3 className="text-xs font-semibold uppercase text-muted-foreground">File evidence</h3>
+              <h3 className="text-xs font-semibold  text-muted-foreground">File evidence</h3>
               <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
                 <Field label="Path" value={pivot.file.path || "-"} wide />
                 <Field label="Process" value={pivot.file.comm || "-"} />
@@ -230,7 +230,7 @@ function ThreatPivotPanel({ pivot, onClose }: { pivot: DeploymentThreatPivot; on
           ) : null}
           {(pivot.kind === "dlp" || pivot.kind === "waf") && (
             <section className="rounded-md border border-border p-3" data-testid={pivot.kind === "dlp" ? "deployment-threat-dlp-evidence" : "deployment-threat-waf-evidence"}>
-              <h3 className="text-xs font-semibold uppercase text-muted-foreground">{pivot.kind.toUpperCase()} evidence</h3>
+              <h3 className="text-xs font-semibold  text-muted-foreground">{pivot.kind.toUpperCase()} evidence</h3>
               <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
                 <Field label="Rule" value={pivot.rule?.name || pivot.rule?.id || "-"} />
                 <Field label="DP rule" value={`${pivot.rule?.dp_rule_id ?? "-"}`} />
@@ -264,7 +264,7 @@ function ImageEvidenceTable({ images, clusterId }: { images: DeploymentImageEvid
           ) : (
             <span className="break-all font-mono text-xs font-medium">{displayImage(image)}</span>
           )}
-          <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{image.image_digest || image.image_ref_normalized}</div>
+          <div className="mt-1 break-all font-mono text-micro text-muted-foreground">{image.image_digest || image.image_ref_normalized}</div>
         </>
       ),
     },
@@ -336,7 +336,7 @@ function ImageFileRisksPanel({ risks, clusterId }: { risks: DeploymentFileRisk[]
           ) : (
             <span className="break-all font-mono text-xs font-medium">{risk.image_ref || risk.image_digest}</span>
           )}
-          <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{risk.image_digest || risk.image_ref_normalized}</div>
+          <div className="mt-1 break-all font-mono text-micro text-muted-foreground">{risk.image_digest || risk.image_ref_normalized}</div>
         </>
       ),
     },
@@ -404,7 +404,7 @@ const networkFlowColumns: Column<DeploymentNetworkFlow>[] = [
     cell: (flow) => (
       <>
         <div className="break-all font-mono text-xs">{flow.src}</div>
-        <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">to {flow.dst}</div>
+        <div className="mt-1 break-all font-mono text-micro text-muted-foreground">to {flow.dst}</div>
       </>
     ),
   },
@@ -556,7 +556,7 @@ function ViolationsPanel({ violations }: { violations: Violation[] }) {
 function Field({ label, value, wide }: { label: string; value: ReactNode; wide?: boolean }) {
   return (
     <div className={cn("grid gap-1", wide && "sm:col-span-2")}>
-      <dt className="text-[10px] uppercase text-muted-foreground">{label}</dt>
+      <dt className="text-micro  text-muted-foreground">{label}</dt>
       <dd className="break-all font-mono text-xs">{value}</dd>
     </div>
   );
@@ -584,7 +584,7 @@ function Pill({ tone, children }: { tone: "neutral" | "ok" | "warn" | "danger"; 
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium",
+        "inline-flex items-center rounded-md px-2 py-0.5 text-micro font-medium",
         tone === "neutral" && "bg-muted text-muted-foreground",
         tone === "ok" && "bg-status-ok/10 text-status-ok",
         tone === "warn" && "bg-status-warn/10 text-status-warn",

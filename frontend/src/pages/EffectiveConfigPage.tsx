@@ -245,8 +245,8 @@ function ProvenancePills({ item }: { item: ConfigItem }) {
   return (
     <span className="inline-flex flex-wrap gap-1">
       <SourcePill source={item.source} />
-      {item.redacted === true ? <span className="rounded border border-status-warning/30 bg-status-warning/10 px-1.5 py-0.5 text-[10px] font-medium text-status-warning">Redacted</span> : null}
-      {item.redacted === undefined ? <span className="text-[10px] text-muted-foreground">Redaction unknown</span> : null}
+      {item.redacted === true ? <span className="rounded border border-status-warning/30 bg-status-warning/10 px-1.5 py-0.5 text-micro font-medium text-status-warning">Redacted</span> : null}
+      {item.redacted === undefined ? <span className="text-micro text-muted-foreground">Redaction unknown</span> : null}
     </span>
   );
 }
@@ -256,7 +256,7 @@ function SourcePill({ source }: { source: ConfigSource }) {
   const cls = source === "database" ? "border-primary/30 bg-primary/10 text-primary" :
     source === "environment_bootstrap" ? "border-status-info/30 bg-status-info/10 text-status-info" :
     "border-border bg-muted text-muted-foreground";
-  return <span className={`inline-flex rounded border px-1.5 py-0.5 text-[10px] font-medium ${cls}`}>{label}</span>;
+  return <span className={`inline-flex rounded border px-1.5 py-0.5 text-micro font-medium ${cls}`}>{label}</span>;
 }
 
 function formatDateTime(value?: string): string {

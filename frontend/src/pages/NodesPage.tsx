@@ -20,6 +20,7 @@ import { PageHeader } from "@/components/ui/page";
 import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { cn } from "@/lib/cn";
+import { Select } from "@/components/ui/form";
 
 const agentStatuses = ["all", "healthy", "stale", "missing"];
 const riskFilters = ["all", "critical", "high", "open", "clean", "host-cves"];
@@ -58,7 +59,7 @@ export function NodesPage() {
           <a href={`/clusters/${clusterId}/nodes/${encodeURIComponent(item.node)}`} className="block font-mono text-sm font-medium hover:underline">
             {item.node}
           </a>
-          {item.coverage_gaps?.length ? <div className="mt-1 text-[11px] text-status-warn">{item.coverage_gaps.length} coverage gap{item.coverage_gaps.length === 1 ? "" : "s"}</div> : null}
+          {item.coverage_gaps?.length ? <div className="mt-1 text-micro text-status-warn">{item.coverage_gaps.length} coverage gap{item.coverage_gaps.length === 1 ? "" : "s"}</div> : null}
         </div>
       ),
       sort: (a, b) => a.node.localeCompare(b.node),
@@ -189,8 +190,8 @@ export function NodesPage() {
     </StatGrid>}
     <section className="rounded-lg border border-border bg-card p-3"><div className="flex flex-wrap gap-3">
       <label className="relative min-w-64 flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden /><input value={query} onChange={event => update({ q: event.target.value || null }, true, true)} placeholder="Search node, OS, kernel, runtime or coverage gap" aria-label="Search nodes" className="w-full rounded-md border border-border bg-background py-2 pl-9 pr-3 text-sm" data-testid="node-search" /></label>
-      <select value={agentStatus} onChange={event => update({ agent: event.target.value === "all" ? null : event.target.value })} aria-label="Runtime agent filter" className="rounded-md border border-border bg-background p-2 text-sm" data-testid="node-agent-filter">{agentStatuses.map(item => <option key={item} value={item}>{item === "all" ? "All agents" : item}</option>)}</select>
-      <select value={riskFilter} onChange={event => update({ risk: event.target.value === "all" ? null : event.target.value, host_cves: null })} aria-label="Host risk filter" className="rounded-md border border-border bg-background p-2 text-sm" data-testid="node-risk-filter">{riskFilters.map(item => <option key={item} value={item}>{item === "all" ? "All risk" : item === "host-cves" ? "Open host CVEs in this source cluster" : item}</option>)}</select>
+      <Select value={agentStatus} onChange={event => update({ agent: event.target.value === "all" ? null : event.target.value })} aria-label="Runtime agent filter" className="rounded-md border border-border bg-background p-2 text-sm" data-testid="node-agent-filter">{agentStatuses.map(item => <option key={item} value={item}>{item === "all" ? "All agents" : item}</option>)}</Select>
+      <Select value={riskFilter} onChange={event => update({ risk: event.target.value === "all" ? null : event.target.value, host_cves: null })} aria-label="Host risk filter" className="rounded-md border border-border bg-background p-2 text-sm" data-testid="node-risk-filter">{riskFilters.map(item => <option key={item} value={item}>{item === "all" ? "All risk" : item === "host-cves" ? "Open host CVEs in this source cluster" : item}</option>)}</Select>
     </div>{params.get("host_cves") === "open" && riskFilter !== "host-cves" && <p className="mt-2 text-xs text-muted-foreground">Source-cluster open host CVE cohort is active. <Button size="sm" onClick={() => update({ host_cves: null })}>Clear host CVE cohort</Button></p>}</section>
     {!validFilters ? <ErrorState title="Choose supported node filters and sorting." action={<Button onClick={() => update({ agent: null, risk: null, host_cves: null, sort: null, order: null })}>Reset filters and sort</Button>} /> : nodesQ.isError || nodesQ.isSuccess && !validResponse ? <ErrorState title="Node inventory could not be loaded or refreshed. Evidence and export are unavailable." action={<Button onClick={() => void nodesQ.refetch()}>Retry nodes</Button>} /> : !available ? <LoadingState label="Loading node inventory…" /> : <section className="space-y-4">
       {nodesQ.isFetching && <p role="status" className="text-sm text-muted-foreground">Refreshing node evidence…</p>}
@@ -297,7 +298,7 @@ function MiniMetric({ label, value, tone }: { label: string; value: number; tone
   return (
     <div className={cn("rounded-md border border-border p-2 text-center", tone === "danger" && "border-status-error/30 bg-status-error/10", tone === "warn" && "border-status-warn/30 bg-status-warn/10")}>
       <div className="text-lg font-semibold">{value.toLocaleString()}</div>
-      <div className="text-[10px] uppercase text-muted-foreground">{label}</div>
+      <div className="text-micro  text-muted-foreground">{label}</div>
     </div>
   );
 }
@@ -305,7 +306,7 @@ function MiniMetric({ label, value, tone }: { label: string; value: number; tone
 function Field({ label, value, wide }: { label: string; value: ReactNode; wide?: boolean }) {
   return (
     <div className={cn("grid gap-1", wide && "sm:col-span-2")}>
-      <dt className="text-[10px] uppercase text-muted-foreground">{label}</dt>
+      <dt className="text-micro  text-muted-foreground">{label}</dt>
       <dd className="break-all font-mono text-xs">{value}</dd>
     </div>
   );
@@ -333,7 +334,7 @@ function Pill({ tone, children }: { tone: "neutral" | "ok" | "warn" | "danger"; 
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium",
+        "inline-flex items-center rounded-md px-2 py-0.5 text-micro font-medium",
         tone === "neutral" && "bg-muted text-muted-foreground",
         tone === "ok" && "bg-status-ok/10 text-status-ok",
         tone === "warn" && "bg-status-warn/10 text-status-warn",

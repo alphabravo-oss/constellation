@@ -22,7 +22,7 @@ async function renderPage(kind: InventoryViewKind, search = "", setup?: (qc: Que
 }
 async function rerender(kind: InventoryViewKind) { await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={identity ? { ...identity } : null}><TestRouter history={history}>{kind === "findings" ? <FindingSavedViewFormPage /> : <TimelineSavedViewFormPage />}</TestRouter></TablePreferencesProvider></QueryClientProvider>)); }
 async function settle(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
-const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent === label)!;
+const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent === label || item.getAttribute("aria-label") === label)!;
 async function name(value: string) { await act(async () => { const input = host.querySelector<HTMLInputElement>("#saved-view-name")!; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); }); }
 async function submit() { await act(async () => host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }))); }
 

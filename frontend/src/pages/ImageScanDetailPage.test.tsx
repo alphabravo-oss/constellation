@@ -33,8 +33,8 @@ async function render(search = "?tab=evidence") {
   await act(async () => root.render(<QueryClientProvider client={client}><TestRouter path="/clusters/$id/images/$resultId" history={history}><ImageScanDetailPage /></TestRouter></QueryClientProvider>));
 }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
-async function tab(name: string) { const trigger = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(x => x.textContent === name)!; await act(async () => trigger.focus()); await settled(() => expect(trigger.getAttribute("aria-selected")).toBe("true")); }
-const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find(x => x.textContent === label)!;
+async function tab(name: string) { const trigger = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((x) => x.textContent === name || x.getAttribute("aria-label") === name)!; await act(async () => trigger.focus()); await settled(() => expect(trigger.getAttribute("aria-selected")).toBe("true")); }
+const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find((x) => x.textContent === label || x.getAttribute("aria-label") === label)!;
 
 it("exposes all layer-linked packages and all secrets/file risks through shared paging", async () => {
   await render("?tab=evidence&context=keep#proof");
@@ -236,6 +236,6 @@ it.each(["named", "normalized-name", "digest-only", "reported-repository", "repo
   await act(async () => button("Export CSV").click());
   expect(vi.mocked(downloadCsv).mock.calls.at(-1)![2][0][2]).toBe(reference);
   await tab("Identity and exports");
-  const referenceField = [...host.querySelectorAll("dt")].find(item => item.textContent === "Reference")!;
+  const referenceField = [...host.querySelectorAll("dt")].find((item) => item.textContent === "Reference" || item.getAttribute("aria-label") === "Reference")!;
   expect(referenceField.nextElementSibling?.textContent).toBe(named);
 });

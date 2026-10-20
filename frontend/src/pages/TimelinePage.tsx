@@ -89,6 +89,7 @@ import {
   inventoryViewHref,
   type TimelineSavedView,
 } from "@/lib/inventory-saved-views";
+import { Select } from "@/components/ui/form";
 
 export function TimelinePage() {
   const {
@@ -722,7 +723,7 @@ export function TimelinePage() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] font-medium text-muted-foreground mr-1">
+          <span className="text-micro font-medium text-muted-foreground mr-1">
             Type
           </span>
           {ALL_SOURCES.map((s) => (
@@ -742,7 +743,7 @@ export function TimelinePage() {
           ))}
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] font-medium text-muted-foreground mr-1">
+          <span className="text-micro font-medium text-muted-foreground mr-1">
             Severity
           </span>
           {SEVERITIES.map((s) => (
@@ -762,7 +763,7 @@ export function TimelinePage() {
         <div className="flex flex-wrap items-end gap-3">
           <label className="space-y-1 text-xs">
             <span>Rolling window</span>
-            <select
+            <Select
               aria-label="Timeline rolling window"
               value={requestedHours ?? ""}
               onChange={(event) =>
@@ -782,12 +783,12 @@ export function TimelinePage() {
               <option value="24">24 hours</option>
               <option value="336">14 days</option>
               <option value="168">7 days</option>
-            </select>
+            </Select>
           </label>
           {sources.size === 1 && sources.has("runtime_event") && (
             <label className="space-y-1 text-xs">
               <span>Runtime event verdicts</span>
-              <select
+              <Select
                 aria-label="Runtime event verdicts"
                 value={verdict}
                 onChange={(event) =>
@@ -804,7 +805,7 @@ export function TimelinePage() {
                     {value}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
           )}
         </div>
@@ -887,14 +888,14 @@ export function TimelinePage() {
                         {it.title}
                       </span>
                     </div>
-                    <div className="text-[10px] font-mono text-muted-foreground">
+                    <div className="text-micro font-mono text-muted-foreground">
                       {[it.namespace, it.workload_id, it.ref]
                         .filter(Boolean)
                         .join(" · ")}
                     </div>
                   </div>
                   <span
-                    className="shrink-0 text-[10px] text-muted-foreground"
+                    className="shrink-0 text-micro text-muted-foreground"
                     title={it.at}
                   >
                     {fmtRelative(it.at)}
@@ -1006,13 +1007,13 @@ function TimelineActiveFilters({
   if (chips.length === 0) return null;
   return (
     <div className="flex flex-wrap items-center gap-1.5 border-t border-border pt-2">
-      <span className="mr-1 text-[11px] font-medium text-muted-foreground">
+      <span className="mr-1 text-micro font-medium text-muted-foreground">
         Active
       </span>
       {chips.map((chip) => (
         <span
           key={chip}
-          className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 font-mono text-[11px] text-primary"
+          className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 font-mono text-micro text-primary"
         >
           {chip}
         </span>
@@ -1020,7 +1021,7 @@ function TimelineActiveFilters({
       <button
         type="button"
         onClick={onClear}
-        className="rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted"
+        className="rounded px-1.5 py-0.5 text-micro text-muted-foreground hover:bg-muted"
       >
         clear
       </button>
@@ -1104,7 +1105,7 @@ function TimelineDetail({ item }: { item: TimelineItem }) {
       </section>
       <section className="rounded-md border border-border p-3">
         <h3 className="text-xs font-semibold">Raw timeline record</h3>
-        <pre className="mt-2 max-h-[280px] overflow-auto rounded bg-muted p-2 text-[11px]">
+        <pre className="mt-2 max-h-[280px] overflow-auto rounded bg-muted p-2 text-micro">
           {JSON.stringify(item, null, 2)}
         </pre>
       </section>
@@ -1123,7 +1124,7 @@ function DetailField({
 }) {
   return (
     <div className="rounded-md border border-border p-2">
-      <dt className="text-[11px] text-muted-foreground">{label}</dt>
+      <dt className="text-micro text-muted-foreground">{label}</dt>
       <dd
         className={`mt-1 break-all text-xs ${mono ? "font-mono" : "font-medium"}`}
       >
@@ -1178,7 +1179,7 @@ function FilterChip({
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-full border px-2.5 py-0.5 text-[11px] capitalize transition-colors ${
+      className={`rounded-full border px-2.5 py-0.5 text-micro capitalize transition-colors ${
         active
           ? "border-primary bg-primary/10 text-primary"
           : "border-border bg-transparent text-muted-foreground hover:bg-muted/40"

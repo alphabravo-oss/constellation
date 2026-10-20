@@ -226,7 +226,7 @@ export function NeuVectorSwitchboardPage() {
                     </span>
                     <div>
                       <div className="text-sm font-semibold text-foreground">{mapping.nv}</div>
-                      <span className={`mt-1 inline-flex rounded border px-1.5 py-0.5 text-[10px] font-medium ${statusClass(mapping.status)}`}>
+                      <span className={`mt-1 inline-flex rounded border px-1.5 py-0.5 text-micro font-medium ${statusClass(mapping.status)}`}>
                         {statusLabel(mapping.status)}
                       </span>
                     </div>

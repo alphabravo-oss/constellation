@@ -507,7 +507,7 @@ function KindBadge({ kind }: { kind: RegistryKind }) {
   const meta = KINDS.find((k) => k.kind === kind);
   return (
     <span className="inline-flex items-center gap-1.5">
-      <span className="grid h-5 w-5 place-items-center rounded-sm bg-muted text-[9px] font-semibold uppercase">
+      <span className="grid h-5 w-5 place-items-center rounded-sm bg-muted text-micro font-semibold ">
         {kind.slice(0, 2)}
       </span>
       <span className="text-xs">{meta?.label ?? kind}</span>
@@ -554,7 +554,7 @@ type RegistryJobCounts = {
 
 function RegistryJobPills({ counts }: { counts?: RegistryJobCounts }) {
   if (!counts || (counts.active === 0 && counts.failed === 0)) {
-    return <span className="text-[10px] text-muted-foreground">idle</span>;
+    return <span className="text-micro text-muted-foreground">idle</span>;
   }
   return (
     <div className="flex flex-wrap items-center gap-1">

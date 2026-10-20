@@ -272,7 +272,7 @@ function PromoteConfirmDialog({ policy, owner, available, recheck, onClose, onCo
           <MatchStatsPane stats={previewReady ? stats : undefined} loading={statsQ.isLoading || statsQ.isFetching} />
           {!available && <p role="alert">Current policy scope is unavailable; promotion is paused.</p>}
           {uncertain && <p role="alert">The promotion could not be confirmed. Reload before another write.</p>}
-          <p className="mt-2 text-[11px] text-muted-foreground">
+          <p className="mt-2 text-micro text-muted-foreground">
             The auto-rollback watcher demotes back to monitor automatically if
             the per-policy deny rate exceeds the configured threshold (default
             1000 / 60s) — your safety belt against a bad rule.
@@ -293,7 +293,7 @@ function PromoteConfirmDialog({ policy, owner, available, recheck, onClose, onCo
  *  from /match-stats or /simulate. The "deny" column is the one operators
  *  care about — that's what would be dropped if (or when) enforce is on. */
 function MatchStatsPane({ stats, loading }: { stats?: PolicyMatchStats; loading?: boolean }) {
-  if (loading) return <div className="mt-3 text-[11px] text-muted-foreground">Loading match preview…</div>;
+  if (loading) return <div className="mt-3 text-micro text-muted-foreground">Loading match preview…</div>;
   if (!stats) return null;
   const cards: Array<{ key: "allow" | "monitor" | "deny"; label: string; tone: string; n: number }> = [
     { key: "allow",   label: "Allow",        tone: "var(--color-status-success)", n: stats.allow },
@@ -302,7 +302,7 @@ function MatchStatsPane({ stats, loading }: { stats?: PolicyMatchStats; loading?
   ];
   return (
     <div className="mt-3 space-y-2" data-testid="runtime-policy-match-stats">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+      <div className="text-micro  text-muted-foreground">
         Last {stats.window_hours}h · {stats.total} flows matched · workload <span className="text-mono text-foreground">{stats.workload}</span>
       </div>
       <div className="grid grid-cols-3 gap-2">
@@ -312,17 +312,17 @@ function MatchStatsPane({ stats, loading }: { stats?: PolicyMatchStats; loading?
             className="rounded border border-border bg-card/50 p-2 text-center"
             data-testid={`match-stats-${c.key}`}
           >
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{c.label}</div>
+            <div className="text-micro  text-muted-foreground">{c.label}</div>
             <div className="text-mono text-2xl font-semibold tabular-nums" style={{ color: c.tone }}>{c.n}</div>
           </div>
         ))}
       </div>
       {stats.deny > 0 && stats.samples?.deny && stats.samples.deny.length > 0 && (
-        <details className="text-[11px]">
+        <details className="text-micro">
           <summary className="cursor-pointer text-muted-foreground hover:text-foreground" data-testid="runtime-policy-match-stats-samples-toggle">
             Sample of would-be-blocked flows ({stats.samples.deny.length})
           </summary>
-          <ul className="mt-1 space-y-0.5 rounded border border-border bg-background/40 p-2 font-mono text-[10px]">
+          <ul className="mt-1 space-y-0.5 rounded border border-border bg-background/40 p-2 font-mono text-micro">
             {stats.samples.deny.map((s, i) => (
               <li key={i} className="truncate">
                 {s.src} → {s.dst}:{s.dst_port} · {s.protocol.toUpperCase()}
@@ -334,7 +334,7 @@ function MatchStatsPane({ stats, loading }: { stats?: PolicyMatchStats; loading?
         </details>
       )}
       {stats.default > 0 && (
-        <div className="text-[10px] text-muted-foreground">
+        <div className="text-micro text-muted-foreground">
           {stats.default} of these matched no rule and fell through to the policy's default action.
         </div>
       )}

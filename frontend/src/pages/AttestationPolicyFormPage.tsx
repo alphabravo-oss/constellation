@@ -153,7 +153,7 @@ export function AttestationPolicyFormPage() {
             }}
           >
             {editing ? (
-              <div className="mb-3 break-all font-mono text-[10px] text-muted-foreground">{editing.id}</div>
+              <div className="mb-3 break-all font-mono text-micro text-muted-foreground">{editing.id}</div>
             ) : null}
 
             <div className="space-y-5">

@@ -15,6 +15,7 @@ import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { scanEngineEvidence } from "@/lib/scan-evidence";
 import { StatCard, StatGrid } from "@/components/ui/stat-card";
+import { Select } from "@/components/ui/form";
 
 const severities = ["all", "critical", "high", "medium", "low", "info"];
 
@@ -83,7 +84,7 @@ export function ImageScansPage() {
         <div className="text-xs">
           <div className="font-medium">{item.scanner_profile}</div>
           <div className="mt-1 text-muted-foreground">{formatDate(item.last_scanned_at)}</div>
-          <div className="mt-1 text-[11px] text-muted-foreground">{scanEngineEvidence(item.engine_status).engines.every((engine) => engine.status === "succeeded") ? "Engines completed" : "Incomplete engine evidence"}</div>
+          <div className="mt-1 text-micro text-muted-foreground">{scanEngineEvidence(item.engine_status).engines.every((engine) => engine.status === "succeeded") ? "Engines completed" : "Incomplete engine evidence"}</div>
         </div>
       ),
     },
@@ -136,7 +137,7 @@ export function ImageScansPage() {
               data-testid="image-scan-search"
             />
           </label>
-          <select
+          <Select
             value={severity}
             onChange={(event) => setSeverity(event.target.value)}
             className="rounded-md border border-border bg-background p-2 text-sm"
@@ -146,7 +147,7 @@ export function ImageScansPage() {
             {severities.map((item) => (
               <option key={item} value={item}>{item === "all" ? "All severities" : item}</option>
             ))}
-          </select>
+          </Select>
         </div>
       </section>
 
@@ -268,7 +269,7 @@ function RiskStack({ item }: { item: ImageScanResult }) {
 function MiniMetric({ label, value, tone }: { label: string; value: number; tone: "normal" | "warn" | "danger" }) {
   return (
     <div className={cn("rounded-md border border-border p-2", tone === "danger" && "border-destructive/40 bg-destructive/10", tone === "warn" && "border-status-warning/40 bg-status-warning/10")}>
-      <div className="text-[10px] text-muted-foreground">{label}</div>
+      <div className="text-micro text-muted-foreground">{label}</div>
       <div className="mt-1 text-lg font-semibold">{value}</div>
     </div>
   );
@@ -287,7 +288,7 @@ function Pill({ children, tone }: { children: ReactNode; tone: "neutral" | "acce
   return (
     <span
       className={cn(
-        "inline-flex h-5 items-center rounded px-1.5 text-[10px] font-medium",
+        "inline-flex h-5 items-center rounded px-1.5 text-micro font-medium",
         tone === "neutral" && "bg-muted text-muted-foreground",
         tone === "accent" && "bg-primary/10 text-primary",
         tone === "warn" && "bg-status-warning/10 text-status-warning",

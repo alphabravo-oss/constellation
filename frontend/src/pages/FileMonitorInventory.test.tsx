@@ -28,7 +28,7 @@ const tree = () => <QueryClientProvider client={client}><TablePreferencesProvide
 async function render(search = "") { history = createMemoryHistory({ initialEntries: [`/clusters/cluster/file-monitor${search}`] }); await act(async () => root.render(tree())); }
 async function settle(check: () => void) { await vi.waitFor(async () => { await act(async () => { }); check(); }, { timeout: 4000 }); }
 const rows = () => host.querySelectorAll('[data-testid="file-monitor-workloads-table"] tbody tr');
-const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent?.trim() === label)!;
+const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === label || b.getAttribute("aria-label") === label)!;
 async function click(label: string) { expect(button(label), label).toBeTruthy(); await act(async () => button(label).click()); }
 async function rules() { await render("?tab=rules&workload=prod%2Fworkload-000"); await settle(() => expect(host.querySelector('[data-testid="file-monitor-rules-table"]')).not.toBeNull()); }
 async function confirm() { await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Delete rule /etc/"]')!.click()); expect(fileProfiles.deleteRule).not.toHaveBeenCalled(); }

@@ -38,11 +38,11 @@ async function render(search = "") {
   await act(async () => root.render(tree()));
 }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
-const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent?.trim() === label)!;
+const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === label || b.getAttribute("aria-label") === label)!;
 async function click(label: string) { await act(async () => button(label).click()); }
 async function choose(label: string, value: string) { await act(async () => { const input = host.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!; Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event("change", { bubbles: true })); }); }
 async function search(value: string) { await act(async () => { const input = host.querySelector<HTMLInputElement>('[aria-label="Search workloads"]')!; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); }); }
-async function tab(label: string) { await act(async () => [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(t => t.textContent === label)!.focus()); }
+async function tab(label: string) { await act(async () => [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((t) => t.textContent === label || t.getAttribute("aria-label") === label)!.focus()); }
 
 it("uses full-cohort KPIs and fetches beyond500 while lifecycle cards remain page-scoped", async () => {
   await render("?page=6&custom=keep"); await settled(() => expect(host.querySelectorAll("tbody tr")).toHaveLength(100));

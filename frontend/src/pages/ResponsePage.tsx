@@ -11,6 +11,7 @@ import { PageHeader } from "@/components/ui/page";
 import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
+import { Select } from "@/components/ui/form";
 
 export function ResponsePage() {
   const { clusterId, cluster, isLoading } = useCluster();
@@ -58,7 +59,7 @@ function ResponseCatalog({ clusterId }: { clusterId: string }) {
       </StatGrid>
       <div className="grid gap-4 sm:grid-cols-2" data-testid="response-rule-filters">
         <label className="block space-y-2 text-sm"><span className="font-medium">Search built-in rules</span><input value={filter} onChange={(e) => setFilter("q", e.target.value)} className="h-10 w-full rounded-md border border-border bg-card px-3" placeholder="Rule name, match or action" /></label>
-        <label className="block space-y-2 text-sm"><span className="font-medium">Event type</span><select value={eventType} onChange={(e) => setFilter("event", e.target.value)} className="h-10 w-full rounded-md border border-border bg-card px-3"><option value="all">All event types</option>{eventType !== "all" && !eventTypes.includes(eventType) && <option value={eventType}>Unknown event type: {eventType}</option>}{eventTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
+        <label className="block space-y-2 text-sm"><span className="font-medium">Event type</span><Select value={eventType} onChange={(e) => setFilter("event", e.target.value)} className="h-10 w-full rounded-md border border-border bg-card px-3"><option value="all">All event types</option>{eventType !== "all" && !eventTypes.includes(eventType) && <option value={eventType}>Unknown event type: {eventType}</option>}{eventTypes.map((type) => <option key={type} value={type}>{type}</option>)}</Select></label>
       </div>
       <p className="text-xs text-muted-foreground">{filtered.length} matching rules out of {rules.length} loaded organization rules.</p>
       <DataTable rows={filtered} columns={columns} rowKey={(r) => r.id} onRowClick={q.isError || q.isFetching ? undefined : openEditor} preferencesKey="response-catalog" exportFileName="response-catalog.csv" testId="response-rules-table" rowTestId={() => "response-rule-row"} emptyState={<EmptyState title={rules.length ? "No matching rules" : "No built-in response rules"} hint={rules.length ? "Change the search or event type filter." : "No rules were returned by the organization catalog."} />} />

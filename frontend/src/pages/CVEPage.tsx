@@ -20,6 +20,7 @@ import { DataTable, type Column } from "@/components/ui/data-table";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader, PageContainer } from "@/components/ui/page";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { Select } from "@/components/ui/form";
 
 const SOURCES = ["NVD", "KEV", "EPSS", "OSV", "GHSA"] as const;
 const SEVERITIES: Severity[] = ["critical", "high", "medium", "low", "info"];
@@ -96,7 +97,7 @@ export function CVEPage() {
         id: "cve_id", exportValue: r => r.cve_id, kind: "id", size: 176, minSize: 160,
         header: "CVE-ID",
         cell: (r) => (
-          <Link to="/cve/$id" params={{ id: r.cve_id }} className="text-mono text-[12px] text-[color:var(--color-primary)] hover:underline">
+          <Link to="/cve/$id" params={{ id: r.cve_id }} className="text-mono text-meta text-[color:var(--color-primary)] hover:underline">
             {r.cve_id}
           </Link>
         ),
@@ -113,7 +114,7 @@ export function CVEPage() {
         header: "CVSS",
         numeric: true,
         cell: (r) => (
-          <span className="text-mono text-[12px] tabular-nums">
+          <span className="text-mono text-meta tabular-nums">
             {r.cvss_base != null ? r.cvss_base.toFixed(1) : <span className="text-muted-foreground">—</span>}
           </span>
         ),
@@ -122,7 +123,7 @@ export function CVEPage() {
       {
         id: "kev", exportValue: r => r.kev_listed, kind: "badge", size: 88, minSize: 80,
         header: "KEV",
-        cell: (r) => (r.kev_listed ? <KevBadge /> : <span className="text-muted-foreground text-[10px]">—</span>),
+        cell: (r) => (r.kev_listed ? <KevBadge /> : <span className="text-muted-foreground text-micro">—</span>),
         sort: (a, b) => Number(a.kev_listed) - Number(b.kev_listed),
       },
       {
@@ -135,7 +136,7 @@ export function CVEPage() {
         id: "title", exportValue: r => r.title ?? "", kind: "text", grow: true, minSize: 240,
         header: "Title",
         cell: (r) => (
-          <span className="line-clamp-1 text-[12px] text-foreground/90" title={r.title ?? r.description}>
+          <span className="line-clamp-1 text-meta text-foreground/90" title={r.title ?? r.description}>
             {r.title || <span className="text-muted-foreground">(no title)</span>}
           </span>
         ),
@@ -146,7 +147,7 @@ export function CVEPage() {
         cell: (r) => (
           <div className="flex flex-wrap gap-1">
             {(r.sources ?? []).slice(0, 3).map((s) => (
-              <span key={s} className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-mono text-muted-foreground">
+              <span key={s} className="rounded bg-muted px-1.5 py-0.5 text-micro text-mono text-muted-foreground">
                 {s}
               </span>
             ))}
@@ -158,11 +159,11 @@ export function CVEPage() {
         header: "Published",
         cell: (r) =>
           r.published_at ? (
-            <span className="text-mono text-[11px] text-muted-foreground">
+            <span className="text-mono text-micro text-muted-foreground">
               {new Date(r.published_at).toISOString().slice(0, 10)}
             </span>
           ) : (
-            <span className="text-muted-foreground text-[10px]">—</span>
+            <span className="text-muted-foreground text-micro">—</span>
           ),
         sort: (a, b) => (a.published_at ?? "").localeCompare(b.published_at ?? ""),
       },
@@ -271,7 +272,7 @@ export function CVEPage() {
             className="w-full rounded-md border border-input bg-background py-2 pl-9 pr-3 text-sm focus:border-[color:var(--color-primary)] focus:outline-none"
           />
         </div>
-        <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-1.5 text-micro text-muted-foreground">
           <span>Try:</span>
           {["Log4Shell", "Heartbleed", "EternalBlue", "Spring4Shell", "CVE-2024-3094"].map((ex) => (
             <button
@@ -288,16 +289,16 @@ export function CVEPage() {
 
       {/* Filter chip bar */}
       <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-3 py-2">
-        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Filters</span>
+        <span className="text-micro  text-muted-foreground">Filters</span>
         <FilterChip label="KEV-only" active={kevOnly} onClick={() => changeFilters({ kev: kevOnly ? "" : "true" })} />
         <FilterChip label="EPSS > 0.5" active={epssHigh} onClick={() => changeFilters({ epss_gt: epssHigh ? "" : "0.5" })} />
         <FilterChip label="CVSS > 7" active={cvssHigh} onClick={() => changeFilters({ cvss_gt: cvssHigh ? "" : "7" })} />
         <div className="ml-1 flex items-center gap-1">
-          <label className="text-[10px] uppercase tracking-wider text-muted-foreground">Severity</label>
-          <select
+          <label className="text-micro  text-muted-foreground">Severity</label>
+          <Select
             value={severity}
             onChange={(e) => setSeverity(e.target.value as Severity | "")}
-            className="rounded border border-border bg-background px-1.5 py-0.5 text-[11px]"
+            className="rounded border border-border bg-background px-1.5 py-0.5 text-micro"
           >
             <option value="">any</option>
             {SEVERITIES.map((s) => (
@@ -305,14 +306,14 @@ export function CVEPage() {
                 {s}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
         <div className="flex items-center gap-1">
-          <label className="text-[10px] uppercase tracking-wider text-muted-foreground">Source</label>
-          <select
+          <label className="text-micro  text-muted-foreground">Source</label>
+          <Select
             value={source}
             onChange={(e) => setSource(e.target.value)}
-            className="rounded border border-border bg-background px-1.5 py-0.5 text-[11px]"
+            className="rounded border border-border bg-background px-1.5 py-0.5 text-micro"
           >
             <option value="">any</option>
             {SOURCES.map((s) => (
@@ -320,13 +321,13 @@ export function CVEPage() {
                 {s}
               </option>
             ))}
-          </select>
+          </Select>
         </div>
         {(kevOnly || epssHigh || cvssHigh || severity || source || q) && (
           <button
             type="button"
             onClick={clearFilters}
-            className="ml-auto text-[11px] text-muted-foreground hover:text-foreground"
+            className="ml-auto text-micro text-muted-foreground hover:text-foreground"
           >
             Clear all
           </button>
@@ -381,7 +382,7 @@ function catalogResponseMatches(data: { results: CVEResult[]; limit: number; off
 }
 
 function EpssBar({ value }: { value?: number }) {
-  if (value == null) return <span className="text-muted-foreground text-[10px]">—</span>;
+  if (value == null) return <span className="text-muted-foreground text-micro">—</span>;
   const pct = Math.min(100, Math.max(0, value * 100));
   const hot = pct >= 50;
   return (
@@ -395,7 +396,7 @@ function EpssBar({ value }: { value?: number }) {
           }}
         />
       </div>
-      <span className="text-mono text-[10px] tabular-nums text-muted-foreground">{pct.toFixed(pct < 1 ? 2 : 1)}%</span>
+      <span className="text-mono text-micro tabular-nums text-muted-foreground">{pct.toFixed(pct < 1 ? 2 : 1)}%</span>
     </div>
   );
 }

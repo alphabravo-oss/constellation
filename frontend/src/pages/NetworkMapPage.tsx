@@ -95,6 +95,7 @@ import {
   type RuntimeThreat,
   type RuntimeThreatDetail,
 } from "@/api/client";
+import { Select } from "@/components/ui/form";
 
 const STATE_COLOR: Record<NetworkFlowState, string> = {
   ok: "var(--color-status-success)",
@@ -720,7 +721,7 @@ function NetworkMapInner() {
         title="Network Activity"
         description="Inspect traffic, live connections and network security evidence."
         actions={
-          <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-mono">
+          <div className="flex flex-wrap items-center gap-1.5 text-micro text-mono">
             <StatusPill label={live ? "Auto refresh" : "paused"} tone={live ? "success" : "neutral"} />
             <Button size="sm" variant="outline" onClick={() => setLive((c) => !c)}>{live ? "Pause" : "Resume"}</Button>
             <Button size="sm" variant="outline" onClick={() => { if (workspaceTab === "pcap") { void queryClient.invalidateQueries({ queryKey: ["pcap-captures", clusterID] }); return; } void q.refetch(); void conversationsQ.refetch(); void lifecycleQ.refetch(); void threatsQ.refetch(); void sessionsQ.refetch(); }}>Refresh</Button>
@@ -767,7 +768,7 @@ function NetworkMapInner() {
             >
               <span>{tab.label}</span>
               {tab.nvLabel !== tab.label && (
-                <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-muted-foreground">
+                <span className="rounded bg-muted px-1.5 py-0.5 text-micro  text-muted-foreground">
                   NV {tab.nvLabel}
                 </span>
               )}
@@ -784,8 +785,8 @@ function NetworkMapInner() {
       <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1.5" data-testid="network-filter-bar">
         {["map", "conversations", "sessions", "threats"].includes(workspaceTab) && <>
         <Filter className="h-3 w-3 text-muted-foreground" aria-hidden />
-        {workspaceTab !== "sessions" && <select
-          className="h-6 rounded border border-input bg-card px-1.5 text-[11px] text-mono outline-none focus:border-[color:var(--color-primary)]"
+        {workspaceTab !== "sessions" && <Select
+          className="h-6 rounded border border-input bg-card px-1.5 text-micro text-mono outline-none focus:border-[color:var(--color-primary)]"
           value={hours}
           onChange={(e) => setHours(Number(e.target.value))}
           aria-label="Traffic window"
@@ -794,9 +795,9 @@ function NetworkMapInner() {
           <option value={1}>1h</option>
           <option value={24}>24h</option>
           <option value={168}>7d</option>
-        </select>}
+        </Select>}
         <input
-          className="h-6 w-16 rounded border border-input bg-card px-1.5 text-[11px] text-mono"
+          className="h-6 w-16 rounded border border-input bg-card px-1.5 text-micro text-mono"
           aria-label="Traffic port"
           data-testid="network-traffic-port"
           placeholder="Port"
@@ -805,7 +806,7 @@ function NetworkMapInner() {
           onChange={(event) => setSessionFilters((current) => ({ ...current, port: event.target.value.replace(/[^\d]/g, "").slice(0, 5) }))}
         />
         <input
-          className="h-6 w-28 rounded border border-input bg-card px-1.5 text-[11px]"
+          className="h-6 w-28 rounded border border-input bg-card px-1.5 text-micro"
           aria-label="Traffic peer"
           data-testid="network-traffic-peer"
           placeholder="Peer"
@@ -813,7 +814,7 @@ function NetworkMapInner() {
           onChange={(event) => setSessionFilters((current) => ({ ...current, peer: event.target.value }))}
         />
         <input
-          className="h-6 w-24 rounded border border-input bg-card px-1.5 text-[11px]"
+          className="h-6 w-24 rounded border border-input bg-card px-1.5 text-micro"
           aria-label="Traffic application"
           data-testid="network-traffic-application"
           title="Application names use source-specific protocol or port hints; numeric IDs filter DPI threats"
@@ -824,8 +825,8 @@ function NetworkMapInner() {
         {/* Server-side verdict / namespace filters — these thread into the
             network.map / lifecycle queries (distinct from the client-side
             verdict + namespace chips that only re-filter the in-memory graph). */}
-        {(workspaceTab === "map" || workspaceTab === "conversations") && <select
-          className="h-6 rounded border border-input bg-card px-1.5 text-[11px] text-mono outline-none focus:border-[color:var(--color-primary)]"
+        {(workspaceTab === "map" || workspaceTab === "conversations") && <Select
+          className="h-6 rounded border border-input bg-card px-1.5 text-micro text-mono outline-none focus:border-[color:var(--color-primary)]"
           value={verdict}
           onChange={(e) => setVerdict(e.target.value)}
           aria-label="Verdict filter"
@@ -836,9 +837,9 @@ function NetworkMapInner() {
           <option value="alert">Alert</option>
           <option value="deny">Deny</option>
           <option value="block">Block</option>
-        </select>}
-        {workspaceTab !== "sessions" && <select
-          className="h-6 max-w-[10rem] rounded border border-input bg-card px-1.5 text-[11px] text-mono outline-none focus:border-[color:var(--color-primary)]"
+        </Select>}
+        {workspaceTab !== "sessions" && <Select
+          className="h-6 max-w-[10rem] rounded border border-input bg-card px-1.5 text-micro text-mono outline-none focus:border-[color:var(--color-primary)]"
           value={namespace}
           onChange={(e) => setNamespace(e.target.value)}
           aria-label="Namespace filter"
@@ -851,9 +852,9 @@ function NetworkMapInner() {
           {namespace && !namespaces.includes(namespace) && (
             <option value={namespace}>{namespace}</option>
           )}
-        </select>}
-        <select
-          className="h-6 max-w-[12rem] rounded border border-input bg-card px-1.5 text-[11px] text-mono outline-none focus:border-[color:var(--color-primary)]"
+        </Select>}
+        <Select
+          className="h-6 max-w-[12rem] rounded border border-input bg-card px-1.5 text-micro text-mono outline-none focus:border-[color:var(--color-primary)]"
           value={selectedGroup?.id ?? groupFilter}
           onChange={(e) => setGroupFilter(e.target.value)}
           aria-label="Group filter"
@@ -868,7 +869,7 @@ function NetworkMapInner() {
           {groupFilter && !groupOptions.some((group) => group.id === groupFilter || group.name === groupFilter) && (
             <option value={groupFilter}>{groupFilter}</option>
           )}
-        </select>
+        </Select>
         {workspaceTab === "map" && <>
         <Chip
           active={verdictsVisible.allow && verdictsVisible.alert && verdictsVisible.block}
@@ -906,7 +907,7 @@ function NetworkMapInner() {
               key={m}
               type="button"
               className={cn(
-                "px-2 py-0.5 text-[10px] capitalize transition-colors",
+                "px-2 py-0.5 text-micro capitalize transition-colors",
                 scopeMode === m
                   ? "bg-[color-mix(in_oklab,var(--color-primary)_22%,transparent)] text-[color:var(--color-primary)]"
                   : "bg-card text-muted-foreground hover:bg-accent",
@@ -925,7 +926,7 @@ function NetworkMapInner() {
           groupLabel={selectedGroupLabel}
           onApply={applySavedViewSnapshot}
         />
-        {["map", "conversations", "sessions", "threats"].includes(workspaceTab) && <span className="ml-auto text-[10px] text-mono text-muted-foreground" data-testid="network-last-updated">{lastUpdated}</span>}
+        {["map", "conversations", "sessions", "threats"].includes(workspaceTab) && <span className="ml-auto text-micro text-mono text-muted-foreground" data-testid="network-last-updated">{lastUpdated}</span>}
       </div>
 
         <RadixTabs.Content value="map" className="flex min-h-0 flex-1 flex-col outline-none" data-testid="network-workspace-panel-map">
@@ -1008,10 +1009,10 @@ function NetworkMapInner() {
             never overlaps it, regardless of how tall the legend grows. */}
         <div className="absolute right-3 top-3 z-10 flex flex-col items-end gap-2">
         <div
-          className="flex flex-col gap-1 rounded-md border border-border bg-card/95 p-2 text-[11px] shadow-[var(--elev-2)] backdrop-blur"
+          className="flex flex-col gap-1 rounded-md border border-border bg-card/95 p-2 text-micro shadow-[var(--elev-2)] backdrop-blur"
           data-testid="network-verdict-legend"
         >
-          <div className="px-1 text-[9px] uppercase tracking-wider text-muted-foreground">Legend</div>
+          <div className="px-1 text-micro  text-muted-foreground">Legend</div>
           {VERDICT_GROUPS.map((g) => {
             const Icon = VERDICT_ICON[g];
             const state = VERDICT_TO_STATE[g];
@@ -1041,14 +1042,14 @@ function NetworkMapInner() {
           })}
           {/* Freshness legend — solid = recent observation, dashed = stale.
               Visible until the BPF agent's uploader writes into network_flows. */}
-          <div className="mt-1 border-t border-border/60 pt-1 text-[10px] text-muted-foreground">
+          <div className="mt-1 border-t border-border/60 pt-1 text-micro text-muted-foreground">
             <div className="flex items-center gap-1.5"><span aria-hidden className="h-px w-4 bg-muted-foreground" /> <span>fresh ≤ 5 min</span></div>
             <div className="flex items-center gap-1.5"><span aria-hidden className="h-px w-4 bg-muted-foreground/40" style={{ borderTop: "1px dashed currentColor", background: "transparent" }} /> <span>stale (~total)</span></div>
           </div>
           {/* Endpoint-kind visibility toggles. `unmanaged` (unresolved in-cluster
               IPs / infra noise) is hidden by default; click to show. */}
           <div className="mt-1 border-t border-border/60 pt-1">
-            <div className="px-1 text-[9px] uppercase tracking-wider text-muted-foreground">Endpoints</div>
+            <div className="px-1 text-micro  text-muted-foreground">Endpoints</div>
             {NODE_KINDS.map((k) => {
               const on = !hiddenKinds.has(k);
               return (
@@ -1116,7 +1117,7 @@ function NetworkMapInner() {
                     type="button"
                     title="Cut this workload off the network with a default-deny NetworkPolicy (CNI-enforced)"
                     onClick={() => navigate({ href: networkActionHref(clusterID, "isolate", selectedWorkload.id) })}
-                    className="inline-flex items-center gap-1 rounded border border-[color:var(--color-severity-critical)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--color-severity-critical)] hover:bg-[color:color-mix(in_oklab,var(--color-severity-critical)_12%,transparent)] disabled:opacity-40"
+                    className="inline-flex items-center gap-1 rounded border border-[color:var(--color-severity-critical)] px-2 py-0.5 text-micro font-medium text-[color:var(--color-severity-critical)] hover:bg-[color:color-mix(in_oklab,var(--color-severity-critical)_12%,transparent)] disabled:opacity-40"
                   >
                     <Lock className="h-3 w-3" /> Isolate
                   </button>
@@ -1124,7 +1125,7 @@ function NetworkMapInner() {
                     type="button"
                     title="Add to the admission-webhook deny list (blocks re-admission / reschedule)"
                     onClick={() => navigate({ href: networkActionHref(clusterID, "quarantine", selectedWorkload.id) })}
-                    className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-[10px] font-medium text-muted-foreground hover:bg-muted disabled:opacity-40"
+                    className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-micro font-medium text-muted-foreground hover:bg-muted disabled:opacity-40"
                   >
                     <Ban className="h-3 w-3" /> Quarantine
                   </button>
@@ -1133,7 +1134,7 @@ function NetworkMapInner() {
               <button
                 type="button"
                 onClick={() => setSelectedWorkloadID(null)}
-                className="text-[10px] text-muted-foreground hover:text-foreground"
+                className="text-micro text-muted-foreground hover:text-foreground"
               >
                 close
               </button>
@@ -1186,7 +1187,7 @@ function NetworkMapInner() {
             <div className="flex flex-wrap items-end gap-3">
               <label className="text-xs">From<input aria-label="Conversation from" className="mt-1 block rounded border border-input bg-background p-2" value={conversationScope.from ?? ""} onChange={event => updateRoute({ from: event.target.value }, true, true)} /></label>
               <label className="text-xs">To<input aria-label="Conversation to" className="mt-1 block rounded border border-input bg-background p-2" value={conversationScope.to ?? ""} onChange={event => updateRoute({ to: event.target.value }, true, true)} /></label>
-              <label className="text-xs">Outcome<select aria-label="Conversation outcome" className="mt-1 block rounded border border-input bg-background p-2" value={conversationScope.verdict_group ?? ""} onChange={event => updateRoute({ verdict_group: event.target.value }, false, true)}><option value="">All outcomes</option><option value="blocked">Denied or blocked</option></select></label>
+              <label className="text-xs">Outcome<Select aria-label="Conversation outcome" className="mt-1 block rounded border border-input bg-background p-2" value={conversationScope.verdict_group ?? ""} onChange={event => updateRoute({ verdict_group: event.target.value }, false, true)}><option value="">All outcomes</option><option value="blocked">Denied or blocked</option></Select></label>
               <Button onClick={() => updateRoute({ from: null, to: null, verdict_group: null }, false, true)}>Clear conversation filters</Button>
             </div>
           </div>
@@ -1315,7 +1316,7 @@ function NetworkConversationsWorkspaceTab({
     { id: "bytes", exportValue: row => row.bytes, header: "Volume", kind: "bytes", size: 128, minSize: 112, maxSize: 160, cell: (row) => <span className="font-mono">{formatBytes(row.bytes)}</span>, sort: (a, b) => a.bytes - b.bytes, numeric: true },
     { id: "packets", exportValue: row => row.packets, header: "Packets", kind: "count", cell: (row) => <span className="font-mono">{row.packets.toLocaleString()}</span>, sort: (a, b) => a.packets - b.packets, numeric: true },
     { id: "edges", exportValue: row => row.edges, header: "Streams", kind: "count", cell: (row) => <span className="font-mono">{row.edges.toLocaleString()}</span>, sort: (a, b) => a.edges - b.edges, numeric: true },
-    { id: "verdict", exportValue: row => row.verdict ?? "", header: "Verdict", kind: "status", cell: (row) => <span className={cn("rounded px-1.5 py-0.5 text-[10px] uppercase", ["deny", "denied", "block", "blocked"].includes(row.verdict ?? "") ? "bg-[color:var(--color-status-error)]/15 text-[color:var(--color-status-error)]" : "bg-muted text-muted-foreground")}>{row.verdict || "allow"}</span>, sort: (a, b) => (a.verdict ?? "allow").localeCompare(b.verdict ?? "allow") },
+    { id: "verdict", exportValue: row => row.verdict ?? "", header: "Verdict", kind: "status", cell: (row) => <span className={cn("rounded px-1.5 py-0.5 text-micro ", ["deny", "denied", "block", "blocked"].includes(row.verdict ?? "") ? "bg-[color:var(--color-status-error)]/15 text-[color:var(--color-status-error)]" : "bg-muted text-muted-foreground")}>{row.verdict || "allow"}</span>, sort: (a, b) => (a.verdict ?? "allow").localeCompare(b.verdict ?? "allow") },
     { id: "last_seen", exportValue: row => row.last_seen, header: "Last seen", kind: "date", size: 224, minSize: 208, maxSize: 240, cell: (row) => <button type="button" className="text-left text-muted-foreground hover:text-foreground" onClick={() => onSelect(row)} data-testid="network-conversation-open">{formatDateTime(row.last_seen)}</button>, sort: (a, b) => Date.parse(a.last_seen) - Date.parse(b.last_seen) },
   ], [onSelect]);
   return (
@@ -1383,8 +1384,8 @@ function NetworkSessionsWorkspaceTab({
       </div>
       <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-border bg-card px-3 py-2" data-testid="network-session-filters">
         <Filter className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
-        <select
-          className="h-7 rounded border border-input bg-card px-2 text-[11px] text-mono outline-none focus:border-[color:var(--color-primary)]"
+        <Select
+          className="h-7 rounded border border-input bg-card px-2 text-micro text-mono outline-none focus:border-[color:var(--color-primary)]"
           value={filters.protocol}
           onChange={(event) => updateFilter("protocol", event.target.value)}
           aria-label="Session protocol"
@@ -1395,9 +1396,9 @@ function NetworkSessionsWorkspaceTab({
           <option value="udp">UDP</option>
           <option value="icmp">ICMP</option>
           <option value="icmpv6">ICMPv6</option>
-        </select>
+        </Select>
         <input
-          className="h-7 w-24 rounded border border-input bg-card px-2 text-[11px] outline-none placeholder:text-muted-foreground focus:border-[color:var(--color-primary)]"
+          className="h-7 w-24 rounded border border-input bg-card px-2 text-micro outline-none placeholder:text-muted-foreground focus:border-[color:var(--color-primary)]"
           value={filters.application}
           onChange={(event) => updateFilter("application", event.target.value)}
           placeholder="App"
@@ -1405,7 +1406,7 @@ function NetworkSessionsWorkspaceTab({
           data-testid="network-session-filter-application"
         />
         <input
-          className="h-7 w-20 rounded border border-input bg-card px-2 text-[11px] text-mono outline-none placeholder:text-muted-foreground focus:border-[color:var(--color-primary)]"
+          className="h-7 w-20 rounded border border-input bg-card px-2 text-micro text-mono outline-none placeholder:text-muted-foreground focus:border-[color:var(--color-primary)]"
           value={filters.port}
           onChange={(event) => updateFilter("port", event.target.value.replace(/[^\d]/g, "").slice(0, 5))}
           inputMode="numeric"
@@ -1414,7 +1415,7 @@ function NetworkSessionsWorkspaceTab({
           data-testid="network-session-filter-port"
         />
         <input
-          className="h-7 w-36 rounded border border-input bg-card px-2 text-[11px] text-mono outline-none placeholder:text-muted-foreground focus:border-[color:var(--color-primary)]"
+          className="h-7 w-36 rounded border border-input bg-card px-2 text-micro text-mono outline-none placeholder:text-muted-foreground focus:border-[color:var(--color-primary)]"
           value={filters.peer}
           onChange={(event) => updateFilter("peer", event.target.value)}
           placeholder="Peer IP"
@@ -1422,7 +1423,7 @@ function NetworkSessionsWorkspaceTab({
           data-testid="network-session-filter-peer"
         />
         <input
-          className="h-7 w-44 rounded border border-input bg-card px-2 text-[11px] text-mono outline-none placeholder:text-muted-foreground focus:border-[color:var(--color-primary)]"
+          className="h-7 w-44 rounded border border-input bg-card px-2 text-micro text-mono outline-none placeholder:text-muted-foreground focus:border-[color:var(--color-primary)]"
           value={filters.workload}
           onChange={(event) => updateFilter("workload", event.target.value)}
           placeholder="Workload"
@@ -1430,7 +1431,7 @@ function NetworkSessionsWorkspaceTab({
           data-testid="network-session-filter-workload"
         />
         <input
-          className="h-7 w-28 rounded border border-input bg-card px-2 text-[11px] text-mono outline-none placeholder:text-muted-foreground focus:border-[color:var(--color-primary)]"
+          className="h-7 w-28 rounded border border-input bg-card px-2 text-micro text-mono outline-none placeholder:text-muted-foreground focus:border-[color:var(--color-primary)]"
           value={filters.node}
           onChange={(event) => updateFilter("node", event.target.value)}
           placeholder="Node"
@@ -1464,13 +1465,13 @@ function NetworkSessionsWorkspaceTab({
               <CircleCheck className="h-3.5 w-3.5 text-[color:var(--color-status-success)]" aria-hidden />
               <span>Kill queued for session {lastKill.session_id}</span>
             </div>
-            <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+            <div className="mt-0.5 truncate text-micro text-muted-foreground">
               {sessionKillTargetLabel(lastKill)} on {lastKill.node || "unknown node"} at {formatKillRequestedAt(lastKill.requested_at)}
               {lastKill.expires_at && <> · Delivery expires {formatKillRequestedAt(lastKill.expires_at)}</>}
             </div>
           </div>
           {lastKill.audit_id ? (
-            <span className="rounded border border-border bg-card px-2 py-0.5 text-[10px] text-mono text-muted-foreground" data-testid="network-session-kill-audit">
+            <span className="rounded border border-border bg-card px-2 py-0.5 text-micro text-mono text-muted-foreground" data-testid="network-session-kill-audit">
               audit #{lastKill.audit_id}
             </span>
           ) : null}
@@ -1767,7 +1768,7 @@ function Chip({
       type="button"
       onClick={onClick}
       className={cn(
-        "inline-flex h-6 items-center gap-1 rounded border px-2 text-[11px] text-mono whitespace-nowrap transition-colors",
+        "inline-flex h-6 items-center gap-1 rounded border px-2 text-micro text-mono whitespace-nowrap transition-colors",
         active
           ? "border-[color-mix(in_oklab,var(--color-primary)_36%,transparent)] bg-[color-mix(in_oklab,var(--color-primary)_18%,transparent)] text-[color:var(--color-primary)]"
           : "border-border bg-card text-muted-foreground hover:bg-accent",
@@ -1802,7 +1803,7 @@ function NamespaceMultiSelect({
         type="button"
         onClick={() => setOpen((v) => !v)}
         className={cn(
-          "inline-flex h-6 items-center gap-1 rounded border px-2 text-[11px] text-mono whitespace-nowrap transition-colors",
+          "inline-flex h-6 items-center gap-1 rounded border px-2 text-micro text-mono whitespace-nowrap transition-colors",
           selected.size > 0
             ? "border-[color-mix(in_oklab,var(--color-primary)_36%,transparent)] bg-[color-mix(in_oklab,var(--color-primary)_18%,transparent)] text-[color:var(--color-primary)]"
             : "border-border bg-card text-muted-foreground hover:bg-accent",
@@ -1819,7 +1820,7 @@ function NamespaceMultiSelect({
         >
           <button
             type="button"
-            className="block w-full rounded px-2 py-1 text-left text-[11px] text-muted-foreground hover:bg-accent"
+            className="block w-full rounded px-2 py-1 text-left text-micro text-muted-foreground hover:bg-accent"
             onClick={() => { onClear(); }}
           >
             Clear
@@ -1832,7 +1833,7 @@ function NamespaceMultiSelect({
                 type="button"
                 onClick={() => onToggle(ns)}
                 className={cn(
-                  "block w-full rounded px-2 py-1 text-left text-[11px] transition-colors",
+                  "block w-full rounded px-2 py-1 text-left text-micro transition-colors",
                   on ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/60",
                 )}
                 aria-pressed={on}
@@ -1841,7 +1842,7 @@ function NamespaceMultiSelect({
               </button>
             );
           })}
-          {namespaces.length === 0 && <div className="px-2 py-2 text-[11px] text-muted-foreground">No namespaces in window</div>}
+          {namespaces.length === 0 && <div className="px-2 py-2 text-micro text-muted-foreground">No namespaces in window</div>}
         </div>
       )}
     </div>
@@ -1987,7 +1988,7 @@ function FlowInspectorPopover({
                 <span className="mx-1.5 text-muted-foreground">→</span>
                 <span className="break-all text-mono">{shortName(flow.dst)}</span>
               </Dialog.Title>
-              <div className="mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground">
+              <div className="mt-0.5 flex items-center gap-2 text-micro text-muted-foreground">
                 <span style={{ color: verdictColor }}>● {flow.verdict}</span>
                 <span>·</span>
                 <span>{formatProtocol(flow)}</span>
@@ -2169,13 +2170,13 @@ function EnforcementCard({ clusterID }: { clusterID: string }) {
       </div>
       <ul className="max-h-56 space-y-1 overflow-auto pr-1">
         {actions.map((a) => (
-          <li key={a.id} className="flex items-center justify-between gap-2 rounded border border-border/60 p-1.5 text-[11px]">
+          <li key={a.id} className="flex items-center justify-between gap-2 rounded border border-border/60 p-1.5 text-micro">
             <div className="min-w-0">
               <div className="flex items-center gap-1">
-                <span className="rounded bg-muted px-1 text-[9px] uppercase text-muted-foreground">{a.kind === "isolate" ? "isolate" : "block"}</span>
+                <span className="rounded bg-muted px-1 text-micro  text-muted-foreground">{a.kind === "isolate" ? "isolate" : "block"}</span>
                 <span className="truncate text-mono font-medium">{a.kind === "isolate" ? shortName(a.target) : `${a.workload ? shortName(a.workload) + " ✕ " : ""}${a.target}`}</span>
               </div>
-              <div className="mt-0.5 break-words text-[10px] text-muted-foreground">
+              <div className="mt-0.5 break-words text-micro text-muted-foreground">
                 <NetworkEnforcementStatus action={a} />
                 {a.reason ? ` · ${a.reason}` : ""}
               </div>
@@ -2219,7 +2220,7 @@ function FlowTab({ flow, threats }: { flow: NetworkFlow; threats: RuntimeThreat[
     <div className="space-y-3" data-testid="network-flow-tab">
       {fromDP && (
         <div
-          className="flex items-center gap-2 rounded border border-border bg-card/60 px-2 py-1.5 text-[11px] text-muted-foreground"
+          className="flex items-center gap-2 rounded border border-border bg-card/60 px-2 py-1.5 text-micro text-muted-foreground"
           data-testid="network-flow-tab-source-dp"
         >
           <Radio className="h-3.5 w-3.5 text-[color:var(--color-status-success)]" aria-hidden />
@@ -2251,11 +2252,11 @@ function FlowTab({ flow, threats }: { flow: NetworkFlow; threats: RuntimeThreat[
         <Field label="Samples" value={flow.samples.toLocaleString()} />
         <Field label="Last seen" value={new Date(flow.last_seen_at).toLocaleString()} />
         <Field label="Verdict" value={flow.verdict} tone={flow.state} />
-        <div><dt className="text-[10px] text-muted-foreground">Signature maximum</dt><dd><ThreatMaximum id={flow.threat_id} complete={flow.threat_id_complete} /></dd></div>
+        <div><dt className="text-micro text-muted-foreground">Signature maximum</dt><dd><ThreatMaximum id={flow.threat_id} complete={flow.threat_id_complete} /></dd></div>
       </dl>
       {hasThreat && (
         <div
-          className="rounded border border-[color:var(--color-status-error)] bg-card/60 p-2 text-[11px]"
+          className="rounded border border-[color:var(--color-status-error)] bg-card/60 p-2 text-micro"
           data-testid="network-flow-tab-threat"
         >
           <div className="mb-1 flex items-center gap-1.5 text-[color:var(--color-status-error)]">
@@ -2300,7 +2301,7 @@ function ThreatTab({ flow, threats }: { flow: NetworkFlow; threats: RuntimeThrea
               <ShieldAlert className="h-3.5 w-3.5" aria-hidden />
               {flow.threat_name || `signature ${flow.threat_id}`}
             </div>
-            <p className="mt-1 text-[11px] leading-tight text-muted-foreground">
+            <p className="mt-1 text-micro leading-tight text-muted-foreground">
               dp flagged this signature on the conversation, but the packet-level detail is no
               longer retained (older than the threat window or cleared). The signature id and
               name above are from the flow record.
@@ -2330,14 +2331,14 @@ function ThreatTab({ flow, threats }: { flow: NetworkFlow; threats: RuntimeThrea
                 <ShieldAlert className="h-3.5 w-3.5" aria-hidden />
                 {t.threat_name || t.msg || `signature ${t.threat_id}`}
               </span>
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-micro text-muted-foreground">
                 {severityLabel(t.severity)} · {threatActionLabel(t.action)}
               </span>
             </div>
             {t.msg && (
-              <div className="mt-1 text-[11px] text-muted-foreground">{t.msg}</div>
+              <div className="mt-1 text-micro text-muted-foreground">{t.msg}</div>
             )}
-            <div className="mt-1 text-mono text-[10px] text-muted-foreground">
+            <div className="mt-1 text-mono text-micro text-muted-foreground">
               {formatEndpoint(t.src_ip, t.src_port)} → {formatEndpoint(t.dst_ip, t.dst_port)}
             </div>
             <div className="mt-2">
@@ -2380,7 +2381,7 @@ function PolicyTab({ flow, lifecycle }: { flow: NetworkFlow; lifecycle: NetworkP
   const tuples = item.tuple_preview ?? [];
   return (
     <div className="space-y-3" data-testid="network-policy-tab">
-      <div className="flex items-center gap-2 text-[11px]">
+      <div className="flex items-center gap-2 text-micro">
         <span className="text-muted-foreground">Generated policy for</span>
         <span className="text-mono text-foreground">{item.workload}</span>
         <span className="rounded px-1.5 py-0.5 text-mono bg-muted text-muted-foreground">
@@ -2393,7 +2394,7 @@ function PolicyTab({ flow, lifecycle }: { flow: NetworkFlow; lifecycle: NetworkP
             <li
               key={`${t.direction}-${t.peer}-${t.protocol}-${t.port}-${i}`}
               className={cn(
-                "flex items-center justify-between gap-2 rounded border px-2 py-1 text-[11px]",
+                "flex items-center justify-between gap-2 rounded border px-2 py-1 text-micro",
                 t.included
                   ? "border-border bg-card"
                   : "border-[color:var(--color-status-warning)]/40 bg-muted/40 text-muted-foreground",
@@ -2402,7 +2403,7 @@ function PolicyTab({ flow, lifecycle }: { flow: NetworkFlow; lifecycle: NetworkP
               <span className="text-mono">
                 {t.direction} · {shortName(t.peer)} · {t.protocol}/{t.port}
               </span>
-              <span className="text-[10px]">
+              <span className="text-micro">
                 {t.included ? t.verdict : `excluded: ${t.exclude_reason || "n/a"}`}
               </span>
             </li>
@@ -2410,7 +2411,7 @@ function PolicyTab({ flow, lifecycle }: { flow: NetworkFlow; lifecycle: NetworkP
         </ul>
       )}
       {yaml && (
-        <pre className="max-h-64 overflow-auto rounded-md bg-muted p-3 text-[11px] leading-tight">{yaml}</pre>
+        <pre className="max-h-64 overflow-auto rounded-md bg-muted p-3 text-micro leading-tight">{yaml}</pre>
       )}
     </div>
   );
@@ -2421,10 +2422,10 @@ function HistoryTab({ data, samples }: { data: number[]; samples: NetworkRecentF
   return (
     <div className="space-y-3" data-testid="network-history-tab">
       <div>
-        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Bytes / 24h (binned)</div>
+        <div className="text-micro  text-muted-foreground">Bytes / 24h (binned)</div>
         <div className="mt-2 rounded-md border border-border bg-muted/30 p-3">
           <Sparkline data={data} width={420} height={64} strokeWidth={1.5} />
-          <div className="mt-1 flex items-center justify-between text-[10px] text-muted-foreground">
+          <div className="mt-1 flex items-center justify-between text-micro text-muted-foreground">
             <span>peak {formatBytes(max)}</span>
             <span>{samples.length} samples</span>
           </div>
@@ -2432,7 +2433,7 @@ function HistoryTab({ data, samples }: { data: number[]; samples: NetworkRecentF
       </div>
       <div>
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+          <div className="text-micro  text-muted-foreground">
             Recent samples · preview up to 8 of {samples.length} returned for this flow
           </div>
           <Button
@@ -2446,7 +2447,7 @@ function HistoryTab({ data, samples }: { data: number[]; samples: NetworkRecentF
             )}
           >Export returned samples</Button>
         </div>
-        <ul className="mt-2 space-y-1 text-[11px]">
+        <ul className="mt-2 space-y-1 text-micro">
           {samples.slice(0, 8).map((s) => (
             <li key={s.id} className="flex items-center justify-between rounded border border-border bg-card px-2 py-1">
               <span className="text-mono">{new Date(s.observed_at).toLocaleTimeString()}</span>
@@ -2614,7 +2615,7 @@ function PolicyLifecyclePanel({
           candidate, and applier evidence.
         </p>
         {items.length > 0 && (
-          <select
+          <Select
             aria-label="Select workload policy"
             value=""
             onChange={(e) => onSelect(e.target.value)}
@@ -2626,7 +2627,7 @@ function PolicyLifecyclePanel({
                 {p.workload}
               </option>
             ))}
-          </select>
+          </Select>
         )}
       </section>
     );
@@ -3071,13 +3072,13 @@ function NodeLabel({ workload, kind }: { workload: NetworkWorkload; kind?: Netwo
       <div className="flex items-center gap-2">
         {pillColor && <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={{ background: pillColor }} />}
         <div className="min-w-0 flex-1 leading-tight">
-          <div className="flex items-center gap-1 truncate text-[11px] text-muted-foreground">
+          <div className="flex items-center gap-1 truncate text-micro text-muted-foreground">
             <span className="truncate">{workload.namespace}</span>
             {/* NET-1: endpoint kind from /network/conversations node_kinds.
                 Only badge off-cluster kinds; managed workloads stay clean. */}
             {kind && kind !== "workload" && (
               <span
-                className="shrink-0 rounded-sm border border-border bg-muted px-1 text-[9px] uppercase tracking-wide"
+                className="shrink-0 rounded-sm border border-border bg-muted px-1 text-micro "
                 data-testid={`network-node-kind-${kind}`}
               >
                 {kind}
@@ -3085,7 +3086,7 @@ function NodeLabel({ workload, kind }: { workload: NetworkWorkload; kind?: Netwo
             )}
             {modeColor && (
               <span
-                className="shrink-0 rounded-sm px-1 text-[9px] uppercase tracking-wide font-medium"
+                className="shrink-0 rounded-sm px-1 text-micro  font-medium"
                 style={{ background: `color-mix(in oklab, ${modeColor} 18%, transparent)`, color: modeColor }}
                 title={`Policy mode: ${mode}${mode === "discover" ? " (unprotected — learning only)" : ""}`}
                 data-testid={`network-node-mode-${mode}`}
@@ -3099,7 +3100,7 @@ function NodeLabel({ workload, kind }: { workload: NetworkWorkload; kind?: Netwo
       </div>
       {workload.finding_count > 0 && (
         <span
-          className="absolute -right-2 -top-2 inline-flex items-center gap-0.5 rounded-full border border-border bg-card px-2 py-0.5 text-[10px] font-mono shadow-[var(--elev-1)]"
+          className="absolute -right-2 -top-2 inline-flex items-center gap-0.5 rounded-full border border-border bg-card px-2 py-0.5 text-micro font-mono shadow-[var(--elev-1)]"
           aria-label={`${criticalCount} critical, ${highCount} high findings`}
         >
           {criticalCount > 0 && (
@@ -3197,8 +3198,8 @@ function StatPill({
       {...rest}
     >
       <span className="text-muted-foreground">{icon}</span>
-      <span className={cn("text-mono text-[12px] font-semibold tabular-nums", toneClass)}>{value}</span>
-      <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
+      <span className={cn("text-mono text-meta font-semibold tabular-nums", toneClass)}>{value}</span>
+      <span className="text-micro  text-muted-foreground">{label}</span>
     </span>
   );
 }
@@ -3236,9 +3237,9 @@ function LiveSessionsCard({
   const [collapsed, setCollapsed] = useState(true);
   const count = sessions.length;
   return (
-    <div className={cn("rounded-md border border-border bg-card/95 p-2 text-[11px] shadow-[var(--elev-2)] backdrop-blur", collapsed ? "w-auto" : "w-[440px] max-w-[80vw]")}
+    <div className={cn("rounded-md border border-border bg-card/95 p-2 text-micro shadow-[var(--elev-2)] backdrop-blur", collapsed ? "w-auto" : "w-[440px] max-w-[80vw]")}
       data-testid="network-sessions-card">
-      <div className="flex items-center justify-between gap-2 px-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+      <div className="flex items-center justify-between gap-2 px-1 text-micro  text-muted-foreground">
         <span className="flex items-center gap-1">
           <Activity className="h-3 w-3" aria-hidden />
           Live sessions · {loading ? "…" : hasMore ? `${count}/${total}` : count}
@@ -3252,7 +3253,7 @@ function LiveSessionsCard({
       {!collapsed && (
         <div className="mt-1">
           {lastKill && (
-            <div className="mb-1 rounded border border-[color:var(--color-status-success)]/40 bg-[color-mix(in_oklab,var(--color-status-success)_10%,transparent)] px-2 py-1 text-[10px] text-muted-foreground" data-testid="network-session-card-kill-result">
+            <div className="mb-1 rounded border border-[color:var(--color-status-success)]/40 bg-[color-mix(in_oklab,var(--color-status-success)_10%,transparent)] px-2 py-1 text-micro text-muted-foreground" data-testid="network-session-card-kill-result">
               Queued session {lastKill.session_id}
               {lastKill.expires_at ? ` · Delivery expires ${formatKillRequestedAt(lastKill.expires_at)}` : ""}
               {lastKill.audit_id ? ` - audit #${lastKill.audit_id}` : ""}
@@ -3267,7 +3268,7 @@ function LiveSessionsCard({
             </p>
           ) : (
             <div className="min-w-0">
-              {count > 200 && <p className="px-1 py-1 text-[10px] text-muted-foreground">Showing first 200 of {count} loaded sessions. Open the Sessions tab for the paged list.</p>}
+              {count > 200 && <p className="px-1 py-1 text-micro text-muted-foreground">Showing first 200 of {count} loaded sessions. Open the Sessions tab for the paged list.</p>}
               <DataTable<NetworkSession>
                 className="[&_.app-table-scroll]:max-h-[300px]"
                 rows={sessions.slice(0, 200)}
@@ -3342,13 +3343,13 @@ function ThreatsCard({
     <>
       <div
         className={cn(
-          "max-w-[80vw] rounded-md border bg-card/95 p-2 text-[11px] shadow-[var(--elev-2)] backdrop-blur",
+          "max-w-[80vw] rounded-md border bg-card/95 p-2 text-micro shadow-[var(--elev-2)] backdrop-blur",
           hot ? "border-[color:var(--color-status-error)]/60" : "border-border",
           collapsed ? "w-auto" : "w-[340px]",
         )}
         data-testid="network-threats-card"
       >
-        <div className={cn("mb-1 flex items-center justify-between px-1 text-[10px] uppercase tracking-wider", hot ? "text-[color:var(--color-status-error)]" : "text-muted-foreground")}>
+        <div className={cn("mb-1 flex items-center justify-between px-1 text-micro ", hot ? "text-[color:var(--color-status-error)]" : "text-muted-foreground")}>
           <span className="flex items-center gap-1">
             <ShieldAlert className="h-3 w-3" aria-hidden />
             DPI threats · {threats.length}
@@ -3366,7 +3367,7 @@ function ThreatsCard({
         </div>
         {!collapsed && (
         <>
-        <p className="mb-1 px-1 text-[9px] leading-tight text-muted-foreground/80">
+        <p className="mb-1 px-1 text-micro leading-tight text-muted-foreground/80">
           Showing latest {recent.length} of {threats.length} loaded DPI threats. Open the Threats tab for the paged list. In monitor mode these are logged, not blocked.
         </p>
         <ul className="space-y-0.5" data-testid="network-threats-list">
@@ -3392,7 +3393,7 @@ function ThreatsCard({
                       </span>
                       <span className="shrink-0 text-mono text-muted-foreground">{time}</span>
                     </div>
-                    <div className="truncate text-[10px] text-muted-foreground">
+                    <div className="truncate text-micro text-muted-foreground">
                       {t.src_ip}:{t.src_port} → {t.dst_ip}:{t.dst_port}
                       {t.severity > 0 && (
                         <span className="ml-1 rounded bg-[color:var(--color-status-error)]/15 px-1 text-[color:var(--color-status-error)]">
@@ -3402,7 +3403,7 @@ function ThreatsCard({
                       <span className="ml-1 text-muted-foreground/70">· {threatActionLabel(t.action)}</span>
                     </div>
                     {t.msg && (
-                      <div className="truncate text-[10px] text-muted-foreground/80" title={t.msg}>
+                      <div className="truncate text-micro text-muted-foreground/80" title={t.msg}>
                         {t.msg}
                       </div>
                     )}
@@ -3411,7 +3412,7 @@ function ThreatsCard({
                     <button
                       type="button"
                       onClick={() => onPivot(flowID)}
-                      className="border-l border-border/60 px-1.5 text-[9px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+                      className="border-l border-border/60 px-1.5 text-micro  text-muted-foreground hover:text-foreground"
                       title="Pivot to the matching flow on the canvas"
                       data-testid={`network-threat-pivot-${t.id}`}
                     >
@@ -3424,12 +3425,12 @@ function ThreatsCard({
           })}
         </ul>
         {threats.length > recent.length && (
-          <div className="mt-1 border-t border-border/60 pt-1 px-1 text-[10px] text-muted-foreground">
+          <div className="mt-1 border-t border-border/60 pt-1 px-1 text-micro text-muted-foreground">
             + {threats.length - recent.length} more in the loaded page
           </div>
         )}
         {!hot && (
-          <p className="px-1 py-1 text-[10px] text-muted-foreground">No DPI threats in the loaded page.</p>
+          <p className="px-1 py-1 text-micro text-muted-foreground">No DPI threats in the loaded page.</p>
         )}
         {/* DPI signature toggle (NV-style): weak-TLS version detection is off by default
             (dp reads the legacy TLS record version in tap mode → false positives on modern HTTPS). */}
@@ -3478,13 +3479,13 @@ function ThreatDrilldownDialog({ id, onClose }: { id: string; onClose: () => voi
                 <ShieldAlert className="h-4 w-4 text-[color:var(--color-status-error)]" aria-hidden />
                 <span className="text-mono">{detail?.threat_name || `threat_${detail?.threat_id ?? "?"}`}</span>
                 {detail?.severity != null && detail.severity > 0 && (
-                  <span className="rounded bg-[color:var(--color-status-error)]/15 px-1.5 py-0.5 text-[10px] text-[color:var(--color-status-error)]">
+                  <span className="rounded bg-[color:var(--color-status-error)]/15 px-1.5 py-0.5 text-micro text-[color:var(--color-status-error)]">
                     severity {detail.severity}
                   </span>
                 )}
               </Dialog.Title>
               {detail?.msg && (
-                <div className="mt-0.5 truncate text-[11px] text-muted-foreground">{detail.msg}</div>
+                <div className="mt-0.5 truncate text-micro text-muted-foreground">{detail.msg}</div>
               )}
             </div>
             <Dialog.Close
@@ -3529,7 +3530,7 @@ export function ThreatPcapCapturePane({ threat, clusterID, snapshot }: { threat:
 
 function ThreatMetaGrid({ t }: { t: RuntimeThreatDetail }) {
   return (
-    <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-[11px]" data-testid="threat-meta">
+    <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-micro" data-testid="threat-meta">
       <Field label="Source" value={`${t.src_ip ?? ""}${t.src_port ? `:${t.src_port}` : ""}`} />
       <Field label="Destination" value={`${t.dst_ip ?? ""}${t.dst_port ? `:${t.dst_port}` : ""}`} />
       <Field label="Workload" value={t.workload_id || t.ep_mac || "—"} />
@@ -3548,12 +3549,12 @@ function ThreatL7Pane({ l7 }: { l7: NonNullable<RuntimeThreatDetail["l7"]> }) {
       className="rounded border border-border bg-background/40 p-3"
       data-testid={`threat-l7-${l7.kind}`}
     >
-      <div className="mb-2 flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+      <div className="mb-2 flex items-center gap-2 text-micro  text-muted-foreground">
         <span>L7 preview</span>
         <span className="rounded bg-accent px-1.5 py-0.5 font-mono text-foreground">{l7.kind.toUpperCase()}</span>
       </div>
       {l7.kind === "http" && l7.http && (
-        <div className="space-y-1.5 text-mono text-[11px]">
+        <div className="space-y-1.5 text-mono text-micro">
           <div>
             <span className="text-[color:var(--color-primary)]">{l7.http.method}</span>{" "}
             <span className="break-all">{l7.http.target}</span>{" "}
@@ -3571,13 +3572,13 @@ function ThreatL7Pane({ l7 }: { l7: NonNullable<RuntimeThreatDetail["l7"]> }) {
         </div>
       )}
       {l7.kind === "dns" && l7.dns && (
-        <div className="text-mono text-[11px]">
+        <div className="text-mono text-micro">
           <span className="text-[color:var(--color-primary)]">{l7.dns.qtype || "?"}</span>{" "}
           <span className="break-all">{l7.dns.qname || "—"}</span>
         </div>
       )}
       {l7.kind === "tls" && l7.tls && (
-        <div className="space-y-1 text-mono text-[11px]">
+        <div className="space-y-1 text-mono text-micro">
           {l7.tls.version && <div><span className="text-muted-foreground">version:</span> {l7.tls.version}</div>}
           {l7.tls.sni && <div><span className="text-muted-foreground">SNI:</span> <span className="break-all">{l7.tls.sni}</span></div>}
         </div>
@@ -3609,7 +3610,7 @@ function ThreatPacketDump({ bytes, capLen }: { bytes: Uint8Array; capLen: number
   }
   return (
     <div className="rounded border border-border bg-background/40 p-3" data-testid="threat-packet-dump">
-      <div className="mb-2 flex items-center justify-between text-[10px] uppercase tracking-wider text-muted-foreground">
+      <div className="mb-2 flex items-center justify-between text-micro  text-muted-foreground">
         <span>Captured packet · {bytes.length} of {capLen || bytes.length} bytes</span>
         {bytes.length > 256 && (
           <button
@@ -3621,7 +3622,7 @@ function ThreatPacketDump({ bytes, capLen }: { bytes: Uint8Array; capLen: number
           </button>
         )}
       </div>
-      <pre className="overflow-x-auto whitespace-pre text-mono text-[10px] leading-snug">
+      <pre className="overflow-x-auto whitespace-pre text-mono text-micro leading-snug">
         {lines.map((l) => (
           `${l.off.toString(16).padStart(4, "0")}  ${l.hex.padEnd(16 * 3 - 1, " ")}  ${l.ascii}\n`
         ))}
@@ -3672,7 +3673,7 @@ function CollapsiblePolicyLifecycle(props: React.ComponentProps<typeof PolicyLif
         type="button"
         onClick={() => setOpen(true)}
         data-testid="network-lifecycle-chip"
-        className="absolute bottom-3 left-3 z-10 inline-flex items-center gap-2 rounded-md border border-border bg-card/95 px-2.5 py-1.5 text-[11px] shadow-[var(--elev-2)] backdrop-blur hover:bg-accent"
+        className="absolute bottom-3 left-3 z-10 inline-flex items-center gap-2 rounded-md border border-border bg-card/95 px-2.5 py-1.5 text-micro shadow-[var(--elev-2)] backdrop-blur hover:bg-accent"
         title="Network policy lifecycle"
       >
         <Eye   className="h-3 w-3 text-muted-foreground" />
@@ -3691,11 +3692,11 @@ function CollapsiblePolicyLifecycle(props: React.ComponentProps<typeof PolicyLif
       data-testid="network-lifecycle-panel"
     >
       <div className="mb-1 flex items-center justify-between">
-        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Network Policy Lifecycle</span>
+        <span className="text-micro  text-muted-foreground">Network Policy Lifecycle</span>
         <button
           type="button"
           onClick={() => setOpen(false)}
-          className="text-[10px] text-muted-foreground hover:text-foreground"
+          className="text-micro text-muted-foreground hover:text-foreground"
         >
           collapse
         </button>

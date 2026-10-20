@@ -138,7 +138,7 @@ function AdmissionRuleBuilder({
         </label>
         <label className="space-y-1 text-xs">
           <span className="text-muted-foreground">Max severity</span>
-          <select
+          <Select
             value={maxSeverity}
             onChange={(e) => setMaxSeverity(e.target.value as "medium" | "high" | "critical")}
             className="h-8 w-full rounded-md border border-border bg-card px-2 text-xs"
@@ -147,7 +147,7 @@ function AdmissionRuleBuilder({
             <option value="medium">medium</option>
             <option value="high">high</option>
             <option value="critical">critical</option>
-          </select>
+          </Select>
         </label>
         <label className="space-y-1 text-xs">
           <span className="text-muted-foreground">Max scan age</span>
@@ -172,7 +172,7 @@ function AdmissionRuleBuilder({
       <div className="mt-3 grid grid-cols-1 gap-2 text-xs md:grid-cols-3">
         <label className="space-y-1">
           <span className="text-muted-foreground">Evidence source</span>
-          <select
+          <Select
             value={sourceType}
             onChange={(e) => setSourceType(e.target.value as AdmissionEvidenceSource)}
             className="h-8 w-full rounded-md border border-border bg-card px-2 text-xs"
@@ -183,7 +183,7 @@ function AdmissionRuleBuilder({
             <option value="registry">Registry</option>
             <option value="manual">Manual</option>
             <option value="any">Any source</option>
-          </select>
+          </Select>
         </label>
         <Toggle checked={requireDigestMatch} onChange={setRequireDigestMatch} label="Require digest match" testId="admission-rule-builder-digest-match" />
         <Toggle checked={requireKnown} onChange={setRequireKnown} label="Require known scan result" testId="admission-rule-builder-known" />

@@ -36,15 +36,15 @@ async function render() {
   await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={identity}><CVEPage /></TablePreferencesProvider></QueryClientProvider>));
 }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
-async function click(label: string) { await act(async () => { [...host.querySelectorAll<HTMLElement>("button,[role=button]")].find(b => b.textContent?.trim() === label)!.click(); }); }
+async function click(label: string) { await act(async () => { [...host.querySelectorAll<HTMLElement>("button,[role=button]")].find((b) => b.textContent?.trim() === label || b.getAttribute("aria-label") === label)!.click(); }); }
 it("uses server lookahead to navigate beyond the first fifty records", async () => {
   await render(); await settled(() => expect(host.textContent).toContain("CVE-page-49"));
   expect(host.textContent).not.toContain("CVE-page-50");
   await click("Next"); await settled(() => expect(host.textContent).toContain("CVE-page-50"));
   expect(cve.search).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 51, offset: 50 }));
   expect(new URLSearchParams(route.latest).get("page")).toBe("2");
-  expect([...host.querySelectorAll("button")].find(b => b.textContent === "Next")?.disabled).toBe(true);
-  const kevFilter = [...host.querySelectorAll<HTMLElement>("[role=button]")].find(el => el.textContent === "KEV-only")!;
+  expect([...host.querySelectorAll("button")].find((b) => b.textContent === "Next" || b.getAttribute("aria-label") === "Next")?.disabled).toBe(true);
+  const kevFilter = [...host.querySelectorAll<HTMLElement>("[role=button]")].find((el) => el.textContent === "KEV-only" || el.getAttribute("aria-label") === "KEV-only")!;
   expect(kevFilter.tabIndex).toBe(0);
   await act(async () => kevFilter.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
   await settled(() => expect(cve.search).toHaveBeenLastCalledWith(expect.objectContaining({ kev: true, offset: 0 })));
@@ -89,7 +89,7 @@ it("sends all reviewed filters and stable sort to matching CSV without page boun
   expect(path).toBe("/cve/search.csv");expect(filename).toBe("constellation-cve-catalog.csv");expect(params).toEqual({q:"openssl",kev:"true",epss_gt:0.5,cvss_gt:7,severity:"high",source:"NVD",sort:"published",dir:"asc"});expect(guard()).toBe(true);await settled(()=>expect(host.textContent).toContain("Exported all 1,001 matching records across pages"));
 });
 it("hides failed cached result pages and blocks both exports until Retry succeeds",async()=>{
- await render();await settled(()=>expect(host.textContent).toContain("CVE-page-0"));vi.mocked(cve.search).mockRejectedValue(new Error("results failed"));await act(async()=>{await client.invalidateQueries({queryKey:["cve","search"]});});await settled(()=>expect(host.textContent).toContain("Could not load CVE results"));expect(host.querySelector("table")).toBeNull();expect([...host.querySelectorAll<HTMLButtonElement>("button")].find(b=>b.textContent==="Export matching CSV")?.disabled).toBe(true);
+ await render();await settled(()=>expect(host.textContent).toContain("CVE-page-0"));vi.mocked(cve.search).mockRejectedValue(new Error("results failed"));await act(async()=>{await client.invalidateQueries({queryKey:["cve","search"]});});await settled(()=>expect(host.textContent).toContain("Could not load CVE results"));expect(host.querySelector("table")).toBeNull();expect([...host.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Export matching CSV" || b.getAttribute("aria-label") === "Export matching CSV")?.disabled).toBe(true);
  vi.mocked(cve.search).mockResolvedValue({results:[{cve_id:"CVE-recovered",kev_listed:false,aliases:[],sources:[]}],limit:51,offset:0});await click("Retry");await settled(()=>expect(host.textContent).toContain("CVE-recovered"));
 });
 it.each([
@@ -98,7 +98,7 @@ it.each([
  {results:[{cve_id:"CVE-invalid",kev_listed:false,aliases:[],sources:[]}],limit:50,offset:0},
  {results:[{cve_id:"CVE-invalid",kev_listed:false,aliases:[],sources:[]}],limit:51,offset:50},
  {results:Array(2).fill({cve_id:"CVE-duplicate",kev_listed:false,aliases:[],sources:[]}),limit:51,offset:0},
-])("blocks malformed or mismatched catalog evidence %j",async payload=>{vi.mocked(cve.search).mockResolvedValue(payload as Awaited<ReturnType<typeof cve.search>>);await render();await settled(()=>expect(host.textContent).toContain("Could not load CVE results"));expect(host.querySelector("table")).toBeNull();expect([...host.querySelectorAll<HTMLButtonElement>("button")].find(b=>b.textContent==="Export matching CSV")?.disabled).toBe(true);});
+])("blocks malformed or mismatched catalog evidence %j",async payload=>{vi.mocked(cve.search).mockResolvedValue(payload as Awaited<ReturnType<typeof cve.search>>);await render();await settled(()=>expect(host.textContent).toContain("Could not load CVE results"));expect(host.querySelector("table")).toBeNull();expect([...host.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Export matching CSV" || b.getAttribute("aria-label") === "Export matching CSV")?.disabled).toBe(true);});
 it("rejects a held export after a completed source refresh and after owner changes",async()=>{
  await render();await settled(()=>expect(host.textContent).toContain("CVE-page-0"));let held:()=>boolean=()=>false;let finish:(value:{exported:number;limit:number;truncated:boolean})=>void=()=>{};vi.mocked(downloadLookaheadCSV).mockImplementation((_path,_params,_filename,guard)=>{held=guard;return new Promise(resolve=>{finish=resolve;});});await click("Export matching CSV");expect(held()).toBe(true);
  await act(async()=>{await client.invalidateQueries({queryKey:["cve","search"]});});await settled(()=>expect(host.textContent).toContain("CVE-page-0"));expect(held()).toBe(false);

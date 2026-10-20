@@ -90,7 +90,7 @@ describe("ResponseRuleFormPage group selector", () => {
     await act(async () => host?.querySelector<HTMLButtonElement>("[role='option']")?.click());
     expect(picker.value).toBe("prod/api");
 
-    const save = Array.from(host!.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.trim() === "Save");
+    const save = Array.from(host!.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.trim() === "Save" || button.getAttribute("aria-label") === "Save");
     await act(async () => save?.click());
     await vi.waitFor(() => expect(update).toHaveBeenCalled());
     expect(update.mock.calls[0][1].workload_match).toEqual({ group: "prod/api" });

@@ -14,6 +14,7 @@ import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { cn } from "@/lib/cn";
 import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
+import { Select } from "@/components/ui/form";
 
 const scanStatuses = ["all", "pending", "running", "completed", "failed", "paused", "canceled", "not-queued"];
 
@@ -30,7 +31,7 @@ const repositoryColumns: Column<RepositoryScan>[] = [
           {item.critical_findings > 0 ? <Pill tone="danger">critical {item.critical_findings}</Pill> : null}
         </div>
         <div className="mt-2 break-all font-mono text-xs font-medium">{item.repository_ref}</div>
-        <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{item.repository_url || item.id}</div>
+        <div className="mt-1 break-all font-mono text-micro text-muted-foreground">{item.repository_url || item.id}</div>
       </>
     ),
   },
@@ -41,7 +42,7 @@ const repositoryColumns: Column<RepositoryScan>[] = [
     cell: (item) => (
       <>
         <div className="font-medium">{item.branch || "branch unknown"}</div>
-        <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{shortCommit(item.commit_sha || item.source_ref)}</div>
+        <div className="mt-1 break-all font-mono text-micro text-muted-foreground">{shortCommit(item.commit_sha || item.source_ref)}</div>
         <div className="mt-1 text-muted-foreground">{item.workflow || "workflow unknown"}</div>
       </>
     ),
@@ -54,7 +55,7 @@ const repositoryColumns: Column<RepositoryScan>[] = [
       <>
         <div className="font-medium">{item.package_count} packages</div>
         <div className="mt-1 text-muted-foreground">{item.open_findings} open findings</div>
-        <div className="mt-1 truncate font-mono text-[10px] text-muted-foreground">{item.inventory_hash || "hash pending"}</div>
+        <div className="mt-1 truncate font-mono text-micro text-muted-foreground">{item.inventory_hash || "hash pending"}</div>
       </>
     ),
   },
@@ -66,7 +67,7 @@ const repositoryColumns: Column<RepositoryScan>[] = [
       <>
         <ScanStatus status={item.latest_job_status} />
         <div className="mt-1 text-muted-foreground">{formatDate(item.latest_observed_at || item.last_seen_at)}</div>
-        <div className="mt-1 break-all font-mono text-[10px] text-muted-foreground">{item.latest_job_id || "job not queued"}</div>
+        <div className="mt-1 break-all font-mono text-micro text-muted-foreground">{item.latest_job_id || "job not queued"}</div>
       </>
     ),
   },
@@ -130,7 +131,7 @@ export function RepositoryScansPage() {
               data-testid="repository-search"
             />
           </label>
-          <select
+          <Select
             value={status}
             onChange={(event) => setStatus(event.target.value)}
             className="rounded-md border border-border bg-background p-2 text-sm"
@@ -139,7 +140,7 @@ export function RepositoryScansPage() {
             {scanStatuses.map((item) => (
               <option key={item} value={item}>{item === "all" ? "All jobs on this page" : item}</option>
             ))}
-          </select>
+          </Select>
         </div>
       </section>
 
@@ -271,7 +272,7 @@ function AttestationHistoryPanel({ item }: { item: RepositoryScan }) {
     <div className="mt-4 space-y-3 border-t border-border pt-4" data-testid="repository-attestation-history">
       <div className="flex items-center justify-between gap-2">
         <h4 className="text-xs font-semibold">Attestation history</h4>
-        {attestationsQ.isFetching ? <span className="text-[10px] text-muted-foreground">Loading...</span> : null}
+        {attestationsQ.isFetching ? <span className="text-micro text-muted-foreground">Loading...</span> : null}
       </div>
       {attestationsQ.isError || attestationMismatch ? <ErrorState title="Attestation history is unavailable." action={<Button onClick={() => void attestationsQ.refetch()}>Retry attestations</Button>} /> : attestationsQ.isFetching || attestationsQ.isPending ? <LoadingState label="Loading attestation history…" /> : attestations.length > 0 ? (
         <div className="space-y-2">
@@ -355,7 +356,7 @@ function AttestationStatus({ status, trusted }: { status: string; trusted: boole
 function MiniMetric({ label, value, tone }: { label: string; value: number; tone: "normal" | "warn" | "danger" }) {
   return (
     <div className={cn("rounded-md border border-border p-2", tone === "danger" && "border-destructive/40 bg-destructive/10", tone === "warn" && "border-status-warning/40 bg-status-warning/10")}>
-      <div className="text-[10px] text-muted-foreground">{label}</div>
+      <div className="text-micro text-muted-foreground">{label}</div>
       <div className="mt-1 text-lg font-semibold">{value}</div>
     </div>
   );
@@ -374,7 +375,7 @@ function Pill({ children, tone }: { children: ReactNode; tone: "neutral" | "acce
   return (
     <span
       className={cn(
-        "inline-flex h-5 items-center rounded px-1.5 text-[10px] font-medium",
+        "inline-flex h-5 items-center rounded px-1.5 text-micro font-medium",
         tone === "neutral" && "bg-muted text-muted-foreground",
         tone === "accent" && "bg-primary/10 text-primary",
         tone === "warn" && "bg-status-warning/10 text-status-warning",

@@ -37,8 +37,8 @@ async function render(type = "asset", id = assetID, search = "", seed?: (client:
   await act(async () => root!.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{org_id:"org",user_id:"operator"}}><TestRouter history={history} path="/clusters/$clusterId/risk/$entityType/$entityId"><RiskDetailPage /></TestRouter></TablePreferencesProvider></QueryClientProvider>));
 }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
-const button = (label: string) => [...host.querySelectorAll("button")].find(item => item.textContent?.trim() === label)!;
-async function tab(label: string) { await act(async () => { [...host.querySelectorAll('[role="tab"]')].find(item => item.textContent === label)!.dispatchEvent(new MouseEvent("mousedown", { button: 0, bubbles: true })); }); }
+const button = (label: string) => [...host.querySelectorAll("button")].find((item) => item.textContent?.trim() === label || item.getAttribute("aria-label") === label)!;
+async function tab(label: string) { await act(async () => { [...host.querySelectorAll('[role="tab"]')].find((item) => item.textContent === label || item.getAttribute("aria-label") === label)!.dispatchEvent(new MouseEvent("mousedown", { button: 0, bubbles: true })); }); }
 
 it.each(["loading", "missing", "wrong", "error", "transition"])("suppresses all entity queries and cached evidence for %s scope", async condition => {
   if (condition === "loading") state.isLoading = true;
@@ -178,7 +178,7 @@ it("exports the selected finding's actual platform role when its optional column
   expect(host.querySelector('[data-testid="risk-generic-findings"] thead')?.textContent).not.toContain("Platform role");
   await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="risk-generic-findings-columns-trigger"]')!.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 })));
   await settled(() => expect(document.querySelector('[role="menuitemcheckbox"]')).not.toBeNull());
-  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find(item => item.textContent === "Platform role")!.click());
+  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((item) => item.textContent === "Platform role" || item.getAttribute("aria-label") === "Platform role")!.click());
   expect(host.querySelector('[data-testid="risk-generic-findings"] tbody')?.textContent).toContain("Core");
   await act(async () => button("Export returned findings").click());
   const [, headers, rows] = vi.mocked(downloadCsv).mock.calls.at(-1)!;
@@ -195,7 +195,7 @@ it("uses the same paged deployment finding inventory in Risk while retaining par
 it("keeps a bounded deployment overview preview read-only and links to the full inventory with context", async () => {
  const d=deployment();d.findings=[{id:"same-uuid",kind:"runtime",title:"Compatibility preview observation",severity:"high",risk_score:60,lifecycle:"open",last_seen_at:"2026-10-12T23:00:00Z"}];vi.mocked(deployments.get).mockResolvedValue(d);
  await render("deployment","deployment","?tab=overview&findings_page=13&custom=keep");await settled(()=>expect(host.textContent).toContain("Compatibility preview observation"));expect(host.querySelector('a[href$="/findings/same-uuid"]')).toBeNull();expect(deployments.findings).not.toHaveBeenCalled();
- const link=[...host.querySelectorAll<HTMLAnchorElement>("a")].find(anchor=>anchor.textContent==="Browse workload findings")!;const params=new URLSearchParams(link.getAttribute("href")!.slice(1));expect(params.get("tab")).toBe("findings");expect(params.get("findings_page")).toBe("13");expect(params.get("custom")).toBe("keep");
+ const link=[...host.querySelectorAll<HTMLAnchorElement>("a")].find((anchor) => anchor.textContent === "Browse workload findings" || anchor.getAttribute("aria-label") === "Browse workload findings")!;const params=new URLSearchParams(link.getAttribute("href")!.slice(1));expect(params.get("tab")).toBe("findings");expect(params.get("findings_page")).toBe("13");expect(params.get("custom")).toBe("keep");
 });
 
 it("discards pending asset risk export after related evidence invalidation and recovery", async () => {

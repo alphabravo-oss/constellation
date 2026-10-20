@@ -307,16 +307,16 @@ function LayersEvidenceCard({ loading, layers, totalSize, result }: { loading: b
             const instr = cmd.split(/\s+/)[0]?.toUpperCase();
             return (
               <li key={layer.digest || layer.diff_id || index} className="flex items-start gap-3 px-3 py-2">
-                <span className="mt-0.5 w-12 shrink-0 text-right font-mono text-[10px] text-muted-foreground">Layer {layer.index ?? index}</span>
+                <span className="mt-0.5 w-12 shrink-0 text-right font-mono text-micro text-muted-foreground">Layer {layer.index ?? index}</span>
                 <div className="min-w-0 flex-1">
-                  <code className="block whitespace-pre-wrap break-words font-mono text-[11px] leading-snug text-foreground">
+                  <code className="block whitespace-pre-wrap break-words font-mono text-micro leading-snug text-foreground">
                     {cmd
                       ? (["RUN","ADD","COPY","ENV","CMD","ENTRYPOINT","WORKDIR","EXPOSE","USER","LABEL","VOLUME","ARG","FROM"].includes(instr ?? "")
                           ? <><span className="text-[color:var(--color-primary)]">{instr}</span>{cmd.slice(instr!.length)}</>
                           : cmd)
                       : <span className="text-muted-foreground">{layer.media_type || "layer"}</span>}
                   </code>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+                  <div className="mt-0.5 flex flex-wrap items-center gap-2 text-micro text-muted-foreground">
                     {layer.in_base_image !== undefined && (
                       <span className={cn("rounded px-1 py-px font-medium", layer.in_base_image ? "bg-muted text-muted-foreground" : "bg-[color-mix(in_oklab,var(--color-primary)_14%,transparent)] text-[color:var(--color-primary)]")}>
                         {layer.in_base_image ? "base" : "app"}
@@ -374,7 +374,7 @@ function ConfigChecksEvidenceCard({ loading, checks }: { loading: boolean; check
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
         <div>
           <h2 className="text-sm font-semibold">Image config checks</h2>
-          <p className="text-[10px] text-muted-foreground">CIS-Docker best-practice controls on the image config</p>
+          <p className="text-micro text-muted-foreground">CIS-Docker best-practice controls on the image config</p>
         </div>
         <div className="flex items-center gap-1">
           {fails > 0 && <Pill tone="danger">{fails} fail</Pill>}
@@ -464,7 +464,7 @@ function FindingsTable({ findings }: { findings: ImageScanFinding[] }) {
             ) : (
               <span className="font-mono text-xs">-</span>
             )}
-            {finding.kev_listed && <span className="rounded px-1 py-px text-[9px] font-semibold text-white" style={{ background: "var(--color-severity-critical)" }} title="CISA Known-Exploited">KEV</span>}
+            {finding.kev_listed && <span className="rounded px-1 py-px text-micro font-semibold text-white" style={{ background: "var(--color-severity-critical)" }} title="CISA Known-Exploited">KEV</span>}
           </span>
           <div className="mt-1 text-xs text-muted-foreground">{finding.title}</div>
         </>
@@ -476,7 +476,7 @@ function FindingsTable({ findings }: { findings: ImageScanFinding[] }) {
       cell: (finding) => (
         <>
           <div className="font-mono text-xs">{finding.package_name || "-"}</div>
-          <div className="mt-1 font-mono text-[11px] text-muted-foreground">{finding.package_version || "-"}</div>
+          <div className="mt-1 font-mono text-micro text-muted-foreground">{finding.package_version || "-"}</div>
         </>
       ),
     },
@@ -676,7 +676,7 @@ function Pill({ children, tone }: { children: ReactNode; tone: "neutral" | "acce
   return (
     <span
       className={cn(
-        "inline-flex h-5 items-center rounded px-1.5 text-[10px] font-medium",
+        "inline-flex h-5 items-center rounded px-1.5 text-micro font-medium",
         tone === "neutral" && "bg-muted text-muted-foreground",
         tone === "accent" && "bg-primary/10 text-primary",
         tone === "warn" && "bg-status-warning/10 text-status-warning",

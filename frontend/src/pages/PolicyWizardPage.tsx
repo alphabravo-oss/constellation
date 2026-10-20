@@ -20,6 +20,7 @@ import { ChevronLeft, ChevronRight, Plus, Trash2 } from "lucide-react";
 
 import { api, policies } from "@/api/client";
 import { PageHeader } from "@/components/ui/page";
+import { Select } from "@/components/ui/form";
 
 // --- DSL types (mirror pkg/policy/dsl) ---
 type LifecycleStage = "BUILD" | "DEPLOY" | "RUNTIME";
@@ -231,7 +232,7 @@ function IdentityStep({ draft, setDraft }: { draft: PolicyDraft; setDraft: (d: P
         />
       </Labelled>
       <Labelled label="Severity">
-        <select
+        <Select
           value={draft.severity}
           onChange={(e) => setDraft({ ...draft, severity: e.target.value as Severity })}
           className="rounded-md border border-border bg-background px-2 py-1.5 text-sm"
@@ -241,7 +242,7 @@ function IdentityStep({ draft, setDraft }: { draft: PolicyDraft; setDraft: (d: P
               {s}
             </option>
           ))}
-        </select>
+        </Select>
       </Labelled>
       <Labelled label="Lifecycle stages">
         <div className="flex flex-wrap gap-2 text-xs">
@@ -303,7 +304,7 @@ function ScopeStep({ draft, setDraft }: { draft: PolicyDraft; setDraft: (d: Poli
           <button
             type="button"
             onClick={() => setDraft({ ...draft, scopes: draft.scopes.filter((_, j) => j !== i) })}
-            className="inline-flex items-center gap-1 self-start text-[11px] text-muted-foreground hover:text-destructive"
+            className="inline-flex items-center gap-1 self-start text-micro text-muted-foreground hover:text-destructive"
           >
             <Trash2 className="h-3 w-3" /> remove
           </button>
@@ -379,7 +380,7 @@ function GroupBuilder({
     >
       <div className="mb-2 flex items-center gap-2 text-xs">
         <span className="text-muted-foreground">Operator</span>
-        <select
+        <Select
           value={group.operator}
           onChange={(e) => onChange({ ...group, operator: e.target.value as BoolOp })}
           className="rounded-md border border-border bg-background px-1.5 py-0.5"
@@ -387,7 +388,7 @@ function GroupBuilder({
           <option value="AND">AND</option>
           <option value="OR">OR</option>
           <option value="NOT">NOT</option>
-        </select>
+        </Select>
       </div>
       {!useChildren ? (
         <CriteriaList
@@ -413,7 +414,7 @@ function GroupBuilder({
           <button
             type="button"
             onClick={() => onChange({ ...group, children: [...(group.children ?? []), { operator: "AND", criteria: [] }] })}
-            className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[11px] hover:bg-accent"
+            className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-micro hover:bg-accent"
           >
             <Plus className="h-3 w-3" /> nested group
           </button>
@@ -423,7 +424,7 @@ function GroupBuilder({
         <button
           type="button"
           onClick={() => onChange({ ...group, children: [{ operator: "AND", criteria: group.criteria ?? [] }], criteria: [] })}
-          className="mt-2 text-[11px] text-muted-foreground hover:text-foreground"
+          className="mt-2 text-micro text-muted-foreground hover:text-foreground"
         >
           + nest as sub-group
         </button>
@@ -457,7 +458,7 @@ function CriteriaList({
       <button
         type="button"
         onClick={() => onChange([...criteria, { field: fields[0]?.name ?? "", operator: "EQ", values: [""] }])}
-        className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[11px] hover:bg-accent"
+        className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-micro hover:bg-accent"
         data-testid="criteria-add"
       >
         <Plus className="h-3 w-3" /> add criterion
@@ -477,7 +478,7 @@ function CriterionRow({
   const f = useMemo(() => fields.find((x) => x.name === c.field), [fields, c.field]);
   return (
     <div className="grid grid-cols-1 gap-2 rounded-md border border-border bg-card p-2 md:grid-cols-[2fr_1fr_2fr_auto]">
-      <select
+      <Select
         value={c.field}
         onChange={(e) => onChange({ ...c, field: e.target.value })}
         className="rounded-md border border-border bg-background px-1.5 py-1 text-xs"
@@ -488,8 +489,8 @@ function CriterionRow({
             {x.name}
           </option>
         ))}
-      </select>
-      <select
+      </Select>
+      <Select
         value={c.operator}
         onChange={(e) => onChange({ ...c, operator: e.target.value })}
         className="rounded-md border border-border bg-background px-1.5 py-1 text-xs"
@@ -499,9 +500,9 @@ function CriterionRow({
             {op}
           </option>
         ))}
-      </select>
+      </Select>
       {f?.type === "enum" && f.enum_values ? (
-        <select
+        <Select
           value={c.values[0] ?? ""}
           onChange={(e) => onChange({ ...c, values: [e.target.value] })}
           className="rounded-md border border-border bg-background px-1.5 py-1 text-xs"
@@ -511,7 +512,7 @@ function CriterionRow({
               {v}
             </option>
           ))}
-        </select>
+        </Select>
       ) : (
         <input
           value={c.values.join(",")}
@@ -599,14 +600,14 @@ function ActionsStep({ draft, setDraft }: { draft: PolicyDraft; setDraft: (d: Po
   return (
     <div className="space-y-3">
       <Labelled label="Enforcement mode">
-        <select
+        <Select
           value={draft.enforcement_mode}
           onChange={(e) => setDraft({ ...draft, enforcement_mode: e.target.value as "monitor" | "enforce" })}
           className="rounded-md border border-border bg-background px-2 py-1.5 text-sm"
         >
           <option value="monitor">monitor (no blocking, alerts only)</option>
           <option value="enforce">enforce (block at admission)</option>
-        </select>
+        </Select>
       </Labelled>
       <Labelled label="Actions">
         <div className="flex flex-wrap gap-2 text-xs">
@@ -644,7 +645,7 @@ function ReviewStep({ draft }: { draft: PolicyDraft }) {
         toggle to <em>enforce</em> from the catalog once you've verified the matches.
       </p>
       <pre
-        className="max-h-96 overflow-auto rounded-md bg-muted p-3 font-mono text-[11px]"
+        className="max-h-96 overflow-auto rounded-md bg-muted p-3 font-mono text-micro"
         data-testid="wizard-review-yaml"
       >
 {yaml}

@@ -98,7 +98,7 @@ export function ClusterHealthPage() {
 function MiniStat({ label, value }: { label: string; value: number | string }) {
   return (
     <div>
-      <dt className="text-[10px] uppercase text-muted-foreground">{label}</dt>
+      <dt className="text-micro  text-muted-foreground">{label}</dt>
       <dd className="font-semibold">{value}</dd>
     </div>
   );

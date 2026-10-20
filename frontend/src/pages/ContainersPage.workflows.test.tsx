@@ -247,7 +247,7 @@ it("controls descending vulnerability sorting on the server without reordering r
   );
   const header = [
     ...host.querySelectorAll<HTMLButtonElement>("thead button"),
-  ].find((b) => b.textContent === "Vulns")!;
+  ].find((b) => b.textContent === "Vulns" || b.getAttribute("aria-label") === "Vulns")!;
   await act(async () => header.click());
   await settled(() =>
     expect(containers.list).toHaveBeenLastCalledWith(

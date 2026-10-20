@@ -63,7 +63,7 @@ function inventory(source: ComponentInstance[], params: ComponentsInventoryParam
 const reportsSource=()=>Array.from({length:2105},(_,i)=>component(`component-${String(i).padStart(4,"0")}`,i%3?{system_config_revision:9}:{config_revision:9}));
 function mockReports(source=reportsSource()){vi.mocked(componentsInventory.list).mockImplementation(async params=>inventory(source,params));}
 async function settled(check:()=>void){await vi.waitFor(async()=>{await act(async()=>{});check();});}
-const button=(label:string)=>[...host.querySelectorAll<HTMLButtonElement>("button")].find(value=>value.textContent?.trim()===label)!;
+const button=(label:string)=>[...host.querySelectorAll<HTMLButtonElement>("button")].find((value) => value.textContent?.trim() === label || value.getAttribute("aria-label") === label)!;
 async function click(label:string){await act(async()=>button(label).click());}
 const reportRows=()=>host.querySelectorAll('[data-testid="effective-config-applied-revisions"] tbody tr');
 async function field(label:string,value:string){await act(async()=>{const input=host.querySelector<HTMLInputElement|HTMLSelectElement>(`[aria-label="${label}"]`)!;Object.getOwnPropertyDescriptor(input.tagName==="SELECT"?HTMLSelectElement.prototype:HTMLInputElement.prototype,"value")!.set!.call(input,value);input.dispatchEvent(new Event(input.tagName==="SELECT"?"change":"input",{bubbles:true}));});}
@@ -111,7 +111,7 @@ it("reports missing provenance and failed component inventory as unknown or unav
   expect(host.querySelector('[data-testid="effective-config-source-summary"]')?.textContent).toContain("Unknown");
 });
 
-async function tab(label: string) { await act(async () => [...host.querySelectorAll('[role="tab"]')].find(t => t.textContent === label)!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }))); await vi.waitFor(() => expect(host.querySelector('[role="tab"][data-state="active"]')?.textContent).toBe(label)); }
+async function tab(label: string) { await act(async () => [...host.querySelectorAll('[role="tab"]')].find((t) => t.textContent === label || t.getAttribute("aria-label") === label)!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 }))); await vi.waitFor(() => expect(host.querySelector('[role="tab"][data-state="active"]')?.textContent).toBe(label)); }
 it("continues revision reports beyond1000 with page CSV and URL/history disclosure", async () => {
  vi.mocked(systemConfigApi.get).mockResolvedValue({ config: { tls_verify: true }, revision: 9, source: "system_config" });
  mockReports();

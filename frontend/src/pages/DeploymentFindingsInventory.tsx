@@ -19,6 +19,7 @@ import { ErrorState, LoadingState } from "@/components/ui/states";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { ScanInventoryExport } from "./inventory-workspace";
 import { deploymentFindingsMatch, deploymentFindingLifecycles, deploymentFindingSeverities, deploymentFindingSorts } from "./DeploymentFindingsInventory.validation";
+import { Select } from "@/components/ui/form";
 
 type Props = { deployment: DeploymentDetail; sourceQueryKey: QueryKey; sourceKind: "detail" | "risk"; sourceReady: boolean };
 const fields = ["q", "severity", "lifecycle", "fixable", "sort", "order", "page"];
@@ -107,9 +108,9 @@ export function DeploymentFindingsInventory({ deployment, sourceQueryKey, source
     <h2 className="text-sm font-semibold">Workload findings</h2>
     <div className="flex flex-wrap gap-2">
       <input aria-label="Search deployment findings" placeholder="Search workload findings" className="min-w-0 basis-64 flex-1 rounded border border-border bg-background px-3 py-2 text-sm" value={search} onChange={e => update({ q: e.target.value }, true, true)} />
-      <select aria-label="Deployment finding lifecycle" value={lifecycle} onChange={e => update({ lifecycle: e.target.value })} className="rounded border border-border bg-background p-2 text-sm"><option value="all">All lifecycles</option>{deploymentFindingLifecycles.map(value => <option key={value}>{value}</option>)}</select>
-      <select aria-label="Deployment finding severity" value={severity} onChange={e => update({ severity: e.target.value })} className="rounded border border-border bg-background p-2 text-sm"><option value="">All severities</option>{deploymentFindingSeverities.map(value => <option key={value}>{value}</option>)}</select>
-      <select aria-label="Deployment finding fixability" value={fixable} onChange={e => update({ fixable: e.target.value })} className="rounded border border-border bg-background p-2 text-sm"><option value="">Any fixability</option><option value="true">Fix available</option><option value="false">No fix reported</option></select>
+      <Select aria-label="Deployment finding lifecycle" value={lifecycle} onChange={e => update({ lifecycle: e.target.value })} className="rounded border border-border bg-background p-2 text-sm"><option value="all">All lifecycles</option>{deploymentFindingLifecycles.map(value => <option key={value}>{value}</option>)}</Select>
+      <Select aria-label="Deployment finding severity" value={severity} onChange={e => update({ severity: e.target.value })} className="rounded border border-border bg-background p-2 text-sm"><option value="">All severities</option>{deploymentFindingSeverities.map(value => <option key={value}>{value}</option>)}</Select>
+      <Select aria-label="Deployment finding fixability" value={fixable} onChange={e => update({ fixable: e.target.value })} className="rounded border border-border bg-background p-2 text-sm"><option value="">Any fixability</option><option value="true">Fix available</option><option value="false">No fix reported</option></Select>
       <Button variant="outline" onClick={() => update({ q: null, severity: null, lifecycle: null, fixable: null, sort: null, order: null })}>Reset finding filters</Button>
     </div>
     {invalid ? <ErrorState title="Choose supported deployment finding filters, sorting and page." /> : !scopeReady ? <LoadingState label="Resolve and refresh this exact deployment before loading findings…" /> : q.isError || badResponse ? <ErrorState title="Deployment workload findings are unavailable or could not be refreshed." action={<Button onClick={() => void q.refetch()}>Retry findings</Button>} /> : !data ? <LoadingState label="Loading deployment workload findings…" /> : <>

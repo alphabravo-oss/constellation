@@ -21,6 +21,7 @@ import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { ErrorState } from "@/components/ui/states";
 import { Button } from "@/components/ui/button";
 import { StatCard, StatGrid } from "@/components/ui/stat-card";
+import { Select } from "@/components/ui/form";
 
 const kinds = ["all", "image", "workload", "iac-resource", "ml-model", "cloud-resource", "host", "repository", "serverless"];
 const criticalities = ["all", "critical", "high", "medium", "low"];
@@ -155,7 +156,7 @@ export function AssetsPage() {
               data-testid="asset-search"
             />
           </label>
-          <select
+          <Select
             value={kind}
             onChange={(event) => setFilter("kind", event.target.value)}
             className="rounded-md border border-border bg-background p-2 text-sm"
@@ -164,8 +165,8 @@ export function AssetsPage() {
             {kinds.map((item) => (
               <option key={item} value={item}>{item === "all" ? "All kinds" : item}</option>
             ))}
-          </select>
-          <select
+          </Select>
+          <Select
             value={criticality}
             onChange={(event) => setFilter("criticality", event.target.value)}
             className="rounded-md border border-border bg-background p-2 text-sm"
@@ -174,12 +175,12 @@ export function AssetsPage() {
             {criticalities.map((item) => (
               <option key={item} value={item}>{item === "all" ? "All criticality" : item}</option>
             ))}
-          </select>
+          </Select>
         </div>
       </section>
 
       <div className="flex flex-wrap items-center gap-3">
-        <label className="text-xs">AI workload <select aria-label="AI workload" value={ai} onChange={event => setFilter("ai_workload", event.target.value)} className="rounded-md border border-border bg-background p-2"><option value="">Any</option><option value="true">AI</option><option value="false">Not AI</option></select></label>
+        <label className="text-xs">AI workload <Select aria-label="AI workload" value={ai} onChange={event => setFilter("ai_workload", event.target.value)} className="rounded-md border border-border bg-background p-2"><option value="">Any</option><option value="true">AI</option><option value="false">Not AI</option></Select></label>
         <Button variant="outline" disabled={!ready || !q.data?.total || exporting} onClick={() => void exportMatching()}>{exporting ? "Exporting…" : "Export matching assets CSV"}</Button>
         <span className="text-xs text-muted-foreground">Up to 100,000 matching assets, across all pages.</span>
       </div>

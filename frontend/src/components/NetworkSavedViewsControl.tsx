@@ -7,6 +7,7 @@ import { downloadJson } from "@/lib/download";
 import { networkViewHref } from "@/lib/network-saved-view-route";
 import { buildNetworkSavedViewsExport, isNetworkSavedView, networkActivitySavedViewsStorageKey, normalizeNetworkSavedView, type NetworkSavedView, type NetworkSavedViewSnapshot } from "@/lib/network-saved-views";
 import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/form";
 
 export function NetworkSavedViewsControl({ clusterID, snapshot, onApply, unavailable = false }: { clusterID: string; snapshot: NetworkSavedViewSnapshot; groupLabel?: string; onApply: (snapshot: NetworkSavedViewSnapshot) => void; unavailable?: boolean }) {
   const identity = useTablePreferencesIdentity();
@@ -22,9 +23,9 @@ export function NetworkSavedViewsControl({ clusterID, snapshot, onApply, unavail
   const disabled = unavailable || !clusterID || !canPersist;
   return <div className="flex min-w-0 flex-wrap items-center gap-2" data-testid="network-saved-views">
     {persistenceError && <p role="alert" className="w-full text-xs text-destructive">{persistenceError}</p>}
-    <select aria-label="Saved network view" data-testid="network-saved-view-select" className="h-9 max-w-56 rounded border border-input bg-card px-2 text-sm" value={selectedView?.id ?? ""} onChange={event => setSelection({ owner, id: event.target.value })}>
+    <Select aria-label="Saved network view" data-testid="network-saved-view-select" className="h-9 max-w-56 rounded border border-input bg-card px-2 text-sm" value={selectedView?.id ?? ""} onChange={event => setSelection({ owner, id: event.target.value })}>
       <option value="">Saved views</option>{views.map(view => <option key={view.id} value={view.id}>{view.name}</option>)}
-    </select>
+    </Select>
     <Button data-testid="network-saved-view-save" disabled={disabled} onClick={() => void navigate({ href: networkViewHref(clusterID, params, hash, "new", snapshot) })}>Save view</Button>
     <Button data-testid="network-saved-view-apply" disabled={disabled || !selectedView} onClick={() => { const view = normalizeNetworkSavedView(selectedView); if (activeOwner.current === owner && !disabled && view?.cluster_id === clusterID) onApply(view.filters); }}>Apply</Button>
     <Button data-testid="network-saved-view-delete" disabled={disabled || !selectedView} onClick={() => { if (activeOwner.current === owner && !disabled && selectedView && window.confirm(`Delete saved view “${selectedView.name}” from this browser?`) && deleteView(selectedView.id).ok) setSelection({ owner, id: "" }); }}>Delete</Button>

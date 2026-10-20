@@ -23,7 +23,7 @@ async function renderPage(search = "") {
   await act(async () => root.render(<QueryClientProvider client={client}><TestRouter history={history}><AdmissionProfileImportPage /></TestRouter></QueryClientProvider>));
 }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
-function button(label: string) { return [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === label)!; }
+function button(label: string) { return [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === label || b.getAttribute("aria-label") === label)!; }
 async function click(label: string) { await act(async () => button(label).click()); }
 async function change(selector: string, value: string) { await act(async () => { const input = host.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(selector)!; const proto = input instanceof HTMLSelectElement ? HTMLSelectElement.prototype : input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(input, value); input.dispatchEvent(new Event(input instanceof HTMLSelectElement ? "change" : "input", { bubbles: true })); }); }
 async function ready() { await settled(() => expect(button("Preview")?.disabled).toBe(false)); }

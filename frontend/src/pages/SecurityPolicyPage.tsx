@@ -74,7 +74,7 @@ export function SecurityPolicyPage() {
                 <TextInput type="number" min={1} max={4} value={form.min_classes}
                   onChange={(e) => set("min_classes", num(e.target.value))} className="w-32" />
               </Field>
-              <Field label="Min uppercase" hint="Minimum uppercase letters. 0 = no specific minimum.">
+              <Field label="Min " hint="Minimum  letters. 0 = no specific minimum.">
                 <TextInput type="number" min={0} value={form.min_uppercase}
                   onChange={(e) => set("min_uppercase", num(e.target.value))} className="w-32" />
               </Field>

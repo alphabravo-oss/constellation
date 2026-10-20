@@ -41,7 +41,7 @@ it("opens a dedicated new form with advanced disclosure and cancels without savi
   expect(host.querySelector('[role="dialog"]')).toBeNull();
   expect(host.querySelector("details")?.open).toBe(false);
   expect([...host.querySelectorAll("button")].some((button) => button.textContent?.trim() === "Test")).toBe(false);
-  await act(async () => [...host.querySelectorAll("button")].find((button) => button.textContent === "Cancel")!.click());
+  await act(async () => [...host.querySelectorAll("button")].find((button) => button.textContent === "Cancel" || button.getAttribute("aria-label") === "Cancel")!.click());
   expect(route.navigate).toHaveBeenCalledWith({ href: "/clusters/cluster/registries" });
   expect(registries.create).not.toHaveBeenCalled();
   expect(registries.test).not.toHaveBeenCalled();

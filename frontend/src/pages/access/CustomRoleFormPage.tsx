@@ -103,7 +103,7 @@ export function CustomRoleFormPage() {
                     <div key={domain} className="rounded-md border border-border">
                       <div className="flex items-center justify-between border-b border-border bg-muted/40 px-3 py-1.5">
                         <span className="text-xs font-semibold capitalize">{domain}</span>
-                        <button type="button" onClick={() => toggleDomain(domainVerbs)} className="text-[11px] text-[color:var(--color-primary)] hover:underline">
+                        <button type="button" onClick={() => toggleDomain(domainVerbs)} className="text-micro text-[color:var(--color-primary)] hover:underline">
                           {allOn ? "Clear all" : "Select all"}
                         </button>
                       </div>
@@ -111,7 +111,7 @@ export function CustomRoleFormPage() {
                         {domainVerbs.map((v) => (
                           <label key={v} className="inline-flex items-center gap-1.5 text-xs">
                             <input type="checkbox" checked={selected.has(v)} onChange={() => toggle(v)} className="h-3.5 w-3.5 rounded border-border" />
-                            <span className="font-mono text-[11px]">{v}</span>
+                            <span className="font-mono text-micro">{v}</span>
                           </label>
                         ))}
                       </div>

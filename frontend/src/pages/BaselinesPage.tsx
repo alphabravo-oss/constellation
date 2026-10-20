@@ -18,6 +18,7 @@ import { cn } from "@/lib/cn";
 import { useInventoryRoute, ScanInventoryExport } from "./inventory-workspace";
 import { useBaselineScope, baselinePath } from "./baselines/context";
 import { BASELINE_INVENTORY_SORTS, baselineInventoryMatches } from "./baselines/inventory";
+import { Select } from "@/components/ui/form";
 
 const COLUMNS: Array<{ mode: BaselineMode; title: string; tagline: string; tone: "info" | "warning" | "success"; icon: typeof Activity }> = [
  { mode: "learn", title: "Learn", tagline: "Configured to learn observed processes.", tone: "info", icon: Activity },
@@ -89,8 +90,8 @@ export function BaselinesPage() {
     <StatGrid><StatCard label="Matching profiles" value={data?.total ?? "—"} />{COLUMNS.map(c => <StatCard key={c.mode} label={c.title} value={data?.summary[c.mode] ?? "—"} />)}</StatGrid>
     <div className="flex flex-wrap gap-3">
       <label className="text-sm">Search workloads<input aria-label="Search workloads" value={route.query} onChange={e => route.setQuery(e.target.value)} className="ml-2 rounded border border-border bg-background px-3 py-2" /></label>
-      <label className="text-sm">Namespace<select aria-label="Namespace" value={namespace} onChange={e => route.update({ namespace: e.target.value })} className="ml-2 rounded border border-border bg-background px-3 py-2"><option value="">All namespaces</option>{(data?.namespaces ?? []).filter(Boolean).map(ns => <option key={ns}>{ns}</option>)}{namespace && !data?.namespaces.includes(namespace) && <option>{namespace}</option>}</select></label>
-      <label className="text-sm">Mode<select aria-label="Mode" value={mode} onChange={e => route.update({ mode: e.target.value })} className="ml-2 rounded border border-border bg-background px-3 py-2"><option value="">All modes</option>{COLUMNS.map(c => <option key={c.mode} value={c.mode}>{c.title}</option>)}</select></label>
+      <label className="text-sm">Namespace<Select aria-label="Namespace" value={namespace} onChange={e => route.update({ namespace: e.target.value })} className="ml-2 rounded border border-border bg-background px-3 py-2"><option value="">All namespaces</option>{(data?.namespaces ?? []).filter(Boolean).map(ns => <option key={ns}>{ns}</option>)}{namespace && !data?.namespaces.includes(namespace) && <option>{namespace}</option>}</Select></label>
+      <label className="text-sm">Mode<Select aria-label="Mode" value={mode} onChange={e => route.update({ mode: e.target.value })} className="ml-2 rounded border border-border bg-background px-3 py-2"><option value="">All modes</option>{COLUMNS.map(c => <option key={c.mode} value={c.mode}>{c.title}</option>)}</Select></label>
       <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={hidePlatform} onChange={e => route.update({ hide_platform: String(e.target.checked) })} /> Hide platform workloads</label>
       <Button variant="outline" onClick={() => route.update({ q: null, namespace: null, mode: null, hide_platform: null, sort: null, order: null })}>Reset filters</Button>
     </div>
@@ -136,7 +137,7 @@ function Column({
             <h2 className="text-sm font-semibold">{title}</h2>
             <StatusPill label={String(profiles.length)} tone={tone} dot={false} uppercase={false} />
           </div>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">{tagline}</p>
+          <p className="mt-0.5 text-micro text-muted-foreground">{tagline}</p>
         </div>
       </header>
       <div className="flex-1 space-y-2 p-3" data-testid={`baselines-column-cards-${mode}`}>
@@ -186,7 +187,7 @@ function ProfileCard({
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="truncate text-[11px] uppercase tracking-wider text-muted-foreground">
+          <p className="truncate text-micro  text-muted-foreground">
             {profile.namespace}
           </p>
           <p className="truncate text-sm font-semibold">{profile.name}</p>
@@ -194,13 +195,13 @@ function ProfileCard({
         <ModePill mode={profile.mode} />
       </div>
 
-      <dl className="mt-3 grid grid-cols-3 gap-2 text-[11px]">
+      <dl className="mt-3 grid grid-cols-3 gap-2 text-micro">
         <Stat label="Procs" value={profile.learned_processes_count} />
         <Stat label="Alerts · retained 24h" value={profile.monitored_alerts_24h} tone={profile.monitored_alerts_24h > 0 ? "warning" : "muted"} />
         <Stat label="Blocks · retained 24h" value={profile.enforced_blocks_24h} tone={profile.enforced_blocks_24h > 0 ? "error" : "muted"} />
       </dl>
 
-      <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+      <div className="mt-2 flex items-center gap-1.5 text-micro text-muted-foreground">
         <Clock3 className="h-3 w-3" aria-hidden />
         <span>Learn started {age}</span>
       </div>
@@ -211,7 +212,7 @@ function ProfileCard({
           {top.map((p, index) => (
             <span
               key={`${p}:${index}`}
-              className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground"
+              className="rounded bg-muted px-1.5 py-0.5 text-micro font-mono text-muted-foreground"
             >
               {p}
             </span>
@@ -220,7 +221,7 @@ function ProfileCard({
       )}
 
       {highlight && (
-        <span className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-primary">
+        <span className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-micro font-semibold  text-primary">
           <Sparkles className="h-2.5 w-2.5" aria-hidden /> Ready
         </span>
       )}

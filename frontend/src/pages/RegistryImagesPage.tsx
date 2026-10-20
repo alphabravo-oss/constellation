@@ -19,6 +19,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Pager } from "@/components/ui/pager";
 import { DigestDisclosure } from "@/components/ui/digest-disclosure";
 import { fmtRelative } from "@/lib/format";
+import { Select } from "@/components/ui/form";
 
 const sorts = [
   "repository",
@@ -193,8 +194,8 @@ export function RegistryImagesPage() {
         <span
           className={
             image.scanned
-              ? "rounded px-1.5 py-0.5 text-[10px] font-medium bg-[color-mix(in_oklab,var(--color-severity-low)_16%,transparent)] text-[color:var(--color-severity-low)]"
-              : "rounded px-1.5 py-0.5 text-[10px] font-medium bg-muted text-muted-foreground"
+              ? "rounded px-1.5 py-0.5 text-micro font-medium bg-[color-mix(in_oklab,var(--color-severity-low)_16%,transparent)] text-[color:var(--color-severity-low)]"
+              : "rounded px-1.5 py-0.5 text-micro font-medium bg-muted text-muted-foreground"
           }
         >
           {image.scanned ? "scanned" : "not scanned"}
@@ -212,14 +213,14 @@ export function RegistryImagesPage() {
       exportValue: (image) => `critical=${image.critical}; high=${image.high}`,
       cell: (image) =>
         image.critical + image.high === 0 ? (
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-micro text-muted-foreground">
             {image.scanned ? "no crit/high" : "—"}
           </span>
         ) : (
           <span className="flex items-center justify-end gap-1">
             {image.critical > 0 && (
               <span
-                className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white"
+                className="rounded px-1.5 py-0.5 text-micro text-mono font-semibold text-white"
                 style={{ background: "var(--color-severity-critical)" }}
               >
                 {image.critical}C
@@ -227,7 +228,7 @@ export function RegistryImagesPage() {
             )}
             {image.high > 0 && (
               <span
-                className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white"
+                className="rounded px-1.5 py-0.5 text-micro text-mono font-semibold text-white"
                 style={{ background: "var(--color-severity-high)" }}
               >
                 {image.high}H
@@ -369,7 +370,7 @@ export function RegistryImagesPage() {
         </label>
         <label className="text-xs">
           Scan evidence
-          <select
+          <Select
             aria-label="Registry scan status"
             value={scanStatus}
             onChange={(event) =>
@@ -383,11 +384,11 @@ export function RegistryImagesPage() {
             <option value="all">Any status</option>
             <option value="scanned">Scanned</option>
             <option value="unscanned">Not scanned</option>
-          </select>
+          </Select>
         </label>
         <label className="text-xs">
           Severity
-          <select
+          <Select
             aria-label="Registry image severity"
             value={severity}
             onChange={(event) =>
@@ -402,7 +403,7 @@ export function RegistryImagesPage() {
             <option value="critical">Critical present</option>
             <option value="high">High present</option>
             <option value="none">No critical/high in scan</option>
-          </select>
+          </Select>
         </label>
         <Button
           variant="outline"

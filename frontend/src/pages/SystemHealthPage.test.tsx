@@ -57,7 +57,7 @@ it("shows bounded job history with ready-only downloads and failure explanations
   expect(supportBundles.listJobs).toHaveBeenCalledWith(undefined);
   expect(host.textContent).toContain("worker unavailable");
   expect(host.textContent).toContain("expired and cannot be downloaded");
-  expect(Array.from(host.querySelectorAll("button")).find((item) => item.textContent === "Older")).toBeUndefined();
+  expect(Array.from(host.querySelectorAll("button")).find((item) => item.textContent === "Older" || item.getAttribute("aria-label") === "Older")).toBeUndefined();
   expect(host.querySelectorAll('[data-testid^="support-bundle-download-"]')).toHaveLength(1);
   await act(async () => button("support-bundle-download-ready").click());
   await flush();
@@ -82,11 +82,11 @@ it("uses the server cursor for older jobs and returns to newest", async () => {
     ? { items: [job("old", "expired")], next_cursor: null }
     : { items: [job("new", "ready")], next_cursor: "cursor-2" });
   await render();
-  await act(async () => Array.from(host.querySelectorAll("button")).find((item) => item.textContent === "Older")!.click());
+  await act(async () => Array.from(host.querySelectorAll("button")).find((item) => item.textContent === "Older" || item.getAttribute("aria-label") === "Older")!.click());
   await flush();
   expect(supportBundles.listJobs).toHaveBeenCalledWith("cursor-2");
   expect(host.querySelector('[data-testid="support-bundle-job-old"]')).not.toBeNull();
-  await act(async () => Array.from(host.querySelectorAll("button")).find((item) => item.textContent === "Newer")!.click());
+  await act(async () => Array.from(host.querySelectorAll("button")).find((item) => item.textContent === "Newer" || item.getAttribute("aria-label") === "Newer")!.click());
   await flush();
   expect(host.querySelector('[data-testid="support-bundle-job-new"]')).not.toBeNull();
 });

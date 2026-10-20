@@ -34,7 +34,7 @@ async function renderPage(page: ReactNode, beforeRender?: (queryClient: QueryCli
 async function rerenderPage(page: ReactNode) { await act(async () => root.render(<QueryClientProvider client={client}>{page}</QueryClientProvider>)); }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
 async function submit() { await act(async () => { host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); }); }
-function button(text: string) { return [...host.querySelectorAll("button")].find((item) => item.textContent?.trim() === text)!; }
+function button(text: string) { return [...host.querySelectorAll("button")].find((item) => item.textContent?.trim() === text || item.getAttribute("aria-label") === text)!; }
 async function changeInput(selector: string, value: string) {
   const input = host.querySelector<HTMLInputElement>(selector)!;
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); });

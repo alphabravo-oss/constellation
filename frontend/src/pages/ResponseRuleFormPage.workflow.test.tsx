@@ -52,6 +52,6 @@ it("requires an action and cancels without a write", async () => {
   await renderPage(); await settled(() => expect(host.querySelector("form")).not.toBeNull());
   await act(async () => { host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
   expect(responseRulesV2.update).not.toHaveBeenCalled();
-  await act(async () => [...host.querySelectorAll("button")].find((button) => button.textContent === "Cancel")!.click());
+  await act(async () => [...host.querySelectorAll("button")].find((button) => button.textContent === "Cancel" || button.getAttribute("aria-label") === "Cancel")!.click());
   expect(route.navigate).toHaveBeenCalledWith({ href: "/clusters/cluster/response-rules" });
 });

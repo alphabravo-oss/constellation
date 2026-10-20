@@ -26,6 +26,7 @@ import { Collapse } from "@/components/ui/collapse";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 import { Button } from "@/components/ui/button";
 import { GroupPicker } from "@/components/GroupPicker";
+import { Select } from "@/components/ui/form";
 
 const FALLBACK_COND_TYPES: Array<RRV2CatalogItem & { id: RRV2CondType }> = [
   { id: "name", label: "Event name", help: "Regex against event name or title" },
@@ -216,7 +217,7 @@ function ResponseRuleEditor({ clusterId, initial, backTo }: { clusterId: string;
               </label>
               <label className="text-xs">
                 <div className="mb-1 text-muted-foreground">Event type</div>
-                <select
+                <Select
                   className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
                   value={rule.event_type}
                   onChange={(e) => onChange({ ...rule, event_type: e.target.value as RRV2EventType })}
@@ -224,7 +225,7 @@ function ResponseRuleEditor({ clusterId, initial, backTo }: { clusterId: string;
                   {eventTypes.map((t) => (
                     <option key={t.id} value={t.id}>{t.label}</option>
                   ))}
-                </select>
+                </Select>
               </label>
               <label className="col-span-full text-xs">
                 <div className="mb-1 text-muted-foreground">Description</div>
@@ -246,10 +247,10 @@ function ResponseRuleEditor({ clusterId, initial, backTo }: { clusterId: string;
             </div>
 
             <fieldset className="space-y-2 rounded-md border border-border p-3">
-              <legend className="px-1 text-xs font-medium uppercase text-muted-foreground">Conditions (AND)</legend>
+              <legend className="px-1 text-xs font-medium  text-muted-foreground">Conditions (AND)</legend>
               {rule.conditions.map((c, i) => (
                 <div key={i} className="flex gap-2">
-                  <select
+                  <Select
                     className="w-44 rounded-md border border-border bg-background px-2 py-1.5 text-xs"
                     aria-label={`Condition ${i + 1} type`}
                     value={c.type}
@@ -258,7 +259,7 @@ function ResponseRuleEditor({ clusterId, initial, backTo }: { clusterId: string;
                     {conditionOptions.map((ct) => (
                       <option key={ct.id} value={ct.id}>{ct.label}</option>
                     ))}
-                  </select>
+                  </Select>
                   <input
                     className="flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-xs font-mono"
                     aria-label={`Condition ${i + 1} value`}
@@ -287,10 +288,10 @@ function ResponseRuleEditor({ clusterId, initial, backTo }: { clusterId: string;
             </fieldset>
 
             <fieldset className="space-y-2 rounded-md border border-border p-3">
-              <legend className="px-1 text-xs font-medium uppercase text-muted-foreground">Actions</legend>
+              <legend className="px-1 text-xs font-medium  text-muted-foreground">Actions</legend>
               {rule.actions.map((a, i) => (
                 <div key={i} className="flex gap-2">
-                  <select
+                  <Select
                     className="w-44 rounded-md border border-border bg-background px-2 py-1.5 text-xs"
                     aria-label={`Action ${i + 1} type`}
                     value={a.kind}
@@ -299,10 +300,10 @@ function ResponseRuleEditor({ clusterId, initial, backTo }: { clusterId: string;
                     {actionOptions.map((ak) => (
                       <option key={ak.id} value={ak.id}>{ak.label}</option>
                     ))}
-                  </select>
+                  </Select>
                   {(a.kind === "notify" || a.kind === "ticket" || a.kind === "webhook") && (
                     receiverOptions.length > 0 ? (
-                      <select
+                      <Select
                         className="flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-xs"
                         aria-label={`Action ${i + 1} receiver`}
                       required
@@ -316,7 +317,7 @@ function ResponseRuleEditor({ clusterId, initial, backTo }: { clusterId: string;
                         {receiverOptions.map((r) => (
                           <option key={r.id} value={r.name}>{r.name} ({r.kind})</option>
                         ))}
-                      </select>
+                      </Select>
                     ) : (
                     <input
                       className="flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-xs"
@@ -349,7 +350,7 @@ function ResponseRuleEditor({ clusterId, initial, backTo }: { clusterId: string;
 
             <Collapse label="Advanced workload selector">
             <fieldset className="space-y-2 rounded-md border border-border p-3">
-              <legend className="px-1 text-xs font-medium uppercase text-muted-foreground">Workload selector</legend>
+              <legend className="px-1 text-xs font-medium  text-muted-foreground">Workload selector</legend>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <label className="text-xs">
                   <div className="mb-1 text-muted-foreground">Group</div>
