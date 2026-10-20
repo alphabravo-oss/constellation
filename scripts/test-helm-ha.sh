@@ -17,7 +17,7 @@ grep -q 'constellation.dev.alphabravo.io' "$rendered"
 grep -q '^kind: Cluster$' "$rendered"
 grep -q 'instances: 3' "$rendered"
 grep -q 'storageClass: longhorn' "$rendered"
-grep -q 'imageName: ghcr.io/alphabravo-oss/constellation/postgres:16.14-v0.3.0' "$rendered"
+grep -q 'imageName: ghcr.io/alphabravo-oss/constellation/postgres:16.15-v0.3.0' "$rendered"
 grep -q 'CREATE EXTENSION IF NOT EXISTS vector' "$rendered"
 grep -q 'port: 8000' "$rendered"
 # migrations run in-process (embedded goose): no schema-wait init container

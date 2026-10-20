@@ -715,7 +715,7 @@ production supply an externally managed `ObjectStore` through
 Release images use `v`-prefixed application versions, such as `api:v0.3.0`.
 An explicit `image.tag` or per-role tag is used verbatim; per-role digest pins
 still take precedence. The CNPG default is
-`<image.registry>/postgres:16.14-v<Chart.appVersion>` and follows the chart version
+`<image.registry>/postgres:16.15-v<Chart.appVersion>` and follows the chart version
 independently of the application `image.tag`. Set `postgres.cloudnativepg.imageName`
 to a version-bearing `tag@sha256:...` reference for a pinned database rollout.
 
@@ -1012,3 +1012,18 @@ Verify against something other than the embedded key: `bundle verify --trust-key
 
 Moving the private key into cosign KMS/HSM (`cosign sign-blob --key awskms://...`) keeps the
 same verification format; only step 1 and the custody row change.
+
+### Private images discovered from the cluster
+
+Set `scanner.registryConfigSecret` to an existing
+`kubernetes.io/dockerconfigjson` Secret in the release namespace when discovered
+image targets need private registry access. The chart mounts its
+`.dockerconfigjson` as a read-only `config.json` and sets `DOCKER_CONFIG` for the
+scanner tools. This explicitly grants every scanner replica pull access to the
+registries in that Secret. Registry connector jobs continue to use their isolated
+per-job credentials, including an empty configuration for anonymous connectors.
+
+The scanner defaults to one concurrent job, a 2 GiB memory request and a 6 GiB
+limit: each image job runs Syft, Trivy and Grype as concurrent child processes.
+Size the limit from container memory measurements over complete scan cycles;
+the worker's Go heap alone does not include its tools or charged file cache.

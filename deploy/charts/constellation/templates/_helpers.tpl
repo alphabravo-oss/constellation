@@ -302,11 +302,11 @@ external
 {{/*
 constellation.cnpgImage resolves the CloudNativePG operand image. Empty
 postgres.cloudnativepg.imageName selects the chart's own pgvector-enabled build
-<image.registry>/postgres:16.14-v<Chart.appVersion> (deploy/docker/Dockerfile.postgres).
+<image.registry>/postgres:16.15-v<Chart.appVersion> (deploy/docker/Dockerfile.postgres).
 */}}
 {{- define "constellation.cnpgImage" -}}
 {{- $cfg := .Values.postgres.cloudnativepg -}}
-{{- default (printf "%s/postgres:16.14-v%s" (default "ghcr.io/alphabravo-oss/constellation" .Values.image.registry) (trimPrefix "v" .Chart.AppVersion)) $cfg.imageName -}}
+{{- default (printf "%s/postgres:16.15-v%s" (default "ghcr.io/alphabravo-oss/constellation" .Values.image.registry) (trimPrefix "v" .Chart.AppVersion)) $cfg.imageName -}}
 {{- end -}}
 
 {{/*

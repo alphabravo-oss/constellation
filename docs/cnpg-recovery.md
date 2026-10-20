@@ -470,7 +470,7 @@ release (namespace `cnpg-system`), but their images are release artifacts:
 their verified tag commits on the repository Go toolchain (go >= 1.27.3, the eMudhra
 floor), applies the reviewed `golang.org/x` bumps, and runs the release gate,
 `scripts/check-image-go.sh` and cosign signing. The pinned references are in
-`deploy/cnpg/images.env`; the operand is the release `postgres:16.14-v<appVersion>` image.
+`deploy/cnpg/images.env`; the operand is the release `postgres:16.15-v<appVersion>` image.
 
 Roll them in this order (take a `Backup` first; archiving must stay green):
 
@@ -485,7 +485,7 @@ kubectl -n cnpg-system set image deploy/cnpg-controller-manager manager="$CNPG_O
 kubectl -n cnpg-system set env deploy/cnpg-controller-manager OPERATOR_IMAGE_NAME="$CNPG_OPERATOR_IMAGE"
 kubectl -n cnpg-system rollout status deploy/cnpg-controller-manager
 # 3. operand (restarts the instance; single-instance clusters see a short outage)
-kubectl -n <ns> patch cluster <name> --type merge -p '{"spec":{"imageName":"<registry>/postgres:16.14-v<appVersion>@<digest>"}}'
+kubectl -n <ns> patch cluster <name> --type merge -p '{"spec":{"imageName":"<registry>/postgres:16.15-v<appVersion>@<digest>"}}'
 ```
 
 Verify `pg_stat_archiver` (`failed_count` not increasing after a `pg_switch_wal()`), the

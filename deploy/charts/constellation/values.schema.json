@@ -493,7 +493,7 @@
             "imageName": {
               "type": "string",
               "title": "pgvector-enabled operand image",
-              "default": "ghcr.io/alphabravo-oss/constellation/postgres:16.14-v0.3.0"
+              "default": "ghcr.io/alphabravo-oss/constellation/postgres:16.15-v0.3.0"
             },
             "storage": {
               "type": "string",

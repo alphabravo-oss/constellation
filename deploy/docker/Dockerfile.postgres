@@ -3,8 +3,16 @@ ARG CNPG_POSTGRES_IMAGE=ghcr.io/cloudnative-pg/postgresql:16.14-standard-bookwor
 FROM ${CNPG_POSTGRES_IMAGE}
 
 USER root
+# apt upgrade also updates PGDG packages. Hold the server/client at the minor
+# advertised by our image tag; refresh these pins deliberately on a minor bump.
+ARG POSTGRES_PACKAGE_VERSION=16.15-1.pgdg12+2
 RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       postgresql-16=${POSTGRES_PACKAGE_VERSION} \
+       postgresql-client-16=${POSTGRES_PACKAGE_VERSION} \
+    && apt-mark hold postgresql-16 postgresql-client-16 \
     && apt-get upgrade -y --no-install-recommends \
     && apt-get install -y --no-install-recommends postgresql-16-pgvector \
+    && test "$(dpkg-query -W -f='${Version}' postgresql-16)" = "${POSTGRES_PACKAGE_VERSION}" \
     && rm -rf /var/lib/apt/lists/*
 USER 26
