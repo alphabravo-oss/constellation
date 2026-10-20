@@ -13,6 +13,7 @@ import (
 // previously only transient kubectl warnings, never audited or counted). It fails
 // against the old code, where the monitor branch only appended a warning.
 func TestEvaluate_MonitorMatchFiresHook(t *testing.T) {
+	t.Parallel()
 	e := NewEngine() // DefaultRules ships require-image-signature in monitor mode
 	var events []DenyEvent
 	e.OnDeny = func(_ context.Context, ev DenyEvent) { events = append(events, ev) }
@@ -53,6 +54,7 @@ func TestEvaluate_MonitorMatchFiresHook(t *testing.T) {
 // TestEvaluate_EnforceDenyIsNotMonitor guards the discriminator: an enforce deny
 // must still fire with Monitor=false so response rules keep running for it.
 func TestEvaluate_EnforceDenyIsNotMonitor(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	var events []DenyEvent
 	e.OnDeny = func(_ context.Context, ev DenyEvent) { events = append(events, ev) }

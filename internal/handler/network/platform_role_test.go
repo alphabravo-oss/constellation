@@ -1,3 +1,5 @@
+//go:build integration
+
 package network
 
 import (
@@ -13,6 +15,7 @@ import (
 )
 
 func TestNetworkMapPlatformRole(t *testing.T) {
+	t.Parallel()
 	database := openTestDB(t)
 	defer database.Close()
 	ctx := context.Background()
@@ -83,6 +86,7 @@ func TestNetworkMapPlatformRole(t *testing.T) {
 }
 
 func TestNetworkFlowPlatformRolesRetainExactCluster(t *testing.T) {
+	t.Parallel()
 	database := openTestDB(t)
 	t.Cleanup(database.Close)
 	pool := database.Pool()

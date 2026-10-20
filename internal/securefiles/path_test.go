@@ -42,6 +42,7 @@ func pathFixtureWrite(t *testing.T, path, value string) {
 }
 
 func TestWritePathPrivateReplacementPreservesOtherHardlinkAndParent(t *testing.T) {
+	t.Parallel()
 	parent := t.TempDir()
 	pathFixtureMode(t, parent, 0o750)
 	original := filepath.Join(parent, "linked-original")
@@ -75,6 +76,7 @@ func TestWritePathPrivateReplacementPreservesOtherHardlinkAndParent(t *testing.T
 }
 
 func TestWritePathRejectsKnownSymlinkAndNonregularDestination(t *testing.T) {
+	t.Parallel()
 	parent := t.TempDir()
 	original := filepath.Join(parent, "original")
 	pathFixtureWrite(t, original, "do not change")
@@ -93,6 +95,7 @@ func TestWritePathRejectsKnownSymlinkAndNonregularDestination(t *testing.T) {
 }
 
 func TestWritePathAcceptsExplicitRelativePathWithoutCreatingParents(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "report")
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -158,6 +161,7 @@ func checkPathFailure(t *testing.T, stage string) {
 }
 
 func TestWritePathRefusesObservedParentReplacementBeforePublication(t *testing.T) {
+	t.Parallel()
 	base := t.TempDir()
 	parent := filepath.Join(base, "parent")
 	moved := filepath.Join(base, "original-parent")
@@ -191,6 +195,7 @@ func TestWritePathRefusesObservedParentReplacementBeforePublication(t *testing.T
 }
 
 func TestWritePathCanceledBeforeStartHasNoEffects(t *testing.T) {
+	t.Parallel()
 	parent := t.TempDir()
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()

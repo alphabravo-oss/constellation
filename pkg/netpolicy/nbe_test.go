@@ -37,6 +37,7 @@ func TestEvaluateNBE(t *testing.T) {
 }
 
 func TestEvaluateNBE_DenyOnlyUnderProtect(t *testing.T) {
+	t.Parallel()
 	// Safety invariant: Deny must never be true unless mode==protect AND the
 	// flow is a genuine cross-namespace crossing.
 	for _, m := range []NBEMode{NBEOff, NBEObserve, NBEMode(""), NBEMode("weird")} {
@@ -50,6 +51,7 @@ func TestEvaluateNBE_DenyOnlyUnderProtect(t *testing.T) {
 }
 
 func TestNBEModeValid(t *testing.T) {
+	t.Parallel()
 	for _, m := range []NBEMode{NBEOff, NBEObserve, NBEProtect} {
 		if !m.Valid() {
 			t.Errorf("%q should be valid", m)

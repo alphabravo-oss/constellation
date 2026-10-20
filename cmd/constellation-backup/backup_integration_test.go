@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -21,25 +23,13 @@ import (
 
 func backupFixturePool(t *testing.T) (*pgxpool.Pool, string, uuid.UUID) {
 	t.Helper()
-	dsn := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Fatal("owned disposable database required")
-	}
-	pool, err := pgxpool.New(t.Context(), dsn)
-	if err != nil {
-		t.Fatal("fixture pool failed")
-	}
-	t.Cleanup(pool.Close)
-	var name string
-	if err = pool.QueryRow(t.Context(), "SELECT current_database()").Scan(&name); err != nil || name != "constellation_test" {
-		t.Fatal("refusing non-disposable database")
-	}
+	pool := pgtest.Pool(t)
 	org := uuid.New()
-	_, err = pool.Exec(t.Context(), "INSERT INTO orgs(id,name,display_name) VALUES($1,$2,'CLI fixture')", org, "cli-"+org.String())
+	_, err := pool.Exec(t.Context(), "INSERT INTO orgs(id,name,display_name) VALUES($1,$2,'CLI fixture')", org, "cli-"+org.String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	return pool, dsn, org
+	return pool, pgtest.URL(t), org
 }
 func failureTrigger(t *testing.T, pool *pgxpool.Pool, org uuid.UUID, event, condition string) {
 	t.Helper()

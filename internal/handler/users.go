@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -40,27 +42,27 @@ func targetUserID(r *http.Request) (uuid.UUID, error) {
 // user_sessions. Idempotent — disabling an already-disabled user still re-runs the cascade.
 func (h *Users) Disable(w http.ResponseWriter, r *http.Request) {
 	if h.db == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "db unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusServiceUnavailable, "db unavailable")
 		return
 	}
 	subj, ok := SubjectFrom(r.Context())
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "no subject"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "no subject")
 		return
 	}
 	targetID, err := targetUserID(r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	if targetID == subj.UserID {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot disable yourself"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "cannot disable yourself")
 		return
 	}
 
 	tx, err := h.db.Pool().Begin(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "begin"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "begin")
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
@@ -70,19 +72,19 @@ func (h *Users) Disable(w http.ResponseWriter, r *http.Request) {
 		`UPDATE users SET disabled = TRUE, updated_at = now() WHERE id = $1 AND org_id = $2`,
 		targetID, subj.OrgID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "disable user"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "disable user")
 		return
 	}
 	if tag.RowsAffected() == 0 {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "not found")
 		return
 	}
 	if err := RevokeUserSessions(r.Context(), tx, targetID); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "revoke sessions"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "revoke sessions")
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "commit"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "commit")
 		return
 	}
 	h.logUserAction(r.Context(), subj.OrgID, subj.UserID, "user.disable", targetID)
@@ -95,27 +97,27 @@ func (h *Users) Disable(w http.ResponseWriter, r *http.Request) {
 // consistent and ensures any in-flight JWT is rejected the instant the tx commits.
 func (h *Users) Delete(w http.ResponseWriter, r *http.Request) {
 	if h.db == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "db unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusServiceUnavailable, "db unavailable")
 		return
 	}
 	subj, ok := SubjectFrom(r.Context())
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "no subject"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "no subject")
 		return
 	}
 	targetID, err := targetUserID(r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	if targetID == subj.UserID {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot delete yourself"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "cannot delete yourself")
 		return
 	}
 
 	tx, err := h.db.Pool().Begin(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "begin"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "begin")
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
@@ -126,24 +128,24 @@ func (h *Users) Delete(w http.ResponseWriter, r *http.Request) {
 		`SELECT id FROM users WHERE id = $1 AND org_id = $2 FOR UPDATE`,
 		targetID, subj.OrgID).Scan(&lockedID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "not found")
 		return
 	}
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup user"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "lookup user")
 		return
 	}
 	if err := RevokeUserSessions(r.Context(), tx, targetID); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "revoke sessions"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "revoke sessions")
 		return
 	}
 	if _, err := tx.Exec(r.Context(),
 		`DELETE FROM users WHERE id = $1 AND org_id = $2`, targetID, subj.OrgID); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "delete user"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "delete user")
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "commit"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "commit")
 		return
 	}
 	h.logUserAction(r.Context(), subj.OrgID, subj.UserID, "user.delete", targetID)
@@ -156,23 +158,23 @@ func (h *Users) Delete(w http.ResponseWriter, r *http.Request) {
 // the PAT path (also gated on must_change_password) cannot be used to sidestep the reset.
 func (h *Users) ForcePasswordReset(w http.ResponseWriter, r *http.Request) {
 	if h.db == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "db unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusServiceUnavailable, "db unavailable")
 		return
 	}
 	subj, ok := SubjectFrom(r.Context())
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "no subject"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "no subject")
 		return
 	}
 	targetID, err := targetUserID(r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 
 	tx, err := h.db.Pool().Begin(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "begin"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "begin")
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
@@ -185,28 +187,28 @@ UPDATE users
  WHERE id = $1 AND org_id = $2 AND password_hash IS NOT NULL`,
 		targetID, subj.OrgID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reset password"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "reset password")
 		return
 	}
 	if tag.RowsAffected() == 0 {
 		// Either no such user in the org, or the user has no local password (SSO-only); a
 		// forced local-password reset does not apply to an SSO-only account.
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no local-password user"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "no local-password user")
 		return
 	}
 	// Revoke the target's PATs too so the reset cannot be sidestepped by an existing token.
 	if _, err := tx.Exec(r.Context(),
 		`UPDATE api_tokens SET revoked_at = now(), status = 'revoked'
 		  WHERE user_id = $1 AND revoked_at IS NULL`, targetID); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "revoke tokens"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "revoke tokens")
 		return
 	}
 	if err := h.auditUserActionTx(r.Context(), tx, subj.OrgID, subj.UserID, "user.force_password_reset", targetID); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "audit reset"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "audit reset")
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "commit"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "commit")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "reset_required"})
@@ -216,22 +218,22 @@ UPDATE users
 // unlocks are idempotent; each successful request has a durable audit event.
 func (h *Users) Unlock(w http.ResponseWriter, r *http.Request) {
 	if h.db == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "db unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusServiceUnavailable, "db unavailable")
 		return
 	}
 	subj, ok := SubjectFrom(r.Context())
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "no subject"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "no subject")
 		return
 	}
 	targetID, err := targetUserID(r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	tx, err := h.db.Pool().Begin(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "begin"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "begin")
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
@@ -242,19 +244,19 @@ UPDATE users
        updated_at = now()
  WHERE id = $1 AND org_id = $2`, targetID, subj.OrgID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "unlock user"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "unlock user")
 		return
 	}
 	if tag.RowsAffected() == 0 {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "not found")
 		return
 	}
 	if err := h.auditUserActionTx(r.Context(), tx, subj.OrgID, subj.UserID, "user.unlock", targetID); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "audit unlock"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "audit unlock")
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "commit"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "commit")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "unlocked"})

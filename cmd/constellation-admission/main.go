@@ -15,6 +15,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -62,6 +63,8 @@ func main() {
 	// by default (in-cluster informer/lister); set --nslabels-enabled=false to
 	// disable when the webhook has no namespaces list/watch grant. Unwired, a rule
 	// carrying a namespaceSelector safely never fires (name-based Namespaces work).
+	exemptNamespaces := flag.String("exempt-namespaces", os.Getenv("CONSTELLATION_ADMISSION_EXEMPT_NAMESPACES"), "Comma-separated namespaces the built-in rules skip (system namespaces using hostNetwork/hostPID)")
+	exemptLabel := flag.String("exempt-namespace-label", envOrDefault("CONSTELLATION_ADMISSION_EXEMPT_NAMESPACE_LABEL", "constellation.alphabravo.io/admission"), "Namespace label whose value \"ignore\" exempts the namespace from the built-in rules (empty disables)")
 	nsLabelsEnabled := flag.Bool("nslabels-enabled", true, "Resolve namespace labels for per-rule match.namespaceSelector scoping (A5)")
 	nsLabelsKubeconfig := flag.String("nslabels-kubeconfig", os.Getenv("KUBECONFIG"), "kubeconfig for the namespace label resolver (empty = in-cluster)")
 	flag.Parse()
@@ -82,6 +85,10 @@ func main() {
 	}()
 
 	policyEngine := admission.NewEngine()
+	if exempt := splitCSV(*exemptNamespaces); len(exempt) > 0 || *exemptLabel != "" {
+		policyEngine.SetRules(admission.ExemptNamespaces(admission.DefaultRules(), exempt, *exemptLabel))
+		slog.Info("admission: built-in rules exempt namespaces", slog.Any("namespaces", exempt), slog.String("label", *exemptLabel))
+	}
 	// Composite engine: the built-in PolicyEngine plus the (optional) Rego and
 	// CEL engines loaded from engine='opa'/'cel' policy rows. Without the chain
 	// those rows would never be evaluated (silent fail-open). Quarantine,
@@ -380,4 +387,21 @@ func validateHandler(engine admission.Engine, tel *telemetry.Telemetry) http.Han
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(out)
 	}
+}
+
+func splitCSV(raw string) []string {
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func envOrDefault(key, def string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return def
 }

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/jackc/pgx/v5"
 
 	"github.com/google/uuid"
@@ -78,7 +80,7 @@ type findingDTO struct {
 func (f *Findings) List(w http.ResponseWriter, r *http.Request) {
 	subj, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "no subject"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "no subject")
 		return
 	}
 	values := r.URL.Query()
@@ -89,12 +91,12 @@ func (f *Findings) List(w http.ResponseWriter, r *http.Request) {
 	offset := findingOffset(values)
 	where, args, err := findingFilter(subj.OrgID, values, true, true)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	order, err := findingOrder(values)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	args = append(args, limit, offset)
@@ -105,7 +107,7 @@ SELECT id, kind, external_id, title, severity, risk_score, lifecycle, asset_id, 
   FROM findings WHERE `+where+` ORDER BY `+order+`
  LIMIT $`+strconv.Itoa(len(args)-1)+` OFFSET $`+strconv.Itoa(len(args)), args...)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()
@@ -118,7 +120,7 @@ SELECT id, kind, external_id, title, severity, risk_score, lifecycle, asset_id, 
 		if err := rows.Scan(&d.ID, &d.Kind, &d.ExternalID, &d.Title, &d.Severity, &d.RiskScore,
 			&d.Lifecycle, &d.AssetID, &d.ClusterID, &techniques, &d.AcceptedUntil, &d.FirstSeen, &d.LastSeen, &inputs,
 			&d.CanonicalEngine, &enginesRaw, &detailRaw, &d.PlatformRole, &d.Revision, &d.TargetClusterID); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		d.RowID = findingRowID(d.ID, d.FirstSeen)
@@ -131,7 +133,7 @@ SELECT id, kind, external_id, title, severity, risk_score, lifecycle, asset_id, 
 		out = append(out, d)
 	}
 	if err := rows.Err(); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read findings"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "could not read findings")
 		return
 	}
 	// Lifecycle tabs retain all statuses, but match the current kind, search,
@@ -139,7 +141,7 @@ SELECT id, kind, external_id, title, severity, risk_score, lifecycle, asset_id, 
 	countWhere, countArgs, _ := findingFilter(subj.OrgID, values, false, true)
 	countRows, err := f.db.Pool().Query(r.Context(), `SELECT lifecycle, count(*) FROM findings WHERE `+countWhere+` GROUP BY lifecycle`, countArgs...)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer countRows.Close()
@@ -148,13 +150,13 @@ SELECT id, kind, external_id, title, severity, risk_score, lifecycle, asset_id, 
 		var lifecycle string
 		var count int
 		if err := countRows.Scan(&lifecycle, &count); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		lifecycleCounts[lifecycle] = count
 	}
 	if err := countRows.Err(); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not count findings"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "could not count findings")
 		return
 	}
 	total := 0
@@ -172,7 +174,7 @@ SELECT id, kind, external_id, title, severity, risk_score, lifecycle, asset_id, 
 		systemWhere, systemArgs, _ := findingFilter(subj.OrgID, systemValues, true, true)
 		var count int
 		if err := f.db.Pool().QueryRow(r.Context(), `SELECT count(*) FROM findings WHERE `+systemWhere, systemArgs...).Scan(&count); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not count system findings"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "could not count system findings")
 			return
 		}
 		systemTotal = &count
@@ -219,11 +221,11 @@ SELECT id, kind, external_id, title, severity, risk_score, lifecycle, asset_id, 
 			&d.Lifecycle, &d.AssetID, &d.ClusterID, &techniques, &d.AcceptedUntil, &d.FirstSeen, &d.LastSeen, &inputs, &factors,
 			&d.CanonicalEngine, &enginesRaw, &detailRaw, &d.PlatformRole, &d.Revision, &d.TargetClusterID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "not found")
 		return
 	}
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "finding evidence unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "finding evidence unavailable")
 		return
 	}
 	d.RowID = findingRowID(d.ID, d.FirstSeen)
@@ -255,6 +257,15 @@ SELECT id, kind, external_id, title, severity, risk_score, lifecycle, asset_id, 
 		"risk_inputs":       d.RiskInputs,
 		"risk":              decomp,
 	}
+	// Display names so breadcrumbs and the affected-asset chip never show a bare UUID.
+	var assetName, assetKind, clusterName string
+	_ = tx.QueryRow(r.Context(), `SELECT COALESCE(a.name,''), COALESCE(a.kind,''), COALESCE(c.name,'')
+  FROM (SELECT $1::uuid AS asset_id, $2::uuid AS cluster_id) k
+  LEFT JOIN assets a ON a.id = k.asset_id AND a.org_id = $3
+  LEFT JOIN clusters c ON c.id = k.cluster_id AND c.org_id = $3`, d.AssetID, d.ClusterID, subj.OrgID).Scan(&assetName, &assetKind, &clusterName)
+	out["asset_name"] = assetName
+	out["asset_kind"] = assetKind
+	out["cluster_name"] = clusterName
 	if d.CanonicalEngine != "" {
 		out["canonical_engine"] = d.CanonicalEngine
 	}
@@ -448,7 +459,7 @@ type triageBody struct {
 func (f *Findings) Triage(w http.ResponseWriter, r *http.Request) {
 	var body triageBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad request")
 		return
 	}
 	tx, found, subj, err := f.beginMutation(r, body.ReviewedRevision)
@@ -467,7 +478,7 @@ func (f *Findings) Triage(w http.ResponseWriter, r *http.Request) {
 	if _, err := tx.Exec(r.Context(),
 		`UPDATE findings SET lifecycle = 'triaged', assignee_id = $2, priority = $3, last_seen_at = NOW()
          WHERE id = $1 AND org_id = $4 AND first_seen_at=$5`, found.ID, assignee, body.Priority, subj.OrgID, found.FirstSeen); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	f.finishMutation(w, r, tx, found, subj, "finding.triage", body)
@@ -493,7 +504,7 @@ func (f *Findings) Suppress(w http.ResponseWriter, r *http.Request) {
 	if _, err := tx.Exec(r.Context(),
 		`UPDATE findings SET lifecycle = 'suppressed', last_seen_at = NOW()
          WHERE id = $1 AND org_id = $2 AND first_seen_at=$3`, found.ID, subj.OrgID, found.FirstSeen); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	f.finishMutation(w, r, tx, found, subj, "finding.suppress", body)
@@ -509,7 +520,7 @@ type acceptBody struct {
 func (f *Findings) AcceptRisk(w http.ResponseWriter, r *http.Request) {
 	var body acceptBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.AcceptedUntil.IsZero() {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "accepted_until required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "accepted_until required")
 		return
 	}
 	subj, ok := authctx.SubjectFrom(r.Context())
@@ -524,11 +535,11 @@ func (f *Findings) AcceptRisk(w http.ResponseWriter, r *http.Request) {
 	// for ~75 years or with a date already in the past.
 	now := time.Now().UTC()
 	if body.AcceptedUntil.Before(now) {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "accepted_until must be in the future"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "accepted_until must be in the future")
 		return
 	}
 	if body.AcceptedUntil.After(now.Add(30 * 24 * time.Hour)) {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "accepted_until cannot exceed 30 days"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "accepted_until cannot exceed 30 days")
 		return
 	}
 
@@ -537,19 +548,19 @@ func (f *Findings) AcceptRisk(w http.ResponseWriter, r *http.Request) {
 	// merged into detail_json under "acceptance".
 	body.Reason = strings.TrimSpace(body.Reason)
 	if len(body.Reason) < 12 {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "reason must be at least 12 characters"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "reason must be at least 12 characters")
 		return
 	}
 	var approver *uuid.UUID
 	if body.ApproverID != "" {
 		a, perr := uuid.Parse(body.ApproverID)
 		if perr != nil {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "approver_id must be a UUID"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "approver_id must be a UUID")
 			return
 		}
 		// Separation of duties: the requester (authenticated caller) may not be their own approver.
 		if a == subj.UserID {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "approver_id must differ from the requester"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "approver_id must differ from the requester")
 			return
 		}
 		approver = &a
@@ -568,7 +579,7 @@ func (f *Findings) AcceptRisk(w http.ResponseWriter, r *http.Request) {
 	}
 	metaJSON, err := json.Marshal(acceptanceMeta)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -584,7 +595,7 @@ func (f *Findings) AcceptRisk(w http.ResponseWriter, r *http.Request) {
 		        detail_json = COALESCE(detail_json, '{}'::jsonb) || $4::jsonb,
 		        last_seen_at = NOW()
          WHERE id = $1 AND org_id = $3 AND first_seen_at=$5`, found.ID, body.AcceptedUntil, subj.OrgID, metaJSON, found.FirstSeen); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	f.finishMutation(w, r, tx, found, subj, "finding.accept_risk", body)

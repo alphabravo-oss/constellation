@@ -1,3 +1,5 @@
+//go:build integration
+
 package handler
 
 import (
@@ -36,7 +38,7 @@ func TestRegistryCredentialsGetIsOrgScoped(t *testing.T) {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = ANY($1)`, []uuid.UUID{orgA, orgB})
 	})
 
-	sealed, err := sealCredentials(ctx, pool, "static", map[string]string{"username": "alice", "password": "s3cret"})
+	sealed, _, err := sealCredentials(ctx, pool, "static", map[string]string{"username": "alice", "password": "s3cret"})
 	if err != nil {
 		t.Fatalf("seal credentials: %v", err)
 	}

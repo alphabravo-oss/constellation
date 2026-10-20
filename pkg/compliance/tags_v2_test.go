@@ -3,6 +3,7 @@ package compliance
 import "testing"
 
 func TestBuildTagsV2_KnownInternal(t *testing.T) {
+	t.Parallel()
 	got := BuildTagsV2("k8s.api.audit-logging")
 	if len(got) == 0 {
 		t.Fatal("expected non-empty tags for known check")
@@ -16,12 +17,14 @@ func TestBuildTagsV2_KnownInternal(t *testing.T) {
 }
 
 func TestBuildTagsV2_UnknownInternal(t *testing.T) {
+	t.Parallel()
 	if got := BuildTagsV2("nonexistent.check"); len(got) != 0 {
 		t.Fatalf("expected empty, got %+v", got)
 	}
 }
 
 func TestFilterByProfile(t *testing.T) {
+	t.Parallel()
 	tags := TagsV2{FrameworkPCIDSS4: ProfileTag{Profile: FrameworkPCIDSS4}}
 	if !FilterByProfile(tags, "") {
 		t.Fatal("empty profile must match")
@@ -35,6 +38,7 @@ func TestFilterByProfile(t *testing.T) {
 }
 
 func TestSortedProfiles(t *testing.T) {
+	t.Parallel()
 	tags := TagsV2{FrameworkSOC2: ProfileTag{}, FrameworkCISK8s: ProfileTag{}}
 	got := SortedProfiles(tags)
 	if got[0] != FrameworkCISK8s {

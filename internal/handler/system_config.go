@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/syscfg"
 	"github.com/alphabravocompany/constellation/pkg/audit"
@@ -220,10 +222,8 @@ func configRevisionPrecondition(r *http.Request) (*int64, error) {
 }
 
 func writeConfigFieldErrors(w http.ResponseWriter, fields []syscfg.FieldError) {
-	writeJSON(w, http.StatusBadRequest, map[string]any{
-		"error":        "invalid system config",
-		"field_errors": fields,
-	})
+	apiutil.WriteDetailed(context.Background(), w, http.StatusBadRequest, "invalid_argument", "invalid system config",
+		map[string]any{"field_errors": fields})
 }
 
 func writeConfigValidationError(w http.ResponseWriter, err error) {

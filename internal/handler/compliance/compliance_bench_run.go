@@ -28,6 +28,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
@@ -96,23 +98,23 @@ func (c *Compliance) RunBench(w http.ResponseWriter, r *http.Request) {
 
 	profileRaw, benchmark, err := benchRunOptions(w, r)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid benchmark request"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid benchmark request")
 		return
 	}
 	profile, ok := normalizeBenchProfile(profileRaw)
 	if !ok {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown profile (want kube-bench or docker-bench)"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "unknown profile (want kube-bench or docker-bench)")
 		return
 	}
 
 	if !compliancepkg.ValidBenchmarkID(benchmark) {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid benchmark identifier"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid benchmark identifier")
 		return
 	}
 	ctx := r.Context()
 	tx, err := c.db.Pool().Begin(ctx)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "enqueue unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "enqueue unavailable")
 		return
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
@@ -130,10 +132,10 @@ RETURNING id::text, cluster_id, profile, benchmark, status, requested_at`,
 		scope.orgID, clusterArg, profile, benchmark, scope.actorID,
 	).Scan(&req.ID, &clusterID, &req.Profile, &req.Benchmark, &req.Status, &requestedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "cluster not found")
 			return
 		}
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "enqueue unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "enqueue unavailable")
 		return
 	}
 	req.RequestedAt = requestedAt.UTC().Format(time.RFC3339)
@@ -144,12 +146,12 @@ RETURNING id::text, cluster_id, profile, benchmark, status, requested_at`,
 	if c.audit != nil {
 		_, _, err := c.audit.LogInTx(ctx, tx, audit.Event{OrgID: &scope.orgID, ActorID: scope.actorID, Action: "compliance.bench.run_requested", TargetKind: "compliance_bench_run", TargetID: req.ID, After: map[string]any{"cluster_id": scope.clusterID, "profile": profile, "benchmark": benchmark}})
 		if err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "enqueue unavailable"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "enqueue unavailable")
 			return
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "enqueue unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "enqueue unavailable")
 		return
 	}
 
@@ -174,13 +176,13 @@ func (c *Compliance) ClaimBenchRun(w http.ResponseWriter, r *http.Request) {
 func (c *Compliance) claimBenchRun(w http.ResponseWriter, r *http.Request, scope complianceWriteScope) {
 	profile, ok := normalizeBenchProfile(r.URL.Query().Get("profile"))
 	if !ok {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown profile (want kube-bench or docker-bench)"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "unknown profile (want kube-bench or docker-bench)")
 		return
 	}
 	ctx := r.Context()
 	tx, err := c.db.Pool().Begin(ctx)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "claim unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "claim unavailable")
 		return
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
@@ -206,7 +208,7 @@ func (c *Compliance) claimBenchRun(w http.ResponseWriter, r *http.Request, scope
 		return
 	}
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "claim unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "claim unavailable")
 		return
 	}
 	if scope.clusterID == nil && clusterID != nil {
@@ -223,11 +225,11 @@ func (c *Compliance) claimBenchRun(w http.ResponseWriter, r *http.Request, scope
 	_, _, err = logger.LogInTx(ctx, tx, audit.Event{OrgID: &scope.orgID, ActorID: scope.actorID, Action: "compliance.bench.claimed", TargetKind: "compliance_bench_run", TargetID: req.ID,
 		Before: map[string]any{"org_wide": inherited}, After: map[string]any{"cluster_id": clusterID, "agent_token_id": scope.agentID, "profile": profile}})
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "claim unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "claim unavailable")
 		return
 	}
 	if err := tx.Commit(ctx); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "claim unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "claim unavailable")
 		return
 	}
 	req.RequestedAt = requestedAt.UTC().Format(time.RFC3339)

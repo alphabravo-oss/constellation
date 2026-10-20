@@ -3,6 +3,7 @@ package aiworkload
 import "testing"
 
 func TestDetect_StrongImageBase(t *testing.T) {
+	t.Parallel()
 	v := Detect(Workload{
 		Namespace: "default", Name: "llama",
 		Images: []string{"pytorch/pytorch:2.5.0-cuda12"},
@@ -13,6 +14,7 @@ func TestDetect_StrongImageBase(t *testing.T) {
 }
 
 func TestDetect_GPUResource(t *testing.T) {
+	t.Parallel()
 	v := Detect(Workload{
 		Namespace: "default", Name: "infer",
 		Images:    []string{"ghcr.io/example/serve:1.0"},
@@ -24,6 +26,7 @@ func TestDetect_GPUResource(t *testing.T) {
 }
 
 func TestDetect_TwoWeakSignals(t *testing.T) {
+	t.Parallel()
 	v := Detect(Workload{
 		Images: []string{"ghcr.io/example/text-llm-server:latest", "ghcr.io/example/embedding-service:1.0"},
 	})
@@ -33,6 +36,7 @@ func TestDetect_TwoWeakSignals(t *testing.T) {
 }
 
 func TestDetect_OneWeakSignalDoesntFire(t *testing.T) {
+	t.Parallel()
 	v := Detect(Workload{
 		Images: []string{"ghcr.io/example/llm-frontend:latest"},
 	})
@@ -42,6 +46,7 @@ func TestDetect_OneWeakSignalDoesntFire(t *testing.T) {
 }
 
 func TestDetect_ExplicitLabel(t *testing.T) {
+	t.Parallel()
 	v := Detect(Workload{
 		Labels: map[string]string{"ai-workload": "true"},
 	})
@@ -51,6 +56,7 @@ func TestDetect_ExplicitLabel(t *testing.T) {
 }
 
 func TestDetect_NonAIWorkload(t *testing.T) {
+	t.Parallel()
 	v := Detect(Workload{
 		Namespace: "default", Name: "web",
 		Images:    []string{"nginx:1.27", "ghcr.io/example/api:1.0"},

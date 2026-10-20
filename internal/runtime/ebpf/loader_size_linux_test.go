@@ -10,6 +10,7 @@ import (
 )
 
 func TestRingBufferSizeBoundsAndDefault(t *testing.T) {
+	t.Parallel()
 	for _, value := range []int{0, os.Getpagesize(), 256 << 10, 1 << 30} {
 		size, err := validatedRingBufferSize(value)
 		expected := value

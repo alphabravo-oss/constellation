@@ -1,0 +1,171 @@
+{{- /*
+NetworkPolicies for the pods the base policy set does not cover once the
+namespace is default-deny (runtime hardening fold-in): the in-cluster CNPG
+instances, the RustFS object store, the backup/sync CronJobs, optional
+Postgres exporters, and a namespace-wide metrics ingress from the monitoring
+namespace. Rendered with networkPolicies.enabled; the CNPG pieces also need
+networkPolicies.cnpg.enabled and a CNPG cluster in this namespace.
+*/ -}}
+{{- $np := .Values.networkPolicies -}}
+{{- if $np.enabled -}}
+{{- $cluster := $np.cnpg.clusterName | default (printf "%s-postgres" (include "constellation.fullname" .)) -}}
+{{- $cnpgNS := $np.cnpgOperator.namespace -}}
+{{- $mon := $np.monitoring -}}
+{{- if $mon.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-monitoring-scrape
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $mon.namespace }}
+      ports:
+        {{- range $mon.ports }}
+        - { protocol: TCP, port: {{ . }} }
+        {{- end }}
+---
+{{- end }}
+{{- if $np.cnpg.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-cnpg-postgres
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: {{ $cluster }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # any pod in the namespace: api, admission, jobs, exporters
+    - from: [{ podSelector: {} }]
+      ports: [{ protocol: TCP, port: 5432 }, { protocol: TCP, port: 9187 }, { protocol: TCP, port: 8000 }]
+    {{- if $mon.enabled }}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $mon.namespace }}
+      ports: [{ protocol: TCP, port: 9187 }, { protocol: TCP, port: 5432 }]
+    {{- end }}
+    # CNPG operator: instance manager status port + replication checks
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $cnpgNS }}
+      ports: [{ protocol: TCP, port: 8000 }, { protocol: TCP, port: 5432 }]
+    {{- with $np.nodeCIDRs }}
+    - from:
+        {{- range . }}
+        - ipBlock: { cidr: {{ . | quote }} }
+        {{- end }}
+      ports: [{ protocol: TCP, port: 8000 }, { protocol: TCP, port: 5432 }, { protocol: TCP, port: 9187 }]
+    {{- end }}
+  egress:
+{{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
+    {{- if or .Values.backup.objectStore.enabled $np.cnpg.objectStoreSelector }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "constellation.objectStoreSelector" . | nindent 14 }}
+      ports: [{ protocol: TCP, port: 9000 }]
+    {{- end }}
+    # replication / switchover between instances
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: {{ $cluster }}
+      ports: [{ protocol: TCP, port: 5432 }]
+{{ include "constellation.networkPolicyKubeAPIEgress" . | nindent 4 }}
+    # barman-cloud plugin sidecar talks to the plugin service in the operator namespace
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $cnpgNS }}
+      ports: [{ protocol: TCP, port: 9090 }]
+    {{- range $np.offhostCIDRs }}
+    - to: [{ ipBlock: { cidr: {{ . | quote }} } }]
+      ports: [{ protocol: TCP, port: 9000 }]
+    {{- end }}
+---
+{{- if or .Values.backup.objectStore.enabled $np.cnpg.objectStoreSelector }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-object-store
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: object-store
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "constellation.objectStoreSelector" . | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {}
+        {{- range $np.nodeCIDRs }}
+        - ipBlock: { cidr: {{ . | quote }} }
+        {{- end }}
+        {{- range $np.cnpg.objectStoreClientNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+        {{- end }}
+      ports: [{ protocol: TCP, port: 9000 }]
+  egress: []
+---
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-backup-jobs
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: [archive-offhost-sync, secrets-backup, object-store-bucket]
+  {{- /* hand-applied jobs labelled by name (runtime overlay) are matched by a second policy below */}}
+  policyTypes: [Egress]
+  egress:
+{{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "constellation.objectStoreSelector" . | nindent 14 }}
+      ports: [{ protocol: TCP, port: 9000 }]
+{{ include "constellation.networkPolicyKubeAPIEgress" . | nindent 4 }}
+    {{- range $np.offhostCIDRs }}
+    - to: [{ ipBlock: { cidr: {{ . | quote }} } }]
+      ports: [{ protocol: TCP, port: 9000 }]
+    {{- end }}
+---
+# Optional Postgres exporters placed in this namespace: DB + DNS egress only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-exporters
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values: {{ toJson $np.cnpg.exporterLabels }}
+  policyTypes: [Egress]
+  egress:
+{{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: {{ $cluster }}
+      ports: [{ protocol: TCP, port: 5432 }]
+{{- end }}
+{{- end }}

@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
+
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
 
 	"github.com/jackc/pgx/v5"
 
@@ -119,6 +122,74 @@ ON CONFLICT (org_id) DO UPDATE SET settings = EXCLUDED.settings, updated_at = NO
 	writeJSON(w, http.StatusOK, map[string]any{"settings": current})
 }
 
+// Themes are the UI colour modes a user can pin; "system" follows the OS.
+var validThemes = map[string]bool{"system": true, "light": true, "dark": true}
+
+// Preferences is the typed, validated per-user preference document the UI
+// syncs (stored in user_settings.settings so the generic bag and this view
+// never diverge).
+type Preferences struct {
+	Theme     string     `json:"theme"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+}
+
+// GetPreferences returns the caller's preferences with defaults applied.
+// GET /api/v1/me/preferences
+func (h *Settings) GetPreferences(w http.ResponseWriter, r *http.Request) {
+	subj, ok := SubjectFrom(r.Context())
+	if !ok {
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "no subject")
+		return
+	}
+	prefs := Preferences{Theme: "system"}
+	var theme *string
+	var updated time.Time
+	err := h.db.Pool().QueryRow(r.Context(),
+		`SELECT settings->>'theme', updated_at FROM user_settings WHERE user_id = $1`, subj.UserID).Scan(&theme, &updated)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+	case err != nil:
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
+		return
+	default:
+		if theme != nil && validThemes[*theme] {
+			prefs.Theme = *theme
+		}
+		prefs.UpdatedAt = &updated
+	}
+	writeJSON(w, http.StatusOK, prefs)
+}
+
+// PutPreferences validates and stores the caller's preferences.
+// PUT /api/v1/me/preferences {"theme":"system|light|dark"}
+func (h *Settings) PutPreferences(w http.ResponseWriter, r *http.Request) {
+	subj, ok := SubjectFrom(r.Context())
+	if !ok {
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "no subject")
+		return
+	}
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	var in Preferences
+	if err := dec.Decode(&in); err != nil {
+		apiutil.WriteError(r.Context(), w, apiutil.Invalid("invalid preferences body: "+err.Error()))
+		return
+	}
+	if !validThemes[in.Theme] {
+		apiutil.WriteError(r.Context(), w, apiutil.Invalid("theme must be one of system, light, dark"))
+		return
+	}
+	var updated time.Time
+	if err := h.db.Pool().QueryRow(r.Context(), `
+INSERT INTO user_settings (user_id, settings) VALUES ($1, jsonb_build_object('theme', $2::text))
+ON CONFLICT (user_id) DO UPDATE SET settings = user_settings.settings || jsonb_build_object('theme', $2::text), updated_at = NOW()
+RETURNING updated_at`, subj.UserID, in.Theme).Scan(&updated); err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, Preferences{Theme: in.Theme, UpdatedAt: &updated})
+}
+
 // GetUser returns the calling user's settings bag.
 func (h *Settings) GetUser(w http.ResponseWriter, r *http.Request) {
 	subj, ok := SubjectFrom(r.Context())
@@ -150,6 +221,12 @@ func (h *Settings) PatchUser(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
 		jsonError(w, http.StatusBadRequest, "invalid JSON body")
 		return
+	}
+	if theme, ok := patch["theme"]; ok && theme != nil {
+		if s, isString := theme.(string); !isString || !validThemes[s] {
+			jsonError(w, http.StatusBadRequest, "theme must be one of system, light, dark")
+			return
+		}
 	}
 
 	tx, err := h.db.Pool().Begin(r.Context())

@@ -29,9 +29,8 @@ jobs:
           node-version-file: .node-version
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - run: go test ./...
-      - run: go install github.com/pressly/goose/v3/cmd/goose@v3.27.1
-      - run: make test-clean-database
+      - run: make test
+      - run: make test-integration
       - run: go vet ./...
       - run: npm ci
         working-directory: frontend
@@ -62,8 +61,8 @@ jobs:
           - { role: runtime-agent, dockerfile: deploy/docker/Dockerfile.runtime-agent }
           - { role: admission, dockerfile: deploy/docker/Dockerfile.admission }
           - { role: kube-bench-runner, dockerfile: deploy/docker/Dockerfile.kube-bench-runner }
-          - { role: migrate, dockerfile: deploy/docker/Dockerfile.migrate }
           - { role: bootstrap, dockerfile: deploy/docker/Dockerfile.bootstrap }
+          - { role: toolbox, dockerfile: deploy/docker/Dockerfile.toolbox }
           - { role: postgres, dockerfile: deploy/docker/Dockerfile.postgres, tag_prefix: "16.14-" }
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

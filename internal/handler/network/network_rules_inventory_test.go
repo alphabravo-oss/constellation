@@ -1,3 +1,5 @@
+//go:build integration
+
 package network
 
 import (
@@ -33,6 +35,7 @@ type networkRulesInventoryResponse struct {
 }
 
 func TestNetworkRuleDisplayIDSQLMatchesGo(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	t.Cleanup(d.Close)
 	for _, pair := range [][2]string{{"", ""}, {"default/api", "default/db"}, {"external", "prod/api"}, {"équipe/服务", "🙂/数据库"}, {strings.Repeat("overflow", 100), strings.Repeat("雪", 60)}, {"a", "bc"}, {"ab", "c"}, {"App/API", "app/api"}} {
@@ -46,6 +49,7 @@ func TestNetworkRuleDisplayIDSQLMatchesGo(t *testing.T) {
 	}
 }
 func TestNetworkRulesInventoryFullCohortPagingFiltersAndCSV(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	t.Cleanup(d.Close)
 	p := d.Pool()
@@ -180,6 +184,7 @@ func TestNetworkRulesInventoryFullCohortPagingFiltersAndCSV(t *testing.T) {
 }
 
 func TestNetworkRulesInventoryDeterministicVerdictAndCollisionIdentity(t *testing.T) {
+	t.Parallel()
 	d, org, actor, cluster := moveRuleFixture(t)
 	p := d.Pool()
 	ctx := context.Background()
@@ -254,6 +259,7 @@ func TestNetworkRulesInventoryDeterministicVerdictAndCollisionIdentity(t *testin
 }
 
 func TestNetworkRuleInventoryStrictPaging(t *testing.T) {
+	t.Parallel()
 	for _, raw := range []string{"offset=" + fmt.Sprint(inventorylist.MaxOffset+1), "limit=5000", "sort=unknown", "hide_platform=1", "limit=1&limit=2"} {
 		values, err := url.ParseQuery(raw)
 		if err != nil {
@@ -266,6 +272,7 @@ func TestNetworkRuleInventoryStrictPaging(t *testing.T) {
 }
 
 func TestNetworkRulesInventoryReadFailureIsUnavailable(t *testing.T) {
+	t.Parallel()
 	d, org, actor, cluster := moveRuleFixture(t)
 	pool := d.Pool()
 	ctx := context.Background()

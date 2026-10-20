@@ -9,6 +9,10 @@ useDefault = true
 
 [allowlist]
 description = "Reviewed allow-list"
+# 2026-10-20 (Phase 1): this commit carried a throwaway age identity for the dev loop
+# (.env.dev) and the integration fixture (pgtest). Never used outside tests/dev; both
+# are now generated at runtime. History is not rewritten.
+commits = ["a77efbc9a17773c621a168207e614e8062dae6b9"]
 paths = [
   # Our own scanner output and local tooling state.
   '''^artifacts/''',

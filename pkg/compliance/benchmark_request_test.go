@@ -6,6 +6,7 @@ import (
 )
 
 func TestBenchmarkRequestProfilesAndIdentifiers(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct{ raw, want string }{{"", "kube-bench"}, {" KubeBench ", "kube-bench"}, {"kube-bench", "kube-bench"}, {"docker", "docker-bench"}, {"docker-bench", "docker-bench"}} {
 		if value, ok := NormalizeBenchProfile(test.raw); !ok || value != test.want {
 			t.Fatalf("profile %q=%q/%v", test.raw, value, ok)

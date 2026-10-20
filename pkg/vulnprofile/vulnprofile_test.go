@@ -6,6 +6,7 @@ import (
 )
 
 func TestProfile_Evaluate_SuppressAccept(t *testing.T) {
+	t.Parallel()
 	p := &Profile{Name: "p", Active: true, Entries: []Entry{
 		{Name: "old-ignored", NameRegex: "^CVE-2019-.*", Action: ActionSuppress},
 	}}
@@ -23,6 +24,7 @@ func TestProfile_Evaluate_SuppressAccept(t *testing.T) {
 }
 
 func TestProfile_Evaluate_SuppressDefer(t *testing.T) {
+	t.Parallel()
 	p := &Profile{Name: "p", Entries: []Entry{
 		{Name: "grace", NameRegex: "CVE-.*", Action: ActionSuppress, DaysToFix: 30},
 	}}
@@ -33,6 +35,7 @@ func TestProfile_Evaluate_SuppressDefer(t *testing.T) {
 }
 
 func TestProfile_Evaluate_RecentEscalate(t *testing.T) {
+	t.Parallel()
 	Now = func() time.Time { return time.Date(2026, 5, 12, 0, 0, 0, 0, time.UTC) }
 	defer func() { Now = time.Now }()
 
@@ -51,6 +54,7 @@ func TestProfile_Evaluate_RecentEscalate(t *testing.T) {
 }
 
 func TestProfile_DomainScope(t *testing.T) {
+	t.Parallel()
 	p := &Profile{
 		Name:        "p",
 		DomainScope: DomainScope{Namespaces: []string{"prod"}},
@@ -69,6 +73,7 @@ func TestProfile_DomainScope(t *testing.T) {
 }
 
 func TestProfile_ImageGlobAndScoreFloor(t *testing.T) {
+	t.Parallel()
 	p := &Profile{Name: "p", Entries: []Entry{
 		{Name: "stripe", Images: []string{"stripe/*"}, ScoreFloor: 9.0, Action: ActionEscalate},
 	}}
@@ -89,6 +94,7 @@ func TestProfile_ImageGlobAndScoreFloor(t *testing.T) {
 }
 
 func TestProfile_Validate(t *testing.T) {
+	t.Parallel()
 	if err := (&Profile{Name: ""}).Validate(); err == nil {
 		t.Fatal("expected error for empty name")
 	}

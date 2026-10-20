@@ -1,3 +1,5 @@
+//go:build integration
+
 package server
 
 import (
@@ -144,7 +146,7 @@ func TestGroupWorkflowUsagePromotionAndUnsafeDelete(t *testing.T) {
 		t.Fatalf("auditor delete: status=%d body=%+v, want 403", status, body)
 	}
 	status, body = doJSON(t, http.MethodDelete, groupURL, admin, nil)
-	if status != http.StatusConflict || body["error"] != "group has policy references" || body["blocking_references"] != float64(3) {
+	if status != http.StatusConflict || errMessage(body) != "group has policy references" || errDetail(body, "blocking_references") != float64(3) {
 		t.Fatalf("unsafe delete: status=%d body=%+v, want blocking 409", status, body)
 	}
 	var groupCount, edgeCount, bindingCount int

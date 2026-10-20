@@ -1,34 +1,26 @@
+//go:build integration
+
 package main
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"testing"
+
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
 
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/alphabravocompany/constellation/internal/netpolicyapply"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestEnforcementStatusCannotOverwriteNewerIntent(t *testing.T) {
-	url := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-	if url == "" {
-		t.Skip("CONSTELLATION_TEST_DATABASE_URL not set; integration test")
-	}
+	t.Parallel()
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, url)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer pool.Close()
-	if err := pool.Ping(ctx); err != nil {
-		t.Skipf("test DB unavailable: %v", err)
-	}
+	pool := pgtest.Pool(t)
 	org, cluster, id := uuid.New(), uuid.New(), uuid.New()
 	exec := func(sql string, args ...any) {
 		t.Helper()

@@ -1,3 +1,5 @@
+//go:build integration
+
 package handler
 
 import (
@@ -55,7 +57,7 @@ func newPrimaryCatalogSinkFixture(t *testing.T, database *db.DB, test primaryCat
 		}
 	}))
 	t.Cleanup(server.Close)
-	sealed, err := sealCredentials(t.Context(), database.Pool(), "static", map[string]string{"username": "owned-user", "password": "owned-password", "token": "owned-token"})
+	sealed, _, err := sealCredentials(t.Context(), database.Pool(), "static", map[string]string{"username": "owned-user", "password": "owned-password", "token": "owned-token"})
 	if err != nil {
 		t.Fatal("owned catalog credentials could not be sealed")
 	}

@@ -7,6 +7,7 @@ import (
 )
 
 func TestProvenance_Shape(t *testing.T) {
+	t.Parallel()
 	in := ProvenanceInput{
 		ArtifactName:   "ghcr.io/alphabravocompany/constellation-api",
 		ArtifactSHA256: "deadbeef",
@@ -46,6 +47,7 @@ func TestProvenance_Shape(t *testing.T) {
 }
 
 func TestNonEmptyDigest_SplitsAlgAndVal(t *testing.T) {
+	t.Parallel()
 	d := nonEmptyDigest("sha256", "gitCommit:abc")
 	if d["gitCommit"] != "abc" {
 		t.Fatalf("expected alg=gitCommit, got %+v", d)

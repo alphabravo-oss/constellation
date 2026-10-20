@@ -1,3 +1,5 @@
+//go:build integration
+
 package network
 
 import (
@@ -79,6 +81,7 @@ func decodeConversations(t *testing.T, response *httptest.ResponseRecorder) conv
 	return body
 }
 func TestConversationInventoryFullCohortSortSummaryAndCSV(t *testing.T) {
+	t.Parallel()
 	database, org, foreign, cluster, sibling, foreignCluster := conversationFixture(t)
 	pool := database.Pool()
 	const total = 6007
@@ -185,6 +188,7 @@ func TestConversationInventoryFullCohortSortSummaryAndCSV(t *testing.T) {
 }
 
 func TestConversationInventoryExactFiltersPlatformAndLiveScope(t *testing.T) {
+	t.Parallel()
 	database, org, _, cluster, sibling, _ := conversationFixture(t)
 	pool := database.Pool()
 	owner, unlabelled := uuid.New(), uuid.New()
@@ -277,6 +281,7 @@ func TestConversationInventoryExactFiltersPlatformAndLiveScope(t *testing.T) {
 }
 
 func TestConversationInventoryCSVLimitIsExplicit(t *testing.T) {
+	t.Parallel()
 	database, org, _, cluster, _, _ := conversationFixture(t)
 	const total = 100003
 	if _, err := database.Pool().Exec(t.Context(), `INSERT INTO network_flow_rollups(org_id,cluster_id,src_workload,dst_workload,protocol,bucket,max_at,sum_bytes)
@@ -302,6 +307,7 @@ func TestConversationInventoryCSVLimitIsExplicit(t *testing.T) {
 }
 
 func TestConversationInventoryOptions(t *testing.T) {
+	t.Parallel()
 	for _, query := range []string{"limit=bad", "sort=bytes;DROP TABLE flows", "order=DESC;--", "offset=-1", "offset=" + strconv.Itoa(inventorylist.MaxOffset+1), "hide_platform=yes", "port=65536", "cluster_id=bad", "limit=2&limit=2"} {
 		values, err := url.ParseQuery(query)
 		if err == nil {
@@ -319,6 +325,7 @@ func TestConversationInventoryOptions(t *testing.T) {
 }
 
 func TestConversationInventoryHighOffsetOptions(t *testing.T) {
+	t.Parallel()
 	for _, offset := range []int{1000001, 2000000, inventorylist.MaxOffset} {
 		values := url.Values{"offset": {strconv.Itoa(offset)}}
 		options, err := parseConversationOptions(values)

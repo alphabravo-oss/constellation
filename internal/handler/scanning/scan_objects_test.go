@@ -1,3 +1,5 @@
+//go:build integration
+
 package scanning
 
 import (
@@ -16,6 +18,7 @@ import (
 )
 
 func TestScanObjects_TriggerQueuesEvidenceBackedTargets(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -111,6 +114,7 @@ SELECT COUNT(*)::int FROM scan_jobs WHERE org_id = $1 AND target_id = $2 AND sta
 }
 
 func TestScanObjects_ReportAndPlatformSummary(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -234,6 +238,7 @@ VALUES ($1, $2, $3, 'completed', 4, 0, $4)`, uuid.New(), orgID, platformTargetID
 }
 
 func TestScanObjects_IgnoreRowsLinkedToForeignOrgTarget(t *testing.T) {
+	t.Parallel()
 	database := openTestDB(t)
 	defer database.Close()
 

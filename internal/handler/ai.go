@@ -12,6 +12,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/pkg/abbot"
 	"github.com/alphabravocompany/constellation/pkg/audit"
@@ -76,11 +78,8 @@ func (a *AI) Query(w http.ResponseWriter, r *http.Request) {
 		slog.WarnContext(r.Context(), "ai org check failed", slog.String("err", err.Error()))
 	}
 	if !aiEnabled {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
-			"error":   "ai disabled for org",
-			"hint":    "ai is off-by-default; an org admin can enable Abbot in settings",
-			"degrade": "true",
-		})
+		apiutil.WriteDetailed(r.Context(), w, http.StatusServiceUnavailable, "ai_disabled", "ai disabled for org",
+			map[string]string{"hint": "ai is off-by-default; an org admin can enable Abbot in settings", "degrade": "true"})
 		return
 	}
 

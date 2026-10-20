@@ -1,3 +1,5 @@
+//go:build integration
+
 package policy
 
 import (
@@ -30,6 +32,7 @@ func responseRulesYAMLFixture(scope, rules string) string {
 }
 
 func TestResponseRulesV2YAMLImportAuditAttemptDoesNotBlockOrgLock(t *testing.T) {
+	t.Parallel()
 	database := openTestDB(t)
 	defer database.Close()
 	pool := database.Pool()
@@ -53,6 +56,7 @@ func TestResponseRulesV2YAMLImportAuditAttemptDoesNotBlockOrgLock(t *testing.T) 
 }
 
 func TestResponseRulesV2YAMLExportImportScopedAndAudited(t *testing.T) {
+	t.Parallel()
 	database := openTestDB(t)
 	defer database.Close()
 	pool := database.Pool()
@@ -155,6 +159,7 @@ func TestResponseRulesV2YAMLExportImportScopedAndAudited(t *testing.T) {
 }
 
 func TestResponseRulesV2YAMLImportConflictsAndRollback(t *testing.T) {
+	t.Parallel()
 	database := openTestDB(t)
 	defer database.Close()
 	pool := database.Pool()

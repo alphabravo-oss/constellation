@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
@@ -336,7 +338,7 @@ type deploymentViolationDTO struct {
 func (h *Deployments) Get(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	subj, _ := SubjectFrom(r.Context())
@@ -353,7 +355,7 @@ SELECT id::text, COALESCE(cluster_id::text, ''), namespace, name, kind,
 			&labels, &detail.RiskScore, &factors, &detail.FindingCount, &detail.CriticalCount, &detail.HighCount,
 			&detail.ImageRefs, &detail.FirstSeenAt, &detail.LastSeenAt)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "not found")
 		return
 	}
 	detail.Labels = json.RawMessage(labels)
@@ -1649,7 +1651,7 @@ SELECT v.id, v.deployment_id, v.policy_name, v.severity, v.kind, v.message, v.at
  WHERE v.org_id = $1
  ORDER BY v.at DESC LIMIT $2`, subj.OrgID, limit)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()

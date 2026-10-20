@@ -20,6 +20,7 @@ import (
 // Opt in only on an isolated privileged Linux host. This is capture/map proof,
 // not an enforcement test: the sole child exits normally when stdin closes.
 func TestProcessIdentityRealKernelLifecycle(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("CONSTELLATION_TEST_BPF_IDENTITY") != "1" {
 		t.Skip("requires explicit isolated privileged BPF acceptance")
 	}
@@ -143,6 +144,7 @@ func awaitKernelChildReady(t *testing.T, ctx context.Context, ready <-chan strin
 }
 
 func TestProcessIdentityKernelChild(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("CONSTELLATION_BPF_IDENTITY_CHILD") != "1" {
 		t.Skip("only invoked by owned child fixture")
 	}

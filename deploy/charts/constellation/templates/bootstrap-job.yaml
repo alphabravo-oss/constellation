@@ -297,6 +297,11 @@ spec:
                 secretKeyRef:
                   name: {{ include "constellation.dsnSecret" . }}
                   key: {{ include "constellation.dsnSecretKey" . }}
+            - name: CONSTELLATION_AGE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "constellation.cryptoSecretName" . }}
+                  key: age-key
             - name: PATH
               value: "/tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
           volumeMounts:

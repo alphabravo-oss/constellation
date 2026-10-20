@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
@@ -59,7 +61,7 @@ func (c *CustomFrameworks) List(w http.ResponseWriter, r *http.Request) {
 SELECT id, name, category, COALESCE(description,''), control_ids, created_at
   FROM custom_frameworks WHERE org_id = $1 ORDER BY created_at DESC`, subj.OrgID)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()
@@ -85,16 +87,16 @@ func (c *CustomFrameworks) Create(w http.ResponseWriter, r *http.Request) {
 	subj, _ := authctx.SubjectFrom(r.Context())
 	var body customFrameworkBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid body")
 		return
 	}
 	body.Name = strings.TrimSpace(body.Name)
 	if body.Name == "" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "name required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "name required")
 		return
 	}
 	if len(body.ControlIDs) == 0 {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "control_ids required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "control_ids required")
 		return
 	}
 	if body.Category == "" {
@@ -109,7 +111,7 @@ INSERT INTO custom_frameworks (id, org_id, name, category, description, control_
 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		id, subj.OrgID, body.Name, body.Category, body.Description, body.ControlIDs, subj.UserID,
 	); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	_, _, _ = c.audit.Log(r.Context(), audit.Event{
@@ -126,13 +128,13 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 func (c *CustomFrameworks) Delete(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	subj, _ := authctx.SubjectFrom(r.Context())
 	if _, err := c.db.Pool().Exec(r.Context(),
 		`DELETE FROM custom_frameworks WHERE id = $1 AND org_id = $2`, id, subj.OrgID); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	uid := subj.UserID

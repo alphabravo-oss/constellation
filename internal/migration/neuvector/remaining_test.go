@@ -13,6 +13,7 @@ import (
 )
 
 func TestRemainingCanonicalFixture(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile("testdata/remaining_families.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -145,6 +146,7 @@ func TestVulnerabilityRejectsWholeProfile(t *testing.T) {
 }
 
 func TestRemainingRESTAndCRDShapes(t *testing.T) {
+	t.Parallel()
 	for _, raw := range []string{
 		`{"profile":{"name":"test","entries":[]}}`,
 		`{"profiles":[{"name":"test","entries":[]}]}`,
@@ -166,6 +168,7 @@ func TestRemainingRESTAndCRDShapes(t *testing.T) {
 }
 
 func TestRegistryValidationAndSecretOmission(t *testing.T) {
+	t.Parallel()
 	for _, endpoint := range []string{"http://registry.test", "https://user:SECRET_PASSWORD@registry.test", "https://registry.test?token=SECRET_TOKEN", "https://registry.test?", "https://registry.test#SECRET_FRAGMENT", "https://registry.test#", "https:///missing-host", "registry.test", "https://registry.test:bad", "https://registry.test\nSECRET_VALUE"} {
 		raw, _ := json.Marshal(map[string]any{"registries": []any{map[string]any{"name": "test", "registry_type": "Docker Registry", "registry": endpoint}}})
 		out, err := ConvertRemainingFamilies(raw)
@@ -192,6 +195,7 @@ func TestRegistryValidationAndSecretOmission(t *testing.T) {
 }
 
 func TestUnknownObjectsNeverBecomeLegacyPolicies(t *testing.T) {
+	t.Parallel()
 	for _, raw := range []string{
 		`SECRET_TOP_KEY: {name: SECRET_NAME, password: SECRET_VALUE}`,
 		`kind: SECRET_KIND
@@ -254,6 +258,7 @@ func TestParseErrorsRedactYAMLValues(t *testing.T) {
 }
 
 func TestRemainingRejectsUnknownProfileEnvelopeSemantics(t *testing.T) {
+	t.Parallel()
 	for _, raw := range []string{
 		`{"kind":"NvVulnerabilityProfile","spec":{"profile":{"name":"reviewed","entries":[{"name":"CVE-2026-1"}]},"domains":["SECRET_SCOPE"]}}`,
 		`{"vulnerability":{"profile":{"name":"reviewed","entries":[{"name":"CVE-2026-1"}]},"domains":["SECRET_SCOPE"]}}`,
@@ -274,6 +279,7 @@ func TestRemainingRejectsUnknownProfileEnvelopeSemantics(t *testing.T) {
 }
 
 func TestRemainingUnknownGenericEnvelopesAreRedacted(t *testing.T) {
+	t.Parallel()
 	for _, raw := range []string{
 		`{"config":{"name":"SECRET_AUTH_NAME","ldap":{"password":"SECRET_PASSWORD"}}}`,
 		`{"configs":[{"name":"SECRET_AUTH_NAME","ldap":{"password":"SECRET_PASSWORD"}}]}`,

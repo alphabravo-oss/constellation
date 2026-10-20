@@ -35,6 +35,7 @@ func TestBuildDPRulesRejectsUnrepresentableFlows(t *testing.T) {
 }
 
 func TestBuildDPRulesPreservesExplicitPortBoundaries(t *testing.T) {
+	t.Parallel()
 	for _, port := range []int{0, 1, 65535} {
 		rules, _, _, err := BuildDPRules("default/api", []Flow{{SrcWorkload: "default/api", Port: port, Protocol: "tcp"}}, DefaultBuildDPRulesOptions())
 		if err != nil || len(rules) != 2 {
@@ -53,6 +54,7 @@ func TestBuildDPRulesPreservesExplicitPortBoundaries(t *testing.T) {
 }
 
 func TestBuildDPRules_DefaultDeny_AllowDNS(t *testing.T) {
+	t.Parallel()
 	rules, def, dir, err := BuildDPRules("default/api", nil, DefaultBuildDPRulesOptions())
 	if err != nil {
 		t.Fatal(err)
@@ -72,6 +74,7 @@ func TestBuildDPRules_DefaultDeny_AllowDNS(t *testing.T) {
 }
 
 func TestBuildDPRules_DedupAndDirection(t *testing.T) {
+	t.Parallel()
 	// Three flows, two are dups by (peer, port, protocol). Expect one rule
 	// per unique edge plus the DNS allow.
 	flows := []Flow{
@@ -105,6 +108,7 @@ func TestBuildDPRules_DedupAndDirection(t *testing.T) {
 }
 
 func TestBuildDPRules_DefaultActionToggle(t *testing.T) {
+	t.Parallel()
 	opts := BuildDPRulesOptions{AllowDNS: false, DefaultDeny: false}
 	rules, def, _, err := BuildDPRules("default/api", []Flow{
 		{SrcWorkload: "default/api", DstWorkload: "external", Port: 443, Protocol: "TCP"},
@@ -121,6 +125,7 @@ func TestBuildDPRules_DefaultActionToggle(t *testing.T) {
 }
 
 func TestBuildDPRules_SkipFlowsNotMatchingTarget(t *testing.T) {
+	t.Parallel()
 	flows := []Flow{
 		{SrcWorkload: "other/wl", DstWorkload: "another/wl", Port: 80, Protocol: "TCP"},
 	}
@@ -135,6 +140,7 @@ func TestBuildDPRules_SkipFlowsNotMatchingTarget(t *testing.T) {
 }
 
 func TestBuildDPRules_FqdnEgressPopulated(t *testing.T) {
+	t.Parallel()
 	flows := []Flow{
 		// Egress to an FQDN — Fqdn must land on the rule, DstIP left empty.
 		{SrcWorkload: "default/api", DstWorkload: "external", Fqdn: "api.github.com", Port: 443, Protocol: "TCP"},
@@ -180,6 +186,7 @@ func TestBuildDPRules_FqdnEgressPopulated(t *testing.T) {
 }
 
 func TestFormatRuleSummary(t *testing.T) {
+	t.Parallel()
 	r := &dp.PolicyRule{
 		Ingress: false,
 		Port:    443,

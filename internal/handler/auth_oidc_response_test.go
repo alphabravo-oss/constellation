@@ -1,3 +1,5 @@
+//go:build integration
+
 package handler
 
 import (
@@ -15,6 +17,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -152,11 +156,11 @@ func assertOIDCCallbackHasNoSession(t *testing.T, mode string) {
 	if response.Code != http.StatusUnauthorized || sessions != 0 || len(response.Result().Cookies()) != 0 {
 		t.Fatalf("failed token response issued identity: status=%d sessions=%d cookies=%d", response.Code, sessions, len(response.Result().Cookies()))
 	}
-	var result map[string]string
+	var result apiutil.Body
 	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if result["error"] != "oidc authentication failed" || strings.Contains(response.Body.String(), oidcCallbackResponseSentinel) {
+	if result.Error.Message != "oidc authentication failed" || strings.Contains(response.Body.String(), oidcCallbackResponseSentinel) {
 		t.Fatal("callback exposed upstream diagnostic")
 	}
 	var failures int

@@ -1,3 +1,5 @@
+//go:build integration
+
 package handler
 
 import (
@@ -144,7 +146,8 @@ func TestBackupInventoryFullOwnedSourceLatestAndCSV(t *testing.T) {
 			t.Fatal("missing subject accepted")
 		}
 		w = request("", export, true, true)
-		if w.Code != 500 || !strings.Contains(w.Body.String(), "Backup history is unavailable") || strings.Contains(w.Body.String(), "context canceled") {
+		// A 500 carries only the scrubbed message (apiutil); the cause is logged, never sent.
+		if w.Code != 500 || !strings.Contains(w.Body.String(), "internal error") || strings.Contains(w.Body.String(), "context canceled") || strings.Contains(w.Body.String(), "Backup history") {
 			t.Fatalf("failure%d %s", w.Code, w.Body.String())
 		}
 	}

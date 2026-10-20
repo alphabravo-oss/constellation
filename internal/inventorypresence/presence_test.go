@@ -1,29 +1,21 @@
+//go:build integration
+
 package inventorypresence
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
+
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestPresenceScopeFreshnessAndHistory(t *testing.T) {
-	url := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-	if url == "" {
-		url = "postgres://test:test@127.0.0.1:15433/constellation_test?sslmode=disable"
-	}
+	t.Parallel()
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, url)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer pool.Close()
-	if err := pool.Ping(ctx); err != nil {
-		t.Skipf("test DB unavailable: %v", err)
-	}
+	pool := pgtest.Pool(t)
 	org, other, cluster := uuid.New(), uuid.New(), uuid.New()
 	exec := func(sql string, args ...any) {
 		t.Helper()
@@ -56,7 +48,7 @@ func TestPresenceScopeFreshnessAndHistory(t *testing.T) {
 		}
 		return c
 	}
-	if c := read(); c.InventoryStatus != "missing" || c.UnverifiedOccurrences != 5 {
+	if c := read(); c.InventoryStatus != "missing" || c.UnverifiedOccurrences != 5 || c.LastKnown != nil {
 		t.Fatalf("missing snapshot: %+v", c)
 	}
 	now := time.Now().UTC()
@@ -88,8 +80,14 @@ func TestPresenceScopeFreshnessAndHistory(t *testing.T) {
 		t.Fatalf("cross-tenant snapshot persisted: %d %v", n, err)
 	}
 	exec(`UPDATE cluster_inventory_presence SET observed_at=NOW()-INTERVAL '2 hours',expires_at=NOW()-INTERVAL '1 hour' WHERE org_id=$1`, org)
-	if c := read(); c.InventoryStatus != "stale" || c.UnverifiedOccurrences != 5 || c.HistoricalOccurrences != 0 {
+	c = read()
+	if c.InventoryStatus != "stale" || c.UnverifiedOccurrences != 5 || c.HistoricalOccurrences != 0 {
 		t.Fatalf("stale snapshot hid findings: %+v", c)
+	}
+	// Stale inventory keeps the last-known exposure (CVE-A on the live pod/image) with its age.
+	if c.LastKnown == nil || c.LastKnown.Critical != 1 || c.LastKnown.High != 0 ||
+		c.ObservedAt == nil || !c.LastKnown.AsOf.Equal(*c.ObservedAt) || time.Since(c.LastKnown.AsOf) < 110*time.Minute {
+		t.Fatalf("stale snapshot lost its last-known exposure: %+v %+v", c, c.LastKnown)
 	}
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM findings WHERE org_id=$1 AND lifecycle='open'`, org).Scan(&n); err != nil || n != 5 {
 		t.Fatalf("history was mutated: %d %v", n, err)

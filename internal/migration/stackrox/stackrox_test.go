@@ -39,6 +39,7 @@ const sampleExport = `
 }`
 
 func TestConvert_TopLevelObject(t *testing.T) {
+	t.Parallel()
 	out, err := Convert([]byte(sampleExport))
 	if err != nil {
 		t.Fatal(err)
@@ -64,6 +65,7 @@ func TestConvert_TopLevelObject(t *testing.T) {
 }
 
 func TestConvert_TopLevelArray(t *testing.T) {
+	t.Parallel()
 	arr := `[{"id":"p","name":"X","lifecycleStages":["RUNTIME"]}]`
 	out, err := Convert([]byte(arr))
 	if err != nil {
@@ -80,6 +82,7 @@ func TestConvert_TopLevelArray(t *testing.T) {
 // A non-disabled DEPLOY policy with no enforcement action is monitor mode and
 // must embed validationFailureAction=audit, not enforce.
 func TestConvert_MonitorPolicyEmitsAudit(t *testing.T) {
+	t.Parallel()
 	export := `[{
 	  "id":"p-mon","name":"Monitor Privileged","lifecycleStages":["DEPLOY"],
 	  "disabled":false,"enforcementActions":[],
@@ -105,6 +108,7 @@ func TestConvert_MonitorPolicyEmitsAudit(t *testing.T) {
 
 // A disabled policy is never enforce mode.
 func TestConvert_DisabledPolicyNotEnforce(t *testing.T) {
+	t.Parallel()
 	export := `[{
 	  "id":"p-dis","name":"Disabled","lifecycleStages":["DEPLOY"],
 	  "disabled":true,"enforcementActions":["SCALE_TO_ZERO_ENFORCEMENT"],
@@ -125,6 +129,7 @@ func TestConvert_DisabledPolicyNotEnforce(t *testing.T) {
 // Supported-but-previously-dropped criteria (Image Tag, Read-Only Root Filesystem)
 // now emit real validate patterns rather than an empty no-op.
 func TestConvert_RealPatternsForMappedCriteria(t *testing.T) {
+	t.Parallel()
 	export := `[{
 	  "id":"p-real","name":"Hardening","lifecycleStages":["DEPLOY"],
 	  "enforcementActions":["SCALE_TO_ZERO_ENFORCEMENT"],
@@ -152,6 +157,7 @@ func TestConvert_RealPatternsForMappedCriteria(t *testing.T) {
 // A DEPLOY policy whose only criterion has no Kyverno mapping must NOT emit a
 // no-op enforce ClusterPolicy; it routes to the constellation-builtin path.
 func TestConvert_UnsupportedCriteriaNotNoOpKyverno(t *testing.T) {
+	t.Parallel()
 	export := `[{
 	  "id":"p-uns","name":"Env Var Policy","lifecycleStages":["DEPLOY"],
 	  "enforcementActions":["SCALE_TO_ZERO_ENFORCEMENT"],
@@ -170,6 +176,7 @@ func TestConvert_UnsupportedCriteriaNotNoOpKyverno(t *testing.T) {
 }
 
 func TestSlug_RemovesNonAlnum(t *testing.T) {
+	t.Parallel()
 	if got := slug("Privileged Container!! (foo/bar)"); got != "privileged-container-foo-bar" {
 		t.Fatalf("slug: %q", got)
 	}

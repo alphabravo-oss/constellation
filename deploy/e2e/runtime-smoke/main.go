@@ -30,6 +30,51 @@ func main() {
 	os.Exit(run())
 }
 
+// smokeCounters tallies the kernel events the smoke window observed.
+type smokeCounters struct {
+	execTotal, execTrue, netConnect, netAccept, fileTotal atomic.Uint64
+}
+
+// consume counts events until the channel closes, logging the first few file opens.
+func (c *smokeCounters) consume(events <-chan ebpf.Event, showFile bool, logger *slog.Logger) {
+	firstFiles := 0
+	for evt := range events {
+		switch evt.Kind {
+		case ebpf.EventKindProcess:
+			c.execTotal.Add(1)
+			if evt.Process != nil && isTrueBinary(evt.Process.Filename) {
+				c.execTrue.Add(1)
+			}
+		case ebpf.EventKindNetwork:
+			c.countNetwork(evt)
+		case ebpf.EventKindFile:
+			c.fileTotal.Add(1)
+			if showFile && firstFiles < 5 && evt.File != nil {
+				logger.Info("file_open", slog.String("comm", evt.File.Comm), slog.String("path", evt.File.Path))
+				firstFiles++
+			}
+		case ebpf.EventKindUnknown:
+			// not counted
+		}
+	}
+}
+
+func (c *smokeCounters) countNetwork(evt ebpf.Event) {
+	if evt.Network == nil {
+		return
+	}
+	switch evt.Network.Direction {
+	case "connect":
+		c.netConnect.Add(1)
+	case "accept":
+		c.netAccept.Add(1)
+	}
+}
+
+func isTrueBinary(fn string) bool {
+	return fn == "/bin/true" || fn == "/usr/bin/true" || strings.HasSuffix(fn, "/true")
+}
+
 // run holds the whole smoke flow so deferred cleanups run before the exit code is returned.
 func run() int {
 	var (
@@ -62,50 +107,12 @@ func run() int {
 	runDone := make(chan error, 1)
 	go func() { runDone <- a.Run(ctx) }()
 
-	// Counters.
-	var (
-		execTotal  atomic.Uint64
-		execTrue   atomic.Uint64
-		netConnect atomic.Uint64
-		netAccept  atomic.Uint64
-		fileTotal  atomic.Uint64
-	)
-
 	// Consumer.
+	var c smokeCounters
 	consumerDone := make(chan struct{})
 	go func() {
 		defer close(consumerDone)
-		var firstFiles int
-		for evt := range a.Events() {
-			switch evt.Kind {
-			case ebpf.EventKindProcess:
-				execTotal.Add(1)
-				if evt.Process != nil {
-					fn := evt.Process.Filename
-					if fn == "/bin/true" || fn == "/usr/bin/true" || strings.HasSuffix(fn, "/true") {
-						execTrue.Add(1)
-					}
-				}
-			case ebpf.EventKindNetwork:
-				if evt.Network == nil {
-					continue
-				}
-				switch evt.Network.Direction {
-				case "connect":
-					netConnect.Add(1)
-				case "accept":
-					netAccept.Add(1)
-				}
-			case ebpf.EventKindFile:
-				fileTotal.Add(1)
-				if *showFile && firstFiles < 5 && evt.File != nil {
-					logger.Info("file_open", slog.String("comm", evt.File.Comm), slog.String("path", evt.File.Path))
-					firstFiles++
-				}
-			case ebpf.EventKindUnknown:
-				// not counted
-			}
-		}
+		c.consume(a.Events(), *showFile, logger)
 	}()
 
 	// Workload generator: 20 iterations of /bin/true + a curl that issues a
@@ -132,14 +139,15 @@ func run() int {
 	<-consumerDone
 
 	dropped := a.Dropped()
-	et := execTotal.Load()
-	etrue := execTrue.Load()
-	nc := netConnect.Load()
-	na := netAccept.Load()
-	ft := fileTotal.Load()
+	et, etrue, nc, na, ft := c.execTotal.Load(), c.execTrue.Load(), c.netConnect.Load(), c.netAccept.Load(), c.fileTotal.Load()
 
+	return report(*duration, et, etrue, nc, na, ft, dropped, *minExec, *minTCP)
+}
+
+// report prints the captured counts and checks them against the thresholds.
+func report(duration time.Duration, et, etrue, nc, na, ft, dropped uint64, minExec, minTCP int) int {
 	fmt.Printf("== Constellation runtime-smoke ==\n")
-	fmt.Printf("duration            : %s\n", *duration)
+	fmt.Printf("duration            : %s\n", duration)
 	fmt.Printf("exec events (total) : %d\n", et)
 	fmt.Printf("exec /bin/true      : %d\n", etrue)
 	fmt.Printf("tcp_connect events  : %d\n", nc)
@@ -148,12 +156,12 @@ func run() int {
 	fmt.Printf("dropped (chan full) : %d\n", dropped)
 
 	failed := false
-	if *minExec > 0 && etrue < uint64(*minExec) {
-		fmt.Fprintf(os.Stderr, "FAIL: /bin/true exec events %d < required %d\n", etrue, *minExec)
+	if minExec > 0 && etrue < uint64(minExec) {
+		fmt.Fprintf(os.Stderr, "FAIL: /bin/true exec events %d < required %d\n", etrue, minExec)
 		failed = true
 	}
-	if *minTCP > 0 && nc < uint64(*minTCP) {
-		fmt.Fprintf(os.Stderr, "FAIL: tcp_connect events %d < required %d\n", nc, *minTCP)
+	if minTCP > 0 && nc < uint64(minTCP) {
+		fmt.Fprintf(os.Stderr, "FAIL: tcp_connect events %d < required %d\n", nc, minTCP)
 		failed = true
 	}
 	if failed {

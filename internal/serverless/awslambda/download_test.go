@@ -241,6 +241,7 @@ func (r cancelPackageReader) Read(p []byte) (int, error) {
 }
 
 func TestHTTPDownloaderCancellationNeverPublishes(t *testing.T) {
+	t.Parallel()
 	dst, prior := packageDestination(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -354,6 +355,7 @@ func TestHTTPDownloaderRejectsSymlinksAndPreservesHardlinkVictim(t *testing.T) {
 }
 
 func TestHTTPDownloaderDirectoryReplacementDoesNotRedirectPublication(t *testing.T) {
+	t.Parallel()
 	dst, prior := packageDestination(t)
 	dir := filepath.Dir(dst)
 	moved := filepath.Join(filepath.Dir(dir), "original")

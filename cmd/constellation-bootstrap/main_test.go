@@ -10,6 +10,7 @@ import (
 // auth.AuthServer — including that secret-bearing fields pass through and role_mapping is
 // honoured — so the bootstrap seed produces exactly what the API CRUD would.
 func TestParseAuthProviders(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`
 - type: oidc
   name: corp-okta

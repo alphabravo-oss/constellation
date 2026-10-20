@@ -1,3 +1,5 @@
+//go:build integration
+
 package findings
 
 import (
@@ -17,6 +19,7 @@ import (
 )
 
 func TestFindingGetReturnsClusterScope(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	ctx := t.Context()
@@ -50,6 +53,7 @@ func TestFindingGetReturnsClusterScope(t *testing.T) {
 }
 
 func TestVulnerabilityExceptionsClusterScope(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	ctx := t.Context()
@@ -223,6 +227,7 @@ func exceptionByID(t *testing.T, items []vulnerabilityExceptionDTO, id string) v
 }
 
 func TestVulnerabilityExceptionsMissingAuditDoesNotInventFindingEvidence(t *testing.T) {
+	t.Parallel()
 	f := newExceptionEvidenceFixture(t)
 	for _, lifecycle := range []string{"accepted", "suppressed"} {
 		id := uuid.New()
@@ -237,6 +242,7 @@ func TestVulnerabilityExceptionsMissingAuditDoesNotInventFindingEvidence(t *test
 	}
 }
 func TestVulnerabilityExceptionsUsesMatchingFindingAuditAndExplicitApprover(t *testing.T) {
+	t.Parallel()
 	f := newExceptionEvidenceFixture(t)
 	id := uuid.New()
 	f.exec(t, `INSERT INTO findings(id,org_id,cluster_id,asset_id,kind,title,severity,lifecycle,accepted_until) VALUES($1,$2,$3,$4,'vulnerability','finding','high','accepted',NOW()+interval '1 day')`, id, f.org, f.cluster, f.asset)
@@ -259,6 +265,7 @@ func TestVulnerabilityExceptionsUsesMatchingFindingAuditAndExplicitApprover(t *t
 	}
 }
 func TestVulnerabilityExceptionsFindingNullScopeDoesNotInheritAssetCluster(t *testing.T) {
+	t.Parallel()
 	f := newExceptionEvidenceFixture(t)
 	id := uuid.New()
 	f.exec(t, `INSERT INTO findings(id,org_id,asset_id,kind,title,severity,lifecycle,accepted_until) VALUES($1,$2,$3,'vulnerability','global finding','high','accepted',NOW()+interval '1 day')`, id, f.org, f.asset)
@@ -271,6 +278,7 @@ func TestVulnerabilityExceptionsFindingNullScopeDoesNotInheritAssetCluster(t *te
 	}
 }
 func TestVulnerabilityExceptionsSharedDigestHasBothClusterAssociations(t *testing.T) {
+	t.Parallel()
 	f := newExceptionEvidenceFixture(t)
 	otherCluster, otherAsset, acceptance := uuid.New(), uuid.New(), uuid.New()
 	digest := "sha256:" + acceptance.String()
@@ -295,6 +303,7 @@ func TestVulnerabilityExceptionsSharedDigestHasBothClusterAssociations(t *testin
 	}
 }
 func TestVulnerabilityExceptionsImageRevokeActorIsExactRecordedRevoker(t *testing.T) {
+	t.Parallel()
 	f := newExceptionEvidenceFixture(t)
 	digest := "sha256:" + uuid.NewString()
 	f.exec(t, `INSERT INTO images(asset_id,registry,repository,digest) VALUES($1,'example.test','revoked',$2)`, f.asset, digest)

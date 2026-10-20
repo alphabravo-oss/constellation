@@ -436,6 +436,13 @@ type Rule struct {
 	// Namespaces and NamespaceSelector are OR-combined: a request in a listed
 	// namespace OR a namespace whose labels match fires the rule.
 	NamespaceSelector map[string]string
+	// ExcludeNamespaces / ExcludeNamespaceSelector carve namespaces OUT of the
+	// rule (evaluated before the include matchers): system namespaces whose
+	// pods legitimately use hostNetwork/hostPID (CNI, node-exporter, ingress)
+	// are exempted from the built-in rules this way (chart
+	// admission.exemptNamespaces + admission.exemptNamespaceLabel=ignore).
+	ExcludeNamespaces        []string
+	ExcludeNamespaceSelector map[string]string
 	// Groups, when non-empty, scopes the rule to pods that resolve into at
 	// least one Constellation group by id or name. Empty = all groups.
 	Groups []string
@@ -613,6 +620,25 @@ func DefaultRules() []Rule {
 			Conditions: RuleConditions{ReadOnlyRootFS: &t},
 		},
 	}
+}
+
+// ExemptNamespaces returns rules with ExcludeNamespaces / ExcludeNamespaceSelector
+// applied to every rule (used on DefaultRules at start-up; label is the namespace
+// label whose value "ignore" opts a namespace out, empty disables the selector).
+func ExemptNamespaces(rules []Rule, namespaces []string, label string) []Rule {
+	out := make([]Rule, len(rules))
+	for i, r := range rules {
+		r.ExcludeNamespaces = append(append([]string(nil), r.ExcludeNamespaces...), namespaces...)
+		if label != "" {
+			sel := map[string]string{label: "ignore"}
+			for k, v := range r.ExcludeNamespaceSelector {
+				sel[k] = v
+			}
+			r.ExcludeNamespaceSelector = sel
+		}
+		out[i] = r
+	}
+	return out
 }
 
 // SetRules replaces the active rules. It is safe to call while Evaluate is serving requests.
@@ -1307,6 +1333,20 @@ func namespaceMatcher(ctx context.Context, labeler NamespaceLabelResolver, names
 		resolErr error
 	)
 	return func(r Rule) bool {
+		for _, ns := range r.ExcludeNamespaces {
+			if ns == namespace {
+				return false
+			}
+		}
+		if len(r.ExcludeNamespaceSelector) > 0 && labeler != nil {
+			if !resolved {
+				labels, resolErr = labeler.NamespaceLabels(ctx, namespace)
+				resolved = true
+			}
+			if resolErr == nil && labelsMatchSelector(labels, r.ExcludeNamespaceSelector) {
+				return false
+			}
+		}
 		if len(r.Namespaces) == 0 && len(r.NamespaceSelector) == 0 {
 			return true
 		}

@@ -23,6 +23,7 @@ func (fakeScanner) Scan(_ context.Context, req ScanRequest) (ScanResult, error) 
 }
 
 func TestPluginServerClient_RoundTrip(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer((&Server{
 		Manifest: Manifest{Name: "demo", Version: "1.0", Capabilities: []Capability{CapScanner}},
 		Scanner:  fakeScanner{},
@@ -51,6 +52,7 @@ func TestPluginServerClient_RoundTrip(t *testing.T) {
 }
 
 func TestServer_ReturnsNotImplementedForMissingCaps(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer((&Server{
 		Manifest: Manifest{Name: "scanner-only", Version: "1.0", Capabilities: []Capability{CapScanner}},
 		Scanner:  fakeScanner{},
@@ -64,6 +66,7 @@ func TestServer_ReturnsNotImplementedForMissingCaps(t *testing.T) {
 }
 
 func TestCheckOnce_RejectsBadManifest(t *testing.T) {
+	t.Parallel()
 	if err := CheckOnce(Manifest{Name: ""}); err == nil {
 		t.Fatal("empty Name should fail")
 	}

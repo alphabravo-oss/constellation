@@ -1,3 +1,5 @@
+//go:build integration
+
 package scanning
 
 import (
@@ -19,6 +21,7 @@ import (
 )
 
 func TestScannerPackagesFromServerlessPackagesDefaultsEcosystem(t *testing.T) {
+	t.Parallel()
 	got := scannerPackagesFromServerlessPackages(ServerlessPackagesPayload{
 		Runtime:      "python3.11",
 		Architecture: "arm64",
@@ -42,6 +45,7 @@ func TestScannerPackagesFromServerlessPackagesDefaultsEcosystem(t *testing.T) {
 }
 
 func TestServerlessPackagesReportQueuesScanEvidence(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 

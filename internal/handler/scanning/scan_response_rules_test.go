@@ -1,3 +1,5 @@
+//go:build integration
+
 package scanning
 
 import (
@@ -21,6 +23,7 @@ import (
 )
 
 func TestScanResponseRuleLegacyTagIsUnsupported(t *testing.T) {
+	t.Parallel()
 	database := openTestDB(t)
 	t.Cleanup(database.Close)
 	ctx := context.Background()
@@ -158,6 +161,7 @@ FROM audit_events WHERE org_id=$1 AND action='response_rule.action.suppress_log'
 // never fired). It exercises the real folding (scanResponseRuleEvent) feeding the real matcher
 // (responserule.MatchRules), so a regression in field names or rank derivation is caught.
 func TestScanResponseRuleEventFiresOnMatch(t *testing.T) {
+	t.Parallel()
 	target := handler.ScanTarget{
 		Type:       "image",
 		Ref:        "ghcr.io/acme/api:1.2.3",

@@ -1,3 +1,5 @@
+//go:build integration
+
 package scanning
 
 import (
@@ -17,6 +19,7 @@ import (
 )
 
 func TestServerlessInventoryPostureTotalsContinuationAndMatchingCSV(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	ctx := t.Context()
@@ -130,6 +133,7 @@ func TestServerlessInventoryPostureTotalsContinuationAndMatchingCSV(t *testing.T
 }
 
 func TestServerlessInventoryMetadataFieldIsolation(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	ctx := t.Context()

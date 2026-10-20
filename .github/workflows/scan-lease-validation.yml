@@ -11,7 +11,7 @@ on:
       - internal/handler/scanning/**
       - internal/handler/registry_credentials*
       - internal/db/schema.go
-      - db/migrations/184_scan_job_lease_identity.sql
+      - internal/server/database/migrations/184_scan_job_lease_identity.sql
 permissions:
   contents: read
 concurrency:
@@ -33,7 +33,7 @@ jobs:
       - run: bash scripts/install-ci-tools.sh goose gotestsum
       - name: Database-backed lease and worker regression suite
         run: |
-          bash scripts/test-go.sh integration ./internal/handler/scanning ./internal/handler ./cmd/constellation-scanner ./pkg/scanlease ./internal/db ./internal/scanner
+          make test-integration PKG="./internal/handler/scanning ./internal/handler ./cmd/constellation-scanner ./pkg/scanlease ./internal/db ./internal/scanner"
       - name: Compile actual-tool acceptance helper
         run: GOWORK=off go test -c -o artifacts/scanner.test ./internal/scanner
       - if: always()

@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	colcrypto "github.com/alphabravocompany/constellation/internal/crypto"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -56,35 +58,6 @@ func TestGenerateBundleTLS(t *testing.T) {
 		CurrentTime: time.Now(),
 	}); err != nil {
 		t.Fatalf("verify: %v", err)
-	}
-}
-
-// TestEncryptDecryptRoundtrip exercises the AES-256-GCM helpers used to seal the
-// bundle YAML before it's written to cluster_init_bundles.contents_encrypted.
-func TestEncryptDecryptRoundtrip(t *testing.T) {
-	key := make([]byte, 32)
-	for i := range key {
-		key[i] = byte(i)
-	}
-	plain := []byte("apiVersion: constellation.alphabravo.io/v1alpha1\nkind: ClusterInitBundle\n")
-	ct, err := encrypt(key, plain)
-	if err != nil {
-		t.Fatalf("encrypt: %v", err)
-	}
-	if len(ct) <= len(plain) {
-		t.Fatalf("ciphertext too short: %d", len(ct))
-	}
-	got, err := decrypt(key, ct)
-	if err != nil {
-		t.Fatalf("decrypt: %v", err)
-	}
-	if string(got) != string(plain) {
-		t.Fatalf("roundtrip mismatch")
-	}
-	// Wrong key fails.
-	badKey := make([]byte, 32)
-	if _, err := decrypt(badKey, ct); err == nil {
-		t.Fatal("expected decrypt with wrong key to fail")
 	}
 }
 
@@ -180,39 +153,26 @@ func TestStatusOf(t *testing.T) {
 	}
 }
 
-// TestResolveKEKNoPanic is the D3 regression guard: resolveKEK must return a usable
-// 32-byte key (or an error) instead of panicking on the request/startup path.
-func TestResolveKEKNoPanic(t *testing.T) {
-	kek, err := resolveKEK()
-	if err != nil {
-		// Acceptable: a crypto-RNG failure now surfaces as an error, never a panic.
-		t.Logf("resolveKEK returned error (degraded, non-fatal): %v", err)
-		return
-	}
-	if len(kek) != 32 {
-		t.Fatalf("resolveKEK: got %d-byte key, want 32", len(kek))
-	}
-}
-
-// TestKEKReady503 verifies the request-path guard: a handler with no usable KEK writes a
-// 503 (not a panic / 500 / process crash) for routes that seal or unseal bundle contents.
+// TestKEKReady503 verifies the request-path guard: a handler without a column
+// encryption key answers 503 on init-bundle routes; with one it proceeds.
 func TestKEKReady503(t *testing.T) {
-	h := &ClusterInitBundles{} // nil KEK simulates a resolveKEK failure
+	t.Parallel()
+	h := &ClusterInitBundles{} // no key configured
 	rec := httptest.NewRecorder()
 	if h.kekReady(rec) {
-		t.Fatal("kekReady: expected false with a nil KEK")
+		t.Fatal("kekReady: expected false without a key")
 	}
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("kekReady: status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
 	}
-
-	// Healthy KEK path: returns true, writes nothing.
-	h2 := &ClusterInitBundles{kek: make([]byte, 32)}
+	secret, _, _ := colcrypto.GenerateKey()
+	enc, _ := colcrypto.NewEncryptor(secret)
+	h2 := &ClusterInitBundles{enc: enc}
 	rec2 := httptest.NewRecorder()
 	if !h2.kekReady(rec2) {
-		t.Fatal("kekReady: expected true with a 32-byte KEK")
+		t.Fatal("kekReady: expected true with a key")
 	}
-	if rec2.Code != http.StatusOK { // recorder default; nothing written
+	if rec2.Code != http.StatusOK || rec2.Body.Len() != 0 {
 		t.Fatalf("kekReady: unexpected write, status = %d", rec2.Code)
 	}
 }

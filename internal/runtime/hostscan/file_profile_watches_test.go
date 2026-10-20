@@ -8,6 +8,7 @@ import (
 )
 
 func TestCollectRuleFilesAtRoot(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeWatchFile(t, root, "/etc/passwd", "root:x")
 	writeWatchFile(t, root, "/var/run/secrets/kubernetes.io/serviceaccount/token", "token")
@@ -43,6 +44,7 @@ func TestCollectRuleFilesAtRoot(t *testing.T) {
 }
 
 func TestCollectFileProfileWatchesUsesPodWorkloadIDs(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeWatchFile(t, root, "/etc/passwd", "root:x")
 	containers := Containers{
@@ -85,6 +87,7 @@ func TestCollectFileProfileWatchesUsesPodWorkloadIDs(t *testing.T) {
 }
 
 func TestHashWatchFile(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	// sha256("root:x") — the real-modification fingerprint B3 records.
 	const wantHash = "fcdf07f41bc4b373f40adcfa6a90c7b5e7ce92de13ec60274bdce076b61f9a9a"

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/google/uuid"
 
 	"github.com/alphabravocompany/constellation/internal/handler"
@@ -122,17 +124,17 @@ func (h *NetworkConversations) EntriesCSV(w http.ResponseWriter, r *http.Request
 func (h *NetworkConversations) writeStreamInventory(w http.ResponseWriter, r *http.Request, export bool) {
 	subj, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, 401, map[string]string{"error": "subject required"})
+		apiutil.WriteStatus(r.Context(), w, 401, "subject required")
 		return
 	}
 	values, err := inventorylist.Query(r)
 	if err != nil {
-		httpx.WriteJSON(w, 400, map[string]string{"error": "invalid query"})
+		apiutil.WriteStatus(r.Context(), w, 400, "invalid query")
 		return
 	}
 	o, err := parseStreamOptions(values)
 	if err != nil {
-		httpx.WriteJSON(w, 400, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, 400, err.Error())
 		return
 	}
 	var owned bool
@@ -141,13 +143,13 @@ func (h *NetworkConversations) writeStreamInventory(w http.ResponseWriter, r *ht
 		return
 	}
 	if !owned {
-		httpx.WriteJSON(w, 404, map[string]string{"error": "cluster not found"})
+		apiutil.WriteStatus(r.Context(), w, 404, "cluster not found")
 		return
 	}
 	o.GroupMembers, o.GroupName, o.GroupActive, err = handler.ResolveGroupFilterMembers(r.Context(), h.db.Pool(), subj.OrgID, o.ClusterID, o.Group)
 	if err != nil {
 		if err.Error() == "group not found" {
-			httpx.WriteJSON(w, 400, map[string]string{"error": "group not found"})
+			apiutil.WriteStatus(r.Context(), w, 400, "group not found")
 		} else {
 			conversationReadError(w)
 		}

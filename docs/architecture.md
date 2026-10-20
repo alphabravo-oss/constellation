@@ -210,7 +210,7 @@ preserve Constellation's stronger evidence goals with explicit costs and tests.
 
 This is the canonical, frozen baseline for the scan domain as of migration `092`.
 It is documentation, not a migration: the tables already exist in the migration
-chain (`db/migrations/`) and are NOT being rewritten here. The point is to make
+chain (`internal/server/database/migrations/`) and are NOT being rewritten here. The point is to make
 future churn visible against a written baseline. The scan domain has historically
 been the churniest part of the schema (`scan_jobs` accreted ALTERs across
 `008,028,034,054,057,062,066,081,084`; `image_scan_artifacts` created in `068`

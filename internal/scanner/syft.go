@@ -34,9 +34,6 @@ func (s *SyftEngine) Scan(ctx context.Context, ref string, opts ScanOptions) (*E
 	if opts.Platform != "" {
 		args = append(args, "--platform", opts.Platform)
 	}
-	if opts.Insecure {
-		args = append(args, "--registry-insecure-skip-tls-verify")
-	}
 
 	ctx, cancel := withTimeout(ctx, opts.Timeout, 5*time.Minute)
 	defer cancel()
@@ -357,6 +354,16 @@ func RegistryEnvironment(opts ScanOptions) []string {
 			isolated = append(isolated, entry)
 		}
 		env = isolated
+	}
+	if opts.Insecure {
+		// syft and grype take registry transport options from the environment only
+		// (there is no --registry-insecure-* CLI flag); trivy uses --insecure.
+		env = append(env,
+			"SYFT_REGISTRY_INSECURE_SKIP_TLS_VERIFY=true",
+			"SYFT_REGISTRY_INSECURE_USE_HTTP=true",
+			"GRYPE_REGISTRY_INSECURE_SKIP_TLS_VERIFY=true",
+			"GRYPE_REGISTRY_INSECURE_USE_HTTP=true",
+		)
 	}
 	if opts.Username != "" || opts.Password != "" {
 		env = append(env,

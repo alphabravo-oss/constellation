@@ -14,6 +14,7 @@ import (
 // exported to a CR (policydb.AdmissionCR) and fed back through the reconciler's mapping
 // (mapAdmissionRule) reproduces the identical row. Export then `kubectl apply` is lossless.
 func TestExportRoundTrip_Admission(t *testing.T) {
+	t.Parallel()
 	org := uuid.New()
 	want := policydb.AdmissionRuleRow{
 		OrgID:       org,
@@ -48,6 +49,7 @@ func TestExportRoundTrip_Admission(t *testing.T) {
 // exported to a CR (policydb.ResponseCR) and fed back through mapResponseRule reproduces the
 // identical rule (modulo the DB-assigned ID, which is not part of the CR's identity).
 func TestExportRoundTrip_Response(t *testing.T) {
+	t.Parallel()
 	org := uuid.New()
 	want := responserule.ResponseRule{
 		OrgID:     org,

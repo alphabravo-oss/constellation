@@ -7,6 +7,7 @@ import (
 )
 
 func TestParseRejectsUntrustedSortAndOrder(t *testing.T) {
+	t.Parallel()
 	sorts := map[string]string{"scan": "last_scanned_at"}
 	for _, raw := range []string{"sort=unknown", "sort=scan%3BDROP+TABLE+orgs", "order=desc%3Bselect+1"} {
 		values, _ := url.ParseQuery(raw)
@@ -25,6 +26,7 @@ func TestParseRejectsUntrustedSortAndOrder(t *testing.T) {
 	}
 }
 func TestFilterAllAndInvalidValues(t *testing.T) {
+	t.Parallel()
 	for _, value := range []string{"", "all", "critical"} {
 		v, err := Filter(url.Values{"severity": {value}}, "severity", "critical")
 		if err != nil || value == "critical" && v != value {
@@ -36,6 +38,7 @@ func TestFilterAllAndInvalidValues(t *testing.T) {
 	}
 }
 func TestCSVHeadersIdentifyMatchingScopeAndCap(t *testing.T) {
+	t.Parallel()
 	for _, total := range []int64{0, 100001} {
 		w := httptest.NewRecorder()
 		WriteCSV(w, "inventory.csv", []byte("ID\n"), Metadata{Total: total})

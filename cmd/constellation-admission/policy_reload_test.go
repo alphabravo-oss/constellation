@@ -12,6 +12,7 @@ import (
 )
 
 func TestAdmissionPolicyRowsToRulesParsesSupportedRows(t *testing.T) {
+	t.Parallel()
 	profile, ok := admission.BuiltInAdmissionProfile("strict-hardening")
 	if !ok {
 		t.Fatal("strict-hardening profile missing")
@@ -38,6 +39,7 @@ func TestAdmissionPolicyRowsToRulesParsesSupportedRows(t *testing.T) {
 }
 
 func TestAdmissionPolicyRowsToRulesParsesEvidenceBackedRows(t *testing.T) {
+	t.Parallel()
 	profile, ok := admission.BuiltInAdmissionProfile("critical-vulnerabilities-blocked")
 	if !ok {
 		t.Fatal("critical profile missing")
@@ -60,6 +62,7 @@ func TestAdmissionPolicyRowsToRulesParsesEvidenceBackedRows(t *testing.T) {
 }
 
 func TestAdmissionPolicyRowsToRulesRejectsInvalidYAML(t *testing.T) {
+	t.Parallel()
 	_, err := admissionPolicyRowsToRules([]admissionPolicyRow{{
 		Name:     "bad",
 		Mode:     "enforce",
@@ -71,6 +74,7 @@ func TestAdmissionPolicyRowsToRulesRejectsInvalidYAML(t *testing.T) {
 }
 
 func TestCELPolicyParseErrorRemainsFailClosed(t *testing.T) {
+	t.Parallel()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	rules := celPolicyRowsToRules([]admissionPolicyRow{{Name: "broken", Mode: "enforce", SpecYAML: "spec: ["}}, logger)
 	if len(rules) != 1 {

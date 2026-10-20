@@ -4,10 +4,11 @@ package lifecycle
 
 import (
 	"context"
-	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -17,15 +18,7 @@ import (
 
 func sessionPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	dsn := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("requires disposable integration database")
-	}
-	base, err := pgxpool.New(t.Context(), dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(base.Close)
+	base := pgtest.Pool(t)
 	pool := pgfixture.Schema(t, base)
 	execSessionSQL(t, pool, `CREATE TABLE user_sessions (LIKE public.user_sessions INCLUDING ALL);
  CREATE TABLE browser_refresh_tokens (LIKE public.browser_refresh_tokens INCLUDING ALL);
@@ -59,6 +52,7 @@ func seedRefresh(t *testing.T, pool *pgxpool.Pool, id uuid.UUID, expiry time.Tim
 }
 
 func TestSessionReaperPreservesActiveLegacyAndReuseEvidence(t *testing.T) {
+	t.Parallel()
 	pool := sessionPool(t)
 	past, future := time.Now().Add(-time.Hour), time.Now().Add(time.Hour)
 	expired := seedSession(t, pool, &past)
@@ -90,6 +84,7 @@ func TestSessionReaperPreservesActiveLegacyAndReuseEvidence(t *testing.T) {
 }
 
 func TestSessionReaperBoundsCascadeAndSkipsLocks(t *testing.T) {
+	t.Parallel()
 	pool := sessionPool(t)
 	past := time.Now().Add(-time.Hour)
 	id := seedSession(t, pool, &past)
@@ -124,6 +119,7 @@ func TestSessionReaperBoundsCascadeAndSkipsLocks(t *testing.T) {
 }
 
 func TestNetworkReaperKeepsFreshRowsAndScopesCompositeKeys(t *testing.T) {
+	t.Parallel()
 	pool := sessionPool(t)
 	org, cluster, other := uuid.New(), uuid.New(), uuid.New()
 	execSessionSQL(t, pool, `INSERT INTO network_sessions(org_id,cluster_id,node,id,updated_at)
@@ -141,6 +137,7 @@ func TestNetworkReaperKeepsFreshRowsAndScopesCompositeKeys(t *testing.T) {
 }
 
 func TestSessionReaperRejectsInvalidBatchAndCancellation(t *testing.T) {
+	t.Parallel()
 	pool := sessionPool(t)
 	for _, n := range []int{0, -1, 5001} {
 		if _, err := ReapSessions(t.Context(), pool, n); err == nil {

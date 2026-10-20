@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -89,7 +91,7 @@ func (h *CustomRoles) List(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.Query(r.Context(),
 		`SELECT id, name, description, verbs FROM custom_roles WHERE org_id = $1 ORDER BY name`, subj.OrgID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()
@@ -98,7 +100,7 @@ func (h *CustomRoles) List(w http.ResponseWriter, r *http.Request) {
 		var d customRoleDTO
 		var id uuid.UUID
 		if err := rows.Scan(&id, &d.Name, &d.Description, &d.Verbs); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		d.ID = id.String()
@@ -111,21 +113,21 @@ func (h *CustomRoles) Create(w http.ResponseWriter, r *http.Request) {
 	subj, _ := SubjectFrom(r.Context())
 	var body customRoleDTO
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid body")
 		return
 	}
 	name := strings.TrimSpace(body.Name)
 	if name == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "name required")
 		return
 	}
 	if rbac.IsRole(name) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name collides with a built-in role"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "name collides with a built-in role")
 		return
 	}
 	verbs, err := sanitizeGrantableVerbs(body.Verbs)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	var id uuid.UUID
@@ -134,10 +136,10 @@ func (h *CustomRoles) Create(w http.ResponseWriter, r *http.Request) {
 		subj.OrgID, name, strings.TrimSpace(body.Description), verbs).Scan(&id)
 	if err != nil {
 		if strings.Contains(err.Error(), "custom_roles_org_id_name_key") {
-			writeJSON(w, http.StatusConflict, map[string]string{"error": "a custom role with that name already exists"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusConflict, "a custom role with that name already exists")
 			return
 		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	h.invalidate(subj.OrgID)
@@ -148,28 +150,28 @@ func (h *CustomRoles) Update(w http.ResponseWriter, r *http.Request) {
 	subj, _ := SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid id")
 		return
 	}
 	var body customRoleDTO
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid body")
 		return
 	}
 	verbs, err := sanitizeGrantableVerbs(body.Verbs)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	ct, err := h.db.Exec(r.Context(),
 		`UPDATE custom_roles SET description=$1, verbs=$2, updated_at=now() WHERE id=$3 AND org_id=$4`,
 		strings.TrimSpace(body.Description), verbs, id, subj.OrgID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if ct.RowsAffected() == 0 {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "custom role not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "custom role not found")
 		return
 	}
 	h.invalidate(subj.OrgID)
@@ -180,7 +182,7 @@ func (h *CustomRoles) Delete(w http.ResponseWriter, r *http.Request) {
 	subj, _ := SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid id")
 		return
 	}
 	// Block delete while still assigned, so we never leave dangling role_assignments.
@@ -189,16 +191,16 @@ func (h *CustomRoles) Delete(w http.ResponseWriter, r *http.Request) {
 		`SELECT count(*) FROM role_assignments ra JOIN custom_roles cr ON cr.name = ra.role
 		   WHERE cr.id = $1 AND cr.org_id = $2 AND ra.scope_org_id = $2`, id, subj.OrgID).Scan(&assigned)
 	if assigned > 0 {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "custom role is still assigned to users"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusConflict, "custom role is still assigned to users")
 		return
 	}
 	ct, err := h.db.Exec(r.Context(), `DELETE FROM custom_roles WHERE id=$1 AND org_id=$2`, id, subj.OrgID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if ct.RowsAffected() == 0 {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "custom role not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "custom role not found")
 		return
 	}
 	h.invalidate(subj.OrgID)

@@ -1,3 +1,5 @@
+//go:build integration
+
 package network
 
 import (
@@ -14,6 +16,7 @@ import (
 )
 
 func TestNetworkActivityLargeFixtureFiltersAndPages(t *testing.T) {
+	t.Parallel()
 	database := openTestDB(t)
 	t.Cleanup(database.Close)
 	pool := database.Pool()

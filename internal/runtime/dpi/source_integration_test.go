@@ -21,6 +21,7 @@ import (
 //	sudo -E env "PATH=$PATH" go test -tags=linux,cgo,integration \
 //	    ./internal/runtime/dpi/... -run TestNFQUEUEAttach
 func TestNFQUEUEAttach(t *testing.T) {
+	t.Parallel()
 	eng := NewEngine(nil)
 	src, err := NewSource(eng, SourceConfig{QueueNum: 99, VerdictAccept: true})
 	if err != nil {

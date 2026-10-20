@@ -10,6 +10,7 @@ import (
 )
 
 func TestWorkloadOwnerResolverVerifiesUIDAndNamespace(t *testing.T) {
+	t.Parallel()
 	yes := true
 	rs := &appsv1.ReplicaSet{ObjectMeta: metav1.ObjectMeta{Namespace: "payments", Name: "api-hash", UID: "rs-uid", OwnerReferences: []metav1.OwnerReference{{Kind: "Deployment", Name: "api", UID: "deployment-uid", Controller: &yes}}}}
 	job := &batchv1.Job{ObjectMeta: metav1.ObjectMeta{Namespace: "payments", Name: "backup-123", UID: "job-uid", OwnerReferences: []metav1.OwnerReference{{Kind: "CronJob", Name: "backup", UID: "cron-uid", Controller: &yes}}}}

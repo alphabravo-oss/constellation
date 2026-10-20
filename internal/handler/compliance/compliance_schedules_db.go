@@ -30,6 +30,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -136,12 +138,12 @@ func NextRunFromCron(expr, tz string, from time.Time) (time.Time, error) {
 func (h *ComplianceSchedulesDB) List(w http.ResponseWriter, r *http.Request) {
 	subj, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthenticated"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "unauthenticated")
 		return
 	}
 	clusterArg, err := sqlx.ParseClusterIDParam(r)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -156,7 +158,7 @@ SELECT id, org_id, cluster_id, name, description, framework, cron_expression, ti
    AND ($2::uuid IS NULL OR cluster_id = $2 OR cluster_id IS NULL)
  ORDER BY name`, subj.OrgID, clusterArg)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()
@@ -165,7 +167,7 @@ SELECT id, org_id, cluster_id, name, description, framework, cron_expression, ti
 	for rows.Next() {
 		row, err := scanScheduleRow(rows)
 		if err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		out = append(out, row)
@@ -187,12 +189,12 @@ func (h *ComplianceSchedulesDB) Get(w http.ResponseWriter, r *http.Request) {
 	subj, _ := authctx.SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid id")
 		return
 	}
 	row, err := h.loadSchedule(r.Context(), subj.OrgID, id)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, err.Error())
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, row)
@@ -215,16 +217,16 @@ type createScheduleReq struct {
 func (h *ComplianceSchedulesDB) Create(w http.ResponseWriter, r *http.Request) {
 	subj, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthenticated"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "unauthenticated")
 		return
 	}
 	var req createScheduleReq
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad body"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad body")
 		return
 	}
 	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Framework) == "" || strings.TrimSpace(req.CronExpression) == "" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "name, framework, cron_expression are required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "name, framework, cron_expression are required")
 		return
 	}
 	if req.Timezone == "" {
@@ -242,14 +244,14 @@ func (h *ComplianceSchedulesDB) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	next, err := NextRunFromCron(req.CronExpression, req.Timezone, time.Now())
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	var clusterArg any
 	if req.ClusterID != nil && *req.ClusterID != "" {
 		cid, err := uuid.Parse(*req.ClusterID)
 		if err != nil {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster_id"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid cluster_id")
 			return
 		}
 		clusterArg = cid
@@ -270,7 +272,7 @@ RETURNING id`,
 		req.CronExpression, req.Timezone, enabled, deliveryRaw,
 		req.ReportFormat, req.ReportTemplate, next, subj.UserID).Scan(&id)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	uid := subj.UserID
@@ -304,21 +306,21 @@ func (h *ComplianceSchedulesDB) Patch(w http.ResponseWriter, r *http.Request) {
 	subj, _ := authctx.SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid id")
 		return
 	}
 	existing, err := h.loadSchedule(r.Context(), subj.OrgID, id)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, err.Error())
 		return
 	}
 	var req patchScheduleReq
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad body"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad body")
 		return
 	}
 	if req.ExpectedUpdatedAt != nil && !req.ExpectedUpdatedAt.Equal(existing.UpdatedAt) {
-		httpx.WriteJSON(w, http.StatusConflict, map[string]string{"error": "schedule changed; reload before saving"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusConflict, "schedule changed; reload before saving")
 		return
 	}
 	if req.Name != nil {
@@ -350,7 +352,7 @@ func (h *ComplianceSchedulesDB) Patch(w http.ResponseWriter, r *http.Request) {
 	}
 	next, err := NextRunFromCron(existing.CronExpression, existing.Timezone, time.Now())
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	deliveryRaw, _ := json.Marshal(existing.Delivery)
@@ -364,11 +366,11 @@ UPDATE compliance_schedules
 		existing.Timezone, deliveryRaw, existing.ReportFormat, existing.ReportTemplate,
 		existing.Framework, next, id, subj.OrgID, existing.UpdatedAt)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if ct.RowsAffected() == 0 {
-		httpx.WriteJSON(w, http.StatusConflict, map[string]string{"error": "schedule changed; reload before saving"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusConflict, "schedule changed; reload before saving")
 		return
 	}
 	uid := subj.UserID
@@ -389,16 +391,16 @@ func (h *ComplianceSchedulesDB) Delete(w http.ResponseWriter, r *http.Request) {
 	subj, _ := authctx.SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid id")
 		return
 	}
 	ct, err := h.db.Pool().Exec(r.Context(), `DELETE FROM compliance_schedules WHERE id=$1 AND org_id=$2`, id, subj.OrgID)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if ct.RowsAffected() == 0 {
-		httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "not found")
 		return
 	}
 	uid := subj.UserID
@@ -418,7 +420,7 @@ func (h *ComplianceSchedulesDB) RunNow(w http.ResponseWriter, r *http.Request) {
 	subj, _ := authctx.SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid id")
 		return
 	}
 	ct, err := h.db.Pool().Exec(r.Context(), `
@@ -426,11 +428,11 @@ UPDATE compliance_schedules
    SET next_run_at = NOW(), enabled = TRUE, updated_at = NOW()
  WHERE id=$1 AND org_id=$2`, id, subj.OrgID)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if ct.RowsAffected() == 0 {
-		httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "not found")
 		return
 	}
 	uid := subj.UserID
@@ -454,7 +456,7 @@ func (h *ComplianceSchedulesDB) Runs(w http.ResponseWriter, r *http.Request) {
 	subj, _ := authctx.SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid id")
 		return
 	}
 	limit := 50
@@ -473,7 +475,7 @@ SELECT id, org_id, cluster_id, schedule_id, framework, started_at, completed_at,
  ORDER BY started_at DESC
  LIMIT $3`, subj.OrgID, id, limit)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()
@@ -481,13 +483,13 @@ SELECT id, org_id, cluster_id, schedule_id, framework, started_at, completed_at,
 	for rows.Next() {
 		row, err := scanRunRow(rows)
 		if err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		out = append(out, row)
 	}
 	if err := rows.Err(); err != nil {
-		httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, 500, err.Error())
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"runs": out})
@@ -499,7 +501,7 @@ func (h *ComplianceSchedulesDB) Artifact(w http.ResponseWriter, r *http.Request)
 	subj, _ := authctx.SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid id")
 		return
 	}
 	var uri, sig, format, mediaType, filename string
@@ -510,14 +512,14 @@ SELECT COALESCE(artifact_uri,''), COALESCE(artifact_signature,''),
  WHERE r.id=$1 AND r.org_id=$2`, id, subj.OrgID).Scan(&uri, &sig, &format, &mediaType, &filename)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
-			httpx.WriteJSON(w, 500, map[string]string{"error": "artifact metadata unavailable"})
+			apiutil.WriteStatus(r.Context(), w, 500, "artifact metadata unavailable")
 			return
 		}
-		httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "run not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "run not found")
 		return
 	}
 	if uri == "" {
-		httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "no artifact for this run"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "no artifact for this run")
 		return
 	}
 	if sig != "" {
@@ -527,7 +529,7 @@ SELECT COALESCE(artifact_uri,''), COALESCE(artifact_signature,''),
 		path := strings.TrimPrefix(uri, "file://")
 		f, err := openComplianceArtifact(path)
 		if err != nil {
-			httpx.WriteJSON(w, http.StatusGone, map[string]string{"error": "artifact file missing"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusGone, "artifact file missing")
 			return
 		}
 		defer f.Close()

@@ -10,6 +10,7 @@ import (
 )
 
 func TestPrivateArtifactAtomicReplacementAndPermissions(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "evidence")
 	if err := mkdirSecurityFixture(dir); err != nil {
 		t.Fatal(err)
@@ -68,6 +69,7 @@ type failedReader struct{}
 
 func (failedReader) Read([]byte) (int, error) { return 0, errors.New("source unavailable") }
 func TestFailedCopyPreservesPriorArtifactAndRemovesTemporary(t *testing.T) {
+	t.Parallel()
 	root, err := OpenPrivateDir(filepath.Join(t.TempDir(), "store"))
 	if err != nil {
 		t.Fatal(err)
@@ -93,6 +95,7 @@ func TestFailedCopyPreservesPriorArtifactAndRemovesTemporary(t *testing.T) {
 	}
 }
 func TestPrivateDirectoryRejectsSharedRootsAndSymlink(t *testing.T) {
+	t.Parallel()
 	for _, dir := range []string{string(filepath.Separator), os.TempDir()} {
 		if root, err := OpenPrivateDir(dir); err == nil {
 			_ = root.Close()
@@ -117,6 +120,7 @@ func TestPrivateDirectoryRejectsSharedRootsAndSymlink(t *testing.T) {
 	}
 }
 func TestPinnedDirectoryNeverUsesReplacementPath(t *testing.T) {
+	t.Parallel()
 	parent := t.TempDir()
 	dir := filepath.Join(parent, "store")
 	root, err := OpenPrivateDir(dir)
@@ -147,6 +151,7 @@ func TestPinnedDirectoryNeverUsesReplacementPath(t *testing.T) {
 	}
 }
 func TestManagedDirectoryRejectsAnotherOwner(t *testing.T) {
+	t.Parallel()
 	if os.Geteuid() != 0 {
 		t.Skip("requires root to construct another-owned directory")
 	}

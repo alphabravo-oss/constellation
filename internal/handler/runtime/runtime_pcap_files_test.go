@@ -1,3 +1,5 @@
+//go:build integration
+
 package runtime
 
 import (
@@ -191,9 +193,6 @@ type pcapFilesFixture struct {
 
 func pcapFilesDB(t *testing.T) *pcapFilesFixture {
 	t.Helper()
-	if os.Getenv("CONSTELLATION_TEST_DATABASE_URL") == "" {
-		t.Skip("requires disposable PostgreSQL fixture")
-	}
 	d := openTestDB(t)
 	t.Cleanup(d.Close)
 	ctx := t.Context()

@@ -1,3 +1,5 @@
+//go:build integration
+
 package policy
 
 import (
@@ -65,6 +67,7 @@ func withSubj(req *http.Request, org, user uuid.UUID) *http.Request {
 }
 
 func TestResponseRuleDefs_CreateValidatesAndPersists(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	pool := d.Pool()
@@ -110,6 +113,7 @@ func TestResponseRuleDefs_CreateValidatesAndPersists(t *testing.T) {
 }
 
 func TestResponseRuleDefs_RejectsTagOnCreateAndUpdate(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	pool := d.Pool()
@@ -143,6 +147,7 @@ VALUES ($1, 'legacy-tag', 'process', '[]'::jsonb, '[{"type":"tag"}]'::jsonb) RET
 }
 
 func TestResponseRuleDefs_RejectsScanSuppressLog(t *testing.T) {
+	t.Parallel()
 	database := openTestDB(t)
 	t.Cleanup(database.Close)
 	pool := database.Pool()
@@ -260,6 +265,7 @@ func TestResponseRuleDefs_RejectsScanSuppressLog(t *testing.T) {
 // naming a real receiver is accepted (201). This exercises resolveReceiverID/validateReceivers
 // — the same resolution fireWebhook uses to route (DispatchTo) instead of broadcast.
 func TestResponseRuleDefs_WebhookReceiverValidation(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	pool := d.Pool()
@@ -295,6 +301,7 @@ func TestResponseRuleDefs_WebhookReceiverValidation(t *testing.T) {
 }
 
 func TestResponseRuleDefs_AgentSyncSerializesEnabledByPriority(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	pool := d.Pool()
@@ -347,6 +354,7 @@ VALUES ($1,$2,$3,$4,'process','[]'::jsonb,'[{"type":"quarantine"}]'::jsonb)`,
 }
 
 func TestResponseRuleDefs_LegacyTagVisibleButNotSynced(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	pool := d.Pool()
@@ -402,6 +410,7 @@ INSERT INTO response_rules (org_id, name, enabled, event_type, conditions, actio
 // and likewise that a user-scoped List for org B never leaks org A's rules. This guards
 // the cross-org isolation the loadRules WHERE org_id=$1 filter provides.
 func TestResponseRuleDefs_CrossOrgIsolation(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	pool := d.Pool()
@@ -457,6 +466,7 @@ VALUES ($1,$2,true,10,'process','[]'::jsonb,'[{"type":"quarantine"}]'::jsonb)`, 
 }
 
 func TestResponseRuleDefs_AgentSyncRequiresAgentToken(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	h := NewResponseRuleDefs(d, audit.New(d.Pool()))
@@ -469,6 +479,7 @@ func TestResponseRuleDefs_AgentSyncRequiresAgentToken(t *testing.T) {
 }
 
 func TestResponseRuleDefs_EvaluateReturnsOrderedActions(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	pool := d.Pool()
@@ -504,6 +515,7 @@ INSERT INTO response_rules (org_id, name, enabled, priority, event_type, conditi
 // the verb is forbidden, a ClusterAdmin (which carries it) is allowed. The wrapper mirrors
 // server.requireVerb's authorization decision exactly.
 func TestResponseRuleDefs_RBAC403(t *testing.T) {
+	t.Parallel()
 	org := uuid.New()
 	gate := func(verb rbac.Verb, asg []rbac.RoleAssignment, next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {

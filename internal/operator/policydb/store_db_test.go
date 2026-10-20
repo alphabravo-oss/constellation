@@ -1,10 +1,13 @@
+//go:build integration
+
 package policydb
 
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
+
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -17,22 +20,8 @@ import (
 // so the test is self-contained against a bare or fully-migrated database.
 func openTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	url := os.Getenv("DATABASE_URL")
-	if url == "" {
-		url = os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-	}
-	if url == "" {
-		t.Skip("CONSTELLATION_TEST_DATABASE_URL not set; integration test")
-	}
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, url)
-	if err != nil {
-		t.Skipf("skipping: cannot reach test DB (%v)", err)
-	}
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		t.Skipf("skipping: cannot ping test DB (%v)", err)
-	}
+	pool := pgtest.Pool(t)
 	stmts := []string{
 		`CREATE EXTENSION IF NOT EXISTS pgcrypto`,
 		`CREATE TABLE IF NOT EXISTS orgs (
@@ -92,6 +81,7 @@ func seedOrg(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
 }
 
 func TestStore_AdmissionUpsertIdempotentDeleteScoped(t *testing.T) {
+	t.Parallel()
 	pool := openTestPool(t)
 	defer pool.Close()
 	org := seedOrg(t, pool)
@@ -147,6 +137,7 @@ func TestStore_AdmissionUpsertIdempotentDeleteScoped(t *testing.T) {
 // whose (org, name) collides with a pre-existing imperative (REST/UI-authored) row must NOT overwrite
 // or relabel it — the upsert returns ErrImperativeConflict and the imperative row is left intact.
 func TestStore_UpsertRefusesImperativeClobber(t *testing.T) {
+	t.Parallel()
 	pool := openTestPool(t)
 	defer pool.Close()
 	org := seedOrg(t, pool)
@@ -195,6 +186,7 @@ func TestStore_UpsertRefusesImperativeClobber(t *testing.T) {
 }
 
 func TestStore_ResponseUpsertIdempotentDeleteScoped(t *testing.T) {
+	t.Parallel()
 	pool := openTestPool(t)
 	defer pool.Close()
 	org := seedOrg(t, pool)

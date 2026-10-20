@@ -156,38 +156,16 @@ func evalCriterion(c dsl.Criterion, r Record) bool {
 	case "NEQ":
 		out = !present || (len(c.Values) > 0 && v != c.Values[0])
 	case "IN":
-		for _, val := range c.Values {
-			if v == val {
-				out = true
-				break
-			}
-		}
+		out = anyValue(c.Values, func(val string) bool { return v == val })
 	case "NOTIN":
-		out = true
-		for _, val := range c.Values {
-			if v == val {
-				out = false
-				break
-			}
-		}
+		out = !anyValue(c.Values, func(val string) bool { return v == val })
 	case "CONTAINS":
-		for _, val := range c.Values {
-			if strings.Contains(v, val) {
-				out = true
-				break
-			}
-		}
+		out = anyValue(c.Values, func(val string) bool { return strings.Contains(v, val) })
 	case "REGEX":
-		for _, val := range c.Values {
+		out = anyValue(c.Values, func(val string) bool {
 			re, err := regexp.Compile(val)
-			if err != nil {
-				continue
-			}
-			if re.MatchString(v) {
-				out = true
-				break
-			}
-		}
+			return err == nil && re.MatchString(v)
+		})
 	case "GT", "GTE", "LT", "LTE":
 		out = numericCompare(v, c.Operator, c.Values)
 	}
@@ -195,6 +173,16 @@ func evalCriterion(c dsl.Criterion, r Record) bool {
 		out = !out
 	}
 	return out
+}
+
+// anyValue reports whether match holds for at least one value.
+func anyValue(vals []string, match func(string) bool) bool {
+	for _, val := range vals {
+		if match(val) {
+			return true
+		}
+	}
+	return false
 }
 
 func numericCompare(have, op string, vals []string) bool {

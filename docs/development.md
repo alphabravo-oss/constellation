@@ -10,13 +10,13 @@ make dev-down
 
 `scripts/dev.sh up`:
 
-1. checks for `docker go air node npx goose` and prints install hints for anything missing;
+1. checks for `docker go air node npx` and prints install hints for anything missing;
 2. loads `.env.dev` (tracked defaults) then `.env.dev.local` (gitignored; auto-created from
    `.env.dev` on first run — put your overrides there);
 3. starts `deploy/dev/compose.yaml`: pgvector Postgres 16 on `:15432`, Prometheus `:9090`,
    Tempo `:3200` (OTLP gRPC `:4317`), Loki `:3100`, Grafana `:3000` with provisioned
    datasources (`deploy/dev/observability/`);
-4. runs `goose up` and seeds `admin@demo.test` / `Constellation!1` (`cmd/constellation-seed`);
+4. applies the embedded migrations (`constellation-api --migrate-only`) and seeds `admin@demo.test` / `Constellation!1` (`cmd/constellation-seed`);
 5. starts `constellation-api` (`:18080`, admin `:18081`), `constellation-operator`
    (`:18082` metrics, `:18083` probes, watching the `constellation-dev` namespace of
    `$KUBECONFIG` so it never fights a deployed operator) and `constellation-scanner`
@@ -28,8 +28,7 @@ The scanner needs `trivy`, `grype`, `syft` on `PATH` to run real scans; without 
 serves health/metrics and logs the missing tools.
 
 Install the Go tools once: `go install github.com/air-verse/air@latest` and
-`go install github.com/pressly/goose/v3/cmd/goose@latest`; `make tools` installs the CI
-pins (golangci-lint, gosec, govulncheck, gitleaks, gotestsum, goose, shellcheck).
+`make tools` installs the CI pins (golangci-lint, gosec, govulncheck, gitleaks, gotestsum, shellcheck).
 
 ## Quality gates
 
@@ -37,7 +36,7 @@ pins (golangci-lint, gosec, govulncheck, gitleaks, gotestsum, goose, shellcheck)
 |---|---|
 | `make check` | lint (golangci-lint v2), vet, fmt (verify-only), shellcheck, frontend lint + tsc, unit tests |
 | `make test` | gotestsum `-race -shuffle=on -count=1 ./...` — no Docker; DB tests skip when `CONSTELLATION_TEST_DATABASE_URL` is unset |
-| `make test-integration` | disposable `pgvector/pgvector:pg16`, `goose up`, seed, `-tags=integration -p 1` |
+| `make test-integration` | `-tags=integration -p 8`; `internal/testutil/pgtest` starts one `pgvector/pgvector:pg16` testcontainer per test process and clones a migrated template DB per test (pgtestdb) |
 | `make security` | gosec, govulncheck, gitleaks (full history) → SARIF under `artifacts/` |
 | `make helm-lint helm-template-smoke` | chart lint + renders across value profiles (Helm 4) |
 | `make e2e` | Playwright; `PLAYWRIGHT_BASE_URL=http://localhost:5173 VITE_API_URL=http://localhost:18080` against the dev loop |

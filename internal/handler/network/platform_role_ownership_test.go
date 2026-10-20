@@ -1,3 +1,5 @@
+//go:build integration
+
 package network
 
 import (
@@ -19,6 +21,7 @@ import (
 )
 
 func TestNetworkEvidenceRolesPodOwnershipAndKindAmbiguity(t *testing.T) {
+	t.Parallel()
 	database := openTestDB(t)
 	t.Cleanup(database.Close)
 	ctx, pool := context.Background(), database.Pool()
@@ -185,6 +188,7 @@ func TestNetworkEvidenceRolesPodOwnershipAndKindAmbiguity(t *testing.T) {
 }
 
 func TestNetworkRoleLookupFailureIsVisible(t *testing.T) {
+	t.Parallel()
 	database := openTestDB(t)
 	t.Cleanup(database.Close)
 	ctx, pool := context.Background(), database.Pool()

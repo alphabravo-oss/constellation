@@ -1,3 +1,5 @@
+//go:build integration
+
 package admissionevidence
 
 import (
@@ -16,6 +18,7 @@ import (
 // evaluated against the image's distinct-CVE counts. DB-backed; skips when the
 // test Postgres is unreachable, mirroring the other *FromPostgres tests.
 func TestAdmissionEvidenceCVEGranularityCountsFromPostgres(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	pool := openAdmissionTestPool(t)
 	defer pool.Close()

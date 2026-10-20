@@ -11,6 +11,7 @@ import (
 // the inner hook FIFO and that the hot-path Hook() returns without waiting on
 // the (slow) inner hook.
 func TestAsyncDenyHook_DeliversInOrder(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	var seen []string
 	done := make(chan struct{})
@@ -51,6 +52,7 @@ func TestAsyncDenyHook_DeliversInOrder(t *testing.T) {
 // and the inner hook runs under a usable (non-cancelled) context even though the
 // admission request context is long gone.
 func TestAsyncDenyHook_DrainsOnClose(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	processed := 0
 	ctxOK := true
@@ -94,6 +96,7 @@ func TestAsyncDenyHook_DrainsOnClose(t *testing.T) {
 // the buffer is full: excess events are dropped (counted) rather than holding
 // up the admission deny verdict.
 func TestAsyncDenyHook_DropsWhenSaturated(t *testing.T) {
+	t.Parallel()
 	block := make(chan struct{})
 	inner := func(_ context.Context, _ DenyEvent) { <-block } // wedge the worker
 	a := NewAsyncDenyHook(context.Background(), inner, 1)
@@ -118,6 +121,7 @@ func TestAsyncDenyHook_DropsWhenSaturated(t *testing.T) {
 // TestAsyncDenyHook_NilInner is a safety check: a nil inner hook yields a nil
 // Hook() and a no-op Close (audit disabled path).
 func TestAsyncDenyHook_NilInner(t *testing.T) {
+	t.Parallel()
 	a := NewAsyncDenyHook(context.Background(), nil, 4)
 	if a.Hook() != nil {
 		t.Fatal("nil inner should yield nil Hook")

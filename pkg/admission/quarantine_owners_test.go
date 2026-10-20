@@ -32,6 +32,7 @@ func (r *ownerStub) Parent(ctx context.Context, ns string, owner metav1.OwnerRef
 	return &metav1.OwnerReference{Kind: "Deployment", Name: "api"}, nil
 }
 func TestDeploymentQuarantineFollowsVerifiedReplicaSetOwner(t *testing.T) {
+	t.Parallel()
 	yes := true
 	for _, tc := range []struct {
 		namespace, rs string
@@ -63,6 +64,7 @@ func TestDeploymentQuarantineFollowsVerifiedReplicaSetOwner(t *testing.T) {
 }
 
 func TestControllerQuarantineUsesObjectIdentityNotTemplateName(t *testing.T) {
+	t.Parallel()
 	yes := true
 	for _, kind := range []string{"Deployment", "ReplicaSet", "Job"} {
 		e := NewEngine()
@@ -82,6 +84,7 @@ func TestControllerQuarantineUsesObjectIdentityNotTemplateName(t *testing.T) {
 }
 
 func TestQuarantineAcceptsRuntimeTypedWorkloadKeys(t *testing.T) {
+	t.Parallel()
 	yes := true
 	for _, key := range []string{"payments/api", "payments/Deployment/api", "payments/deployment/api"} {
 		e := NewEngine()

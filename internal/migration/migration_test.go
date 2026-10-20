@@ -34,6 +34,7 @@ response:
 `
 
 func TestNeuVector_Convert(t *testing.T) {
+	t.Parallel()
 	out, err := neuvector.Convert([]byte(nvExport))
 	if err != nil {
 		t.Fatal(err)
@@ -85,6 +86,7 @@ spec:
 `
 
 func TestNeuVector_ConvertFileProfiles(t *testing.T) {
+	t.Parallel()
 	out, err := neuvector.ConvertFileProfiles([]byte(nvFileMonitorExport))
 	if err != nil {
 		t.Fatal(err)
@@ -133,6 +135,7 @@ admission:
 `
 
 func TestNeuVector_ConvertAdmissionProfileBundleParity(t *testing.T) {
+	t.Parallel()
 	bundle, err := neuvector.ConvertAdmissionProfileBundle([]byte(nvAdmissionProfileExport))
 	if err != nil {
 		t.Fatal(err)
@@ -226,6 +229,7 @@ const aquaExport = `
 ]`
 
 func TestAqua_Convert(t *testing.T) {
+	t.Parallel()
 	out, err := aqua.Convert([]byte(aquaExport))
 	if err != nil {
 		t.Fatal(err)
@@ -249,6 +253,7 @@ const prismaExport = `
 ]}`
 
 func TestPrisma_Convert(t *testing.T) {
+	t.Parallel()
 	out, err := prisma.Convert([]byte(prismaExport))
 	if err != nil {
 		t.Fatal(err)

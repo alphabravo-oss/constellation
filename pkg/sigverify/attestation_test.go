@@ -11,6 +11,7 @@ import (
 )
 
 func TestVerifyAttestationParsesCosignOutput(t *testing.T) {
+	t.Parallel()
 	statement := map[string]any{
 		"_type":         "https://in-toto.io/Statement/v1",
 		"predicateType": "https://slsa.dev/provenance/v1",
@@ -60,6 +61,7 @@ func TestVerifyAttestationParsesCosignOutput(t *testing.T) {
 }
 
 func TestVerifyAttestationUsesPublicKeyMode(t *testing.T) {
+	t.Parallel()
 	statement := map[string]any{
 		"_type":         "https://in-toto.io/Statement/v1",
 		"predicateType": "https://slsa.dev/provenance/v1",
@@ -116,6 +118,7 @@ func TestVerifyAttestationUsesPublicKeyMode(t *testing.T) {
 }
 
 func TestVerifyAttestationKeylessRequiresExplicitTrustPolicy(t *testing.T) {
+	t.Parallel()
 	statement := map[string]any{
 		"_type":         "https://in-toto.io/Statement/v1",
 		"predicateType": "https://slsa.dev/provenance/v1",

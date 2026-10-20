@@ -1,3 +1,5 @@
+//go:build integration
+
 package network
 
 import (
@@ -179,6 +181,7 @@ func TestIngestSessionsUsesTokenClusterAndRejectsInvalidSnapshots(t *testing.T) 
 }
 
 func TestIngestSessionsAcceptsUnboundTokenForSingleCluster(t *testing.T) {
+	t.Parallel()
 	database := openTestDB(t)
 	t.Cleanup(database.Close)
 	ctx := context.Background()

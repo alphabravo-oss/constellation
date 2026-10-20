@@ -1,3 +1,5 @@
+//go:build integration
+
 package network
 
 import (
@@ -55,6 +57,7 @@ func moveRuleRequest(ctx context.Context, database *db.DB, orgID, userID, cluste
 }
 
 func TestMoveNetworkRuleToTopAuditsAndChangesExistingRule(t *testing.T) {
+	t.Parallel()
 	database, orgID, userID, clusterID := moveRuleFixture(t)
 	response := moveRuleRequest(t.Context(), database, orgID, userID, clusterID, "default/lower", true)
 	if response.Code != http.StatusOK {
@@ -111,6 +114,7 @@ func TestMoveNetworkRuleToTopRejectsMissingScopeRuleAndAudit(t *testing.T) {
 }
 
 func TestMoveNetworkRuleToTopSerializesConcurrentMoves(t *testing.T) {
+	t.Parallel()
 	database, orgID, userID, clusterID := moveRuleFixture(t)
 	var group sync.WaitGroup
 	statuses := make(chan int, 2)
@@ -150,6 +154,7 @@ func TestMoveNetworkRuleToTopSerializesConcurrentMoves(t *testing.T) {
 }
 
 func TestNetworkRulesPreservesNegativePrecedence(t *testing.T) {
+	t.Parallel()
 	database, orgID, userID, clusterID := moveRuleFixture(t)
 	if _, err := database.Pool().Exec(context.Background(), `UPDATE network_rule_overrides SET priority=-10 WHERE org_id=$1 AND cluster_id=$2 AND from_ep='default/lower'`, orgID, clusterID); err != nil {
 		t.Fatal(err)
@@ -179,6 +184,7 @@ func TestNetworkRulesPreservesNegativePrecedence(t *testing.T) {
 }
 
 func TestMoveNetworkRuleToTopRollsBackWhenCompletionAuditFails(t *testing.T) {
+	t.Parallel()
 	database, orgID, userID, clusterID := moveRuleFixture(t)
 	const constraint = "test_move_top_completion_audit_guard"
 	statement := fmt.Sprintf(`ALTER TABLE audit_events ADD CONSTRAINT %s CHECK (NOT (org_id='%s' AND action='network_rule.move_top')) NOT VALID`, constraint, orgID)

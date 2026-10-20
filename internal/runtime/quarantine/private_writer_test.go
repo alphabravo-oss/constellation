@@ -26,6 +26,7 @@ func privateQuarantine(t *testing.T, dir string, cols CollectorSet) *Quarantine 
 }
 
 func TestSnapshotOutputIsPrivateAndSizeIsActualArchiveSize(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "snapshots")
 	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -52,6 +53,7 @@ func TestSnapshotOutputIsPrivateAndSizeIsActualArchiveSize(t *testing.T) {
 }
 
 func TestSnapshotRejectsReplacedRootBeforeCollection(t *testing.T) {
+	t.Parallel()
 	parent := t.TempDir()
 	dir := filepath.Join(parent, "snapshots")
 	var calls atomic.Int32
@@ -80,6 +82,7 @@ func TestSnapshotRejectsReplacedRootBeforeCollection(t *testing.T) {
 }
 
 func TestSnapshotRootSubstitutionRetainsOnlyPrivateCompleteArtifact(t *testing.T) {
+	t.Parallel()
 	parent := t.TempDir()
 	dir := filepath.Join(parent, "snapshots")
 	moved := filepath.Join(parent, "retained")
@@ -130,6 +133,7 @@ func (w *archiveClosingFailureWriter) Write(p []byte) (int, error) {
 }
 
 func TestArchiveFinalizationErrorPreventsPublication(t *testing.T) {
+	t.Parallel()
 	failure := errors.New("owned writer failure")
 	if err := encodeTarball(t.Context(), rejectingArchiveWriter{failure}, map[string][]byte{"entry": []byte("body")}); !errors.Is(err, failure) {
 		t.Fatal("gzip/tar output failure hidden")
@@ -154,6 +158,7 @@ func TestArchiveFinalizationErrorPreventsPublication(t *testing.T) {
 }
 
 func TestCancelledSnapshotNeverPublishes(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	dir := filepath.Join(t.TempDir(), "snapshots")
 	q := privateQuarantine(t, dir, CollectorSet{Logs: func(context.Context, string, string, int) (map[string][]string, error) {
@@ -170,6 +175,7 @@ func TestCancelledSnapshotNeverPublishes(t *testing.T) {
 }
 
 func TestCloseWaitsForExecuteAndPreventsLaterCollection(t *testing.T) {
+	t.Parallel()
 	entered, release := make(chan struct{}), make(chan struct{})
 	var calls atomic.Int32
 	q := privateQuarantine(t, filepath.Join(t.TempDir(), "snapshots"), CollectorSet{Logs: func(context.Context, string, string, int) (map[string][]string, error) {
@@ -205,6 +211,7 @@ func TestCloseWaitsForExecuteAndPreventsLaterCollection(t *testing.T) {
 var _ io.Writer = rejectingArchiveWriter{}
 
 func TestCollectorFailuresKeepExistingBestEffortSnapshot(t *testing.T) {
+	t.Parallel()
 	failure := errors.New("owned collector failure")
 	q, err := New(Options{OutputDir: filepath.Join(t.TempDir(), "snapshots")}, CollectorSet{
 		Cordon: func(context.Context, Target) (string, error) { return "partial policy", failure },

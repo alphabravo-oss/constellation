@@ -34,3 +34,6 @@ internal/runtime/ebpf/bpf/*.o
 # Admission test credentials are streamed to Kubernetes, never retained as evidence.
 /deploy/e2e/threat-scenarios/04-admission-tls/captures/secret.yaml
 /deploy/e2e/threat-scenarios/04-admission-tls/captures/tls/*.key
+
+# stray go build outputs at the repo root (use make build -> bin/)
+/constellation-*

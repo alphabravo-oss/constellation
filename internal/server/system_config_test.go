@@ -1,3 +1,5 @@
+//go:build integration
+
 package server
 
 import (
@@ -31,7 +33,7 @@ func newSysConfigTestServer(t *testing.T) (*Server, *httptest.Server, *pgxpool.P
 	t.Helper()
 	t.Setenv("CONSTELLATION_ALLOW_HS256_JWT", "true")
 	ctx := context.Background()
-	url := testDBURL()
+	url := testDBURL(t)
 
 	pool, err := pgxpool.New(ctx, url)
 	if err != nil {
@@ -319,4 +321,18 @@ func testCAPEM(t *testing.T) string {
 		t.Fatalf("create cert: %v", err)
 	}
 	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+}
+
+// errMessage reads the message of a {"error":{"code","message"}} body decoded as map[string]any.
+func errMessage(body map[string]any) string {
+	e, _ := body["error"].(map[string]any)
+	m, _ := e["message"].(string)
+	return m
+}
+
+// errDetail reads one key of the error's details object.
+func errDetail(body map[string]any, key string) any {
+	e, _ := body["error"].(map[string]any)
+	d, _ := e["details"].(map[string]any)
+	return d[key]
 }

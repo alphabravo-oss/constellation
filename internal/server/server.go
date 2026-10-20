@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rs/zerolog"
+
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
@@ -23,8 +25,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
 	"github.com/alphabravocompany/constellation/internal/astronomer"
 	"github.com/alphabravocompany/constellation/internal/auth"
+	colcrypto "github.com/alphabravocompany/constellation/internal/crypto"
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
@@ -37,13 +41,13 @@ import (
 	"github.com/alphabravocompany/constellation/internal/handler/runtime"
 	"github.com/alphabravocompany/constellation/internal/handler/scanning"
 	"github.com/alphabravocompany/constellation/internal/lifecycle"
+	"github.com/alphabravocompany/constellation/internal/logging"
 	"github.com/alphabravocompany/constellation/internal/syscfg"
 	"github.com/alphabravocompany/constellation/internal/telemetry"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/livegraph"
 	"github.com/alphabravocompany/constellation/pkg/notify"
 	"github.com/alphabravocompany/constellation/pkg/rbac"
-	regsecrets "github.com/alphabravocompany/constellation/pkg/registry/secrets"
 	"github.com/alphabravocompany/constellation/pkg/version"
 )
 
@@ -93,6 +97,7 @@ type Config struct {
 
 // Server holds the HTTP server + its dependencies.
 type Server struct {
+	log      zerolog.Logger
 	cfg      Config
 	tel      *telemetry.Telemetry
 	db       *db.DB
@@ -193,7 +198,7 @@ func New(ctx context.Context, cfg Config, tel *telemetry.Telemetry, database *db
 	// and (H2) the IdP secret fields in auth_servers.config. nil when no KEK is available, in which
 	// case those paths fall back to their pre-seal behavior rather than failing startup.
 	var sealer auth.Sealer
-	if cipher, cerr := regsecrets.Default(ctx, database.Pool(), tel.Logger); cerr != nil {
+	if cipher, cerr := colcrypto.Default(); cerr != nil {
 		tel.Logger.Warn("install KEK cipher unavailable; per-joint mTLS + IdP secret sealing disabled", slog.String("err", cerr.Error()))
 	} else {
 		sealer = cipher
@@ -271,6 +276,7 @@ func New(ctx context.Context, cfg Config, tel *telemetry.Telemetry, database *db
 	s := &Server{
 		cfg:                 cfg,
 		tel:                 tel,
+		log:                 tel.Log,
 		db:                  database,
 		auditLog:            audit.New(database.Pool()),
 		signer:              signer,
@@ -552,20 +558,21 @@ func (s *Server) buildRouter() chi.Router {
 	// below still yields a 500 with a request id, then request id + trace span, then the
 	// access log, then the cross-cutting guards, then authn (authMiddleware) and authz
 	// (requireVerb) at the route groups.
-	r.Use(chimw.Recoverer)
+	r.Use(apiutil.Recoverer)
 	r.Use(chimw.RequestID)
+	r.Use(correlationID)
 	// Resolve the client only through the trusted suffix of X-Forwarded-For;
 	// client-supplied prefixes and alternative headers cannot mint rate buckets.
 	r.Use(s.trustedProxyRealIP())
 	r.Use(s.tel.HTTPMiddleware)
-	r.Use(s.slogMiddleware)
+	r.Use(s.requestSummary)
 	r.Use(s.requestTimeout())
 	r.Use(s.maxBodyBytes())
 	corsOpts := cors.Options{
 		AllowedOrigins:   corsAllowedOrigins(s.cfg.CORSOrigins),
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Authorization", "Content-Type", "If-Match", "X-Request-Id", "Idempotency-Key", auth.BrowserHeader},
-		ExposedHeaders:   []string{"X-Export-Total", "X-Export-Limit", "X-Export-Truncated", "X-Export-Org-ID", "X-Export-Scope", "X-Report-Org-ID", "X-Report-Cluster-ID", "X-Report-Limit", "X-Report-Total", "X-Report-Truncated", "X-Constellation-PDF-Fallback", "Content-Disposition"},
+		ExposedHeaders:   []string{"X-Export-Total", "X-Export-Limit", "X-Export-Truncated", "X-Export-Org-ID", "X-Export-Scope", "X-Report-Org-ID", "X-Report-Cluster-ID", "X-Report-Limit", "X-Report-Total", "X-Report-Truncated", "X-Constellation-PDF-Fallback", "Content-Disposition", apiutil.RequestIDHeader},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}
@@ -578,6 +585,10 @@ func (s *Server) buildRouter() chi.Router {
 		corsOpts.AllowOriginFunc = func(*http.Request, string) bool { return false }
 	}
 	r.Use(cors.Handler(corsOpts))
+	r.NotFound(apiutil.NotFoundHandler)
+	r.MethodNotAllowed(apiutil.MethodNotAllowedHandler)
+	r.NotFound(apiutil.NotFoundHandler)
+	r.MethodNotAllowed(apiutil.MethodNotAllowedHandler)
 
 	r.Get("/healthz", s.handleHealth)
 	r.Get("/readyz", s.handleReady)
@@ -1075,6 +1086,8 @@ func (s *Server) buildRouter() chi.Router {
 			r.Patch("/settings/org", s.requireVerb(rbac.VerbManageOrg, settings.PatchOrg))
 			r.Get("/settings/user", s.requireVerb(rbac.VerbReadFindings, settings.GetUser))
 			r.Patch("/settings/user", s.requireVerb(rbac.VerbReadFindings, settings.PatchUser))
+			r.Get("/me/preferences", s.requireVerb(rbac.VerbReadFindings, settings.GetPreferences))
+			r.Put("/me/preferences", s.requireVerb(rbac.VerbReadFindings, settings.PutPreferences))
 
 			receivers := handler.NewReceivers(s.db, s.auditLog, s.dispatcher)
 			r.Get("/integrations/receivers", s.requireVerb(rbac.VerbReadFindings, receivers.List))
@@ -1792,33 +1805,44 @@ func (s *Server) runAuthProviderReloader(ctx context.Context) {
 
 // ---------------- middleware ----------------
 
-// slogMiddleware emits exactly one request-summary line per request: route pattern,
-// method, status, bytes, duration, request id and — when the auth middleware ran — the
-// principal and org (read after the handler so the deferred log sees authctx).
-func (s *Server) slogMiddleware(next http.Handler) http.Handler {
+// correlationID carries chi's request id on the context as the logging
+// correlation id, so every line logged during the request (slog or zerolog)
+// and the summary line share correlation_id.
+func correlationID(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := chimw.GetReqID(r.Context())
+		if id != "" {
+			w.Header().Set(apiutil.RequestIDHeader, id)
+		}
+		next.ServeHTTP(w, r.WithContext(logging.WithCorrelationID(r.Context(), id)))
+	})
+}
+
+// requestSummary emits exactly one request-summary line per request (guide
+// ch.05): route pattern, method, status, bytes, duration, correlation id and —
+// when the auth middleware ran — the principal and org (read after the handler
+// so the deferred log sees authctx).
+func (s *Server) requestSummary(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
+		ctx, slot := authctx.WithSlot(r.Context())
+		r = r.WithContext(ctx)
 		next.ServeHTTP(ww, r)
-		attrs := []slog.Attr{
-			slog.String("method", r.Method),
-			slog.String("path", r.URL.Path),
-			slog.Int("status", ww.Status()),
-			slog.Int("bytes", ww.BytesWritten()),
-			slog.String("request_id", chimw.GetReqID(r.Context())),
-			slog.Duration("dur", time.Since(start)),
-		}
-		if rc := chi.RouteContext(r.Context()); rc != nil {
-			attrs = append(attrs, slog.String("route", rc.RoutePattern()))
-		}
-		if subj, ok := authctx.SubjectFrom(r.Context()); ok {
-			attrs = append(attrs, slog.String("principal", subj.UserID.String()), slog.String("org_id", subj.OrgID.String()))
-		}
-		level := slog.LevelInfo
+		reqLog := logging.Ctx(r.Context(), s.log)
+		ev := reqLog.Info()
 		if ww.Status() >= http.StatusInternalServerError {
-			level = slog.LevelError
+			ev = reqLog.Error()
 		}
-		s.tel.Logger.LogAttrs(r.Context(), level, "http", attrs...)
+		ev = ev.Str("method", r.Method).Str("path", r.URL.Path).Int("status", ww.Status()).
+			Int("bytes", ww.BytesWritten()).Dur("duration", time.Since(start))
+		if rc := chi.RouteContext(r.Context()); rc != nil {
+			ev = ev.Str("route", rc.RoutePattern())
+		}
+		if subj, ok := slot.Subject(); ok {
+			ev = ev.Str("principal", subj.UserID.String()).Str("org_id", subj.OrgID.String())
+		}
+		ev.Msg("http")
 	})
 }
 
@@ -2489,8 +2513,10 @@ func bearerToken(r *http.Request) string {
 	return strings.TrimPrefix(h, "Bearer ")
 }
 
+// writeError is the legacy status-first helper; apiutil keeps the body shape
+// and scrubs 5xx messages. New code returns typed errors to apiutil.WriteError.
 func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
+	apiutil.WriteStatus(context.Background(), w, status, msg)
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
@@ -2500,7 +2526,7 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 }
 
 // loadRoleAssignments queries role_assignments for the user. The inline pgx query below is
-// the source of truth; the schema lives in db/migrations.
+// the source of truth; the schema lives in internal/server/database/migrations.
 func loadRoleAssignments(ctx context.Context, database *db.DB, userID uuid.UUID) ([]rbac.RoleAssignment, error) {
 	// P0-11: an assignment mirrored from an expiring role binding stops authorizing once its
 	// expires_at passes. This is the single per-request loader, so filtering here enforces

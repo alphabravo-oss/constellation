@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -51,13 +53,13 @@ type createImageAcceptanceBody struct {
 func (h *ImageAcceptances) List(w http.ResponseWriter, r *http.Request) {
 	assetID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad asset id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad asset id")
 		return
 	}
 	subj, _ := SubjectFrom(r.Context())
 	items, err := h.listForAsset(r, subj.OrgID, assetID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"image_acceptances": items})
@@ -66,31 +68,31 @@ func (h *ImageAcceptances) List(w http.ResponseWriter, r *http.Request) {
 func (h *ImageAcceptances) Create(w http.ResponseWriter, r *http.Request) {
 	assetID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad asset id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad asset id")
 		return
 	}
 	var body createImageAcceptanceBody
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad request")
 		return
 	}
 	body.Rationale = strings.TrimSpace(body.Rationale)
 	if len(body.Rationale) < 12 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "rationale must be at least 12 characters"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "rationale must be at least 12 characters")
 		return
 	}
 	acceptedUntil, err := time.Parse(time.RFC3339, body.AcceptedUntil)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "accepted_until must be RFC3339"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "accepted_until must be RFC3339")
 		return
 	}
 	if acceptedUntil.Before(time.Now().UTC()) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "accepted_until must be in the future"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "accepted_until must be in the future")
 		return
 	}
 	if acceptedUntil.After(time.Now().UTC().Add(30 * 24 * time.Hour)) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "accepted_until cannot exceed 30 days"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "accepted_until cannot exceed 30 days")
 		return
 	}
 	subj, _ := SubjectFrom(r.Context())
@@ -106,14 +108,14 @@ VALUES ($1, $2, $3, $4, $5)
 RETURNING id`, subj.OrgID, imageDigest, body.Rationale, subj.UserID, acceptedUntil).Scan(&id); err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "image_acceptances_active_expiry_key" {
-			writeJSON(w, http.StatusConflict, map[string]string{"error": "active image acceptance already exists for this expiry"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusConflict, "active image acceptance already exists for this expiry")
 			return
 		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "create image acceptance failed"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "create image acceptance failed")
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "image acceptance commit failed"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "image acceptance commit failed")
 		return
 	}
 	if h.auditLog != nil {
@@ -135,18 +137,18 @@ RETURNING id`, subj.OrgID, imageDigest, body.Rationale, subj.UserID, acceptedUnt
 func (h *ImageAcceptances) Revoke(w http.ResponseWriter, r *http.Request) {
 	assetID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad asset id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad asset id")
 		return
 	}
 	acceptanceID, err := uuid.Parse(chi.URLParam(r, "acceptanceID"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad acceptance id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad acceptance id")
 		return
 	}
 	var body imageAcceptanceScope
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && err != io.EOF {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad request")
 		return
 	}
 	subj, _ := SubjectFrom(r.Context())
@@ -161,15 +163,15 @@ UPDATE image_acceptances
  WHERE id = $1 AND org_id = $2 AND image_digest = $3 AND revoked_at IS NULL`,
 		acceptanceID, subj.OrgID, imageDigest)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if tag.RowsAffected() == 0 {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "acceptance not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "acceptance not found")
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "image acceptance commit failed"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "image acceptance commit failed")
 		return
 	}
 	if h.auditLog != nil {
@@ -245,13 +247,13 @@ func (h *ImageAcceptances) lockReviewedImage(w http.ResponseWriter, r *http.Requ
 		var err error
 		wantedCluster, err = uuid.Parse(expected.ClusterID)
 		if err != nil || expected.ExpectedImageDigest == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "expected_image_digest and valid cluster_id must be provided together"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "expected_image_digest and valid cluster_id must be provided together")
 			return nil, "", nil, false
 		}
 	}
 	tx, err := h.db.Pool().Begin(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "image scope unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "image scope unavailable")
 		return nil, "", nil, false
 	}
 	var digest string
@@ -263,12 +265,12 @@ func (h *ImageAcceptances) lockReviewedImage(w http.ResponseWriter, r *http.Requ
 		if errors.Is(err, pgx.ErrNoRows) {
 			status, message = http.StatusNotFound, "image not found"
 		}
-		writeJSON(w, status, map[string]string{"error": message})
+		apiutil.WriteStatus(r.Context(), w, status, message)
 		return nil, "", nil, false
 	}
 	if expected.ExpectedImageDigest != "" && (digest != expected.ExpectedImageDigest || clusterID == nil || *clusterID != wantedCluster) {
 		_ = tx.Rollback(r.Context())
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "reviewed image digest or cluster changed; reload before submitting"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusConflict, "reviewed image digest or cluster changed; reload before submitting")
 		return nil, "", nil, false
 	}
 	return tx, digest, clusterID, true

@@ -279,6 +279,8 @@ spec:
     - Egress
   egress:
 {{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
+{{- /* RBAC snapshot (saBindRiskyRole) and namespace-label resolver watch the API server. */}}
+{{ include "constellation.networkPolicyKubeAPIEgress" . | nindent 4 }}
 {{ if .Values.api.enabled }}
     - to:
         - podSelector:
@@ -431,16 +433,6 @@ spec:
             matchLabels:
               app.kubernetes.io/name: {{ include "constellation.name" . }}
               app.kubernetes.io/component: api
-      ports:
-        - protocol: TCP
-          port: 5432
-{{ end }}
-{{ if .Values.migrate.enabled }}
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: {{ include "constellation.name" . }}
-              app.kubernetes.io/component: migrate
       ports:
         - protocol: TCP
           port: 5432
@@ -616,25 +608,6 @@ spec:
       ports:
         - protocol: TCP
           port: 9000
-{{ end }}
-{{ if .Values.migrate.enabled }}
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: {{ include "constellation.fullname" . }}-migrate-egress
-  labels: {{- include "constellation.labels" . | nindent 4 }}
-    app.kubernetes.io/component: migrate
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: {{ include "constellation.name" . }}
-      app.kubernetes.io/component: migrate
-  policyTypes:
-    - Egress
-  egress:
-{{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
-{{ include "constellation.networkPolicyPostgresEgress" . | nindent 4 }}
 {{ end }}
 {{ if and .Values.bootstrap.enabled (not .Values.initBundle.secretName) }}
 ---

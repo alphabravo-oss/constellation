@@ -6,12 +6,13 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
-	"github.com/alphabravocompany/constellation/internal/handler/httpx"
 )
 
 type complianceWriteScope struct {
@@ -45,22 +46,22 @@ func complianceWriteQuery(r *http.Request) (url.Values, *uuid.UUID, error) {
 func (c *Compliance) userWriteScope(w http.ResponseWriter, r *http.Request) (complianceWriteScope, bool) {
 	subject, ok := authctx.SubjectFrom(r.Context())
 	if !ok || subject.OrgID == uuid.Nil {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "subject required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
 		return complianceWriteScope{}, false
 	}
 	_, cluster, err := complianceWriteQuery(r)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return complianceWriteScope{}, false
 	}
 	if cluster != nil {
 		var owned bool
 		if err := c.db.Pool().QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM clusters WHERE id=$1 AND org_id=$2)`, cluster, subject.OrgID).Scan(&owned); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "cluster unavailable"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "cluster unavailable")
 			return complianceWriteScope{}, false
 		}
 		if !owned {
-			httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "cluster not found")
 			return complianceWriteScope{}, false
 		}
 	}
@@ -74,21 +75,21 @@ func (c *Compliance) userWriteScope(w http.ResponseWriter, r *http.Request) (com
 func (c *Compliance) agentWriteScope(w http.ResponseWriter, r *http.Request) (complianceWriteScope, bool) {
 	token, ok := handler.RuntimeAgentTokenFrom(r.Context())
 	if !ok || token == nil {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "runtime-agent token required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "runtime-agent token required")
 		return complianceWriteScope{}, false
 	}
 	_, requested, err := complianceWriteQuery(r)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return complianceWriteScope{}, false
 	}
 	cluster, err := handler.ResolveAgentClusterID(r.Context(), c.db, token)
 	if errors.Is(err, handler.ErrAgentClusterScope) || err == nil && (cluster == nil || requested != nil && *requested != *cluster) {
-		httpx.WriteJSON(w, http.StatusForbidden, map[string]string{"error": "agent token cluster scope mismatch"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusForbidden, "agent token cluster scope mismatch")
 		return complianceWriteScope{}, false
 	}
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "cluster unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "cluster unavailable")
 		return complianceWriteScope{}, false
 	}
 	return complianceWriteScope{orgID: token.OrgID, clusterID: cluster, agentID: &token.ID}, true
@@ -122,11 +123,11 @@ func (scope complianceWriteScope) lockCluster(w http.ResponseWriter, r *http.Req
 		if scope.agentID != nil {
 			status, message = http.StatusForbidden, "agent token cluster scope mismatch"
 		}
-		httpx.WriteJSON(w, status, map[string]string{"error": message})
+		apiutil.WriteStatus(r.Context(), w, status, message)
 		return false
 	}
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "cluster unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "cluster unavailable")
 		return false
 	}
 	return true

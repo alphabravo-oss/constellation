@@ -8,6 +8,7 @@ import (
 )
 
 func TestConvertNativeAdmissionRulesMapsDenyAndException(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`rules:
   - id: 11
     comment: Allow platform namespace exception
@@ -75,6 +76,7 @@ func TestConvertNativeAdmissionRulesMapsDenyAndException(t *testing.T) {
 }
 
 func TestConvertNativeAdmissionDisabledRuleIsMonitorDisabled(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`rules:
   - id: 13
     comment: Disabled host namespace rule
@@ -99,6 +101,7 @@ func TestConvertNativeAdmissionDisabledRuleIsMonitorDisabled(t *testing.T) {
 }
 
 func TestConvertNativeAdmissionScopeOnlyExceptionRequiresManualReview(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`rules:
   - id: 14
     comment: Namespace-only exception
@@ -124,6 +127,7 @@ func TestConvertNativeAdmissionScopeOnlyExceptionRequiresManualReview(t *testing
 }
 
 func TestConvertDPIRulesFromDLPAndWAFSecurityRuleList(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`kind: List
 items:
   - apiVersion: neuvector.com/v1
@@ -184,6 +188,7 @@ items:
 }
 
 func TestConvertDPIRulesPreservesProvenanceAndUnsupportedPatternDetails(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`dlp_sensors:
   - name: pii-sensor
     cfg_type: federal
@@ -264,6 +269,7 @@ func TestConvertDPIRulesPreservesProvenanceAndUnsupportedPatternDetails(t *testi
 }
 
 func TestConvertDPIRulesPreservesGroupScopeBindingCandidates(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`dlp_groups:
   - name: nv.default.api
     status: true
@@ -290,6 +296,7 @@ func TestConvertDPIRulesPreservesGroupScopeBindingCandidates(t *testing.T) {
 }
 
 func TestConvertGroupsFromRESTAndCRDDefinitions(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`groups:
   - name: nv.api.default
     comment: API service
@@ -344,6 +351,7 @@ spec:
 }
 
 func TestConvertGroupsRejectsUnsupportedCriteria(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`groups:
   - name: nv.unsupported
     criteria:
@@ -377,6 +385,7 @@ func TestConvertGroupsRejectsUnsupportedCriteria(t *testing.T) {
 }
 
 func TestCountSourceObjectsMixedFixture(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`admission:
   rules:
     - id: 1001
@@ -455,6 +464,7 @@ network_rules:
 }
 
 func TestConvertNetworkRulesFromRESTAndCRD(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`policy:
   rules:
     - id: 1001
@@ -527,6 +537,7 @@ spec:
 }
 
 func TestConvertNetworkRulesRejectsUnsupportedSemantics(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`network_rules:
   - id: 1
     from: a
@@ -569,6 +580,7 @@ func TestConvertNetworkRulesRejectsUnsupportedSemantics(t *testing.T) {
 }
 
 func TestConvertSkipsNetworkRulesInAdmissionPolicyPath(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`rules:
   - id: 1001
     comment: API to database
@@ -587,6 +599,7 @@ func TestConvertSkipsNetworkRulesInAdmissionPolicyPath(t *testing.T) {
 }
 
 func TestConvertProcessProfilesFromRESTAndCRD(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`process_profiles:
   - group: nv.api.default
     mode: protect
@@ -640,6 +653,7 @@ spec:
 }
 
 func TestConvertProcessProfilesRejectsUnsafeRules(t *testing.T) {
+	t.Parallel()
 	raw := []byte(`process_profile:
   group: nv.api.default
   mode: monitor

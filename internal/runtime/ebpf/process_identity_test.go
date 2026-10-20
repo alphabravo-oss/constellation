@@ -19,6 +19,7 @@ type legacyIdentityTestLoader struct{}
 func (l *legacyIdentityTestLoader) Start(context.Context, func(Event)) error { return nil }
 func (l *legacyIdentityTestLoader) Close() error                             { return nil }
 func TestAgentExactProcessIdentityIsOptionalForCapture(t *testing.T) {
+	t.Parallel()
 	for _, provider := range []loader{nil, &legacyIdentityTestLoader{}, &identityTestLoader{}} {
 		agent := &Agent{events: make(chan Event, 1), loader: provider}
 		if value, known := agent.ProcessStartIdentity(4242); known || value != 0 {

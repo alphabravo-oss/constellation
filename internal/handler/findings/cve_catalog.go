@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
 	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
@@ -140,12 +142,12 @@ func (c *CVE) Search(w http.ResponseWriter, r *http.Request)    { c.catalogRead(
 func (c *CVE) SearchCSV(w http.ResponseWriter, r *http.Request) { c.catalogRead(w, r, true) }
 func (c *CVE) catalogRead(w http.ResponseWriter, r *http.Request, export bool) {
 	if _, ok := authctx.SubjectFrom(r.Context()); !ok {
-		httpx.WriteJSON(w, 401, map[string]string{"error": "subject required"})
+		apiutil.WriteStatus(r.Context(), w, 401, "subject required")
 		return
 	}
 	options, err := parseCVECatalog(r, export)
 	if err != nil {
-		httpx.WriteJSON(w, 400, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, 400, err.Error())
 		return
 	}
 	args := append([]any{}, options.args...)
@@ -159,7 +161,7 @@ func (c *CVE) catalogRead(w http.ResponseWriter, r *http.Request, export bool) {
 	query := `SELECT cve_id,COALESCE(title,''),COALESCE(description,''),cvss_base,cvss_vector,kev_listed,kev_added,epss_probability,epss_updated_at,aliases,` + affected + `,sources,published_at,modified_at FROM cve_records ` + options.where + ` ORDER BY ` + options.order + ` LIMIT $` + strconv.Itoa(len(args)-1) + ` OFFSET $` + strconv.Itoa(len(args))
 	rows, err := c.db.Pool().Query(r.Context(), query, args...)
 	if err != nil {
-		httpx.WriteJSON(w, 500, map[string]string{"error": "CVE catalog could not be loaded"})
+		apiutil.WriteStatus(r.Context(), w, 500, "CVE catalog could not be loaded")
 		return
 	}
 	defer rows.Close()
@@ -168,14 +170,14 @@ func (c *CVE) catalogRead(w http.ResponseWriter, r *http.Request, export bool) {
 		var item cveDTO
 		var affected []byte
 		if err := rows.Scan(&item.CVEID, &item.Title, &item.Description, &item.CVSSBase, &item.CVSSVector, &item.KEVListed, &item.KEVAdded, &item.EPSSProbability, &item.EPSSUpdatedAt, &item.Aliases, &affected, &item.Sources, &item.PublishedAt, &item.ModifiedAt); err != nil {
-			httpx.WriteJSON(w, 500, map[string]string{"error": "CVE catalog could not be loaded"})
+			apiutil.WriteStatus(r.Context(), w, 500, "CVE catalog could not be loaded")
 			return
 		}
 		item.Affected = affected
 		out = append(out, item)
 	}
 	if rows.Err() != nil {
-		httpx.WriteJSON(w, 500, map[string]string{"error": "CVE catalog could not be loaded"})
+		apiutil.WriteStatus(r.Context(), w, 500, "CVE catalog could not be loaded")
 		return
 	}
 	if !export {
@@ -194,7 +196,7 @@ func (c *CVE) catalogRead(w http.ResponseWriter, r *http.Request, export bool) {
 	}
 	writer.Flush()
 	if writer.Error() != nil {
-		httpx.WriteJSON(w, 500, map[string]string{"error": "CVE catalog export could not be prepared"})
+		apiutil.WriteStatus(r.Context(), w, 500, "CVE catalog export could not be prepared")
 		return
 	}
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")

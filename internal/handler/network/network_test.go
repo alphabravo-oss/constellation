@@ -1,3 +1,5 @@
+//go:build integration
+
 package network
 
 import (
@@ -13,6 +15,7 @@ import (
 )
 
 func TestNetwork_MapAggregatesFlows(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 

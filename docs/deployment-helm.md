@@ -612,7 +612,6 @@ production supply an externally managed `ObjectStore` through
 | `image.pullPolicy`                    | `IfNotPresent`                                       | Set to `Always` for floating tags                               |
 | `image.pullSecrets`                   | `[]`                                                 | Required for private registries                                 |
 | `revisionHistoryLimit`                | `3`                                                  | Raise only if you need more in-cluster rollback history          |
-| `migrate.psqlImage`                   | digest-pinned `postgres:16.10-alpine3.22`            | Mirror/pin the Postgres client helper image                     |
 | `security.podSecurityContext.enabled` | `true`                                               | Apply shared pod hardening to non-privileged app workloads      |
 | `security.containerSecurityContext.enabled` | `true`                                        | Drop caps, disallow escalation, run Go/distroless roles as UID/GID 10001, and keep app root filesystems read-only |
 | app workload service account automount | `false` for API/scanner/admission/frontend/importer/archiver | Keep Kubernetes API tokens off pods that do not need them |
@@ -851,3 +850,106 @@ exclusions and runtime/network-policy enforcement protection. The release namesp
 This excludes all workloads in those namespaces from these enforcement paths;
 scanning and finding visibility are independent. It does not prevent an application
 policy from disconnecting that application from a protected service.
+
+## Off-host backups and secrets backup
+
+`backup.objectStore` is a same-cluster WAL archive. `backup.offhost` adds the
+second failure domain the runtime hardening stream ran by hand:
+
+```yaml
+backup:
+  objectStore: { enabled: true, bucket: constellation-recovery }
+  offhost:
+    enabled: true
+    endpointURL: http://backup-host:9000       # any S3 API (RustFS, MinIO, Ceph RGW, AWS)
+    bucket: constellation-recovery-offhost
+    credentialsSecret: offhost-credentials     # keys ACCESS_KEY_ID / SECRET_ACCESS_KEY
+    sync: { schedule: "*/15 * * * *" }
+    recovery: { enabled: true }
+networkPolicies:
+  offhostCIDRs: ["100.86.167.87/32"]
+```
+
+This renders a second Barman `ObjectStore` (`<archive>-offhost`), the
+`archive-offhost-sync` CronJob (rclone from the toolbox image, credentials via
+`RCLONE_CONFIG_*` env — no config file) and a `<archive>-offhost-recovery`
+ObjectStore to point `postgres.cloudnativepg.barmanCloud.recovery.objectStoreName`
+at for a PITR drill. **Switch WAL twice before a drill**
+(`SELECT pg_switch_wal();` ×2 on the primary) so the target time is archived
+on both stores; see `docs/cnpg-recovery.md`.
+
+`backup.secrets` backs up the namespace's Kubernetes Secrets (TLS material,
+tokens, the age key) daily, encrypted to `backup.secrets.ageRecipient`, to the
+same kind of S3 remote. Keep the matching age identity off the cluster;
+restore with `age -d -i identity.txt secrets-<ts>.tar.gz.age | tar xz`.
+
+## Monitoring with the Prometheus Operator
+
+`metrics.serviceMonitor.enabled=true` renders ServiceMonitors for the API
+(admin port), scanner and admission and PodMonitors for the operator, the
+runtime agent and the CNPG instances; `metrics.prometheusRule.enabled=true`
+ships the alert rules (`constellation.components`, CNPG archiving/backup,
+and — `includeClusterRules` — node/pod/PVC capacity). Component heartbeat
+age, scanner engine-DB age (trivy, trivy-java-db, grype) and CVE-feed age are
+served by the API itself (`constellation_component_heartbeat_age_seconds`,
+`constellation_scanner_engine_db_age_seconds`, `constellation_cve_feed_age_seconds`),
+so no postgres-exporter is required. `metrics.postgresRole.enabled` still
+renders a read-only `constellation_metrics` role (CNPG `managed.roles`,
+grants owned by migration 186) for an optional exporter. With
+`networkPolicies.enabled`, `networkPolicies.monitoring.namespace` is admitted
+to every metrics port.
+
+## Changing the bootstrap admin password
+
+`bootstrap.admin` mints `<release>-admin-credentials` once and the
+bootstrap-admin Job is idempotent: editing the Secret later does **not**
+change the password stored in the database. Rotate through the API, which
+also revokes the admin's other sessions:
+
+```sh
+TOKEN=$(curl -sf -X POST https://constellation.example.com/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"admin@constellation.local","password":"<current>"}' | jq -r .token)
+curl -sf -X POST https://constellation.example.com/api/v1/auth/change-password \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"current_password":"<current>","new_password":"<new>"}'
+kubectl -n constellation-system create secret generic constellation-admin-credentials \
+  --from-literal=password='<new>' --dry-run=client -o yaml | kubectl apply -f -   # keep the Secret in step
+```
+
+`bootstrap.admin.forcePasswordChange=true` makes the UI demand this on first
+login.
+
+## Pod Security Admission and the k3s host profile
+
+Every chart pod is `restricted`-clean; the runtime agent is the documented
+exception (hostNetwork/hostPID). `deploy/k3s/psa-admission.yaml` is the
+AdmissionConfiguration that exempts it (through the DaemonSet controller and
+its ServiceAccount) and `deploy/k3s/config.yaml` carries the kubelet
+eviction/image-GC thresholds a single-node k3s host needs. See
+`docs/k3s-profile.md`. The admission webhook's own built-in rules skip
+`admission.exemptNamespaces` and namespaces labelled
+`constellation.alphabravo.io/admission=ignore`.
+
+## API high availability with packet evidence
+
+`api.replicas > 1` with `api.pcapStorage.enabled` requires a ReadWriteMany
+claim; `validate.yaml` rejects RWO because captures are files written by
+every replica. `examples/values-api-ha-rwx.yaml` is the supported profile
+(RWX PVC created first, `accessMode: ReadWriteMany`). Without RWX storage run
+one API replica with packet evidence, or scale the API with packet evidence
+disabled.
+
+## Air-gapped installs
+
+`constellationctl bundle build` packs every image (OCI layout), the chart and
+a cosign-compatible signed BOM; `bundle verify` checks the signature against
+the vendor key compiled into the binary (`--trust-key` to override) before
+any payload is read; `bundle load --registry <host:port> --values-out
+values-bundle.yaml` pushes the images into the cluster-local registry and
+writes a values file that pins every role to the loaded digest with
+`global.imageRegistry`. On k3s without a registry, `bundle load --containerd`
+imports straight into the node image store (`image.pullPolicy: Never`). The
+scanner defaults to `--offline-db` (baked DBs; `CONSTELLATION_SCANNER_OFFLINE_DB=false`
+opts into online refresh) and every binary logs one `egress endpoints` line at
+start-up naming every out-of-cluster endpoint it may contact.

@@ -1,20 +1,20 @@
+//go:build integration
+
 package handler
 
 import (
 	"context"
-	"os"
-	"path/filepath"
+	"io/fs"
 	"strings"
 	"testing"
+
+	migrationset "github.com/alphabravocompany/constellation/internal/server/database"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
 func TestAuditLookupMigrationRetriesConcurrentBuild(t *testing.T) {
-	if os.Getenv("CONSTELLATION_TEST_DATABASE_URL") == "" {
-		t.Skip("requires explicitly configured disposable test database")
-	}
 	database := openTestDB(t)
 	defer database.Close()
 	ctx := t.Context()
@@ -52,7 +52,7 @@ func TestAuditLookupMigrationRetriesConcurrentBuild(t *testing.T) {
 	if valid {
 		t.Fatal("failed fixture build did not leave an invalid index")
 	}
-	source, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", "173_audit_target_lookup.sql"))
+	source, err := fs.ReadFile(migrationset.FS(), "173_audit_target_lookup.sql")
 	if err != nil {
 		t.Fatal(err)
 	}

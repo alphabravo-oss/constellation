@@ -17,6 +17,7 @@ import (
 )
 
 func TestCollectReportsLambdaPackageEvidenceWithLayers(t *testing.T) {
+	t.Parallel()
 	functionZip := testZip(t, map[string]string{
 		"handler.py": "print('ok')\n",
 	})
@@ -98,6 +99,7 @@ func TestCollectReportsLambdaPackageEvidenceWithLayers(t *testing.T) {
 }
 
 func TestCollectRejectsUnsafeLambdaZipPath(t *testing.T) {
+	t.Parallel()
 	badZip := testZip(t, map[string]string{
 		"../escape": "bad",
 	})
@@ -120,6 +122,7 @@ func TestCollectRejectsUnsafeLambdaZipPath(t *testing.T) {
 }
 
 func TestCollectSkipsImagePackageType(t *testing.T) {
+	t.Parallel()
 	fn := lambdatypes.FunctionConfiguration{
 		FunctionArn:  awssdk.String("arn:aws:lambda:us-east-1:123456789012:function:image-fn"),
 		FunctionName: awssdk.String("image-fn"),

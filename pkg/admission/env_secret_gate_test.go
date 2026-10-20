@@ -20,6 +20,7 @@ func envSecretEngine() *PolicyEngine {
 }
 
 func TestEvaluate_DeniesEnvVarSecret(t *testing.T) {
+	t.Parallel()
 	e := envSecretEngine()
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "leaky"},
@@ -43,6 +44,7 @@ func TestEvaluate_DeniesEnvVarSecret(t *testing.T) {
 }
 
 func TestEvaluate_AllowsEnvVarSecretRef(t *testing.T) {
+	t.Parallel()
 	e := envSecretEngine()
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "clean"},
@@ -69,6 +71,7 @@ func TestEvaluate_AllowsEnvVarSecretRef(t *testing.T) {
 }
 
 func TestRuleFromYAMLParsesEnvVarSecretGate(t *testing.T) {
+	t.Parallel()
 	rule, supported, err := RuleFromYAML("env-secrets", "env-secrets", "", "enforce", `apiVersion: constellation.alphabravo.io/v1alpha1
 kind: AdmissionRule
 spec:
@@ -87,6 +90,7 @@ spec:
 }
 
 func TestRuleFromYAMLParsesCVEScoreGate(t *testing.T) {
+	t.Parallel()
 	rule, supported, err := RuleFromYAML("cve-score", "cve-score", "", "enforce", `apiVersion: constellation.alphabravo.io/v1alpha1
 kind: AdmissionRule
 spec:

@@ -23319,6 +23319,135 @@
         "summary": "Create k8s-audit:bulk"
       }
     },
+    "/api/v1/me/preferences": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Preferences",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "theme"
+                  ],
+                  "properties": {
+                    "theme": {
+                      "type": "string",
+                      "enum": [
+                        "system",
+                        "light",
+                        "dark"
+                      ],
+                      "description": "UI colour mode; system follows the OS."
+                    },
+                    "updated_at": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "Last change; absent until the user saves a preference."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Get the caller's UI preferences",
+        "description": "Per-user preferences synced across sessions (theme: system|light|dark; default system). Stored in the same document as /api/v1/settings/user.",
+        "tags": [
+          "settings"
+        ]
+      },
+      "put": {
+        "responses": {
+          "200": {
+            "description": "Stored preferences",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "theme"
+                  ],
+                  "properties": {
+                    "theme": {
+                      "type": "string",
+                      "enum": [
+                        "system",
+                        "light",
+                        "dark"
+                      ],
+                      "description": "UI colour mode; system follows the OS."
+                    },
+                    "updated_at": {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "Last change; absent until the user saves a preference."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid preferences (unknown field or theme)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "request_id": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "summary": "Replace the caller's UI preferences",
+        "description": "Validates and stores the theme. Unknown fields are rejected.",
+        "tags": [
+          "settings"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "theme"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "theme": {
+                    "type": "string",
+                    "enum": [
+                      "system",
+                      "light",
+                      "dark"
+                    ],
+                    "description": "UI colour mode; system follows the OS."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/migration/imports": {
       "get": {
         "description": "Returns persisted migration previews and their apply/rollback state for the authenticated organization, newest first. Use the returned next_cursor for keyset paging that is not shifted by newer imports; cursor and offset cannot be combined.",

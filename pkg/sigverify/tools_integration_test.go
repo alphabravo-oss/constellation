@@ -9,6 +9,7 @@ import (
 // The fixture is an image signed and attested by the previous Cosign major
 // version, using an ephemeral test key and no transparency log.
 func TestBundledCosignLegacyVerification(t *testing.T) {
+	t.Parallel()
 	ref := os.Getenv("CONSTELLATION_TEST_SIGNED_IMAGE")
 	key := os.Getenv("CONSTELLATION_TEST_SIGNING_PUBLIC_KEY")
 	if ref == "" || key == "" {
@@ -41,6 +42,7 @@ func TestBundledCosignLegacyVerification(t *testing.T) {
 }
 
 func TestBundledCosignKeylessVerification(t *testing.T) {
+	t.Parallel()
 	ref := os.Getenv("CONSTELLATION_TEST_KEYLESS_IMAGE")
 	if ref == "" {
 		t.Skip("set a digest-pinned keyless fixture")

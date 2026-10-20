@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
@@ -174,17 +176,17 @@ func conversationRowID(from, to string) string {
 func (h *NetworkConversations) listConversations(w http.ResponseWriter, r *http.Request, export bool) {
 	subject, ok := authctx.SubjectFrom(r.Context())
 	if !ok || subject.OrgID == uuid.Nil {
-		httpx.WriteJSON(w, 401, map[string]string{"error": "authentication required"})
+		apiutil.WriteStatus(r.Context(), w, 401, "authentication required")
 		return
 	}
 	values, err := inventorylist.Query(r)
 	if err != nil {
-		httpx.WriteJSON(w, 400, map[string]string{"error": "invalid query"})
+		apiutil.WriteStatus(r.Context(), w, 400, "invalid query")
 		return
 	}
 	o, err := parseConversationOptions(values)
 	if err != nil {
-		httpx.WriteJSON(w, 400, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, 400, err.Error())
 		return
 	}
 	if o.ClusterID != nil {
@@ -193,14 +195,14 @@ func (h *NetworkConversations) listConversations(w http.ResponseWriter, r *http.
 			conversationReadError(w)
 			return
 		} else if !exists {
-			httpx.WriteJSON(w, 404, map[string]string{"error": "cluster not found"})
+			apiutil.WriteStatus(r.Context(), w, 404, "cluster not found")
 			return
 		}
 	}
 	o.GroupMembers, o.GroupName, o.GroupActive, err = handler.ResolveGroupFilterMembers(r.Context(), h.db.Pool(), subject.OrgID, o.ClusterID, o.Group)
 	if err != nil {
 		if err.Error() == "group not found" {
-			httpx.WriteJSON(w, 400, map[string]string{"error": "group not found"})
+			apiutil.WriteStatus(r.Context(), w, 400, "group not found")
 		} else {
 			conversationReadError(w)
 		}
@@ -268,7 +270,7 @@ func (h *NetworkConversations) listConversations(w http.ResponseWriter, r *http.
 	httpx.WriteJSON(w, 200, response)
 }
 func conversationReadError(w http.ResponseWriter) {
-	httpx.WriteJSON(w, 500, map[string]string{"error": "could not read conversations"})
+	apiutil.WriteStatus(context.Background(), w, 500, "could not read conversations")
 }
 
 func (h *NetworkConversations) readConversationInventory(ctx context.Context, org uuid.UUID, o conversationOptions, includeGraph bool) ([]platformConversation, *graph.Graph, inventorylist.Metadata, error) {

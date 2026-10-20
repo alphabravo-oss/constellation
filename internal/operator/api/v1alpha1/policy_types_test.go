@@ -11,6 +11,7 @@ import (
 // TestAdmissionRuleDeepCopyRoundTrip verifies the hand-written DeepCopy produces an
 // independent, equal copy (no shared backing arrays/maps) for ConstellationAdmissionRule.
 func TestAdmissionRuleDeepCopyRoundTrip(t *testing.T) {
+	t.Parallel()
 	orig := &ConstellationAdmissionRule{
 		ObjectMeta: metav1.ObjectMeta{Name: "block-privileged", Labels: map[string]string{"team": "sec"}},
 		Spec: ConstellationAdmissionRuleSpec{
@@ -53,6 +54,7 @@ func TestAdmissionRuleDeepCopyRoundTrip(t *testing.T) {
 // TestResponseRuleDeepCopyRoundTrip verifies DeepCopy for ConstellationResponseRule,
 // including the nested condition/action slices and the action params map.
 func TestResponseRuleDeepCopyRoundTrip(t *testing.T) {
+	t.Parallel()
 	orig := &ConstellationResponseRule{
 		ObjectMeta: metav1.ObjectMeta{Name: "quarantine-crypto-miner"},
 		Spec: ConstellationResponseRuleSpec{
@@ -100,6 +102,7 @@ func TestResponseRuleDeepCopyRoundTrip(t *testing.T) {
 // TestPolicyTypesRegisteredInScheme verifies the new kinds (and their List types) are
 // registered in the group-version SchemeBuilder so the operator manager can serve them.
 func TestPolicyTypesRegisteredInScheme(t *testing.T) {
+	t.Parallel()
 	scheme := runtime.NewScheme()
 	if err := AddToScheme(scheme); err != nil {
 		t.Fatalf("AddToScheme: %v", err)

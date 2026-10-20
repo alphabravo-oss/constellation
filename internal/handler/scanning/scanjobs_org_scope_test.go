@@ -1,3 +1,5 @@
+//go:build integration
+
 package scanning
 
 import (
@@ -17,6 +19,7 @@ import (
 )
 
 func TestScanJobs_ReadsIgnoreJobsLinkedToForeignOrgTargets(t *testing.T) {
+	t.Parallel()
 	database := openTestDB(t)
 	defer database.Close()
 	ctx := context.Background()
@@ -89,6 +92,7 @@ func TestScanJobs_ReadsIgnoreJobsLinkedToForeignOrgTargets(t *testing.T) {
 }
 
 func TestScanJobs_RejectsJobWithForeignOrgTarget(t *testing.T) {
+	t.Parallel()
 	database := openTestDB(t)
 	defer database.Close()
 	ctx := context.Background()
@@ -172,6 +176,7 @@ func TestScanJobs_RejectsJobWithForeignOrgTarget(t *testing.T) {
 }
 
 func TestScanJobs_ClaimIgnoresEvidenceLinkedToForeignOrgTarget(t *testing.T) {
+	t.Parallel()
 	database := openTestDB(t)
 	defer database.Close()
 	ctx := context.Background()

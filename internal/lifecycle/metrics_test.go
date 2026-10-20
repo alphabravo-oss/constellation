@@ -11,6 +11,7 @@ import (
 )
 
 func TestCleanupMetricsPreserveFailuresAndPartialProgress(t *testing.T) {
+	t.Parallel()
 	registry := prometheus.NewRegistry()
 	metrics, err := NewMetrics(registry)
 	if err != nil {
@@ -34,6 +35,7 @@ func TestCleanupMetricsPreserveFailuresAndPartialProgress(t *testing.T) {
 }
 
 func TestCanceledSessionMonitorDoesNotTouchDatabase(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	metrics, err := NewMetrics(nil)

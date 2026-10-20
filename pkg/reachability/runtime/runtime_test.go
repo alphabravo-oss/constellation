@@ -10,6 +10,7 @@ import (
 )
 
 func TestConfirmsViaProcessExec(t *testing.T) {
+	t.Parallel()
 	var marks []Mark
 	c := New(nil, func(m Mark) { marks = append(marks, m) })
 
@@ -36,6 +37,7 @@ func TestConfirmsViaProcessExec(t *testing.T) {
 }
 
 func TestConfirmsViaLibraryLoad(t *testing.T) {
+	t.Parallel()
 	var marks []Mark
 	c := New(nil, func(m Mark) { marks = append(marks, m) })
 
@@ -62,6 +64,7 @@ func TestConfirmsViaLibraryLoad(t *testing.T) {
 }
 
 func TestDedup(t *testing.T) {
+	t.Parallel()
 	var marks []Mark
 	c := New(nil, func(m Mark) { marks = append(marks, m) })
 	c.AddSubject(Subject{VulnerabilityID: "CVE-1", ExePath: "/x"})
@@ -74,6 +77,7 @@ func TestDedup(t *testing.T) {
 }
 
 func TestLoadFromVerdicts(t *testing.T) {
+	t.Parallel()
 	c := New(nil, nil)
 	c.LoadFromVerdicts([]reachability.Verdict{
 		{VulnerabilityID: "CVE-1", Symbol: "pkg.Foo", Module: "m1"},
@@ -86,6 +90,7 @@ func TestLoadFromVerdicts(t *testing.T) {
 }
 
 func TestRunDrainsChannel(t *testing.T) {
+	t.Parallel()
 	c := New(nil, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -99,6 +104,7 @@ func TestRunDrainsChannel(t *testing.T) {
 }
 
 func TestAttachUprobeStub(t *testing.T) {
+	t.Parallel()
 	_, err := AttachUprobe("/bin/true", "main.main", nil)
 	if err == nil {
 		t.Fatal("expected error from closed event source")

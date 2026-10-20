@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
@@ -161,31 +163,31 @@ func scanNetworkRuleInventory(row inventorylist.Row) (networkRuleInventoryRow, e
 func (h *Network) networkRulesInventory(w http.ResponseWriter, r *http.Request, export bool) {
 	sub, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, 401, map[string]string{"error": "subject required"})
+		apiutil.WriteStatus(r.Context(), w, 401, "subject required")
 		return
 	}
 	cluster, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		httpx.WriteJSON(w, 400, map[string]string{"error": "invalid cluster id"})
+		apiutil.WriteStatus(r.Context(), w, 400, "invalid cluster id")
 		return
 	}
 	values, err := inventorylist.Query(r)
 	if err != nil {
-		httpx.WriteJSON(w, 400, map[string]string{"error": "invalid query"})
+		apiutil.WriteStatus(r.Context(), w, 400, "invalid query")
 		return
 	}
 	o, f, err := networkRuleInventoryOptions(values)
 	if err != nil {
-		httpx.WriteJSON(w, 400, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, 400, err.Error())
 		return
 	}
 	var owned bool
 	if err := h.db.Pool().QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM clusters WHERE id=$1 AND org_id=$2)`, cluster, sub.OrgID).Scan(&owned); err != nil {
-		httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, 500, err.Error())
 		return
 	}
 	if !owned {
-		httpx.WriteJSON(w, 404, map[string]string{"error": "cluster not found"})
+		apiutil.WriteStatus(r.Context(), w, 404, "cluster not found")
 		return
 	}
 	d := networkRuleInventoryDefinition(sub.OrgID, cluster, f)
@@ -197,7 +199,7 @@ func (h *Network) networkRulesInventory(w http.ResponseWriter, r *http.Request, 
 		}
 		body, meta, err := inventorylist.CSV(r.Context(), h.db.Pool(), d, o, scanNetworkRuleInventory, headers, cells)
 		if err != nil {
-			httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, 500, err.Error())
 			return
 		}
 		inventorylist.WriteCSV(w, "network-rules.csv", body, meta)
@@ -205,7 +207,7 @@ func (h *Network) networkRulesInventory(w http.ResponseWriter, r *http.Request, 
 	}
 	rows, meta, err := inventorylist.Read(r.Context(), h.db.Pool(), d, o, scanNetworkRuleInventory)
 	if err != nil {
-		httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, 500, err.Error())
 		return
 	}
 	httpx.WriteJSON(w, 200, map[string]any{"cluster_id": cluster, "rules": rows, "total": meta.Total, "has_more": meta.HasMore, "summary": meta.Summary, "limit": o.Limit, "offset": o.Offset, "sort": o.Sort, "order": o.Order, "filters": f, "source": "retained_flow_rollups_and_authored_overrides", "summary_scope": "matching_rules", "source_complete": true})

@@ -14,6 +14,8 @@ import (
 	"math/big"
 	"time"
 
+	colcrypto "github.com/alphabravocompany/constellation/internal/crypto"
+
 	"github.com/jackc/pgx/v5"
 )
 
@@ -27,6 +29,8 @@ const fedCAAdvisoryLock int64 = 0x436f6e73746c4361 // "ConstlCa"
 type Sealer interface {
 	Seal(plaintext []byte) ([]byte, error)
 	Open(sealed []byte) ([]byte, error)
+	// KeyID identifies the key new writes use (stored as the row's key_id).
+	KeyID() string
 }
 
 // FedCA is the master-held federation certificate authority (D2). It signs a short-lived
@@ -135,8 +139,8 @@ func generateAndStoreFedCA(ctx context.Context, store sessionKeyStore, sealer Se
 		return nil, fmt.Errorf("auth: seal fed CA key: %w", err)
 	}
 	if _, err := tx.Exec(ctx,
-		`INSERT INTO fed_ca (cert_pem, key_enc, active) VALUES ($1, $2, TRUE)`,
-		string(certPEM), keyEnc); err != nil {
+		`INSERT INTO fed_ca (cert_pem, key_enc, active, key_id, algorithm) VALUES ($1, $2, TRUE, $3, $4)`,
+		string(certPEM), keyEnc, sealer.KeyID(), colcrypto.Algorithm); err != nil {
 		return nil, fmt.Errorf("auth: persist fed CA: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {

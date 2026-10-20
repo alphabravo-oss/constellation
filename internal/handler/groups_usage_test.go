@@ -1,3 +1,5 @@
+//go:build integration
+
 package handler
 
 import (
@@ -189,7 +191,8 @@ VALUES ($1, $2, 'prod/web', 'log-writer', '/var/log/app.log', ARRAY['logger'], $
 	if err := json.NewDecoder(updateRec.Body).Decode(&updateConflict); err != nil {
 		t.Fatalf("decode update conflict: %v", err)
 	}
-	if updateConflict["blocking_references"].(float64) != 4 || !jsonArrayContains(updateConflict["changed_fields"], "name") {
+	updateDetails, _ := updateConflict["error"].(map[string]any)["details"].(map[string]any)
+	if updateDetails["blocking_references"].(float64) != 4 || !jsonArrayContains(updateDetails["changed_fields"], "name") {
 		t.Fatalf("update conflict = %+v", updateConflict)
 	}
 
@@ -204,7 +207,8 @@ VALUES ($1, $2, 'prod/web', 'log-writer', '/var/log/app.log', ARRAY['logger'], $
 	if err := json.NewDecoder(delRec.Body).Decode(&conflict); err != nil {
 		t.Fatalf("decode conflict: %v", err)
 	}
-	if conflict["blocking_references"].(float64) != 4 {
+	conflictDetails, _ := conflict["error"].(map[string]any)["details"].(map[string]any)
+	if conflictDetails["blocking_references"].(float64) != 4 {
 		t.Fatalf("blocking references = %+v", conflict)
 	}
 

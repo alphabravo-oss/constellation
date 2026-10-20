@@ -26,6 +26,7 @@ var sampleFlows = []Flow{
 }
 
 func TestGenerateNative_HasIngressAndEgress(t *testing.T) {
+	t.Parallel()
 	yaml := GenerateNative("default/api-service", "default",
 		map[string]string{"app": "api-service"}, sampleFlows)
 	// must mention ingress from frontend on 8080
@@ -44,6 +45,7 @@ func TestGenerateNative_HasIngressAndEgress(t *testing.T) {
 }
 
 func TestGenerateCilium_HasCiliumShape(t *testing.T) {
+	t.Parallel()
 	yaml := GenerateCilium("default/api-service", "default",
 		map[string]string{"app": "api-service"}, sampleFlows)
 	if !strings.Contains(yaml, "cilium.io/v2") {
@@ -58,6 +60,7 @@ func TestGenerateCilium_HasCiliumShape(t *testing.T) {
 }
 
 func TestGenerateCalico_HasFelixSelector(t *testing.T) {
+	t.Parallel()
 	yaml := GenerateCalico("default/api-service", "default",
 		map[string]string{"app": "api-service"}, sampleFlows)
 	if !strings.Contains(yaml, "projectcalico.org/v3") {
@@ -69,6 +72,7 @@ func TestGenerateCalico_HasFelixSelector(t *testing.T) {
 }
 
 func TestGeneratePolicies_PreserveL7IntentAsMetadata(t *testing.T) {
+	t.Parallel()
 	flows := []Flow{
 		{SrcNamespace: "default", SrcWorkload: "frontend", DstNamespace: "default", DstWorkload: "api", Protocol: "TCP", Port: 8443, L7Protocol: "grpc"},
 		{SrcNamespace: "default", SrcWorkload: "api", DstNamespace: "data", DstWorkload: "postgres", Protocol: "TCP", Port: 5432, L7Protocol: "postgres"},
@@ -88,6 +92,7 @@ func TestGeneratePolicies_PreserveL7IntentAsMetadata(t *testing.T) {
 }
 
 func TestDedupeFlows_SumsCount(t *testing.T) {
+	t.Parallel()
 	dup := []Flow{
 		{DstWorkload: "x", Protocol: "TCP", Port: 80, Count: 10},
 		{DstWorkload: "x", Protocol: "TCP", Port: 80, Count: 5},
@@ -105,6 +110,7 @@ func TestDedupeFlows_SumsCount(t *testing.T) {
 }
 
 func TestDedupeFlows_PreservesDistinctIngressPeers(t *testing.T) {
+	t.Parallel()
 	flows := []Flow{
 		{SrcNamespace: "default", SrcWorkload: "frontend", DstNamespace: "default", DstWorkload: "api", Protocol: "TCP", Port: 8443, Count: 10},
 		{SrcNamespace: "jobs", SrcWorkload: "worker", DstNamespace: "default", DstWorkload: "api", Protocol: "TCP", Port: 8443, Count: 5},
@@ -116,6 +122,7 @@ func TestDedupeFlows_PreservesDistinctIngressPeers(t *testing.T) {
 }
 
 func TestGenerateCilium_ExternalEgressUsesCIDR(t *testing.T) {
+	t.Parallel()
 	yaml := GenerateCilium("frontend", "default", map[string]string{"app": "frontend"}, []Flow{
 		{SrcNamespace: "default", SrcWorkload: "frontend", DstIP: "203.0.113.10", Protocol: "TCP", Port: 443, Count: 2},
 	})
@@ -282,6 +289,7 @@ func dnsRuleProtocols(t *testing.T, rule map[string]any) map[string]bool {
 }
 
 func TestGenerateCilium_NonFQDNUnchanged(t *testing.T) {
+	t.Parallel()
 	// The Cilium output for a workload-to-workload flow set must be byte-for-byte
 	// stable: adding FQDN support changed nothing for flows without an Fqdn.
 	a := GenerateCilium("default/api-service", "default", map[string]string{"app": "api-service"}, sampleFlows)
@@ -298,6 +306,7 @@ func TestGenerateCilium_NonFQDNUnchanged(t *testing.T) {
 }
 
 func TestGenerateCiliumWithOptions_ConfigurableDNS(t *testing.T) {
+	t.Parallel()
 	opts := CiliumOptions{
 		KubeDNSSelector: map[string]string{
 			"k8s:io.kubernetes.pod.namespace": "openshift-dns",
@@ -333,6 +342,7 @@ func TestGenerateCiliumWithOptions_ConfigurableDNS(t *testing.T) {
 }
 
 func TestCiliumOptions_ZeroValueNormalizes(t *testing.T) {
+	t.Parallel()
 	// A zero-value CiliumOptions must fall back to the stock kube-dns defaults
 	// rather than emitting an empty/invalid DNS-visibility rule.
 	manifest := GenerateCiliumWithOptions("frontend", "default", map[string]string{"app": "frontend"},

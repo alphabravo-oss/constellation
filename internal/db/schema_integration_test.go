@@ -4,24 +4,16 @@ package db
 
 import (
 	"context"
-	"os"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
 
 	"github.com/alphabravocompany/constellation/internal/testutil/pgfixture"
 )
 
 func TestRequireSchemaHandlesMissingOldRolledBackAndCurrent(t *testing.T) {
-	dsn := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("requires disposable integration database")
-	}
-	base, err := pgxpool.New(t.Context(), dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(base.Close)
+	t.Parallel()
+	base := pgtest.Pool(t)
 	pool := pgfixture.Schema(t, base)
 	database := NewFromPool(pool)
 	if err := database.RequireSchema(t.Context()); err == nil {

@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 
 	"github.com/alphabravocompany/constellation/internal/handler"
@@ -55,7 +57,7 @@ func (p *Policies) ExportAdmissionProfile(w http.ResponseWriter, r *http.Request
 	profileID := chi.URLParam(r, "profile")
 	profile, ok := admission.BuiltInAdmissionProfile(profileID)
 	if !ok {
-		httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "admission profile not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "admission profile not found")
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, admission.AdmissionProfileBundleFor(profile))

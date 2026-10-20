@@ -28,6 +28,7 @@ deny[msg] {
 // the chain existed the webhook only ran the built-in PolicyEngine, so a Rego
 // deny silently failed open.
 func TestChainEngine_RegoDenyDenies(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	rego, errs, err := NewRegoEngine(ctx,
 		map[string]string{"block-forbidden-registry": regoDenyByImage},
@@ -75,6 +76,7 @@ func TestChainEngine_RegoDenyDenies(t *testing.T) {
 // and fired no EventAdmission response rule. The chain must now fan the deny out
 // to its DenyHook with the offending policy id.
 func TestChainEngine_RegoDenyFiresOnDeny(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	rego, _, err := NewRegoEngine(ctx,
 		map[string]string{"block-forbidden-registry": regoDenyByImage},
@@ -124,6 +126,7 @@ func TestChainEngine_RegoDenyFiresOnDeny(t *testing.T) {
 // TestChainEngine_CELDenyFiresOnDeny is the CEL counterpart: a CEL enforce deny
 // must also reach the chain's DenyHook.
 func TestChainEngine_CELDenyFiresOnDeny(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	// Deny on image name — something no built-in rule cares about — so the deny
 	// can only come from the CEL engine (proving the chain fired the hook, not
@@ -219,6 +222,7 @@ func TestChainEngine_CompiledPolicyFailureFiresDenyHook(t *testing.T) {
 // fires its own OnDeny, so the chain must stay silent on that path (exactly one
 // event total).
 func TestChainEngine_PolicyDenyDoesNotDoubleFire(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	var count int32
 	policy := NewEngine()

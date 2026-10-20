@@ -56,6 +56,7 @@ func TestCheckFileModeMax_SubsetNotMagnitude(t *testing.T) {
 }
 
 func TestCheckFileModeMax_MissingFileSkips(t *testing.T) {
+	t.Parallel()
 	res, _ := checkFileModeMax(t.TempDir(), "/etc/shadow", 0o640)
 	if res != "skip" {
 		t.Errorf("missing file: result %q, want skip", res)
@@ -63,6 +64,7 @@ func TestCheckFileModeMax_MissingFileSkips(t *testing.T) {
 }
 
 func TestRunCIS_DefaultChecks_NoCrashes(t *testing.T) {
+	t.Parallel()
 	r := RunCIS(CISOptions{NodeName: "test", HostRoot: ""})
 	if len(r.Checks) == 0 {
 		t.Fatal("no checks ran")
@@ -84,6 +86,7 @@ func TestRunCIS_DefaultChecks_NoCrashes(t *testing.T) {
 }
 
 func TestRunCIS_CustomCheckList(t *testing.T) {
+	t.Parallel()
 	r := RunCIS(CISOptions{
 		NodeName: "test",
 		Checks: []CISCheck{
@@ -99,6 +102,7 @@ func TestRunCIS_CustomCheckList(t *testing.T) {
 }
 
 func TestCheckSSHDOption(t *testing.T) {
+	t.Parallel()
 	// Use a fake sshd_config in a tempdir.
 	dir := t.TempDir()
 	body := `# config

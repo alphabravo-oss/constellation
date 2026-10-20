@@ -17,6 +17,7 @@ import (
 
 // TestValidatorVerifyRSA round-trips an RS256 JWT against a JWKS server backed by an in-memory key.
 func TestValidatorVerifyRSA(t *testing.T) {
+	t.Parallel()
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("gen key: %v", err)
@@ -61,6 +62,7 @@ func TestValidatorVerifyRSA(t *testing.T) {
 
 // TestValidatorRejectsBadSig confirms a key swap is detected.
 func TestValidatorRejectsBadSig(t *testing.T) {
+	t.Parallel()
 	good, _ := rsa.GenerateKey(rand.Reader, 2048)
 	other, _ := rsa.GenerateKey(rand.Reader, 2048)
 
@@ -89,6 +91,7 @@ func TestValidatorRejectsBadSig(t *testing.T) {
 }
 
 func TestValidatorEnforcesIssuerAudience(t *testing.T) {
+	t.Parallel()
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("gen key: %v", err)
@@ -135,6 +138,7 @@ func TestValidatorEnforcesIssuerAudience(t *testing.T) {
 }
 
 func TestSubjectID(t *testing.T) {
+	t.Parallel()
 	got, err := SubjectID(jwt.MapClaims{"sub": "  astro-user-1  "})
 	if err != nil {
 		t.Fatalf("SubjectID: %v", err)

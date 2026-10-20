@@ -10,6 +10,7 @@ import (
 )
 
 func TestContainerIDFromCgroupPath(t *testing.T) {
+	t.Parallel()
 	const id = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	cases := []string{
 		"/sys/fs/cgroup/kubepods.slice/kubepods-burstable.slice/pod123/cri-containerd-" + id + ".scope",
@@ -24,6 +25,7 @@ func TestContainerIDFromCgroupPath(t *testing.T) {
 }
 
 func TestContainerIDFromCgroupRootMatchesInode(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	const id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	dir := filepath.Join(root, "kubepods.slice", "pod123", "cri-containerd-"+id+".scope")

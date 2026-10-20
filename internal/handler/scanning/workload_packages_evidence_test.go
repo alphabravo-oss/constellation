@@ -1,3 +1,5 @@
+//go:build integration
+
 package scanning
 
 import (
@@ -17,6 +19,7 @@ import (
 )
 
 func TestScannerPackagesFromWorkloadPackagesAddsImageHints(t *testing.T) {
+	t.Parallel()
 	got := scannerPackagesFromWorkloadPackages(WorkloadPackagesPayload{
 		WorkloadID: "payments/pod/api",
 		Containers: []WorkloadPackageContainer{{
@@ -46,6 +49,7 @@ func TestScannerPackagesFromWorkloadPackagesAddsImageHints(t *testing.T) {
 }
 
 func TestWorkloadContainerImageIdentityUsesBareCRIRefAsDigestOnly(t *testing.T) {
+	t.Parallel()
 	container := WorkloadPackageContainer{
 		Image:    "docker.io/constellation/api:0.1.0",
 		ImageRef: "sha256:eb15e83d7a4364dcf9711473e213136c997495c1e8e78f42a45e0ee3b9127244",
@@ -75,6 +79,7 @@ func TestWorkloadContainerImageIdentityUsesBareCRIRefAsDigestOnly(t *testing.T) 
 }
 
 func TestWorkloadPackagesReportQueuesScanEvidence(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 

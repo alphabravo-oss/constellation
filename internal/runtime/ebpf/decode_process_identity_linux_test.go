@@ -10,6 +10,7 @@ import (
 )
 
 func TestDecodeProcessStartIdentityIsAdditive(t *testing.T) {
+	t.Parallel()
 	for _, tail := range []int{0, 4, 8} {
 		header := int(unsafe.Sizeof(recordHeader{}))
 		body := make([]byte, 16+256+256+tail)
@@ -37,6 +38,7 @@ func TestDecodeProcessStartIdentityIsAdditive(t *testing.T) {
 }
 
 func TestDecodeRecordFullCHeaderLayout(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []byte{recKindExec, recKindFile} {
 		record := make([]byte, 40+528)
 		record[0] = kind

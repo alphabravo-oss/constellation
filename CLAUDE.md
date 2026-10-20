@@ -31,11 +31,11 @@ agent) follows. It derives from the AlphaBravo Technology Selection Guide, chapt
 | Stop / status / logs | `make dev-down` / `make dev-status` / `make dev-logs` | `scripts/dev.sh logs api` for one process. |
 | Build every binary | `make build` | `bin/<name>`; add binaries to `BINARIES` in the Makefile. |
 | Unit tests | `make test` | gotestsum, `-race -shuffle=on`, JUnit under `artifacts/`; no Docker. |
-| Integration tests | `make test-integration` | Disposable pgvector container, `goose up` smoke, `-tags=integration`. |
+| Integration tests | `make test-integration` | `-tags=integration`; testcontainers pgvector + pgtestdb clone per test (`internal/testutil/pgtest`), `-p 8`. |
 | Quality gate | `make check` | lint + vet + fmt (verify-only) + shellcheck + frontend lint + unit tests. |
 | Format | `make fmt-fix` | gofmt + goimports (local prefix `github.com/alphabravocompany/constellation`). |
 | Security | `make security` | gosec, govulncheck, gitleaks → SARIF. |
-| Migrations | `make migrate` | goose up against `$DATABASE_URL`; forward-only. |
+| Migrations | `make migrate` | `constellation-api --migrate-only`: embedded goose set under an advisory lock; the API also runs it on boot. Forward-only. |
 | Chart | `make helm-lint helm-template-smoke` | Helm 4 CLI. |
 | Images | `make image-<role>` / `make images` | `GO_VERSION` always comes from `go.mod`. |
 | FIPS | `make fips-build` | Go-native FIPS 140-3 module (ADR 0004). |
@@ -52,7 +52,7 @@ Tempo `:3200` (OTLP `:4317`), Loki `:3100`.
 - `internal/handler/*` — legacy REST handlers (lint held at STANDARD until extracted).
 - `internal/telemetry` — the only OTel/Prometheus init; `Init(ctx, Config)`.
 - `internal/operator` — controller-runtime operator; CRDs in `deploy/charts/constellation/crds`.
-- `db/migrations` — goose SQL, forward-only.
+- `internal/server/database/migrations` — embedded goose SQL, forward-only; runner in `internal/server/database`.
 - `deploy/charts/constellation` — the only deployment path (ADR 0007).
 - `third_party/neuvector` — vendored C data-plane (ADR 0003).
 - `docs/decisions` — ADRs (MADR); write one for any stack change.

@@ -1,3 +1,5 @@
+//go:build integration
+
 package findings
 
 import (
@@ -16,6 +18,7 @@ import (
 )
 
 func TestFindingsServerFilterParity(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	ctx := context.Background()

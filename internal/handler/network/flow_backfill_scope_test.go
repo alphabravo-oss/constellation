@@ -1,3 +1,5 @@
+//go:build integration
+
 package network
 
 import (
@@ -9,6 +11,7 @@ import (
 )
 
 func TestFlowBackfillDoesNotCrossClusterIPReuse(t *testing.T) {
+	t.Parallel()
 	database := openTestDB(t)
 	t.Cleanup(database.Close)
 	ctx := context.Background()

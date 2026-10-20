@@ -30,6 +30,7 @@ func enqueueTestBatch(t *testing.T, queue *Queue) {
 }
 
 func TestClosedQueueCannotAffectNewOwner(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	old := openTestQueue(t, dir)
 	enqueueTestBatch(t, old)
@@ -69,6 +70,7 @@ func assertOldest(t *testing.T, queue *Queue, sequence int64, count int) {
 }
 
 func TestDirectoryReplacementCannotRedirectQueue(t *testing.T) {
+	t.Parallel()
 	parent := t.TempDir()
 	dir := filepath.Join(parent, "queue")
 	moved := filepath.Join(parent, "original")
@@ -94,6 +96,7 @@ func TestDirectoryReplacementCannotRedirectQueue(t *testing.T) {
 }
 
 func TestLockReplacementCannotShareQueue(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	queue := openTestQueue(t, dir)
 	enqueueTestBatch(t, queue)
@@ -174,6 +177,7 @@ func assertRejectedLink(t *testing.T, kind string) {
 }
 
 func TestConcurrentClosePreservesPublishedBatches(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	queue := openTestQueue(t, dir)
 	var workers sync.WaitGroup
@@ -216,6 +220,7 @@ func TestConcurrentClosePreservesPublishedBatches(t *testing.T) {
 }
 
 func TestRecoveryRemovesOnlyUnpublishedRegularFiles(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	queue := openTestQueue(t, dir)
 	enqueueTestBatch(t, queue)
@@ -239,6 +244,7 @@ func TestRecoveryRemovesOnlyUnpublishedRegularFiles(t *testing.T) {
 }
 
 func TestRecoveryRejectsLinkedStateWithoutChangingIdentity(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	queue := openTestQueue(t, dir)
 	enqueueTestBatch(t, queue)
@@ -282,10 +288,12 @@ func TestRecoveryRejectsLinkedStateWithoutChangingIdentity(t *testing.T) {
 }
 
 func TestInFlightEnqueueLockReplacementRetainsExclusiveDirectory(t *testing.T) {
+	t.Parallel()
 	assertInFlightReplacement(t, false)
 }
 
 func TestInFlightAckLockReplacementRetainsExclusiveDirectory(t *testing.T) {
+	t.Parallel()
 	assertInFlightReplacement(t, true)
 }
 
@@ -352,6 +360,7 @@ func assertInFlightReplacement(t *testing.T, acknowledge bool) {
 }
 
 func TestDirectoryAndLegacyFileLocksBothRemainEffective(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	root, err := os.OpenRoot(dir)
 	if err != nil {

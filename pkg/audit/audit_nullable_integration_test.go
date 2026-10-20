@@ -5,10 +5,11 @@ package audit
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -16,18 +17,11 @@ import (
 )
 
 func TestAuditVerifyChainNullableMetadata(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"null-request", "null-targets", "tampered-request"} {
 		t.Run(kind, func(t *testing.T) {
 			// Never truncate or append synthetic test content to the real global chain.
-			databaseURL := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-			if databaseURL == "" {
-				t.Skip("requires explicitly configured disposable database")
-			}
-			admin, err := pgxpool.New(t.Context(), databaseURL)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer admin.Close()
+			admin := pgtest.Pool(t)
 			schema := "audit_nullable_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 			quoted := pgx.Identifier{schema}.Sanitize()
 			if _, err := admin.Exec(t.Context(), "CREATE SCHEMA "+quoted); err != nil {

@@ -18,6 +18,7 @@ import (
 )
 
 func TestAuditArchiveHeartbeatSnapshotIsBounded(t *testing.T) {
+	t.Parallel()
 	state := &auditArchiveHeartbeatState{
 		Bucket:        "sensitive-audit-bucket",
 		Prefix:        "constellation/audit",
@@ -47,6 +48,7 @@ func TestAuditArchiveHeartbeatSnapshotIsBounded(t *testing.T) {
 }
 
 func TestMakeArchiveKeys(t *testing.T) {
+	t.Parallel()
 	start := time.Date(2026, 6, 12, 1, 2, 3, 0, time.UTC)
 	end := start.Add(24 * time.Hour)
 
@@ -67,6 +69,7 @@ func TestMakeArchiveKeys(t *testing.T) {
 }
 
 func TestSignArchiveManifestStaticKey(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	priv := filepath.Join(dir, "cosign.key")
 	pub := filepath.Join(dir, "cosign.pub")
@@ -121,6 +124,7 @@ func TestSignArchiveManifestStaticKey(t *testing.T) {
 }
 
 func TestUploadArchive(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	archivePath := filepath.Join(dir, "archive.jsonl.gz")
 	archiveBody := []byte("compressed-jsonl")

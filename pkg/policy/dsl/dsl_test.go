@@ -3,6 +3,7 @@ package dsl
 import "testing"
 
 func TestPolicyValidate(t *testing.T) {
+	t.Parallel()
 	good := Policy{
 		Name:            "deny-privileged",
 		Severity:        "high",
@@ -33,6 +34,7 @@ func TestPolicyValidate(t *testing.T) {
 }
 
 func TestPolicyMarshalRoundtrip(t *testing.T) {
+	t.Parallel()
 	p := Policy{
 		Name: "p", Severity: "medium", Source: SourceDeclarative,
 		LifecycleStages: []LifecycleStage{StageBuild, StageDeploy},

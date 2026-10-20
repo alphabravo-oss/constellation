@@ -1,3 +1,5 @@
+//go:build integration
+
 package scanning
 
 import (
@@ -13,6 +15,7 @@ import (
 )
 
 func TestScanJobClaimPersistsInventoryAndRefreshesOnRetry(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	pool := d.Pool()

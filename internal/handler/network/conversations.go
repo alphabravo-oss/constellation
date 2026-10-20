@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/google/uuid"
 
 	"github.com/alphabravocompany/constellation/internal/db"
@@ -212,7 +214,7 @@ func (h *NetworkConversations) Detail(w http.ResponseWriter, r *http.Request) {
 	from := strings.TrimSpace(r.URL.Query().Get("from"))
 	to := strings.TrimSpace(r.URL.Query().Get("to"))
 	if from == "" || to == "" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "from and to are required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "from and to are required")
 		return
 	}
 	hours, _ := strconv.Atoi(r.URL.Query().Get("hours"))
@@ -224,7 +226,7 @@ func (h *NetworkConversations) Detail(w http.ResponseWriter, r *http.Request) {
 	if clusterID != "" {
 		u, err := uuid.Parse(clusterID)
 		if err != nil {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster_id"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid cluster_id")
 			return
 		}
 		clusterUUID = &u
@@ -244,7 +246,7 @@ SELECT protocol, COALESCE(l7_protocol,''), COALESCE(dst_port,0), verdict,
  ORDER BY SUM(sum_bytes) DESC
  LIMIT 200`, subj.OrgID, clusterID, from, to, hours)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()
@@ -256,7 +258,7 @@ SELECT protocol, COALESCE(l7_protocol,''), COALESCE(dst_port,0), verdict,
 		var last time.Time
 		if err := rows.Scan(&e.Protocol, &l7, &e.Port, &e.Verdict, &e.Bytes, &e.Packets,
 			&e.ClientBytes, &e.ServerBytes, &e.Sessions, &e.Severity, &e.ThreatID, &e.ThreatIDComplete, &last); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read conversation entries"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "could not read conversation entries")
 			return
 		}
 		e.Protocol = strings.ToUpper(e.Protocol)
@@ -271,7 +273,7 @@ SELECT protocol, COALESCE(l7_protocol,''), COALESCE(dst_port,0), verdict,
 		tSess += e.Sessions
 	}
 	if err := rows.Err(); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read conversation entries"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "could not read conversation entries")
 		return
 	}
 	rows.Close()
@@ -286,7 +288,7 @@ SELECT protocol, COALESCE(l7_protocol,''), COALESCE(dst_port,0), verdict,
 	if len(entries) > 0 {
 		roles, err := h.conversationPlatformRoles(r.Context(), subj.OrgID, clusterUUID, from, to)
 		if err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not classify conversation entries"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "could not classify conversation entries")
 			return
 		}
 		if role := roles[from]; role != "" {

@@ -1,3 +1,5 @@
+//go:build integration
+
 package policy
 
 import (
@@ -17,6 +19,7 @@ import (
 )
 
 func TestResponseRules_ListReturnsCatalog(t *testing.T) {
+	t.Parallel()
 	w := httptest.NewRecorder()
 	NewResponseRules().List(w, httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/response-rules", nil))
 	if w.Code != http.StatusOK {
@@ -52,6 +55,7 @@ func TestResponseRules_ListReturnsCatalog(t *testing.T) {
 }
 
 func TestResponseRules_UpdatePersistsOverrideAndAudit(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	pool := d.Pool()
@@ -129,6 +133,7 @@ func TestResponseRules_UpdatePersistsOverrideAndAudit(t *testing.T) {
 }
 
 func TestResponseRules_UpdateRequiresReason(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	pool := d.Pool()

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/google/uuid"
 
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
@@ -76,33 +78,33 @@ func (c *Compliance) ChecksCSV(w http.ResponseWriter, r *http.Request) { c.check
 func (c *Compliance) checksInventory(w http.ResponseWriter, r *http.Request, export bool) {
 	subj, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "subject required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
 		return
 	}
 	values, err := inventorylist.Query(r)
 	if err != nil {
-		httpx.WriteJSON(w, 400, map[string]string{"error": "invalid query string"})
+		apiutil.WriteStatus(r.Context(), w, 400, "invalid query string")
 		return
 	}
 	clusterID, err := sqlx.ParseClusterIDParam(r)
 	if err != nil {
-		httpx.WriteJSON(w, 400, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, 400, err.Error())
 		return
 	}
 	if clusterID != nil {
 		var owned bool
 		if err := c.db.Pool().QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM clusters WHERE id=$1 AND org_id=$2)`, clusterID, subj.OrgID).Scan(&owned); err != nil {
-			httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, 500, err.Error())
 			return
 		}
 		if !owned {
-			httpx.WriteJSON(w, 404, map[string]string{"error": "cluster not found"})
+			apiutil.WriteStatus(r.Context(), w, 404, "cluster not found")
 			return
 		}
 	}
 	opts, err := inventorylist.Parse(values, map[string]string{"framework": "(lower(framework),lower(control_id))", "control": "(lower(control_id),lower(framework))", "title": "lower(title)", "status": "effective_status", "severity": "CASE severity WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END", "evaluated": "evaluated_at"}, "framework")
 	if err != nil {
-		httpx.WriteJSON(w, 400, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, 400, err.Error())
 		return
 	}
 	// Legacy positional clients received up to500 rows in framework/control order.
@@ -115,7 +117,7 @@ func (c *Compliance) checksInventory(w http.ResponseWriter, r *http.Request, exp
 	}
 	status, err := inventorylist.Filter(values, "status", "pass", "fail", "manual", "not_applicable", "exempted", "graded", "ungraded")
 	if err != nil {
-		httpx.WriteJSON(w, 400, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, 400, err.Error())
 		return
 	}
 	framework := values.Get("framework")
@@ -141,7 +143,7 @@ func (c *Compliance) checksInventory(w http.ResponseWriter, r *http.Request, exp
 			return []string{item.ID.String(), cluster, asset, item.Framework, item.ControlID, item.Title, item.Status, item.EffectiveStatus, item.Severity, item.Evidence, item.Remediation, item.EvaluatedAt.Format(time.RFC3339), exemption, expires}
 		})
 		if err != nil {
-			httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, 500, err.Error())
 			return
 		}
 		inventorylist.WriteCSV(w, "constellation-compliance-checks.csv", body, meta)
@@ -149,7 +151,7 @@ func (c *Compliance) checksInventory(w http.ResponseWriter, r *http.Request, exp
 	}
 	rows, meta, err := inventorylist.Read(r.Context(), c.db.Pool(), definition, opts, scanComplianceInventory)
 	if err != nil {
-		httpx.WriteJSON(w, 500, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, 500, err.Error())
 		return
 	}
 	httpx.WriteJSON(w, 200, map[string]any{"checks": rows, "cluster_id": clusterID, "framework": framework, "profile": values.Get("profile"), "control_id": values.Get("control_id"), "status": status, "q": strings.TrimSpace(values.Get("q")), "sort": opts.Sort, "order": opts.Order, "limit": opts.Limit, "offset": opts.Offset, "total": meta.Total, "has_more": meta.HasMore, "summary": meta.Summary})

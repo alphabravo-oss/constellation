@@ -1,3 +1,5 @@
+//go:build integration
+
 package k8saudit
 
 import (
@@ -6,9 +8,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
 
 	"github.com/google/uuid"
 
@@ -17,15 +20,7 @@ import (
 )
 
 func TestAuditIngestUsesTokenClusterAndRejectsInvalidBindings(t *testing.T) {
-	databaseURL := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("CONSTELLATION_TEST_DATABASE_URL not set; integration test")
-	}
-	database, err := db.Connect(context.Background(), databaseURL)
-	if err != nil {
-		t.Skipf("skipping: cannot reach test DB (%v)", err)
-	}
-	t.Cleanup(database.Close)
+	database := db.NewFromPool(pgtest.Pool(t))
 	ctx := context.Background()
 	pool := database.Pool()
 	createOrg := func() uuid.UUID {

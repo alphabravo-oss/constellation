@@ -5,10 +5,11 @@ package lifecycle
 import (
 	"context"
 	"errors"
-	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -19,6 +20,7 @@ import (
 )
 
 func TestPartitionStatisticsRefreshesOnlyOneParentPerPass(t *testing.T) {
+	t.Parallel()
 	pool := statisticsPool(t)
 	pgfixture.PartitionCollision(t, pool, "events")
 	pgfixture.PartitionCollision(t, pool, "findings")
@@ -34,6 +36,7 @@ func TestPartitionStatisticsRefreshesOnlyOneParentPerPass(t *testing.T) {
 }
 
 func TestPartitionStatisticsRefusesNonOwnerWithoutFalseSuccess(t *testing.T) {
+	t.Parallel()
 	pool := statisticsPool(t)
 	role := "stats_reader_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	roleSQL := pgx.Identifier{role}.Sanitize()
@@ -65,21 +68,14 @@ func TestPartitionStatisticsRefusesNonOwnerWithoutFalseSuccess(t *testing.T) {
 
 func statisticsPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	dsn := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("requires disposable integration database")
-	}
-	base, err := pgxpool.New(t.Context(), dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(base.Close)
+	base := pgtest.Pool(t)
 	pool := pgfixture.Schema(t, base)
 	pgfixture.PartitionCollision(t, pool, "network_flows")
 	return pool
 }
 
 func TestPartitionStatisticsRefreshPreservesRowsAndCollectsParentStats(t *testing.T) {
+	t.Parallel()
 	pool := statisticsPool(t)
 	execSessionSQL(t, pool, `CREATE TABLE events (id integer);
  CREATE TABLE unrelated (id integer) PARTITION BY RANGE(id);
@@ -106,6 +102,7 @@ func TestPartitionStatisticsRefreshPreservesRowsAndCollectsParentStats(t *testin
 }
 
 func TestPartitionStatisticsSkipsFreshParents(t *testing.T) {
+	t.Parallel()
 	pool := statisticsPool(t)
 	execSessionSQL(t, pool, "ANALYZE network_flows; SELECT pg_stat_force_next_flush()")
 	result, err := RefreshPartitionStatistics(t.Context(), pool)
@@ -115,6 +112,7 @@ func TestPartitionStatisticsSkipsFreshParents(t *testing.T) {
 }
 
 func TestPartitionStatisticsSkipsConcurrentMaintainer(t *testing.T) {
+	t.Parallel()
 	pool := statisticsPool(t)
 	tx, err := pool.Begin(t.Context())
 	if err != nil {
@@ -131,6 +129,7 @@ func TestPartitionStatisticsSkipsConcurrentMaintainer(t *testing.T) {
 }
 
 func TestPartitionStatisticsLockedParentIsNotReportedFresh(t *testing.T) {
+	t.Parallel()
 	pool := statisticsPool(t)
 	tx, err := pool.Begin(t.Context())
 	if err != nil {
@@ -157,6 +156,7 @@ func TestPartitionStatisticsLockedParentIsNotReportedFresh(t *testing.T) {
 }
 
 func TestPartitionStatisticsRespectsCancellation(t *testing.T) {
+	t.Parallel()
 	pool := statisticsPool(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()

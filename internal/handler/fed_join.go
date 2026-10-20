@@ -9,13 +9,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/alphabravocompany/constellation/internal/auth"
+	colcrypto "github.com/alphabravocompany/constellation/internal/crypto"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/federation"
-	regsecrets "github.com/alphabravocompany/constellation/pkg/registry/secrets"
 )
 
 // ── FED-JOIN-25: joint-side "join a remote master" endpoint ──────────────────
@@ -89,13 +91,13 @@ func (h *Federation) JoinRemote(w http.ResponseWriter, r *http.Request) {
 	// must not silently fall back to deployment credentials.
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid federation join request"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid federation join request")
 		return
 	}
 
 	masterURL, token, err := resolveRemoteJoinConfig(req, os.Getenv("CONSTELLATION_FED_MASTER_URL"), os.Getenv("CONSTELLATION_FED_MASTER_TOKEN"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -104,7 +106,7 @@ func (h *Federation) JoinRemote(w http.ResponseWriter, r *http.Request) {
 	// effort: on a bearer-only (no-CA) master the join returns no key, so a nil sealer is
 	// fine; performRemoteJoin fails loudly only if a key arrives without a cipher.
 	var sealer auth.Sealer
-	if cipher, cerr := regsecrets.Default(r.Context(), h.db.Pool(), nil); cerr == nil {
+	if cipher, cerr := colcrypto.Default(); cerr == nil {
 		sealer = cipher
 	}
 
@@ -112,7 +114,7 @@ func (h *Federation) JoinRemote(w http.ResponseWriter, r *http.Request) {
 	res, err := performRemoteJoin(r.Context(), h.db.Pool(), sealer, client,
 		subj.OrgID, masterURL, token, req.ClusterID, req.ClusterName)
 	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadGateway, err.Error())
 		return
 	}
 

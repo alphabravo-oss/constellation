@@ -10,6 +10,7 @@ import (
 )
 
 func TestConnectorReady(t *testing.T) {
+	t.Parallel()
 	base := ConnectorConfig{Branch: "main", FilePath: "c.yaml", PAT: "x"}
 	gh := base
 	gh.Provider = ProviderGitHub
@@ -36,6 +37,7 @@ func TestConnectorReady(t *testing.T) {
 }
 
 func TestPushConfigDisabled(t *testing.T) {
+	t.Parallel()
 	err := PushConfig(context.Background(), ConnectorConfig{Provider: ProviderGitHub}, []byte("x"), "m")
 	if !errors.Is(err, ErrConnectorDisabled) {
 		t.Fatalf("want ErrConnectorDisabled, got %v", err)
@@ -44,6 +46,7 @@ func TestPushConfigDisabled(t *testing.T) {
 
 // TestPushGitHubCreate exercises the create path (GET 404 -> PUT 201) against a stub.
 func TestPushGitHubCreate(t *testing.T) {
+	t.Parallel()
 	var gotPut bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -78,6 +81,7 @@ func TestPushGitHubCreate(t *testing.T) {
 // TestPushGitHubNoopWhenIdentical verifies the blob-SHA short-circuit: when the remote
 // file already has the identical content, no PUT is issued.
 func TestPushGitHubNoopWhenIdentical(t *testing.T) {
+	t.Parallel()
 	content := []byte("same: content\n")
 	sha := gitBlobSHA1(content)
 	var putCount int
@@ -121,6 +125,7 @@ func (rt rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 }
 
 func TestAzureRefBranch(t *testing.T) {
+	t.Parallel()
 	r := azureRef{Name: "refs/heads/main"}
 	if r.branch() != "main" {
 		t.Fatalf("branch=%q", r.branch())

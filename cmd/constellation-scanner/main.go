@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"math"
 	"net/http"
 	neturl "net/url"
@@ -95,7 +96,8 @@ func main() {
 		goReachabilityEnabled = flag.Bool("go-reachability-enabled", envBool("CONSTELLATION_SCANNER_GO_REACHABILITY_ENABLED", false), "Enable govulncheck binary-mode reachability analysis for Go-binary findings (opt-in; requires govulncheck on PATH)")
 		tlsSkipVerify         = flag.Bool("tls-skip-verify", envBool("CONSTELLATION_SCANNER_TLS_SKIP_VERIFY", false), "Skip TLS certificate verification for outbound artifact downloads (serverless). Mirrors the org egress tls_verify=false opt-out; the proxy honors HTTPS_PROXY/NO_PROXY from the environment.")
 		dbRefreshInterval     = flag.Duration("db-refresh-interval", envDuration("CONSTELLATION_SCANNER_DB_REFRESH_INTERVAL", 6*time.Hour), "Default cadence to refresh Trivy/Grype vuln DBs; overridable at runtime via the UI (system_config scanner_db_refresh_minutes).")
-		offlineDB             = flag.Bool("offline-db", envBool("CONSTELLATION_SCANNER_OFFLINE_DB", false), "Air-gapped mode: never pull Trivy/Grype DBs from the internet (operators pre-load them).")
+		insecureRegistries    = flag.String("insecure-registries", envOr("CONSTELLATION_SCANNER_INSECURE_REGISTRIES", ""), "Comma-separated registry hosts (host[:port]) reached over plain HTTP / unverified TLS, e.g. the air-gap cluster-local registry. Only these hosts are affected.")
+		offlineDB             = flag.Bool("offline-db", envBool("CONSTELLATION_SCANNER_OFFLINE_DB", true), "Air-gapped mode (default): never pull Trivy/Grype DBs from the internet; set --offline-db=false (or CONSTELLATION_SCANNER_OFFLINE_DB=false) to opt into online refresh.")
 	)
 	flag.Parse()
 	if err := validateOneShotOutputs(*oneShotRef, *oneShotJSON, *oneShotSARIF); err != nil {
@@ -219,6 +221,7 @@ func main() {
 		fileRiskMaxFindings:   *fileRiskMaxFindings,
 		iacEnabled:            *iacEnabled,
 		goReachabilityEnabled: *goReachabilityEnabled,
+		insecureRegistries:    parseInsecureRegistries(*insecureRegistries),
 		artifactHTTPClient:    newArtifactHTTPClient(*tlsSkipVerify),
 		logger:                logger,
 	}
@@ -254,6 +257,13 @@ func main() {
 
 	// Keep Trivy/Grype vuln DBs fresh on a schedule (UI-overridable), so connected
 	// scanners auto-update without a per-scan pull or a redeploy.
+	// Air-gap first (guide ch.08/09): the vulnerability DB mirrors are the only
+	// out-of-cluster endpoints, and only when --offline-db=false.
+	telemetry.NewEgress().
+		AddIf(!*offlineDB, "trivy_db", "ghcr.io/aquasecurity/trivy-db").
+		AddIf(!*offlineDB, "trivy_java_db", "ghcr.io/aquasecurity/trivy-java-db").
+		AddIf(!*offlineDB, "grype_db", "https://toolbox-data.anchore.io/grype/databases").
+		Log(slog.Default())
 	go w.dbRefreshLoop(ctx, *dbRefreshInterval, *offlineDB)
 
 	w.run(ctx, *pollInterval)
@@ -312,6 +322,7 @@ type worker struct {
 	fileRiskMaxFindings   int
 	iacEnabled            bool
 	goReachabilityEnabled bool
+	insecureRegistries    map[string]bool
 	// artifactHTTPClient is the outbound client used for serverless artifact
 	// downloads. It honors HTTPS_PROXY/NO_PROXY from the environment (the egress
 	// proxy injected into the scanner pod) and the -tls-skip-verify TLS opt-out,
@@ -639,7 +650,7 @@ func (w *worker) executeJob(ctx context.Context, j *scanJob) {
 		// Otherwise prefer a full registry scan; fall back to collected package
 		// evidence when the image can't be resolved from a registry — e.g. a
 		// node-local image built on the cluster and never pushed anywhere.
-		pinnedRef, digest, resolveErr := resolveImageDigestRef(ctx, imageRef, regAuth)
+		pinnedRef, digest, resolveErr := resolveImageDigestRef(ctx, imageRef, regAuth, w.insecureFor(imageRef))
 		if resolveErr != nil {
 			if scanFromEvidence("image not resolvable from registry: " + resolveErr.Error()) {
 				break
@@ -660,6 +671,7 @@ func (w *worker) executeJob(ctx context.Context, j *scanJob) {
 			Password:          regAuth.Password,
 			RegistryAuthority: regAuth.Authority,
 			DockerConfigDir:   regAuth.DockerConfigDir,
+			Insecure:          w.insecureFor(imageRef),
 		})
 		if err != nil && scanFromEvidence("registry scan failed: "+err.Error()) {
 			// Node-local images (e.g. a bare sha256: ref that resolves but syft
@@ -852,7 +864,7 @@ func (w *worker) scanServerlessArtifact(ctx context.Context, j *scanJob, source 
 	return res, nil
 }
 
-func resolveImageDigestRef(ctx context.Context, ref string, auth registryAuth) (string, string, error) {
+func resolveImageDigestRef(ctx context.Context, ref string, auth registryAuth, insecure bool) (string, string, error) {
 	identity := imageid.Parse(ref)
 	if identity.Digest != "" {
 		return identity.Normalized, identity.Digest, nil
@@ -863,9 +875,12 @@ func resolveImageDigestRef(ctx context.Context, ref string, auth registryAuth) (
 	}
 	var resolvedRef string
 	var err error
-	if auth.Username != "" || auth.Password != "" {
+	switch {
+	case insecure:
+		resolvedRef, err = resolveInsecureDigest(ctx, resolveRef)
+	case auth.Username != "" || auth.Password != "":
 		resolvedRef, err = resolvePrivateDigest(ctx, resolveRef, auth, nil)
-	} else {
+	default:
 		resolvedRef, err = registry.ResolveDigestReference(ctx, resolveRef)
 	}
 	if err != nil {
@@ -1874,4 +1889,41 @@ func splitCSV(value string) []string {
 		}
 	}
 	return out
+}
+
+// parseInsecureRegistries turns the --insecure-registries list into a host set.
+func parseInsecureRegistries(raw string) map[string]bool {
+	out := map[string]bool{}
+	for _, part := range strings.Split(raw, ",") {
+		if h := strings.ToLower(strings.TrimSpace(part)); h != "" {
+			out[h] = true
+		}
+	}
+	return out
+}
+
+// insecureFor reports whether ref's registry host is on the operator's
+// --insecure-registries list (air-gap cluster-local registries over HTTP).
+func (w *worker) insecureFor(ref string) bool {
+	if len(w.insecureRegistries) == 0 {
+		return false
+	}
+	parsed, err := name.ParseReference(strings.TrimSpace(ref), name.WeakValidation)
+	if err != nil {
+		return false
+	}
+	return w.insecureRegistries[strings.ToLower(parsed.Context().RegistryStr())]
+}
+
+// resolveInsecureDigest pins ref against an allow-listed plain-HTTP registry.
+func resolveInsecureDigest(ctx context.Context, ref string) (string, error) {
+	parsed, err := name.ParseReference(ref, name.Insecure)
+	if err != nil {
+		return "", err
+	}
+	desc, err := remote.Head(parsed, remote.WithContext(ctx))
+	if err != nil {
+		return "", err
+	}
+	return parsed.Context().Digest(desc.Digest.String()).String(), nil
 }

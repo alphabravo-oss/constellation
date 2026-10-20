@@ -19,7 +19,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -27,10 +26,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	colcrypto "github.com/alphabravocompany/constellation/internal/crypto"
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/gitops"
-	regsecrets "github.com/alphabravocompany/constellation/pkg/registry/secrets"
 )
 
 // GitConnector is the HTTP handler for /api/v1/config/git-connector.
@@ -138,8 +137,9 @@ func (h *GitConnector) Put(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var sealed []byte
+	var sealKeyID any
 	if strings.TrimSpace(dto.PAT) != "" {
-		cipher, err := regsecrets.Default(r.Context(), h.db.Pool(), slog.Default())
+		cipher, err := colcrypto.Default()
 		if err != nil {
 			jsonError(w, http.StatusInternalServerError, "cipher: "+err.Error())
 			return
@@ -149,15 +149,16 @@ func (h *GitConnector) Put(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, http.StatusInternalServerError, "seal: "+err.Error())
 			return
 		}
+		sealKeyID = cipher.KeyID()
 	}
 
 	// COALESCE keeps the existing PAT when sealed is NULL (no new PAT supplied).
 	if _, err := h.db.Pool().Exec(r.Context(), `
 INSERT INTO git_connectors
     (org_id, provider, github_owner, github_repo, azure_org, azure_project, azure_repo,
-     branch, default_file_path, committer_name, committer_email, enabled, pat_sealed)
+     branch, default_file_path, committer_name, committer_email, enabled, pat_sealed, key_id, algorithm)
 VALUES ($1,$2,NULLIF($3,''),NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),NULLIF($7,''),
-        $8,$9,$10,$11,$12,$13)
+        $8,$9,$10,$11,$12,$13,$14::text,CASE WHEN $14::text IS NULL THEN NULL ELSE $15::text END)
 ON CONFLICT (org_id) DO UPDATE SET
     provider=EXCLUDED.provider,
     github_owner=EXCLUDED.github_owner, github_repo=EXCLUDED.github_repo,
@@ -166,9 +167,11 @@ ON CONFLICT (org_id) DO UPDATE SET
     committer_name=EXCLUDED.committer_name, committer_email=EXCLUDED.committer_email,
     enabled=EXCLUDED.enabled,
     pat_sealed=COALESCE(EXCLUDED.pat_sealed, git_connectors.pat_sealed),
+    key_id=COALESCE(EXCLUDED.key_id, git_connectors.key_id),
+    algorithm=COALESCE(EXCLUDED.algorithm, git_connectors.algorithm),
     updated_at=NOW()`,
 		subj.OrgID, dto.Provider, dto.GitHubOwner, dto.GitHubRepo, dto.AzureOrg, dto.AzureProject, dto.AzureRepo,
-		dto.Branch, dto.FilePath, dto.CommitterName, dto.CommitterEmail, dto.Enabled, sealed); err != nil {
+		dto.Branch, dto.FilePath, dto.CommitterName, dto.CommitterEmail, dto.Enabled, sealed, sealKeyID, colcrypto.Algorithm); err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -237,7 +240,7 @@ SELECT provider, COALESCE(github_owner,''), COALESCE(github_repo,''),
 	}
 	cfg.Provider = gitops.Provider(prov)
 	if len(sealed) > 0 {
-		cipher, cerr := regsecrets.Default(ctx, pool, slog.Default())
+		cipher, cerr := colcrypto.Default()
 		if cerr != nil {
 			return cfg, enabled, cerr
 		}

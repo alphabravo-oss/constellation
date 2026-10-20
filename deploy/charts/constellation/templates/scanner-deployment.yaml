@@ -57,6 +57,10 @@ spec:
             - containerPort: 8090
               name: http
           env:
+            {{- with .Values.scanner.insecureRegistries }}
+            - name: CONSTELLATION_SCANNER_INSECURE_REGISTRIES
+              value: {{ join "," . | quote }}
+            {{- end }}
             - name: CONSTELLATION_CONTROL_PLANE_URL
               value: {{ include "constellation.apiURL" . | quote }}
             - name: CONSTELLATION_API_URL

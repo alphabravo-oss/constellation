@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/alphabravocompany/constellation/internal/handler/platformrole"
 
 	"github.com/go-chi/chi/v5"
@@ -42,72 +44,72 @@ func (a *Assets) FindingsCSV(w http.ResponseWriter, r *http.Request) { a.finding
 func (a *Assets) findingsInventory(w http.ResponseWriter, r *http.Request, csv bool) {
 	subj, ok := SubjectFrom(r.Context())
 	if !ok {
-		writeJSON(w, 401, map[string]string{"error": "unauthorized"})
+		apiutil.WriteStatus(r.Context(), w, 401, "unauthorized")
 		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, 400, map[string]string{"error": "bad asset id"})
+		apiutil.WriteStatus(r.Context(), w, 400, "bad asset id")
 		return
 	}
 	values, err := inventorylist.Query(r)
 	if err != nil {
-		writeJSON(w, 400, map[string]string{"error": "invalid query"})
+		apiutil.WriteStatus(r.Context(), w, 400, "invalid query")
 		return
 	}
 	var cluster *uuid.UUID
 	err = a.db.Pool().QueryRow(r.Context(), `SELECT cluster_id FROM assets WHERE org_id=$1 AND id=$2`, subj.OrgID, id).Scan(&cluster)
 	if errors.Is(err, pgx.ErrNoRows) {
-		writeJSON(w, 404, map[string]string{"error": "asset not found"})
+		apiutil.WriteStatus(r.Context(), w, 404, "asset not found")
 		return
 	}
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": "asset scope unavailable"})
+		apiutil.WriteStatus(r.Context(), w, 500, "asset scope unavailable")
 		return
 	}
 	if raw := values.Get("cluster_id"); raw != "" {
 		requested, e := uuid.Parse(raw)
 		if e != nil {
-			writeJSON(w, 400, map[string]string{"error": "bad cluster id"})
+			apiutil.WriteStatus(r.Context(), w, 400, "bad cluster id")
 			return
 		}
 		var owned bool
 		if e = a.db.Pool().QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM clusters WHERE org_id=$1 AND id=$2)`, subj.OrgID, requested).Scan(&owned); e != nil {
-			writeJSON(w, 500, map[string]string{"error": "cluster scope unavailable"})
+			apiutil.WriteStatus(r.Context(), w, 500, "cluster scope unavailable")
 			return
 		}
 		if !owned || cluster == nil || *cluster != requested {
-			writeJSON(w, 404, map[string]string{"error": "asset not found in cluster"})
+			apiutil.WriteStatus(r.Context(), w, 404, "asset not found in cluster")
 			return
 		}
 	}
 	options, err := inventorylist.Parse(values, map[string]string{"finding": "lower(title)", "kind": "kind", "severity": `CASE severity WHEN 'critical' THEN 5 WHEN 'high' THEN 4 WHEN 'medium' THEN 3 WHEN 'low' THEN 2 WHEN 'info' THEN 1 ELSE 0 END`, "risk": "risk_score", "lifecycle": "lifecycle", "source": "source", "observed": "last_seen_at"}, "risk")
 	if err != nil {
-		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, 400, err.Error())
 		return
 	}
 	for _, key := range []string{"limit", "offset"} {
 		if raw := values.Get(key); raw != "" {
 			n, e := strconv.Atoi(raw)
 			if e != nil || n < 0 || key == "limit" && (n < 1 || n > 500) {
-				writeJSON(w, 400, map[string]string{"error": "invalid " + key})
+				apiutil.WriteStatus(r.Context(), w, 400, "invalid "+key)
 				return
 			}
 		}
 	}
 	severity, err := inventorylist.Filter(values, "severity", "critical", "high", "medium", "low", "info", "unknown")
 	if err != nil {
-		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, 400, err.Error())
 		return
 	}
 	lifecycle, err := inventorylist.Filter(values, "lifecycle", "open", "triaged", "in_progress", "resolved", "suppressed", "accepted")
 	if err != nil {
-		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, 400, err.Error())
 		return
 	}
 	source, err := inventorylist.Filter(values, "source", "asset", "image_scan")
 	if err != nil {
-		writeJSON(w, 400, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, 400, err.Error())
 		return
 	}
 	search := strings.TrimSpace(values.Get("q"))
@@ -153,7 +155,7 @@ func (a *Assets) findingsInventory(w http.ResponseWriter, r *http.Request, csv b
 			return []string{f.RowID, f.ID.String(), id.String(), clusterText, f.Title, f.ExternalID, f.Kind, f.Severity, strconv.Itoa(f.RiskScore), f.Lifecycle, f.Source, resultText, f.FindingKey, f.LastSeenAt.UTC().Format(time.RFC3339Nano), firstSeen, f.Revision, sourceCluster, targetCluster, f.PlatformRole}
 		})
 		if e != nil {
-			writeJSON(w, 500, map[string]string{"error": "asset findings export unavailable"})
+			apiutil.WriteStatus(r.Context(), w, 500, "asset findings export unavailable")
 			return
 		}
 		inventorylist.WriteCSV(w, fmt.Sprintf("asset-%s-findings.csv", id), body, meta)
@@ -161,7 +163,7 @@ func (a *Assets) findingsInventory(w http.ResponseWriter, r *http.Request, csv b
 	}
 	items, meta, err := inventorylist.Read(r.Context(), a.db.Pool(), def, options, scanAssetFinding)
 	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": "asset findings unavailable"})
+		apiutil.WriteStatus(r.Context(), w, 500, "asset findings unavailable")
 		return
 	}
 	writeJSON(w, 200, map[string]any{"asset_id": id, "cluster_id": cluster, "items": items, "total": meta.Total, "summary": meta.Summary, "has_more": meta.HasMore, "limit": options.Limit, "offset": options.Offset, "sort": options.Sort, "order": options.Order, "q": search, "severity": severity, "lifecycle": lifecycle, "source": source})

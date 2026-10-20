@@ -12,6 +12,7 @@ import (
 )
 
 func TestIAMRoleAnalyzerFindsManagedAndInlinePermissionRisks(t *testing.T) {
+	t.Parallel()
 	managedDoc := url.QueryEscape(`{
 	  "Version": "2012-10-17",
 	  "Statement": [
@@ -64,6 +65,7 @@ func TestIAMRoleAnalyzerFindsManagedAndInlinePermissionRisks(t *testing.T) {
 }
 
 func TestIAMRoleAnalyzerReportsIncompleteCoverageOnFetchError(t *testing.T) {
+	t.Parallel()
 	client := &fakeIAMRolePermissionAPI{
 		attached: []iamtypes.AttachedPolicy{{
 			PolicyName: awssdk.String("CustomPolicy"),
@@ -102,6 +104,7 @@ func TestIAMRoleAnalyzerReportsIncompleteCoverageOnFetchError(t *testing.T) {
 }
 
 func TestAnalyzePolicyDocumentHandlesNotAction(t *testing.T) {
+	t.Parallel()
 	findings, _ := analyzePolicyDocument(`{
 	  "Statement": {"Effect": "Allow", "NotAction": "iam:DeleteRole", "Resource": "*"}
 	}`, "inline", "broad-notaction", "")
@@ -111,6 +114,7 @@ func TestAnalyzePolicyDocumentHandlesNotAction(t *testing.T) {
 }
 
 func TestRoleNameFromARN(t *testing.T) {
+	t.Parallel()
 	got := roleNameFromARN("arn:aws:iam::123456789012:role/service-role/payments")
 	if got != "payments" {
 		t.Fatalf("role name = %q", got)

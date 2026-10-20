@@ -1,3 +1,5 @@
+//go:build integration
+
 package network
 
 import (
@@ -13,6 +15,7 @@ import (
 )
 
 func TestFlowRetentionPartitionIdentityAndBatch(t *testing.T) {
+	t.Parallel()
 	database := openTestDB(t)
 	t.Cleanup(database.Close)
 	pool := pgfixture.Schema(t, database.Pool())
@@ -100,6 +103,7 @@ func assertRollupTotals(t *testing.T, rr *RollupRefresher, want int64) {
 }
 
 func TestRollupLateArrivalPruneAndRefoldPreserveHistory(t *testing.T) {
+	t.Parallel()
 	rr := rollupFixture(t)
 	ctx := context.Background()
 	old := time.Now().UTC().Add(-72 * time.Hour).Truncate(time.Hour)
@@ -134,6 +138,7 @@ func TestRollupLateArrivalPruneAndRefoldPreserveHistory(t *testing.T) {
 }
 
 func TestRollupFailureAndLagBlockRetention(t *testing.T) {
+	t.Parallel()
 	rr := rollupFixture(t)
 	ctx := context.Background()
 	old := time.Now().UTC().Add(-72 * time.Hour)
@@ -155,6 +160,7 @@ func TestRollupFailureAndLagBlockRetention(t *testing.T) {
 }
 
 func TestRollupExplicitZeroRetentionOverridesEnvironment(t *testing.T) {
+	t.Parallel()
 	rr := rollupFixture(t)
 	ctx := context.Background()
 	insertRollupFlow(t, rr, time.Now().UTC().Add(-72*time.Hour), false)

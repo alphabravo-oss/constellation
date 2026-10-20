@@ -10,6 +10,7 @@ import (
 )
 
 func TestStatisticsMetricsDoNotCountFailedOrSkippedAnalysis(t *testing.T) {
+	t.Parallel()
 	registry := prometheus.NewRegistry()
 	metrics, err := NewStatisticsMetrics(registry)
 	if err != nil {
@@ -40,6 +41,7 @@ func TestStatisticsMetricsDoNotCountFailedOrSkippedAnalysis(t *testing.T) {
 }
 
 func TestStatisticsMetricsKeepFixedTableLabels(t *testing.T) {
+	t.Parallel()
 	metrics, err := NewStatisticsMetrics(nil)
 	if err != nil {
 		t.Fatal(err)

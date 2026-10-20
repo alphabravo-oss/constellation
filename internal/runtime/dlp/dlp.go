@@ -162,18 +162,7 @@ func (e *Engine) Inspect(workload string, evt dpi.L7Event) Verdict {
 	}
 	e.mu.RUnlock()
 
-	verdict := Verdict{Action: "allow", Mode: mode}
-	for _, s := range sensors {
-		for _, p := range s.Patterns {
-			for _, t := range p.Targets {
-				for _, raw := range targetValues(t, evt) {
-					if m := matchPattern(p, t, raw); m != nil {
-						verdict.Matches = append(verdict.Matches, *m)
-					}
-				}
-			}
-		}
-	}
+	verdict := Verdict{Action: "allow", Mode: mode, Matches: sensorMatches(sensors, evt)}
 	if len(verdict.Matches) == 0 {
 		return verdict
 	}
@@ -183,23 +172,47 @@ func (e *Engine) Inspect(workload string, evt dpi.L7Event) Verdict {
 	case baseline.ModeMonitor:
 		verdict.Action = "alert"
 	case baseline.ModeEnforce:
-		blocked := false
-		for _, m := range verdict.Matches {
-			for _, s := range sensors {
-				for _, p := range s.Patterns {
-					if p.ID == m.PatternID && p.Action == "block" {
-						blocked = true
+		verdict.Action = "alert"
+		if anyBlocking(sensors, verdict.Matches) {
+			verdict.Action = "block"
+		}
+	}
+	return verdict
+}
+
+// sensorMatches runs every sensor pattern over every target value of evt.
+func sensorMatches(sensors []Sensor, evt dpi.L7Event) []Match {
+	var out []Match
+	for _, s := range sensors {
+		for _, p := range s.Patterns {
+			for _, t := range p.Targets {
+				for _, raw := range targetValues(t, evt) {
+					if m := matchPattern(p, t, raw); m != nil {
+						out = append(out, *m)
 					}
 				}
 			}
 		}
-		if blocked {
-			verdict.Action = "block"
-		} else {
-			verdict.Action = "alert"
+	}
+	return out
+}
+
+// anyBlocking reports whether any matched pattern carries the block action.
+func anyBlocking(sensors []Sensor, matches []Match) bool {
+	blocking := map[int]bool{}
+	for _, s := range sensors {
+		for _, p := range s.Patterns {
+			if p.Action == "block" {
+				blocking[p.ID] = true
+			}
 		}
 	}
-	return verdict
+	for _, m := range matches {
+		if blocking[m.PatternID] {
+			return true
+		}
+	}
+	return false
 }
 
 func matchPattern(p Pattern, target, raw string) *Match {

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
@@ -211,18 +213,18 @@ SELECT cve_id, COALESCE(title,''), COALESCE(description,''), cvss_base, cvss_vec
 		return
 	}
 
-	httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+	apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "not found")
 }
 
 func (c *CVE) Affected(w http.ResponseWriter, r *http.Request) {
 	subj, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "subject required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
 		return
 	}
 	id := strings.ToUpper(strings.TrimSpace(chi.URLParam(r, "id")))
 	if id == "" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "missing cve id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "missing cve id")
 		return
 	}
 	// Optional cluster scope: when the CVE detail is opened from inside a cluster,
@@ -232,16 +234,16 @@ func (c *CVE) Affected(w http.ResponseWriter, r *http.Request) {
 	if cs := strings.TrimSpace(r.URL.Query().Get("cluster_id")); cs != "" {
 		cid, perr := uuid.Parse(cs)
 		if perr != nil {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster_id"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid cluster_id")
 			return
 		}
 		var owned bool
 		if err := c.db.Pool().QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM clusters WHERE id=$1 AND org_id=$2)`, cid, subj.OrgID).Scan(&owned); err != nil {
-			httpx.WriteJSON(w, 500, map[string]string{"error": "Affected evidence could not be loaded"})
+			apiutil.WriteStatus(r.Context(), w, 500, "Affected evidence could not be loaded")
 			return
 		}
 		if !owned {
-			httpx.WriteJSON(w, 404, map[string]string{"error": "cluster not found"})
+			apiutil.WriteStatus(r.Context(), w, 404, "cluster not found")
 			return
 		}
 		clusterArg = cid
@@ -297,7 +299,7 @@ SELECT r.id,
  ORDER BY max_risk_score DESC, r.last_scanned_at DESC, r.id ASC
  LIMIT 500`, subj.OrgID, id, clusterArg)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "Affected evidence could not be loaded"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "Affected evidence could not be loaded")
 		return
 	}
 	defer imageRows.Close()
@@ -332,7 +334,7 @@ SELECT r.id,
 			&row.LastSeenAt,
 			&row.LastScannedAt,
 		); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "Affected evidence could not be loaded"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "Affected evidence could not be loaded")
 			return
 		}
 		row.SeverityCounts = map[string]int{
@@ -352,7 +354,7 @@ SELECT r.id,
 		images = append(images, row)
 	}
 	if err := imageRows.Err(); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "Affected evidence could not be loaded"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "Affected evidence could not be loaded")
 		return
 	}
 
@@ -402,7 +404,7 @@ SELECT l.cluster_id,
  ORDER BY max_risk_score DESC, MAX(l.last_seen_at) DESC, l.cluster_id, l.deployment_id, l.workload_id, l.namespace, l.name, l.kind
  LIMIT 1000`, subj.OrgID, id, clusterArg)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "Affected evidence could not be loaded"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "Affected evidence could not be loaded")
 		return
 	}
 	defer workloadRows.Close()
@@ -430,7 +432,7 @@ SELECT l.cluster_id,
 			&row.HighCount,
 			&row.LastSeenAt,
 		); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "Affected evidence could not be loaded"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "Affected evidence could not be loaded")
 			return
 		}
 		cluster := clustersByID[row.ClusterID]
@@ -449,7 +451,7 @@ SELECT l.cluster_id,
 		workloads = append(workloads, row)
 	}
 	if err := workloadRows.Err(); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "Affected evidence could not be loaded"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "Affected evidence could not be loaded")
 		return
 	}
 
@@ -520,7 +522,7 @@ SELECT
   FROM cve_records
 `).Scan(&total, &kev, &epssGt50, &cvssGt70, &hasCVSS, &oldest, &latest,
 		&critCount, &highCount, &medCount, &lowCount, &infoCount); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 

@@ -1,3 +1,5 @@
+//go:build integration
+
 package policy
 
 import (
@@ -17,6 +19,7 @@ import (
 )
 
 func TestPolicies_SimulateWithoutStorageUsesNoSynthesizedPolicies(t *testing.T) {
+	t.Parallel()
 	body := []byte(`{"manifest":"apiVersion: v1\nkind: Pod\nmetadata:\n  name: privileged-debug\n  namespace: default\nspec:\n  containers:\n    - name: shell\n      image: busybox:latest\n      securityContext:\n        privileged: true\n        runAsUser: 0\n"}`)
 	w := httptest.NewRecorder()
 
@@ -50,6 +53,7 @@ func TestPolicies_SimulateWithoutStorageUsesNoSynthesizedPolicies(t *testing.T) 
 }
 
 func TestPolicies_SimulateRejectsClusterResourceSamplesWithoutManifest(t *testing.T) {
+	t.Parallel()
 	body := []byte(`{"cluster_resource_id":"missing-resource"}`)
 	w := httptest.NewRecorder()
 
@@ -60,6 +64,7 @@ func TestPolicies_SimulateRejectsClusterResourceSamplesWithoutManifest(t *testin
 }
 
 func TestPolicies_SimulateEvaluatesStoredCriticalVulnerabilityEvidence(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -210,6 +215,7 @@ spec:
 }
 
 func TestPolicies_AdmissionProfilesListAndExport(t *testing.T) {
+	t.Parallel()
 	h := NewPolicies(nil, nil, nil)
 	list := httptest.NewRecorder()
 	h.AdmissionProfiles(list, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/policies/admission-profiles", nil))
@@ -252,6 +258,7 @@ func TestPolicies_AdmissionProfilesListAndExport(t *testing.T) {
 }
 
 func TestPolicies_ImportAdmissionProfileDryRun(t *testing.T) {
+	t.Parallel()
 	body := []byte(`{"profile_id":"strict-hardening","mode":"monitor","enabled":false,"dry_run":true}`)
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/policies/admission-profiles:import", bytes.NewReader(body))
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: uuid.New(), OrgID: uuid.New()}))
@@ -279,6 +286,7 @@ func TestPolicies_ImportAdmissionProfileDryRun(t *testing.T) {
 }
 
 func TestPolicies_ImportAdmissionProfileRejectsUnknownProfile(t *testing.T) {
+	t.Parallel()
 	body := []byte(`{"profile_id":"missing","dry_run":true}`)
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/policies/admission-profiles:import", bytes.NewReader(body))
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: uuid.New(), OrgID: uuid.New()}))
@@ -291,6 +299,7 @@ func TestPolicies_ImportAdmissionProfileRejectsUnknownProfile(t *testing.T) {
 }
 
 func TestAdmissionProfileImportAcceptsDirectBundle(t *testing.T) {
+	t.Parallel()
 	profile, ok := admission.BuiltInAdmissionProfile("basic-hardening")
 	if !ok {
 		t.Fatal("basic-hardening profile missing")
@@ -313,6 +322,7 @@ func TestAdmissionProfileImportAcceptsDirectBundle(t *testing.T) {
 }
 
 func TestAdmissionProfileImportRejectsOversizedRuleSet(t *testing.T) {
+	t.Parallel()
 	profile, ok := admission.BuiltInAdmissionProfile("basic-hardening")
 	if !ok {
 		t.Fatal("basic-hardening profile missing")
@@ -330,6 +340,7 @@ func TestAdmissionProfileImportRejectsOversizedRuleSet(t *testing.T) {
 }
 
 func TestParseAdmissionWorkloadIncludesEphemeralContainers(t *testing.T) {
+	t.Parallel()
 	got, err := parseAdmissionWorkload(`apiVersion: v1
 kind: Pod
 metadata:
@@ -358,6 +369,7 @@ spec:
 }
 
 func TestParseAdmissionWorkloadRequiresEveryImagePinnedWhenNoSignatureAnnotation(t *testing.T) {
+	t.Parallel()
 	got, err := parseAdmissionWorkload(`apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -380,6 +392,7 @@ spec:
 }
 
 func TestParseAdmissionWorkloadHonorsTemplateSignatureAnnotation(t *testing.T) {
+	t.Parallel()
 	got, err := parseAdmissionWorkload(`apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -403,6 +416,7 @@ spec:
 }
 
 func TestEvaluateAdmissionPoliciesDeniesExplicitPrivilegedUnsignedPolicy(t *testing.T) {
+	t.Parallel()
 	manifest := `apiVersion: v1
 kind: Pod
 metadata:

@@ -38,11 +38,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	colcrypto "github.com/alphabravocompany/constellation/internal/crypto"
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/registry"
 	"github.com/alphabravocompany/constellation/internal/syscfg"
 	"github.com/alphabravocompany/constellation/pkg/audit"
-	regsecrets "github.com/alphabravocompany/constellation/pkg/registry/secrets"
 )
 
 // Registries handles /api/v1/registries.
@@ -410,7 +410,7 @@ func (h *Registries) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sealed, err := sealCredentials(r.Context(), h.db.Pool(), req.AuthKind, req.Credentials)
+	sealed, sealKeyID, err := sealCredentials(r.Context(), h.db.Pool(), req.AuthKind, req.Credentials)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, "seal creds: "+err.Error())
 		return
@@ -430,10 +430,10 @@ func (h *Registries) Create(w http.ResponseWriter, r *http.Request) {
 
 	if _, err := h.db.Pool().Exec(r.Context(), `
 INSERT INTO registries (id, org_id, name, kind, endpoint, auth_kind, auth_secret,
-                        scan_cadence, image_globs, scan_policy, created_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11)`,
+                        scan_cadence, image_globs, scan_policy, created_by, key_id, algorithm)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, NULLIF($12::text, ''), CASE WHEN $12::text = '' THEN NULL ELSE $13::text END)`,
 		id, subj.OrgID, req.Name, req.Kind, req.Endpoint, req.AuthKind, sealed,
-		cadence, globs, string(policyRaw), subj.UserID,
+		cadence, globs, string(policyRaw), subj.UserID, sealKeyID, colcrypto.Algorithm,
 	); err != nil {
 		if strings.Contains(err.Error(), "unique") || strings.Contains(err.Error(), "duplicate") {
 			jsonError(w, http.StatusConflict, "registry name already in use")
@@ -584,12 +584,14 @@ func (h *Registries) Patch(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		sealed, err := sealCredentials(r.Context(), h.db.Pool(), authKind, *req.Credentials)
+		sealed, keyID, err := sealCredentials(r.Context(), h.db.Pool(), authKind, *req.Credentials)
 		if err != nil {
 			jsonError(w, http.StatusInternalServerError, "seal creds: "+err.Error())
 			return
 		}
 		addArg("auth_secret", sealed)
+		addArg("key_id", nullIfEmpty(keyID))
+		addArg("algorithm", nullIfEmptyAlg(keyID))
 	}
 
 	if len(sets) == 0 {
@@ -882,30 +884,35 @@ func validateRegistryKind(kind string) error {
 	return nil
 }
 
-// sealCredentials JSON-marshals creds and seals them with the install KEK.
-// Returns (nil, nil) when there are no creds (auth_kind="none").
-func sealCredentials(ctx context.Context, pool *pgxpool.Pool, authKind string, creds map[string]string) ([]byte, error) {
+// sealCredentials JSON-marshals creds and seals them under the current
+// column-encryption key (internal/crypto); the returned keyID is stored next
+// to the ciphertext. Returns (nil, "", nil) when there are no creds.
+func sealCredentials(_ context.Context, _ *pgxpool.Pool, authKind string, creds map[string]string) (sealed []byte, keyID string, err error) {
 	if authKind == "none" || len(creds) == 0 {
-		return nil, nil
+		return nil, "", nil
 	}
-	cipher, err := regsecrets.Default(ctx, pool, slog.Default())
+	enc, err := colcrypto.Default()
 	if err != nil {
-		return nil, fmt.Errorf("cipher: %w", err)
+		return nil, "", fmt.Errorf("cipher: %w", err)
 	}
 	pt, err := json.Marshal(creds)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return cipher.Seal(pt)
+	s, err := enc.Encrypt(pt)
+	if err != nil {
+		return nil, "", err
+	}
+	return s.Ciphertext, s.KeyID, nil
 }
 
 // openCredentials inverts sealCredentials. Returns an empty map when sealed is
 // nil/empty.
-func openCredentials(ctx context.Context, pool *pgxpool.Pool, sealed []byte) (map[string]string, error) {
+func openCredentials(_ context.Context, _ *pgxpool.Pool, sealed []byte) (map[string]string, error) {
 	if len(sealed) == 0 {
 		return map[string]string{}, nil
 	}
-	cipher, err := regsecrets.Default(ctx, pool, slog.Default())
+	cipher, err := colcrypto.Default()
 	if err != nil {
 		return nil, fmt.Errorf("cipher: %w", err)
 	}
@@ -1485,4 +1492,18 @@ func int64FromHash(s string) int64 {
 		h *= 1099511628211
 	}
 	return int64(h)
+}
+
+func nullIfEmpty(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+func nullIfEmptyAlg(keyID string) any {
+	if keyID == "" {
+		return nil
+	}
+	return colcrypto.Algorithm
 }

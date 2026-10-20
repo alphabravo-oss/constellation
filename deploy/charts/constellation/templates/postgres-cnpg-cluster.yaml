@@ -2,8 +2,8 @@
 {{- /*
 CloudNativePG-managed Postgres Cluster. This is a normal chart resource (not a
 hook), so helm creates it AFTER the pre-install credential Secrets
-(postgres-secrets.yaml, weight -8) but BEFORE the post-install migrate (weight
--5) and bootstrap (weight 0/5) hooks. The migrate Job's `until psql select 1`
+(postgres-secrets.yaml, weight -8) but BEFORE the bootstrap (weight 0/5) hooks. The API applies the embedded
+schema migrations on boot (advisory-locked); the bootstrap Job's `until psql select 1`
 wait loop tolerates the longer CNPG bootstrap latency on a fresh cluster.
 
 PREREQUISITE: the CloudNativePG operator must already be installed in the
@@ -55,6 +55,17 @@ spec:
   backup:
     {{- toYaml . | nindent 4 }}
   {{- end }}
+  {{- if $.Values.metrics.postgresRole.enabled }}
+  # Declarative read-only metrics role (login + password managed here; SELECT
+  # grants on component_heartbeats / cve_feed_checkpoints owned by migration 186).
+  managed:
+    roles:
+      - name: {{ $.Values.metrics.postgresRole.name }}
+        ensure: present
+        login: true
+        passwordSecret:
+          name: {{ include "constellation.fullname" . }}-metrics-role
+  {{- end }}
   {{- if $cfg.barmanCloud.enabled }}
   plugins:
     - name: {{ $cfg.barmanCloud.pluginName | quote }}
@@ -95,4 +106,26 @@ spec:
         - CREATE EXTENSION IF NOT EXISTS pg_trgm
         - CREATE EXTENSION IF NOT EXISTS vector
     {{- end }}
+{{- end }}
+{{- if and (eq (include "constellation.postgresMode" .) "cnpg") .Values.metrics.postgresRole.enabled }}
+---
+{{- $mrName := printf "%s-metrics-role" (include "constellation.fullname" .) }}
+{{- $mrExisting := lookup "v1" "Secret" .Release.Namespace $mrName }}
+{{- $mrPassword := "" }}
+{{- if and $mrExisting $mrExisting.data $mrExisting.data.password }}
+  {{- $mrPassword = $mrExisting.data.password | b64dec }}
+{{- else }}
+  {{- $mrPassword = randAlphaNum 32 }}
+{{- end }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $mrName }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    cnpg.io/reload: "true"
+type: kubernetes.io/basic-auth
+stringData:
+  username: {{ .Values.metrics.postgresRole.name | quote }}
+  password: {{ $mrPassword | quote }}
 {{- end }}

@@ -1,3 +1,5 @@
+//go:build integration
+
 package backup
 
 import (
@@ -5,31 +7,19 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// openConfigTestPool connects to the test database. Skips when unreachable so the
-// suite stays green in environments without Postgres.
+// openConfigTestPool returns a pool on this test's private, migrated database.
 func openConfigTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	url := os.Getenv("DATABASE_URL")
-	if url == "" {
-		t.Skip("CONSTELLATION_TEST_DATABASE_URL not set; integration test")
-	}
-	pool, err := pgxpool.New(context.Background(), url)
-	if err != nil {
-		t.Skipf("skipping: cannot create pool (%v)", err)
-	}
-	if err := pool.Ping(context.Background()); err != nil {
-		pool.Close()
-		t.Skipf("skipping: cannot reach test DB (%v)", err)
-	}
-	return pool
+	return pgtest.Pool(t)
 }
 
 // seedConfigOrg creates an isolated org with one user (password hash set), a custom

@@ -1,3 +1,5 @@
+//go:build integration
+
 package policy
 
 import (
@@ -15,6 +17,7 @@ import (
 )
 
 func TestDPIThreatSettingsScopeAtomicCleanupAndCAS(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	t.Cleanup(d.Close)
 	ctx := context.Background()

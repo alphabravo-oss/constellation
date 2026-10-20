@@ -7,6 +7,7 @@ import (
 )
 
 func TestComplianceHTML(t *testing.T) {
+	t.Parallel()
 	html, err := ComplianceHTML(ComplianceData{
 		OrgName: "Demo", FrameworkName: "CIS Kubernetes 1.9", Framework: "cis-k8s-1.9",
 		GeneratedAt: time.Now(),
@@ -32,6 +33,7 @@ func TestComplianceHTML(t *testing.T) {
 }
 
 func TestExecutiveHTML(t *testing.T) {
+	t.Parallel()
 	html, err := ExecutiveHTML(ExecutiveData{
 		OrgName: "Demo", GeneratedAt: time.Now(), ScanWindow: "last 30 days",
 		TotalFindings: 42, CriticalFindings: 3, HighFindings: 9,
@@ -51,6 +53,7 @@ func TestExecutiveHTML(t *testing.T) {
 }
 
 func TestReportsRenderExactWorkloadRoleAndExplicitSource(t *testing.T) {
+	t.Parallel()
 	html, err := ExecutiveHTML(ExecutiveData{OrgName: "Actual Org", ScanWindow: "All retained finding instances", SourceLabel: "selected cluster", MTTRSource: "Organization-wide materialized metrics", TopAssets: []AssetRow{{Name: "api", Namespace: "orbit", ClusterID: "cluster-a", PlatformRole: "core", RiskScore: 80}, {Name: "customer", Namespace: "app", ClusterID: "cluster-b"}}})
 	if err != nil {
 		t.Fatal(err)

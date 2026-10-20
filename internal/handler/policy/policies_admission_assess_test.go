@@ -129,6 +129,7 @@ func criterionMatchesSyntheticAssessPod(key string) bool {
 // TestAssessImageMatchesDeniesOnCVEGate asserts a known-bad image (one that
 // exceeds a critical-CVE gate) is denied by assess with the gate's reason.
 func TestAssessImageMatchesDeniesOnCVEGate(t *testing.T) {
+	t.Parallel()
 	policies := []policyDTO{{
 		Name:    "block-critical-cves",
 		Engine:  "constellation-admission",

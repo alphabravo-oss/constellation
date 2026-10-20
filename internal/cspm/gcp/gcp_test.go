@@ -28,6 +28,7 @@ func (f *fakeHTTP) Do(req *http.Request) (*http.Response, error) {
 }
 
 func TestScanIAM_FlagsOverPrivilegedHumanBindings(t *testing.T) {
+	t.Parallel()
 	c := &Connector{
 		Token:     "t",
 		ProjectID: "demo-proj",
@@ -51,6 +52,7 @@ func TestScanIAM_FlagsOverPrivilegedHumanBindings(t *testing.T) {
 }
 
 func TestScanStorage_FlagsAllUsersBinding(t *testing.T) {
+	t.Parallel()
 	c := &Connector{
 		Token: "t", ProjectID: "demo-proj",
 		HTTP: &fakeHTTP{responses: map[string]string{

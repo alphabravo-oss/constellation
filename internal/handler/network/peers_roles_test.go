@@ -1,3 +1,5 @@
+//go:build integration
+
 package network
 
 import (
@@ -27,6 +29,7 @@ type peersRoleResponse struct {
 }
 
 func TestPeersRolesExactSourceIdentityAndVisibility(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	t.Cleanup(d.Close)
 	ctx, pool := context.Background(), d.Pool()
@@ -184,6 +187,7 @@ func TestPeersRolesExactSourceIdentityAndVisibility(t *testing.T) {
 }
 
 func TestPeersRejectsMalformedVisibilityAndDuplicateQuery(t *testing.T) {
+	t.Parallel()
 	h := NewNetwork(nil)
 	for _, path := range []string{"/network/peers?workload=a/b&hide_platform=yes", "/network/peers?workload=a/b&workload=c/d", "/network/peers?workload=a/b;hide_platform=true"} {
 		res := httptest.NewRecorder()

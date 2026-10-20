@@ -21,6 +21,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
@@ -258,19 +260,19 @@ type baselineDetailDTO struct {
 func (h *Baselines) List(w http.ResponseWriter, r *http.Request) {
 	subj, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "subject required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
 		return
 	}
 	clusterArg, err := sqlx.ParseClusterIDParam(r)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	namespace := strings.TrimSpace(r.URL.Query().Get("namespace"))
 
 	workloads, err := h.observedWorkloads(r.Context(), subj.OrgID, clusterArg, namespace)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -279,7 +281,7 @@ func (h *Baselines) List(w http.ResponseWriter, r *http.Request) {
 	for _, wl := range workloads {
 		state, err := h.ensureState(r.Context(), subj.OrgID, wl, now)
 		if err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		profiles = append(profiles, h.summary(state))
@@ -310,17 +312,17 @@ func (h *Baselines) List(w http.ResponseWriter, r *http.Request) {
 func (h *Baselines) Get(w http.ResponseWriter, r *http.Request) {
 	subj, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "subject required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
 		return
 	}
 	workloadID := workloadIDParam(r)
 	if workloadID == "" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "workload_id required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "workload_id required")
 		return
 	}
 	clusterArg, err := sqlx.ParseClusterIDParam(r)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	wl, ok, err := h.findWorkload(r.Context(), subj.OrgID, clusterArg, workloadID)
@@ -329,22 +331,22 @@ func (h *Baselines) Get(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, errBaselineAmbiguous) {
 			status = http.StatusConflict
 		}
-		httpx.WriteJSON(w, status, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, status, err.Error())
 		return
 	}
 	if !ok {
-		httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "workload not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "workload not found")
 		return
 	}
 	state, err := h.ensureState(r.Context(), subj.OrgID, wl, time.Now().UTC())
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	rules, err := h.loadProcessRules(r.Context(), subj.OrgID, wl.ClusterID, wl.WorkloadID)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not load process rules"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "could not load process rules")
 		return
 	}
 	detail := baselineDetailDTO{
@@ -374,27 +376,27 @@ type baselineModeBody struct {
 func (h *Baselines) SetMode(w http.ResponseWriter, r *http.Request) {
 	subj, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "subject required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
 		return
 	}
 	workloadID := workloadIDParam(r)
 	if workloadID == "" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "workload_id required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "workload_id required")
 		return
 	}
 	var body baselineModeBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid body")
 		return
 	}
 	target, err := normalizeMode(body.Mode)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	clusterArg, err := sqlx.ParseClusterIDParam(r)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	wl, ok, err := h.findWorkload(r.Context(), subj.OrgID, clusterArg, workloadID)
@@ -403,26 +405,26 @@ func (h *Baselines) SetMode(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, errBaselineAmbiguous) {
 			status = http.StatusConflict
 		}
-		httpx.WriteJSON(w, status, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, status, err.Error())
 		return
 	}
 	if !ok {
-		httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "workload not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "workload not found")
 		return
 	}
 	now := time.Now().UTC()
 	state, err := h.ensureState(r.Context(), subj.OrgID, wl, now)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	from := state.Mode
 	if body.ExpectedMode != "" && body.ExpectedMode != string(from) {
-		httpx.WriteJSON(w, http.StatusConflict, map[string]string{"error": "baseline mode changed; refresh and review before saving"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusConflict, "baseline mode changed; refresh and review before saving")
 		return
 	}
 	if !validTransition(from, target) {
-		httpx.WriteJSON(w, http.StatusConflict, map[string]string{"error": fmt.Sprintf("transition %s → %s not allowed", from, target)})
+		apiutil.WriteStatus(r.Context(), w, http.StatusConflict, fmt.Sprintf("transition %s → %s not allowed", from, target))
 		return
 	}
 	reason := strings.TrimSpace(body.Reason)
@@ -434,7 +436,7 @@ func (h *Baselines) SetMode(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, errBaselineChanged) {
 			status = http.StatusConflict
 		}
-		httpx.WriteJSON(w, status, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, status, err.Error())
 		return
 	}
 	// A memory-backed state (empty ClusterID) is the SAME pointer stored in h.state that

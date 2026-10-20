@@ -1,11 +1,14 @@
+//go:build integration
+
 package main
 
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"testing"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -22,19 +25,8 @@ import (
 
 func admissionAuditTestDB(t *testing.T) (context.Context, *pgxpool.Pool, uuid.UUID, uuid.UUID) {
 	t.Helper()
-	databaseURL := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("CONSTELLATION_TEST_DATABASE_URL not set; integration test")
-	}
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, databaseURL)
-	if err != nil {
-		t.Skipf("test DB unavailable: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	if err := pool.Ping(ctx); err != nil {
-		t.Skipf("test DB unavailable: %v", err)
-	}
+	pool := pgtest.Pool(t)
 	orgID, clusterID := uuid.New(), uuid.New()
 	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, display_name) VALUES ($1, $2, 'Admission Audit Test')`, orgID, "admission-audit-"+orgID.String()); err != nil {
 		t.Fatal(err)
@@ -51,6 +43,7 @@ func admissionAuditTestDB(t *testing.T) (context.Context, *pgxpool.Pool, uuid.UU
 }
 
 func TestAdmissionResponseRuleLegacyTagIsUnsupported(t *testing.T) {
+	t.Parallel()
 	ctx, pool, orgID, clusterID := admissionAuditTestDB(t)
 	pod := "legacy-tag-" + uuid.NewString()
 	deny := admission.DenyEvent{Namespace: "default", Pod: pod}
@@ -165,6 +158,7 @@ func TestAdmissionSuppressLogAuditHook(t *testing.T) {
 }
 
 func TestAdmissionSuppressLogPreservesDenial(t *testing.T) {
+	t.Parallel()
 	ctx, pool, orgID, clusterID := admissionAuditTestDB(t)
 	if _, err := pool.Exec(ctx, `INSERT INTO response_rules (org_id, name, event_type, conditions, actions) VALUES ($1, 'suppress-deny', 'admission', '[]', '[{"type":"suppress_log"}]')`, orgID); err != nil {
 		t.Fatal(err)
@@ -204,6 +198,7 @@ func TestAdmissionSuppressLogPreservesDenial(t *testing.T) {
 }
 
 func TestAdmissionDenyAuditEvent(t *testing.T) {
+	t.Parallel()
 	orgID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 	clusterID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
 	event := admissionAuditEvent(orgID, clusterID, admission.DenyEvent{
@@ -269,6 +264,7 @@ func TestAdmissionDenyAuditEvent(t *testing.T) {
 }
 
 func TestAdmissionMonitorAuditEvent(t *testing.T) {
+	t.Parallel()
 	orgID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 	clusterID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
 	event := admissionAuditEvent(orgID, clusterID, admission.DenyEvent{
@@ -293,6 +289,7 @@ func TestAdmissionMonitorAuditEvent(t *testing.T) {
 }
 
 func TestChainDenyHooks(t *testing.T) {
+	t.Parallel()
 	var calls []string
 	hook := chainDenyHooks(
 		func(_ context.Context, ev admission.DenyEvent) { calls = append(calls, "first:"+ev.RuleID) },

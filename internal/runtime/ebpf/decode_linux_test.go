@@ -15,6 +15,7 @@ import (
 // matchers reject anything without a leading slash, so a regression that
 // truncated to the dentry leaf (basename) would silently disable detection.
 func TestDecodeRecordFileAbsolutePath(t *testing.T) {
+	t.Parallel()
 	const path = "/etc/shadow"
 
 	hdrSz := int(unsafe.Sizeof(recordHeader{})) // matches the wire header layout

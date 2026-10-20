@@ -50,6 +50,7 @@ type nativeAcceptanceScenario struct {
 }
 
 func TestGenerateNativeRuntimePolicyFixture(t *testing.T) {
+	t.Parallel()
 	directory := os.Getenv("CONSTELLATION_NATIVE_POLICY_DIR")
 	if directory == "" {
 		t.Skip("opt in with scripts/test-native-policy.sh; requires native C harness")

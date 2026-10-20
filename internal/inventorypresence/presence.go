@@ -43,6 +43,17 @@ type Counts struct {
 	CurrentOccurrences    int        `json:"current_occurrences"`
 	HistoricalOccurrences int        `json:"historical_occurrences"`
 	UnverifiedOccurrences int        `json:"unverified_occurrences"`
+	// LastKnown is the exposure as classified by the most recent snapshot, set
+	// only when that snapshot has expired (InventoryStatus "stale") so a UI can
+	// show the last-known counts with their age instead of nothing.
+	LastKnown *LastKnown `json:"last_known,omitempty"`
+}
+
+// LastKnown is critical/high exposure from an expired inventory snapshot.
+type LastKnown struct {
+	Critical int       `json:"critical"`
+	High     int       `json:"high"`
+	AsOf     time.Time `json:"as_of"`
 }
 
 // Counts refer to open critical/high vulnerability findings. CVEs are unique
@@ -56,7 +67,12 @@ const countsSQL = `WITH classified AS (
    CASE WHEN s.pods->>a.name IN ('Running','Pending','Unknown','') THEN 'current'
    WHEN f.last_seen_at>s.observed_at THEN 'unverified' ELSE 'historical' END
  WHEN a.kind='image' AND s.image_digests ? COALESCE(NULLIF(a.digest,''),a.name) THEN 'current'
- ELSE 'unverified' END AS presence
+ ELSE 'unverified' END AS presence,
+ CASE WHEN s.observed_at IS NULL OR a.cluster_id IS DISTINCT FROM c.id THEN 'unverified'
+ WHEN a.kind='workload' AND a.name ~ '^[^/]+/pod/[^/]+$' THEN
+   CASE WHEN s.pods->>a.name IN ('Running','Pending','Unknown','') THEN 'current' ELSE 'other' END
+ WHEN a.kind='image' AND s.image_digests ? COALESCE(NULLIF(a.digest,''),a.name) THEN 'current'
+ ELSE 'unverified' END AS last_presence
  FROM clusters c
  LEFT JOIN cluster_inventory_presence s ON s.org_id=c.org_id AND s.cluster_id=c.id
  LEFT JOIN findings f ON f.org_id=c.org_id AND f.cluster_id=c.id
@@ -69,7 +85,9 @@ const countsSQL = `WITH classified AS (
  max(observed_at),
  count(DISTINCT external_id) FILTER(WHERE presence='current' AND severity='critical'),
  count(DISTINCT external_id) FILTER(WHERE presence='current' AND severity='high'),
- count(finding_id) FILTER(WHERE presence='current'),count(finding_id) FILTER(WHERE presence='historical'),count(finding_id) FILTER(WHERE presence='unverified')
+ count(finding_id) FILTER(WHERE presence='current'),count(finding_id) FILTER(WHERE presence='historical'),count(finding_id) FILTER(WHERE presence='unverified'),
+ count(DISTINCT external_id) FILTER(WHERE last_presence='current' AND severity='critical'),
+ count(DISTINCT external_id) FILTER(WHERE last_presence='current' AND severity='high')
  FROM classified GROUP BY cluster_id`
 
 func Read(ctx context.Context, pool *pgxpool.Pool, org, cluster uuid.UUID) (Counts, error) {
@@ -99,8 +117,12 @@ func read(ctx context.Context, pool *pgxpool.Pool, org uuid.UUID, cluster *uuid.
 	for rows.Next() {
 		var id uuid.UUID
 		var c Counts
-		if err := rows.Scan(&id, &c.InventoryStatus, &c.ObservedAt, &c.CurrentCritical, &c.CurrentHigh, &c.CurrentOccurrences, &c.HistoricalOccurrences, &c.UnverifiedOccurrences); err != nil {
+		var lastCritical, lastHigh int
+		if err := rows.Scan(&id, &c.InventoryStatus, &c.ObservedAt, &c.CurrentCritical, &c.CurrentHigh, &c.CurrentOccurrences, &c.HistoricalOccurrences, &c.UnverifiedOccurrences, &lastCritical, &lastHigh); err != nil {
 			return nil, err
+		}
+		if c.InventoryStatus == "stale" && c.ObservedAt != nil {
+			c.LastKnown = &LastKnown{Critical: lastCritical, High: lastHigh, AsOf: *c.ObservedAt}
 		}
 		out[id] = c
 	}

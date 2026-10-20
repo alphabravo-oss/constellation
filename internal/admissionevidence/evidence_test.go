@@ -1,12 +1,15 @@
+//go:build integration
+
 package admissionevidence
 
 import (
 	"context"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -17,6 +20,7 @@ import (
 )
 
 func TestAdmissionEvidenceImagesIncludesAllPodContainerTypes(t *testing.T) {
+	t.Parallel()
 	pod := &corev1.Pod{Spec: corev1.PodSpec{
 		InitContainers: []corev1.Container{{Name: "init", Image: "busybox:1.36"}},
 		Containers:     []corev1.Container{{Name: "app", Image: "ghcr.io/acme/app:1.0"}},
@@ -34,6 +38,7 @@ func TestAdmissionEvidenceImagesIncludesAllPodContainerTypes(t *testing.T) {
 }
 
 func TestImageRefCandidatesAddsDockerAndDigestForms(t *testing.T) {
+	t.Parallel()
 	busybox := imageRefCandidates(admission.ParseReqImageName("busybox"))
 	wantBusybox := []string{"busybox", "docker.io/library/busybox:latest", "busybox:latest", "docker.io/busybox:latest"}
 	if !reflect.DeepEqual(busybox, wantBusybox) {
@@ -48,6 +53,7 @@ func TestImageRefCandidatesAddsDockerAndDigestForms(t *testing.T) {
 }
 
 func TestEvidenceGateSeverityAndKindMapping(t *testing.T) {
+	t.Parallel()
 	vuln := admission.EvidenceGate{Type: "vulnerability", MaxAllowedSeverity: "high"}
 	if got := minimumSeverityRankForGate(vuln); got != 4 {
 		t.Fatalf("critical-only rank = %d", got)
@@ -66,6 +72,7 @@ func TestEvidenceGateSeverityAndKindMapping(t *testing.T) {
 }
 
 func TestFindEvidenceHitFailsClosedForNonVulnerabilityKinds(t *testing.T) {
+	t.Parallel()
 	// image_scan_findings persists only vulnerability findings, so a
 	// misconfiguration/iac/cloud-config/compliance gate cannot be evaluated and
 	// must fail closed (return an error the caller turns into a deny) rather than
@@ -89,6 +96,7 @@ func TestFindEvidenceHitFailsClosedForNonVulnerabilityKinds(t *testing.T) {
 }
 
 func TestArtifactGateFromFindingGate(t *testing.T) {
+	t.Parallel()
 	secretGate, ok := artifactGateFromFindingGate(admission.EvidenceGate{
 		Type:              "finding",
 		FindingKinds:      []string{"secret"},
@@ -125,6 +133,7 @@ func TestArtifactGateFromFindingGate(t *testing.T) {
 }
 
 func TestFormatAdmissionArtifactHits(t *testing.T) {
+	t.Parallel()
 	image := admissionEvidenceImage{Container: "app", Raw: "ghcr.io/acme/app@sha256:abc"}
 	secret := formatAdmissionEvidenceHit(admission.Rule{}, admission.EvidenceGate{Type: "artifact"}, image, admissionEvidenceHit{
 		Kind: "secret", Severity: "high", ExternalID: "aws-access-key", Title: "AWS access key", Path: "/app/config.env", Count: 2,
@@ -153,6 +162,7 @@ func TestFormatAdmissionArtifactHits(t *testing.T) {
 }
 
 func TestAdmissionEvidenceArtifactsFromPostgres(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	pool := openAdmissionTestPool(t)
 	defer pool.Close()
@@ -295,6 +305,7 @@ INSERT INTO image_scan_artifacts (
 }
 
 func TestAdmissionEvidenceScanQualityGatesFromPostgres(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	pool := openAdmissionTestPool(t)
 	defer pool.Close()
@@ -569,18 +580,7 @@ INSERT INTO scan_result_attestations (
 
 func openAdmissionTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	url := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-	if url == "" {
-		t.Skip("CONSTELLATION_TEST_DATABASE_URL not set; integration test")
-	}
-	pool, err := pgxpool.New(context.Background(), url)
-	if err != nil {
-		t.Skipf("skipping: cannot reach test DB (%v)", err)
-	}
-	if err := pool.Ping(context.Background()); err != nil {
-		pool.Close()
-		t.Skipf("skipping: cannot reach test DB (%v)", err)
-	}
+	pool := pgtest.Pool(t)
 	return pool
 }
 
@@ -589,6 +589,7 @@ func openAdmissionTestPool(t *testing.T) *pgxpool.Pool {
 // counted (distinct external_id), and the gate denies when the count exceeds
 // MaxCVEsAtOrAboveScore. DB-backed; auto-skips if the test DB is unreachable.
 func TestAdmissionEvidenceCVEScoreGateFromPostgres(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	pool := openAdmissionTestPool(t)
 	defer pool.Close()
@@ -676,6 +677,7 @@ INSERT INTO image_scan_findings (
 // from both the named-deny and count paths. DB-backed; auto-skips if the test DB
 // is unreachable.
 func TestAdmissionEvidenceDeniedCVEAndGraceFromPostgres(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	pool := openAdmissionTestPool(t)
 	defer pool.Close()

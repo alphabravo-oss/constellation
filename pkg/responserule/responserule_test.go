@@ -130,6 +130,7 @@ func TestMatchConditionOps(t *testing.T) {
 }
 
 func TestMatchEnabledAndEventTypeAndAndSemantics(t *testing.T) {
+	t.Parallel()
 	base := ResponseRule{
 		Name: "r", Enabled: true, EventType: EventProcess,
 		Actions: []Action{{Type: ActionQuarantine}},
@@ -164,6 +165,7 @@ func TestMatchEnabledAndEventTypeAndAndSemantics(t *testing.T) {
 }
 
 func TestMatchRulesPriorityOrdering(t *testing.T) {
+	t.Parallel()
 	q := Action{Type: ActionQuarantine}
 	s := Action{Type: ActionSuppressLog}
 	tag := Action{Type: ActionTag}
@@ -201,6 +203,7 @@ func TestMatchRulesPriorityOrdering(t *testing.T) {
 }
 
 func TestMatchRulesTieBreakByName(t *testing.T) {
+	t.Parallel()
 	rules := []ResponseRule{
 		{Name: "bravo", Enabled: true, Priority: 50, EventType: EventNetwork, Actions: []Action{{Type: ActionTag}}},
 		{Name: "alpha", Enabled: true, Priority: 50, EventType: EventNetwork, Actions: []Action{{Type: ActionTag}}},
@@ -212,6 +215,7 @@ func TestMatchRulesTieBreakByName(t *testing.T) {
 }
 
 func TestMatchInputUnmodified(t *testing.T) {
+	t.Parallel()
 	rules := []ResponseRule{
 		{Name: "z", Priority: 9, Enabled: true, EventType: EventProcess, Actions: []Action{{Type: ActionTag}}},
 		{Name: "a", Priority: 1, Enabled: true, EventType: EventProcess, Actions: []Action{{Type: ActionTag}}},
@@ -224,6 +228,7 @@ func TestMatchInputUnmodified(t *testing.T) {
 
 // sanity: ID/OrgID round-trip through the model (used by sync serialization).
 func TestRuleCarriesIdentity(t *testing.T) {
+	t.Parallel()
 	id := uuid.New()
 	org := uuid.New()
 	r := ResponseRule{ID: id, OrgID: org, Name: "x", EventType: EventScan, Enabled: true,

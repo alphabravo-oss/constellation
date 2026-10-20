@@ -27,7 +27,7 @@ install_archive() {
 }
 
 if [[ "$#" == 0 ]]; then
-  set -- golangci-lint gosec govulncheck gitleaks gotestsum goose actionlint shellcheck
+  set -- golangci-lint gosec govulncheck gitleaks gotestsum actionlint shellcheck
 fi
 for tool in "$@"; do
   case "$tool" in
@@ -65,7 +65,6 @@ for tool in "$@"; do
     gosec) go install github.com/securego/gosec/v2/cmd/gosec@v2.29.0 ;;
     govulncheck) go install golang.org/x/vuln/cmd/govulncheck@latest ;;
     gotestsum) go install gotest.tools/gotestsum@v1.13.0 ;;
-    goose) go install github.com/pressly/goose/v3/cmd/goose@v3.29.0 ;;
     air) go install github.com/air-verse/air@v1.67.4 ;;
     actionlint) go install github.com/rhysd/actionlint/cmd/actionlint@latest ;;
     *) echo "Unknown CI tool: $tool" >&2; exit 2 ;;

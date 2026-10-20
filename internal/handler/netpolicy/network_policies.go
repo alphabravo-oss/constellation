@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
@@ -161,13 +163,13 @@ func (h *NetworkPolicies) List(w http.ResponseWriter, r *http.Request) {
 	if h.db != nil {
 		subj, ok := authctx.SubjectFrom(r.Context())
 		if !ok {
-			httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "subject required"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
 			return
 		}
 		var err error
 		selectedCluster, err = h.resolvePolicyCluster(r, subj.OrgID.String())
 		if err != nil {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 			return
 		}
 		var clusterUUID *uuid.UUID
@@ -178,18 +180,18 @@ func (h *NetworkPolicies) List(w http.ResponseWriter, r *http.Request) {
 		}
 		selectedGroupMembers, selectedGroup, groupActive, err = handlerpkg.ResolveGroupFilterMembers(r.Context(), h.db.Pool(), subj.OrgID, clusterUUID, r.URL.Query().Get("group"))
 		if err != nil {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 			return
 		}
 		items, err = h.observedPolicyLifecycleCatalog(r, subj.OrgID.String(), selectedCluster, namespace)
 		if err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		applyClusterToPolicies(items, selectedCluster)
 		items, err = h.applyPersistedState(r, subj.OrgID.String(), selectedCluster, items)
 		if err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	}
@@ -262,12 +264,12 @@ func (h *NetworkPolicies) List(w http.ResponseWriter, r *http.Request) {
 
 func (h *NetworkPolicies) PreviewAction(w http.ResponseWriter, r *http.Request) {
 	if h.db == nil {
-		httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "network policy lifecycle storage unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusServiceUnavailable, "network policy lifecycle storage unavailable")
 		return
 	}
 	subj, hasSubject := authctx.SubjectFrom(r.Context())
 	if !hasSubject {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "subject required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
 		return
 	}
 	var rawBody []byte
@@ -277,26 +279,26 @@ func (h *NetworkPolicies) PreviewAction(w http.ResponseWriter, r *http.Request) 
 	}
 	workload, action := policyWorkloadAndAction(r)
 	if workload == "" || action == "" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "workload and action required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "workload and action required")
 		return
 	}
 	selectedCluster, err := h.resolvePolicyCluster(r, subj.OrgID.String())
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	item, ok, err := h.findObservedNetworkPolicy(r, subj.OrgID.String(), selectedCluster, workload)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if !ok {
-		httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "policy not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "policy not found")
 		return
 	}
 	items, err := h.applyPersistedState(r, subj.OrgID.String(), selectedCluster, []networkPolicyLifecycleDTO{item})
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	item = items[0]
@@ -308,32 +310,32 @@ func (h *NetworkPolicies) PreviewAction(w http.ResponseWriter, r *http.Request) 
 		_ = json.NewDecoder(bytes.NewReader(rawBody)).Decode(&body)
 		mode := strings.TrimSpace(strings.ToLower(body.Mode))
 		if !isValidPolicyMode(mode) {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "force requires mode: discover, monitor, or protect"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "force requires mode: discover, monitor, or protect")
 			return
 		}
 		item.ForcedMode = mode
 	}
 	if action == "promote" && item.CurrentMode == "protect" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "workload already at protect (highest posture)"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "workload already at protect (highest posture)")
 		return
 	}
 	if action == "demote" && item.CurrentMode == "discover" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "discover workloads cannot be demoted"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "discover workloads cannot be demoted")
 		return
 	}
 	if action == "apply" && h.db != nil && item.ApprovalStatus != "approved" && item.ApprovalStatus != "applied" {
-		httpx.WriteJSON(w, http.StatusConflict, map[string]string{"error": "network policy must be approved before apply"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusConflict, "network policy must be approved before apply")
 		return
 	}
 	if action == "apply" && h.db != nil && item.CandidateStale {
-		httpx.WriteJSON(w, http.StatusConflict, map[string]string{"error": "network policy candidate changed after approval; re-approval required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusConflict, "network policy candidate changed after approval; re-approval required")
 		return
 	}
 	if action == "demote" && h.db != nil {
 		var body networkPolicyActionBody
 		_ = json.NewDecoder(bytes.NewReader(rawBody)).Decode(&body)
 		if strings.TrimSpace(body.Reason) == "" {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "demotion reason required"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "demotion reason required")
 			return
 		}
 	}
@@ -352,7 +354,7 @@ func (h *NetworkPolicies) PreviewAction(w http.ResponseWriter, r *http.Request) 
 			}
 		}
 		if !isReplay && (strings.TrimSpace(body.CandidateHash) == "" || strings.TrimSpace(body.CandidateHash) != item.CandidateHash) {
-			httpx.WriteJSON(w, http.StatusConflict, map[string]string{"error": "network policy candidate hash mismatch; refresh and review the latest candidate"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusConflict, "network policy candidate hash mismatch; refresh and review the latest candidate")
 			return
 		}
 	}
@@ -360,10 +362,10 @@ func (h *NetworkPolicies) PreviewAction(w http.ResponseWriter, r *http.Request) 
 	persisted, err := h.persistAction(r, item, action, subj.OrgID.String(), subj.UserID.String(), selectedCluster)
 	if err != nil {
 		if strings.Contains(err.Error(), "idempotency key already used") {
-			httpx.WriteJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusConflict, err.Error())
 			return
 		}
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
@@ -383,50 +385,50 @@ func (h *NetworkPolicies) PreviewAction(w http.ResponseWriter, r *http.Request) 
 
 func (h *NetworkPolicies) Rollback(w http.ResponseWriter, r *http.Request) {
 	if h.db == nil {
-		httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "network policy lifecycle storage unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusServiceUnavailable, "network policy lifecycle storage unavailable")
 		return
 	}
 	subj, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "subject required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
 		return
 	}
 	workload, _ := policyWorkloadAndAction(r)
 	if workload == "" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "workload required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "workload required")
 		return
 	}
 	selectedCluster, err := h.resolvePolicyCluster(r, subj.OrgID.String())
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	item, ok, err := h.findObservedNetworkPolicy(r, subj.OrgID.String(), selectedCluster, workload)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if !ok {
-		httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "policy not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "policy not found")
 		return
 	}
 	items, err := h.applyPersistedState(r, subj.OrgID.String(), selectedCluster, []networkPolicyLifecycleDTO{item})
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	item = items[0]
 	persisted, err := h.persistRollback(r, item, subj.OrgID.String(), subj.UserID.String(), selectedCluster)
 	if err != nil {
 		if strings.Contains(err.Error(), "rollback ref not found") {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 			return
 		}
 		if strings.Contains(err.Error(), "idempotency key already used") {
-			httpx.WriteJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusConflict, err.Error())
 			return
 		}
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{

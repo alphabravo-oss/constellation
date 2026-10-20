@@ -1,3 +1,5 @@
+//go:build integration
+
 package policydb
 
 import (
@@ -11,6 +13,7 @@ import (
 // verifies ListAdmissionRules returns the latest version per name, and that AdmissionCR renders a
 // CR whose spec carries the row's columns verbatim — the GitOps export read path.
 func TestStore_ListAdmissionRulesExport(t *testing.T) {
+	t.Parallel()
 	pool := openTestPool(t)
 	defer pool.Close()
 	org := seedOrg(t, pool)
@@ -64,6 +67,7 @@ func TestStore_ListAdmissionRulesExport(t *testing.T) {
 // TestStore_ListResponseRulesExport seeds response rules and verifies ListResponseRules returns
 // them priority-ordered with conditions/actions decoded, and ResponseCR renders a matching CR.
 func TestStore_ListResponseRulesExport(t *testing.T) {
+	t.Parallel()
 	pool := openTestPool(t)
 	defer pool.Close()
 	org := seedOrg(t, pool)

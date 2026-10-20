@@ -153,7 +153,7 @@ func (h *SupportBundle) build(ctx context.Context, subj Subject) (supportBundleD
 		value, err := collect()
 		if err != nil {
 			warnings = append(warnings, name+": "+err.Error())
-			sections[name] = map[string]any{"error": err.Error()}
+			sections[name] = map[string]any{"error": err.Error()} // apiutil:allow — bundle section, not an HTTP error body
 			return
 		}
 		sections[name] = value

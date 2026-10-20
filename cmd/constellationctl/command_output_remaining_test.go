@@ -1,3 +1,5 @@
+//go:build integration
+
 package main
 
 import (
@@ -17,6 +19,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/spf13/cobra"
@@ -452,15 +456,7 @@ VALUES ('00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-00000000
 
 func remainingCLIDatabase(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	url := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-	if url == "" {
-		t.Skip("requires isolated test database")
-	}
-	database, err := db.Connect(t.Context(), url)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(database.Close)
+	database := db.NewFromPool(pgtest.Pool(t))
 	return pgfixture.Schema(t, database.Pool())
 }
 

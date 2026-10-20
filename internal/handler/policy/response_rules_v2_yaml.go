@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -184,18 +186,18 @@ func (h *ResponseRulesV2) ExportYAML(w http.ResponseWriter, r *http.Request) {
 	subject, _ := authctx.SubjectFrom(r.Context())
 	clusterID, err := sqlx.ParseClusterIDParam(r)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if clusterID != nil {
 		var owned uuid.UUID
 		err := h.db.Pool().QueryRow(r.Context(), `SELECT id FROM clusters WHERE org_id=$1 AND id=$2`, subject.OrgID, clusterID).Scan(&owned)
 		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "cluster not found")
 			return
 		}
 		if err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify cluster"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to verify cluster")
 			return
 		}
 	}
@@ -205,7 +207,7 @@ SELECT name, description, enabled, priority, event_type, conditions, actions, wo
  WHERE org_id=$1 AND cluster_id IS NOT DISTINCT FROM $2::uuid
  ORDER BY priority, name`, subject.OrgID, clusterID)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to export rules"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to export rules")
 		return
 	}
 	defer rows.Close()
@@ -214,17 +216,17 @@ SELECT name, description, enabled, priority, event_type, conditions, actions, wo
 		var item responseRuleYAMLRule
 		var conditions, actions, selector []byte
 		if err := rows.Scan(&item.Name, &item.Description, &item.Enabled, &item.Priority, &item.EventType, &conditions, &actions, &selector); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to export rules"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to export rules")
 			return
 		}
 		if json.Unmarshal(conditions, &item.Conditions) != nil || json.Unmarshal(actions, &item.Actions) != nil || json.Unmarshal(selector, &item.WorkloadMatch) != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "invalid stored response rule"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "invalid stored response rule")
 			return
 		}
 		for index := range item.Actions {
 			action := &item.Actions[index]
 			if !responseRuleYAMLActionParamsValid(*action) {
-				httpx.WriteJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "response rule has unsupported action params"})
+				apiutil.WriteStatus(r.Context(), w, http.StatusUnprocessableEntity, "response rule has unsupported action params")
 				return
 			}
 			if action.Kind != response.ActionNotify && action.Kind != response.ActionTicket && action.Kind != response.ActionWebhook {
@@ -236,7 +238,7 @@ SELECT name, description, enabled, priority, event_type, conditions, actions, wo
 				var err error
 				targetID, name, err = responseRuleYAMLReceiverName(r.Context(), h.db.Pool(), subject.OrgID, action.Target, true)
 				if err != nil {
-					httpx.WriteJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "response rule references an unavailable receiver"})
+					apiutil.WriteStatus(r.Context(), w, http.StatusUnprocessableEntity, "response rule references an unavailable receiver")
 					return
 				}
 				action.Target = name
@@ -244,7 +246,7 @@ SELECT name, description, enabled, priority, event_type, conditions, actions, wo
 			if reference := action.Params["receiver"]; reference != "" {
 				receiverID, name, err := responseRuleYAMLReceiverName(r.Context(), h.db.Pool(), subject.OrgID, reference, true)
 				if err != nil || (targetID != uuid.Nil && receiverID != targetID) {
-					httpx.WriteJSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "response rule references an unavailable or conflicting receiver"})
+					apiutil.WriteStatus(r.Context(), w, http.StatusUnprocessableEntity, "response rule references an unavailable or conflicting receiver")
 					return
 				}
 				action.Params["receiver"] = name
@@ -253,12 +255,12 @@ SELECT name, description, enabled, priority, event_type, conditions, actions, wo
 		document.Rules = append(document.Rules, item)
 	}
 	if rows.Err() != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to export rules"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to export rules")
 		return
 	}
 	data, err := yaml.Marshal(document)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to encode rules"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to encode rules")
 		return
 	}
 	w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
@@ -270,17 +272,17 @@ SELECT name, description, enabled, priority, event_type, conditions, actions, wo
 func (h *ResponseRulesV2) ImportYAML(w http.ResponseWriter, r *http.Request) {
 	mediaType, parameters, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || (mediaType != "application/yaml" && mediaType != "application/x-yaml" && mediaType != "text/yaml" && mediaType != "text/x-yaml") || (parameters["charset"] != "" && !strings.EqualFold(parameters["charset"], "utf-8")) {
-		httpx.WriteJSON(w, http.StatusUnsupportedMediaType, map[string]string{"error": "Content-Type must be YAML with UTF-8 charset"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnsupportedMediaType, "Content-Type must be YAML with UTF-8 charset")
 		return
 	}
 	if h.auditLog == nil {
-		httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "audit unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusServiceUnavailable, "audit unavailable")
 		return
 	}
 	subject, _ := authctx.SubjectFrom(r.Context())
 	clusterID, err := sqlx.ParseClusterIDParam(r)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	defaultConflict := r.URL.Query().Get("on_conflict")
@@ -292,18 +294,18 @@ func (h *ResponseRulesV2) ImportYAML(w http.ResponseWriter, r *http.Request) {
 		err = validateResponseRulesYAML(document, responseRulesYAMLScope(clusterID), defaultConflict)
 	}
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if clusterID != nil {
 		var owned uuid.UUID
 		err := h.db.Pool().QueryRow(r.Context(), `SELECT id FROM clusters WHERE org_id=$1 AND id=$2`, subject.OrgID, clusterID).Scan(&owned)
 		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "cluster not found")
 			return
 		}
 		if err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify cluster"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to verify cluster")
 			return
 		}
 	}
@@ -317,12 +319,12 @@ func (h *ResponseRulesV2) ImportYAML(w http.ResponseWriter, r *http.Request) {
 	}
 	attemptID, _, err := h.auditLog.Log(r.Context(), audit.Event{OrgID: &subject.OrgID, ActorID: &subject.UserID, Action: "response_rule_v2.import_attempt", TargetKind: "response-rule-v2", TargetID: targetID, After: map[string]any{"scope": responseRulesYAMLScope(clusterID), "names": names, "on_conflict": defaultConflict}})
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "audit unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusServiceUnavailable, "audit unavailable")
 		return
 	}
 	tx, err := h.db.Pool().Begin(r.Context())
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to begin import"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to begin import")
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
@@ -330,17 +332,17 @@ func (h *ResponseRulesV2) ImportYAML(w http.ResponseWriter, r *http.Request) {
 		var owned uuid.UUID
 		err := tx.QueryRow(r.Context(), `SELECT id FROM clusters WHERE org_id=$1 AND id=$2 FOR SHARE`, subject.OrgID, clusterID).Scan(&owned)
 		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "cluster not found")
 			return
 		}
 		if err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to verify cluster"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to verify cluster")
 			return
 		}
 	}
 	var lockedOrgID uuid.UUID
 	if err := tx.QueryRow(r.Context(), `SELECT id FROM orgs WHERE id=$1 FOR UPDATE`, subject.OrgID).Scan(&lockedOrgID); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to lock organization"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to lock organization")
 		return
 	}
 	results := make([]map[string]string, 0, len(document.Rules))
@@ -350,7 +352,7 @@ func (h *ResponseRulesV2) ImportYAML(w http.ResponseWriter, r *http.Request) {
 		var existingCluster *uuid.UUID
 		err := tx.QueryRow(r.Context(), `SELECT id, cluster_id FROM response_rules_v2 WHERE org_id=$1 AND name=$2`, subject.OrgID, item.Name).Scan(&existingID, &existingCluster)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to inspect rule"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to inspect rule")
 			return
 		}
 		conflict := item.OnConflict
@@ -359,11 +361,11 @@ func (h *ResponseRulesV2) ImportYAML(w http.ResponseWriter, r *http.Request) {
 		}
 		if err == nil {
 			if (existingCluster == nil) != (clusterID == nil) || (existingCluster != nil && *existingCluster != clusterID.(uuid.UUID)) {
-				httpx.WriteJSON(w, http.StatusConflict, map[string]string{"error": fmt.Sprintf("rule %q exists in another scope", item.Name)})
+				apiutil.WriteStatus(r.Context(), w, http.StatusConflict, fmt.Sprintf("rule %q exists in another scope", item.Name))
 				return
 			}
 			if conflict == "error" {
-				httpx.WriteJSON(w, http.StatusConflict, map[string]string{"error": fmt.Sprintf("rule %q already exists", item.Name)})
+				apiutil.WriteStatus(r.Context(), w, http.StatusConflict, fmt.Sprintf("rule %q already exists", item.Name))
 				return
 			}
 			if conflict == "skip" {
@@ -376,16 +378,16 @@ func (h *ResponseRulesV2) ImportYAML(w http.ResponseWriter, r *http.Request) {
 			var groupID uuid.UUID
 			err := tx.QueryRow(r.Context(), `SELECT id FROM groups WHERE org_id=$1 AND (id::text=$2 OR name=$2) AND (cluster_id IS NULL OR ($3::uuid IS NOT NULL AND cluster_id=$3)) FOR SHARE NOWAIT`, subject.OrgID, selector, clusterID).Scan(&groupID)
 			if errors.Is(err, pgx.ErrNoRows) {
-				httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("rule %q references a group outside this scope", item.Name)})
+				apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, fmt.Sprintf("rule %q references a group outside this scope", item.Name))
 				return
 			}
 			var pgError *pgconn.PgError
 			if errors.As(err, &pgError) && pgError.Code == "55P03" {
-				httpx.WriteJSON(w, http.StatusConflict, map[string]string{"error": "group is being modified; retry"})
+				apiutil.WriteStatus(r.Context(), w, http.StatusConflict, "group is being modified; retry")
 				return
 			}
 			if err != nil {
-				httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to validate group"})
+				apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to validate group")
 				return
 			}
 		}
@@ -398,22 +400,22 @@ func (h *ResponseRulesV2) ImportYAML(w http.ResponseWriter, r *http.Request) {
 				var err error
 				targetID, _, err = responseRuleYAMLReceiverName(r.Context(), tx, subject.OrgID, action.Target, false)
 				if errors.Is(err, pgx.ErrNoRows) {
-					httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("rule %q references a receiver outside this organization", item.Name)})
+					apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, fmt.Sprintf("rule %q references a receiver outside this organization", item.Name))
 					return
 				}
 				if err != nil {
-					httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to validate receiver"})
+					apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to validate receiver")
 					return
 				}
 			}
 			if reference := action.Params["receiver"]; reference != "" {
 				receiverID, _, err := responseRuleYAMLReceiverName(r.Context(), tx, subject.OrgID, reference, false)
 				if errors.Is(err, pgx.ErrNoRows) || (err == nil && targetID != uuid.Nil && receiverID != targetID) {
-					httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("rule %q references a receiver outside this organization", item.Name)})
+					apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, fmt.Sprintf("rule %q references a receiver outside this organization", item.Name))
 					return
 				}
 				if err != nil {
-					httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to validate receiver"})
+					apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to validate receiver")
 					return
 				}
 			}
@@ -433,9 +435,9 @@ func (h *ResponseRulesV2) ImportYAML(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			var pgError *pgconn.PgError
 			if errors.As(err, &pgError) && pgError.Code == "23505" {
-				httpx.WriteJSON(w, http.StatusConflict, map[string]string{"error": fmt.Sprintf("rule %q already exists", item.Name)})
+				apiutil.WriteStatus(r.Context(), w, http.StatusConflict, fmt.Sprintf("rule %q already exists", item.Name))
 			} else {
-				httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to import rule"})
+				apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to import rule")
 			}
 			return
 		}
@@ -443,11 +445,11 @@ func (h *ResponseRulesV2) ImportYAML(w http.ResponseWriter, r *http.Request) {
 	}
 	completionID, _, err := h.auditLog.LogInTx(r.Context(), tx, audit.Event{OrgID: &subject.OrgID, ActorID: &subject.UserID, Action: "response_rule_v2.import", TargetKind: "response-rule-v2", TargetID: targetID, After: map[string]any{"created": created, "replaced": replaced, "skipped": skipped, "results": results, "audit_attempt_id": attemptID}})
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "audit unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusServiceUnavailable, "audit unavailable")
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to commit import"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to commit import")
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"created": created, "replaced": replaced, "skipped": skipped, "results": results, "audit_attempt_id": attemptID, "completion_audit_id": completionID})

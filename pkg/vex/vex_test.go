@@ -7,6 +7,7 @@ import (
 )
 
 func TestOpenVEX_StatusMapping(t *testing.T) {
+	t.Parallel()
 	findings := []Finding{
 		{VulnerabilityID: "CVE-2024-0001", Lifecycle: "open", Product: "pkg:apk/alpine/openssl@3.0", UpdatedAt: time.Now()},
 		{VulnerabilityID: "CVE-2024-0002", Lifecycle: "suppressed", Product: "pkg:apk/alpine/openssl@3.0", Rationale: "compensating WAF rule", UpdatedAt: time.Now()},
@@ -45,6 +46,7 @@ func TestOpenVEX_StatusMapping(t *testing.T) {
 }
 
 func TestCycloneDXVEX_ShapeAndAnalysisState(t *testing.T) {
+	t.Parallel()
 	findings := []Finding{
 		{VulnerabilityID: "CVE-2024-1111", Lifecycle: "suppressed", Product: "pkg:apk/alpine/openssl@3.0", Rationale: "not exploitable", UpdatedAt: time.Now()},
 	}
@@ -75,6 +77,7 @@ func TestCycloneDXVEX_ShapeAndAnalysisState(t *testing.T) {
 }
 
 func TestVulnURI_RoutesByIDPrefix(t *testing.T) {
+	t.Parallel()
 	for in, want := range map[string]string{
 		"CVE-2024-1":     "https://nvd.nist.gov/vuln/detail/CVE-2024-1",
 		"GHSA-aaaa-bbbb": "https://github.com/advisories/GHSA-aaaa-bbbb",

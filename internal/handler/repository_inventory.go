@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 
 	"github.com/go-chi/chi/v5"
@@ -189,17 +191,17 @@ func repositoryInventoryDefinition(r *http.Request) (inventorylist.Definition, i
 
 func (h *RepositoryInventoryHandler) List(w http.ResponseWriter, r *http.Request) {
 	if _, ok := SubjectFrom(r.Context()); !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "subject required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
 		return
 	}
 	d, o, err := repositoryInventoryDefinition(r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	items, meta, err := inventorylist.Read(r.Context(), h.db.Pool(), d, o, func(row inventorylist.Row) (repositoryScanDTO, error) { return scanRepositoryRow(row) })
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"repository_scans": items, "limit": o.Limit, "offset": o.Offset, "sort": o.Sort, "order": o.Order, "total": meta.Total, "has_more": meta.HasMore, "summary": meta.Summary})
@@ -207,12 +209,12 @@ func (h *RepositoryInventoryHandler) List(w http.ResponseWriter, r *http.Request
 
 func (h *RepositoryInventoryHandler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 	if _, ok := SubjectFrom(r.Context()); !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "subject required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
 		return
 	}
 	d, o, err := repositoryInventoryDefinition(r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	body, meta, err := inventorylist.CSV(r.Context(), h.db.Pool(), d, o, func(row inventorylist.Row) (repositoryScanDTO, error) { return scanRepositoryRow(row) }, []string{"ID", "Repository", "URL", "Source", "Branch", "Commit", "Workflow", "Packages", "Open findings", "Critical", "High", "Job status", "Evidence observed", "Last seen", "Attestation status", "Attestation trusted"}, func(item repositoryScanDTO) []string {
@@ -228,7 +230,7 @@ func (h *RepositoryInventoryHandler) ExportCSV(w http.ResponseWriter, r *http.Re
 		return []string{item.ID.String(), item.RepositoryRef, item.RepositoryURL, item.SourceType, item.Branch, item.CommitSHA, item.Workflow, strconv.Itoa(item.PackageCount), strconv.Itoa(item.OpenFindings), strconv.Itoa(item.CriticalFindings), strconv.Itoa(item.HighFindings), item.LatestJobStatus, observed, item.LastSeenAt.Format(time.RFC3339), attStatus, attTrusted}
 	})
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	inventorylist.WriteCSV(w, "constellation-repository-scans.csv", body, meta)

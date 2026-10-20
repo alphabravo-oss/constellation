@@ -1,3 +1,5 @@
+//go:build integration
+
 package main
 
 import (
@@ -5,9 +7,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
 
 	"github.com/google/uuid"
 
@@ -21,20 +24,13 @@ import (
 // Restart the disk queue and replay through HTTP; raw rows, late aggregates and
 // policy counters must still represent precisely one observation.
 func TestTelemetryReplayAfterLostAcknowledgement(t *testing.T) {
-	databaseURL := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("requires migrated integration database")
-	}
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	d, err := db.Connect(ctx, databaseURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer d.Close()
+	d := db.NewFromPool(pgtest.Pool(t))
 	pool := d.Pool()
 	org, cluster := uuid.New(), uuid.New()
-	if _, err = pool.Exec(ctx, `INSERT INTO orgs(id,name,display_name) VALUES ($1,$2,$2)`, org, "replay-"+org.String()); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO orgs(id,name,display_name) VALUES ($1,$2,$2)`, org, "replay-"+org.String()); err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
@@ -42,7 +38,7 @@ func TestTelemetryReplayAfterLostAcknowledgement(t *testing.T) {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM network_flow_rollups WHERE org_id=$1`, org)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id=$1`, org)
 	}()
-	if _, err = pool.Exec(ctx, `INSERT INTO clusters(id,org_id,name) VALUES ($1,$2,'replay')`, cluster, org); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO clusters(id,org_id,name) VALUES ($1,$2,'replay')`, cluster, org); err != nil {
 		t.Fatal(err)
 	}
 	token, tokenID, err := handler.IssueRuntimeAgentToken(ctx, pool, org, "replay", time.Hour)

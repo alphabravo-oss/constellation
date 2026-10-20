@@ -1,3 +1,5 @@
+//go:build integration
+
 package policydb
 
 import (
@@ -13,6 +15,7 @@ import (
 )
 
 func TestOperatorGroupReferenceGuard(t *testing.T) {
+	t.Parallel()
 	pool := openTestPool(t)
 	defer pool.Close()
 	ctx := context.Background()
@@ -73,6 +76,7 @@ func TestOperatorGroupReferenceGuard(t *testing.T) {
 }
 
 func TestOperatorNetworkRuleScopeAndPolicyGuard(t *testing.T) {
+	t.Parallel()
 	pool := openTestPool(t)
 	defer pool.Close()
 	ctx := context.Background()
@@ -133,6 +137,7 @@ func TestOperatorNetworkRuleScopeAndPolicyGuard(t *testing.T) {
 }
 
 func TestOperatorGroupScopeCollision(t *testing.T) {
+	t.Parallel()
 	pool := openTestPool(t)
 	defer pool.Close()
 	ctx := context.Background()
@@ -157,6 +162,7 @@ func TestOperatorGroupScopeCollision(t *testing.T) {
 }
 
 func TestOperatorGroupReferenceInsertRace(t *testing.T) {
+	t.Parallel()
 	pool := openTestPool(t)
 	defer pool.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

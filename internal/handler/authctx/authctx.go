@@ -9,6 +9,7 @@ package authctx
 
 import (
 	"context"
+	"sync"
 
 	"github.com/google/uuid"
 
@@ -52,7 +53,42 @@ func (s Subject) HasTokenScope(v rbac.Verb) bool {
 
 // WithSubject attaches s to ctx.
 func WithSubject(ctx context.Context, s Subject) context.Context {
+	if slot, ok := ctx.Value(slotKey{}).(*Slot); ok {
+		slot.set(s)
+	}
 	return context.WithValue(ctx, subjectKey{}, s)
+}
+
+type slotKey struct{}
+
+// Slot lets middleware that runs *outside* authentication (the request-summary
+// log line) observe the subject authentication attaches further down the chain:
+// WithSubject records into the request's slot as well as the child context.
+type Slot struct {
+	mu   sync.Mutex
+	subj *Subject
+}
+
+// WithSlot returns ctx carrying a fresh Slot.
+func WithSlot(ctx context.Context) (context.Context, *Slot) {
+	slot := &Slot{}
+	return context.WithValue(ctx, slotKey{}, slot), slot
+}
+
+func (s *Slot) set(subj Subject) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.subj = &subj
+}
+
+// Subject returns the subject recorded during the request, if any.
+func (s *Slot) Subject() (Subject, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.subj == nil {
+		return Subject{}, false
+	}
+	return *s.subj, true
 }
 
 // SubjectFrom returns the Subject attached to ctx, if any.

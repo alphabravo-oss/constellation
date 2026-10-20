@@ -16,6 +16,7 @@ import (
 // exported to a CR (policydb.GroupCR) and fed back through the reconciler's mapping (mapGroup)
 // reproduces the identical row. Export then `kubectl apply` is lossless.
 func TestExportRoundTrip_Group(t *testing.T) {
+	t.Parallel()
 	org := uuid.New()
 	want := policydb.GroupRow{
 		OrgID:   org,
@@ -51,6 +52,7 @@ func TestExportRoundTrip_Group(t *testing.T) {
 // modes become "monitor" (observe, never block) — the reconciler must never author a blocking
 // group implicitly.
 func TestMapGroup_Defaults(t *testing.T) {
+	t.Parallel()
 	cr := &cv1alpha1.ConstellationGroup{}
 	cr.Name = "svc"
 	cr.Spec.OrgID = uuid.New().String()
@@ -71,6 +73,7 @@ func TestMapGroup_Defaults(t *testing.T) {
 // TestMapGroup_RejectsBadOrg proves a non-UUID orgID is a permanent (spec) error so the
 // reconciler records InvalidSpec rather than writing a row.
 func TestMapGroup_RejectsBadOrg(t *testing.T) {
+	t.Parallel()
 	cr := &cv1alpha1.ConstellationGroup{}
 	cr.Name = "svc"
 	cr.Spec.OrgID = "not-a-uuid"
@@ -83,6 +86,7 @@ func TestMapGroup_RejectsBadOrg(t *testing.T) {
 // row exported to a CR (policydb.NetworkRuleCR) and fed back through mapNetworkRule reproduces the
 // identical row (the synthesised metadata.name is not part of the reconcile identity).
 func TestExportRoundTrip_NetworkRule(t *testing.T) {
+	t.Parallel()
 	org := uuid.New()
 	cluster := uuid.New()
 	want := policydb.NetworkRuleRow{
@@ -117,6 +121,7 @@ func TestExportRoundTrip_NetworkRule(t *testing.T) {
 // TestMapNetworkRule_Defaults asserts the safety default: an empty mode becomes "monitor" so a
 // freshly authored edge never enforces a default-deny until explicitly promoted to protect.
 func TestMapNetworkRule_Defaults(t *testing.T) {
+	t.Parallel()
 	cr := &cv1alpha1.ConstellationNetworkRule{}
 	cr.Spec.OrgID = uuid.New().String()
 	cr.Spec.ClusterID = uuid.New().String()
@@ -134,6 +139,7 @@ func TestMapNetworkRule_Defaults(t *testing.T) {
 
 // TestMapNetworkRule_RejectsMissingGroups proves an edge missing from/to is a spec error.
 func TestMapNetworkRule_RejectsMissingGroups(t *testing.T) {
+	t.Parallel()
 	cr := &cv1alpha1.ConstellationNetworkRule{}
 	cr.Spec.OrgID = uuid.New().String()
 	cr.Spec.ClusterID = uuid.New().String()

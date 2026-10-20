@@ -12,6 +12,7 @@ import (
 )
 
 func TestCollectContainerPackagesReadsDpkgViaProcRoot(t *testing.T) {
+	t.Parallel()
 	root := socketfixture.Dir(t)
 	listener := createTestCRISocket(t, root)
 	defer listener.Close()
@@ -69,6 +70,7 @@ func TestCollectContainerPackagesReadsDpkgViaProcRoot(t *testing.T) {
 }
 
 func TestContainerPIDParsesNumberAndNestedString(t *testing.T) {
+	t.Parallel()
 	if got := containerPID(map[string]any{"pid": float64(4321)}); got != 4321 {
 		t.Fatalf("numeric pid = %d, want 4321", got)
 	}
@@ -78,6 +80,7 @@ func TestContainerPIDParsesNumberAndNestedString(t *testing.T) {
 }
 
 func TestCollectPackagesAtRootDoesNotFallbackToHost(t *testing.T) {
+	t.Parallel()
 	root := socketfixture.Dir(t)
 	pkgs, err := collectPackagesAtRoot(root, "node-a", "ubuntu", "24.04")
 	if err == nil {

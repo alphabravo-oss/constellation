@@ -1,3 +1,5 @@
+//go:build integration
+
 package policy
 
 import (
@@ -124,6 +126,7 @@ func listResponseRulesV2(t *testing.T, r http.Handler, orgID, userID, clusterID 
 }
 
 func TestResponseRulesV2_ReorderIsScopedAndDrivesListOrder(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	pool := d.Pool()
@@ -175,6 +178,7 @@ func TestResponseRulesV2_ReorderIsScopedAndDrivesListOrder(t *testing.T) {
 }
 
 func TestResponseRulesV2_ReorderRejectsPartialDuplicateAndOutOfScopeIDs(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	pool := d.Pool()
@@ -212,6 +216,7 @@ func TestResponseRulesV2_ReorderRejectsPartialDuplicateAndOutOfScopeIDs(t *testi
 }
 
 func TestResponseRulesV2_ReorderAuditCompletionIsAtomic(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	pool := d.Pool()
@@ -276,6 +281,7 @@ func TestResponseRulesV2_ReorderAuditCompletionIsAtomic(t *testing.T) {
 }
 
 func TestResponseRulesV2_OptionsExposeNVEventCatalogAndReceivers(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	pool := d.Pool()
@@ -336,6 +342,7 @@ func TestResponseRulesV2_OptionsExposeNVEventCatalogAndReceivers(t *testing.T) {
 }
 
 func TestResponseRulesV2_CreateAcceptsNVEventAndWebhookAction(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	pool := d.Pool()
@@ -360,6 +367,7 @@ func TestResponseRulesV2_CreateAcceptsNVEventAndWebhookAction(t *testing.T) {
 }
 
 func TestResponseRulesV2_CreateAcceptsSuppressLogAction(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	pool := d.Pool()
@@ -384,6 +392,7 @@ func TestResponseRulesV2_CreateAcceptsSuppressLogAction(t *testing.T) {
 }
 
 func TestResponseRulesV2_CreatePreservesGroupSelector(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	pool := d.Pool()
@@ -432,6 +441,7 @@ func sendResponseRuleV2Group(ctx context.Context, r http.Handler, method, path s
 }
 
 func TestResponseRulesV2_GroupSelectorRequiresScopedGroup(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	pool := d.Pool()
@@ -611,6 +621,7 @@ func TestResponseRulesV2_GroupMutationWinsBeforeCreateAndUpdate(t *testing.T) {
 }
 
 func TestResponseRulesV2_GroupRowLockReturnsConflict(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	pool := d.Pool()
@@ -643,6 +654,7 @@ func TestResponseRulesV2_GroupRowLockReturnsConflict(t *testing.T) {
 }
 
 func TestResponseRulesV2_GroupUpdateDoesNotDeadlockReorder(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	pool := d.Pool()
