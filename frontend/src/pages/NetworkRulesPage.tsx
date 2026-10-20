@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
-  Network as NetworkIcon,
   Check,
   Ban,
   Plus,
@@ -20,23 +19,23 @@ import {
 import { ImportExportButtons } from "@/components/ImportExportButtons";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
-import { Collapse } from "@/components/ui/collapse";
 import { PageHeader } from "@/components/ui/page";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 import { Pager } from "@/components/ui/pager";
 import { fmtRelative } from "@/lib/format";
 import { INVENTORY_MAX_PAGE } from "@/lib/inventory-pagination";
 import { exportQueryReady, useExportGuard } from "@/hooks/useExportGuard";
-import { useInventoryRoute, ScanInventoryExport } from "./inventory-workspace";
+import { FilterLabel, InventoryMoreFilters, InventorySearch, useInventoryRoute, useScanInventoryExport } from "./inventory-workspace";
+import { usePlatformComponentVisibility } from "@/hooks/usePlatformComponentVisibility";
+import { sentenceValue } from "@/components/ui/status-pill";
 import {
   useNetworkRuleScope,
   NETWORK_RULE_SORTS,
   networkRuleInventoryMatches,
   networkRuleFingerprint,
 } from "./network-rule-inventory";
-import { Select } from "@/components/ui/form";
+import { Select, TextInput } from "@/components/ui/form";
 
 const RULE_METADATA_MIGRATION = {
   id: "network-rule-metadata-v1",
@@ -53,6 +52,7 @@ export function NetworkRulesPage() {
     params.get(key)?.trim() === "all" ? "" : (params.get(key)?.trim() ?? "");
   const sort = params.get("sort") ?? "evaluation",
     order = params.get("order") ?? "asc";
+  const [platformHidden] = usePlatformComponentVisibility();
   const request: NetworkRuleInventoryParams = {
     q: route.debouncedQuery.trim(),
     from: filter("from"),
@@ -60,7 +60,7 @@ export function NetworkRulesPage() {
     action: filter("action"),
     status: filter("status"),
     cfg_type: filter("cfg_type"),
-    hide_platform: params.get("hide_platform") === "true",
+    hide_platform: params.has("hide_platform") ? params.get("hide_platform") === "true" : platformHidden,
     sort,
     order: order as "asc" | "desc",
     limit: 100,
@@ -84,6 +84,7 @@ export function NetworkRulesPage() {
       ["true", "false"].includes(params.get("hide_platform")!));
   const key = ["network-rules-inventory", scope.owner, cluster, request];
   const context = JSON.stringify([scope.owner, cluster, request]);
+
   const q = useQuery({
     queryKey: key,
     enabled: scope.ready && validRoute && !route.debouncing,
@@ -402,12 +403,51 @@ export function NetworkRulesPage() {
     type: "learned",
     last_match: "last",
   };
+  const matching = useScanInventoryExport({ context, disabled: !available || uncertain, isCurrent: fresh, download: (guard) => networkRules.inventoryCSV(cluster, request, guard) });
   const sortFields: Record<string, string> = {
     learned: "type",
     last: "last_match",
   };
   const setFilter = (key: string, value: string) =>
     route.update({ [key]: value }, true, ["from", "to"].includes(key));
+  const rulesToolbar = <>
+    <InventorySearch value={route.query} onChange={route.setQuery} label="Search network rules" placeholder="Search from, to, application, port or comment" />
+    {(
+      [
+        ["action", "Action", ["allow", "deny"]],
+        ["status", "Status", ["enabled", "disabled"]],
+      ] as const
+    ).map(([name, label, values]) => (
+      <Select key={name} aria-label={label} className="h-9" value={filter(name)} onChange={(event) => setFilter(name, event.target.value)}>
+        <option value="">{`Any ${label.toLowerCase()}`}</option>
+        {values.map((value) => <option key={value} value={value}>{sentenceValue(value)}</option>)}
+      </Select>
+    ))}
+    <InventoryMoreFilters count={[filter("from"), filter("to"), filter("cfg_type")].filter(Boolean).length + (sort !== "evaluation" ? 1 : 0)}>
+      <FilterLabel label="Type">
+        <Select aria-label="Type" className="w-full" value={filter("cfg_type")} onChange={(event) => setFilter("cfg_type", event.target.value)}>
+          <option value="">Any type</option>
+          {["learned", "learned_override", "user_created"].map((value) => <option key={value} value={value}>{sentenceValue(value)}</option>)}
+        </Select>
+      </FilterLabel>
+      <FilterLabel label="Sort">
+        <Select aria-label="Sort network rules" className="w-full" value={sort} onChange={(event) => route.update({ sort: event.target.value })}>
+          {NETWORK_RULE_SORTS.map((value) => <option value={value} key={value}>{value === "evaluation" ? "Evaluation order" : sentenceValue(value)}</option>)}
+        </Select>
+      </FilterLabel>
+      <FilterLabel label="Order">
+        <Select aria-label="Sort direction" className="w-full" value={order} onChange={(event) => route.update({ order: event.target.value })}>
+          <option value="asc">Ascending</option>
+          <option value="desc">Descending</option>
+        </Select>
+      </FilterLabel>
+      {["from", "to"].map((name) => (
+        <FilterLabel key={name} label={`Exact ${name}`}>
+          <TextInput aria-label={`Exact ${name}`} value={filter(name)} onChange={(event) => setFilter(name, event.target.value)} />
+        </FilterLabel>
+      ))}
+    </InventoryMoreFilters>
+  </>;
   return (
     <div
       className="space-y-4"
@@ -415,10 +455,11 @@ export function NetworkRulesPage() {
       data-cluster-id={cluster}
     >
       <PageHeader
-        title="Network Rules"
-        description="Review learned traffic and configured allow or deny rules."
+        title="Network rules"
+        description="Learned traffic and configured allow or deny rules."
         actions={
           <div className="flex items-center gap-2">
+            <Button disabled={q.isFetching} onClick={() => void q.refetch()}>Refresh</Button>
             {available && !uncertain && (
               <ImportExportButtons
                 filename="constellation-network-rules.yaml"
@@ -444,6 +485,7 @@ export function NetworkRulesPage() {
               />
             )}
             <Button
+              variant="primary"
               disabled={!available || uncertain}
               onClick={() => {
                 if (fresh())
@@ -479,128 +521,17 @@ export function NetworkRulesPage() {
                   ? "Loading network rules"
                   : `${q.data!.total.toLocaleString()} matching network rules`
             }
+            numbers={[
+              { label: "allow", value: summary?.allow ?? "—" },
+              { label: "deny", value: summary?.deny ?? "—" },
+              { label: "learned", value: summary?.learned ?? "—" },
+              { label: "disabled", value: summary?.disabled ?? "—", tone: "muted" },
+            ]}
+            detail={<div className="space-y-1">
+              <p data-testid="network-rules-summary">Rules {summary?.total ?? "—"} · allow {summary?.allow ?? "—"} · deny {summary?.deny ?? "—"} · learned {summary?.learned ?? "—"} · disabled {summary?.disabled ?? "—"}</p>
+              <p>Metrics cover every matching retained observed pair and configured override. Display sorting applies across server pages; Move to top changes configured evaluation priority. Page CSV includes selected columns from this page; matching CSV exports up to 100,000 matches. Portable YAML exports all authored overrides and ignores inventory filters. Configuration and observed traffic do not confirm agent enforcement.</p>
+            </div>}
           />
-          <StatGrid>
-            {(["total", "allow", "deny", "learned", "disabled"] as const).map(
-              (name) => (
-                <StatCard
-                  key={name}
-                  label={
-                    name === "total"
-                      ? "Rules"
-                      : name[0].toUpperCase() + name.slice(1)
-                  }
-                  value={summary?.[name] ?? "—"}
-                  icon={
-                    name === "total" ? (
-                      <NetworkIcon className="h-3.5 w-3.5" />
-                    ) : undefined
-                  }
-                />
-              ),
-            )}
-          </StatGrid>
-          <div className="flex flex-wrap items-end gap-3">
-            <label className="min-w-52 flex-1 text-xs">
-              Search network rules
-              <input
-                aria-label="Search network rules"
-                value={route.query}
-                onChange={(event) => route.setQuery(event.target.value)}
-                placeholder="Search from, to, application, port, comment…"
-                className="mt-1 w-full rounded border border-border bg-background px-3 py-2"
-              />
-            </label>
-            {(
-              [
-                ["action", "Action", ["allow", "deny"]],
-                ["status", "Status", ["enabled", "disabled"]],
-                [
-                  "cfg_type",
-                  "Type",
-                  ["learned", "learned_override", "user_created"],
-                ],
-              ] as const
-            ).map(([name, label, values]) => (
-              <label className="text-xs" key={name}>
-                {label}
-                <Select
-                  aria-label={label}
-                  className="mt-1 block rounded border border-border bg-background p-2"
-                  value={filter(name)}
-                  onChange={(event) => setFilter(name, event.target.value)}
-                >
-                  <option value="">All</option>
-                  {values.map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
-                </Select>
-              </label>
-            ))}
-            <label className="text-xs">
-              Sort
-              <Select
-                aria-label="Sort network rules"
-                className="mt-1 block rounded border border-border bg-background p-2"
-                value={sort}
-                onChange={(event) => route.update({ sort: event.target.value })}
-              >
-                {NETWORK_RULE_SORTS.map((value) => (
-                  <option value={value} key={value}>
-                    {value === "evaluation" ? "Evaluation order" : value}
-                  </option>
-                ))}
-              </Select>
-            </label>
-            <label className="text-xs">
-              Order
-              <Select
-                aria-label="Sort direction"
-                className="mt-1 block rounded border border-border bg-background p-2"
-                value={order}
-                onChange={(event) =>
-                  route.update({ order: event.target.value })
-                }
-              >
-                <option value="asc">Ascending</option>
-                <option value="desc">Descending</option>
-              </Select>
-            </label>
-            <label className="flex items-center gap-2 text-xs">
-              <input
-                type="checkbox"
-                checked={request.hide_platform}
-                onChange={(event) =>
-                  route.update({ hide_platform: String(event.target.checked) })
-                }
-              />
-              Hide platform components
-            </label>
-            <Button
-              variant="outline"
-              disabled={q.isFetching}
-              onClick={() => void q.refetch()}
-            >
-              Refresh
-            </Button>
-          </div>
-          <Collapse label="Advanced: exact endpoints">
-            <div className="flex flex-wrap gap-3">
-              {["from", "to"].map((name) => (
-                <label key={name} className="text-xs">
-                  Exact {name}
-                  <input
-                    aria-label={`Exact ${name}`}
-                    className="ml-2 rounded border border-border bg-background p-2"
-                    value={filter(name)}
-                    onChange={(event) => setFilter(name, event.target.value)}
-                  />
-                </label>
-              ))}
-            </div>
-          </Collapse>
           {uncertain && (
             <ErrorState title="The last write could not be confirmed in this workspace. Reload before another write." />
           )}
@@ -615,26 +546,17 @@ export function NetworkRulesPage() {
               title="Could not load network rules."
               action={<Button onClick={() => void q.refetch()}>Retry</Button>}
             />
-          ) : !available ? (
-            <LoadingState label="Loading network rules…" />
           ) : (
             <>
-              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                <span>{q.data!.total.toLocaleString()} matching rules</span>
-                <ScanInventoryExport
-                  context={context}
-                  disabled={!available || uncertain}
-                  isCurrent={fresh}
-                  download={(guard) =>
-                    networkRules.inventoryCSV(cluster, request, guard)
-                  }
-                />
-              </div>
+              {matching.status}
+              {available && <span className="sr-only">{q.data!.total.toLocaleString()} matching rules</span>}
               <DataTable
-                rows={rows}
+                toolbar={rulesToolbar}
+                exportOptions={[matching.option]}
+                rows={available ? rows : []}
                 columns={columns}
                 rowKey={(row) => row.row_id}
-                testId="network-rules-table"
+                testId={available ? "network-rules-table" : "network-rules-table-loading"}
                 preferencesKey="network-rules"
                 preferenceMigration={RULE_METADATA_MIGRATION}
                 defaultHiddenColumnIds={[
@@ -663,13 +585,14 @@ export function NetworkRulesPage() {
                 pagination={false}
                 canExport={fresh}
                 exportFileName="network-rules-page"
-                exportLabel="Export page CSV"
-                emptyState={
-                  <p className="p-4 text-sm">
+                exportLabel="This page"
+                emptyState={!available ? <LoadingState label="Loading network rules" /> :
+                  <p className="p-4 text-sm text-muted-foreground">
                     No matching network rules on this page.
                   </p>
                 }
               />
+              {available && <>
               <Pager
                 page={route.page}
                 pageSize={100}
@@ -680,19 +603,9 @@ export function NetworkRulesPage() {
               {!rows.length && route.page > 0 && (
                 <Button onClick={() => route.setPage(0)}>First page</Button>
               )}
+              </>}
             </>
           )}
-          <Collapse label="Rule evidence details">
-            <p className="text-xs text-muted-foreground">
-              Metrics cover every matching retained observed pair and configured
-              override. Display sorting applies across server pages; Move to top
-              changes configured evaluation priority. Page CSV includes selected
-              columns from this page. Matching CSV exports up to 100,000
-              matches. Portable YAML exports all authored overrides and ignores
-              inventory filters. Configuration and observed traffic do not
-              confirm agent enforcement.
-            </p>
-          </Collapse>
         </>
       )}
     </div>

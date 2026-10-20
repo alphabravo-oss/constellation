@@ -5,7 +5,7 @@ import { assetDisplayName } from "@/lib/asset-identity";
 import { DigestDisclosure } from "@/components/ui/digest-disclosure";
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { BadgeCheck, Boxes, FileJson, Search, ShieldAlert, ShieldCheck } from "lucide-react";
+import { Boxes, FileJson, ShieldAlert, ShieldCheck } from "lucide-react";
 
 import { assets, type Asset } from "@/api/client";
 import { useDebounced } from "@/hooks/useDebounced";
@@ -13,14 +13,14 @@ import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext"
 import { Pager } from "@/components/ui/pager";
 import { LoadingState } from "@/components/ui/states";
 import { cn } from "@/lib/cn";
-import { useInventoryScope } from "./inventory-workspace";
+import { InventorySearch, useInventoryScope } from "./inventory-workspace";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { useRouteSearchParams } from "@/lib/route-search";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { ErrorState } from "@/components/ui/states";
 import { Button } from "@/components/ui/button";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
+import { sentenceValue } from "@/components/ui/status-pill";
 import { Select } from "@/components/ui/form";
 
 const kinds = ["all", "image", "workload", "iac-resource", "ml-model", "cloud-resource", "host", "repository", "serverless"];
@@ -34,7 +34,7 @@ export function AssetsPage() {
   // surface, not under a specific cluster's posture pane.
   const qc = useQueryClient();
   const inventoryScope = useInventoryScope();
-  const { clusterId, isLoading: clusterLoading, error: clusterError } = inventoryScope;
+  const { clusterId, isLoading: clusterLoading } = inventoryScope;
   const scopeReady = inventoryScope.ready;
   const [params, setParams] = useRouteSearchParams();
   const kind = params.get("kind") ?? "all";
@@ -117,16 +117,17 @@ export function AssetsPage() {
         description="Risk-ranked inventory across images, workloads, IaC, ML, and cloud resources."
         actions={
           <div className="flex items-center gap-2">
-          <Button variant="outline" disabled={!scopeReady || q.isFetching} onClick={() => void q.refetch()}>Refresh</Button>
+          <ResourceSavedViewsControl inventory="assets" clusterId={clusterId} ready={ready}/>
+          <Button disabled={!scopeReady || q.isFetching} onClick={() => void q.refetch()}>Refresh</Button>
           <a
             href={selected ? `/clusters/${clusterId}/assets/${selected.id}` : `/clusters/${clusterId}/assets`}
             className={cn(
-              "inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm hover:bg-accent",
+              "inline-flex h-8 items-center gap-2 rounded-md border border-border px-3 text-meta font-medium hover:bg-accent",
               !selected && "pointer-events-none opacity-50",
             )}
           >
             <Boxes className="h-4 w-4" aria-hidden />
-            Open Full Asset
+            Open full asset
           </a>
           </div>
         }
@@ -134,64 +135,39 @@ export function AssetsPage() {
 
       <VerdictBanner status={!scopeReady || q.isError ? "degraded" : (summary?.critical_high ?? 0) > 0 ? "degraded" : "info"}
         title={!scopeReady ? "Cluster scope unavailable" : q.isError ? "Asset inventory unavailable" : !ready ? "Loading or updating assets" : `${q.data.total.toLocaleString()} matching assets`}
-        detail="Search, filters, summary, sorting and server pages cover the complete matching inventory. Table CSV covers this page; full CSV exports up to 100,000 matching assets." />
-      {!scopeReady ? <ErrorState title="Resolve the selected cluster before loading assets" error={clusterError} action={<Button onClick={inventoryScope.retry}>Retry cluster</Button>} /> : q.isError ? <ErrorState title="Could not load or refresh assets" error={q.error} action={<Button onClick={() => void q.refetch()}>Retry</Button>} /> : !ready ? <LoadingState label="Loading or updating assets…" /> : null}
-      <ResourceSavedViewsControl inventory="assets" clusterId={clusterId} ready={ready}/>
-      <StatGrid data-testid="assets-summary">
-        <StatCard label="Matching assets" value={summary?.total.toLocaleString() ?? "—"} icon={<Boxes className="h-3.5 w-3.5" />} hint={summary ? `${summary.images} images · ${summary.workloads} workloads · ${summary.ai} AI` : undefined} />
-        <StatCard label="Critical / High" value={summary?.critical_high.toLocaleString() ?? "—"} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={(summary?.critical_high ?? 0) > 0 ? "high" : "neutral"} hint={summary ? `${summary.open_findings} open findings` : undefined} />
-        <StatCard label="Unsigned images" value={summary?.unsigned_images.toLocaleString() ?? "—"} icon={<BadgeCheck className="h-3.5 w-3.5" />} hint={summary ? `${summary.signed_images} signed · ${summary.signature_unknown} not reported` : undefined} />
-        <StatCard label="Missing SBOM" value={summary?.missing_sbom.toLocaleString() ?? "—"} icon={<FileJson className="h-3.5 w-3.5" />} hint={summary ? `${summary.with_sbom} with SBOM evidence` : undefined} />
-      </StatGrid>
-
-      <section className="rounded-lg border border-border bg-card p-3">
-        <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_170px_170px]">
-          <label className="relative block">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-            <input
-              value={search}
-              onChange={(event) => setFilter("q", event.target.value)}
-              placeholder="Search asset, registry, digest, label"
-              className="w-full rounded-md border border-border bg-background py-2 pl-9 pr-3 text-sm"
-              data-testid="asset-search"
-            />
-          </label>
-          <Select
-            value={kind}
-            onChange={(event) => setFilter("kind", event.target.value)}
-            className="rounded-md border border-border bg-background p-2 text-sm"
-            data-testid="asset-kind-filter"
-          >
-            {kinds.map((item) => (
-              <option key={item} value={item}>{item === "all" ? "All kinds" : item}</option>
-            ))}
-          </Select>
-          <Select
-            value={criticality}
-            onChange={(event) => setFilter("criticality", event.target.value)}
-            className="rounded-md border border-border bg-background p-2 text-sm"
-            data-testid="asset-criticality-filter"
-          >
-            {criticalities.map((item) => (
-              <option key={item} value={item}>{item === "all" ? "All criticality" : item}</option>
-            ))}
-          </Select>
-        </div>
-      </section>
-
-      <div className="flex flex-wrap items-center gap-3">
-        <label className="text-xs">AI workload <Select aria-label="AI workload" value={ai} onChange={event => setFilter("ai_workload", event.target.value)} className="rounded-md border border-border bg-background p-2"><option value="">Any</option><option value="true">AI</option><option value="false">Not AI</option></Select></label>
-        <Button variant="outline" disabled={!ready || !q.data?.total || exporting} onClick={() => void exportMatching()}>{exporting ? "Exporting…" : "Export matching assets CSV"}</Button>
-        <span className="text-xs text-muted-foreground">Up to 100,000 matching assets, across all pages.</span>
-      </div>
-      {exportError?.scope === exportScope && <ErrorState title="Asset export failed" error={exportError.error} />}
-      {exportResult?.scope === exportScope && <p role="status" className="text-xs text-muted-foreground">Exported {exportResult.exported} of {exportResult.total} matching assets.{exportResult.truncated ? " The 100,000-row limit was reached." : ""}</p>}
-      {ready && <section className="flex flex-col gap-4">
-        <DataTable rows={filtered} columns={columns} rowKey={asset => asset.id} onRowClick={asset => setSelectedID(asset.id)} selected={new Set(selected ? [selected.id] : [])} preferencesKey="assets" defaultHiddenColumnIds={["platform-role"]} manualSorting sort={{ id: sort, dir: order }} onSortChange={setSort} pagination={false} exportFileName="constellation-assets-page" exportLabel="Export this page CSV" testId="assets-table" rowTestId={() => "asset-row"} emptyState={<div className="px-3 py-8 text-center text-xs text-muted-foreground">No assets match the current filters or page.</div>} />
-        <p className="text-xs text-muted-foreground" data-testid="assets-page-scope">Showing {filtered.length ? page * ASSET_PAGE_SIZE + 1 : 0}–{filtered.length ? page * ASSET_PAGE_SIZE + filtered.length : 0} of {q.data.total} matching assets. Preview and table CSV cover this page.</p>
+        numbers={summary ? [
+          { label: "critical or high", value: summary.critical_high.toLocaleString(), tone: summary.critical_high > 0 ? "high" : "default", title: `${summary.open_findings} open findings` },
+          { label: "unsigned images", value: summary.unsigned_images.toLocaleString(), title: `${summary.signed_images} signed · ${summary.signature_unknown} not reported` },
+          { label: "missing SBOM", value: summary.missing_sbom.toLocaleString(), title: `${summary.with_sbom} with SBOM evidence` },
+        ] : undefined}
+        detail={<div className="space-y-1">
+          <p data-testid="assets-summary">Matching assets {summary?.total.toLocaleString() ?? "—"}{summary ? ` (${summary.images} images · ${summary.workloads} workloads · ${summary.ai} AI)` : ""} · critical or high {summary?.critical_high.toLocaleString() ?? "—"} · unsigned images {summary?.unsigned_images.toLocaleString() ?? "—"} · missing SBOM {summary?.missing_sbom.toLocaleString() ?? "—"}</p>
+          <p>Search, filters, summary, sorting and server pages cover the complete matching inventory. Table CSV covers this page; full CSV exports up to 100,000 matching assets.</p>
+        </div>} />
+      {!scopeReady ? <ErrorState title="Resolve the selected cluster before loading assets" action={<Button onClick={inventoryScope.retry}>Retry cluster</Button>} /> : q.isError ? <ErrorState title="Could not load or refresh assets" action={<Button onClick={() => void q.refetch()}>Retry</Button>} /> : null}
+      {exportError?.scope === exportScope && <ErrorState title="Asset export failed" />}
+      {exportResult?.scope === exportScope && <p role="status" className="text-sm text-muted-foreground">Exported {exportResult.exported} of {exportResult.total} matching assets.{exportResult.truncated ? " The 100,000-row limit was reached." : ""}</p>}
+      {scopeReady && !q.isError && <section className="flex flex-col gap-4">
+        <DataTable rows={ready ? filtered : []} columns={columns} rowKey={asset => asset.id} onRowClick={asset => setSelectedID(asset.id)} selected={new Set(selected ? [selected.id] : [])} preferencesKey="assets" defaultHiddenColumnIds={["platform-role"]} manualSorting sort={{ id: sort, dir: order }} onSortChange={setSort} pagination={false}
+          toolbar={<>
+            <InventorySearch value={search} onChange={value => setFilter("q", value)} label="Search assets" placeholder="Search asset, registry, digest or label" testId="asset-search" />
+            <Select value={kind} onChange={(event) => setFilter("kind", event.target.value)} className="h-9" data-testid="asset-kind-filter" aria-label="Asset kind filter">
+              {kinds.map((item) => <option key={item} value={item}>{item === "all" ? "Any kind" : sentenceValue(item)}</option>)}
+            </Select>
+            <Select value={criticality} onChange={(event) => setFilter("criticality", event.target.value)} className="h-9" data-testid="asset-criticality-filter" aria-label="Asset criticality filter">
+              {criticalities.map((item) => <option key={item} value={item}>{item === "all" ? "Any criticality" : sentenceValue(item)}</option>)}
+            </Select>
+            <Select aria-label="AI workload" value={ai} onChange={event => setFilter("ai_workload", event.target.value)} className="h-9"><option value="">AI or not</option><option value="true">AI workloads</option><option value="false">Not AI</option></Select>
+          </>}
+          exportOptions={[{ label: exporting ? "Exporting…" : "Matching assets", description: "Every page, up to 100,000 assets", disabled: !ready || !q.data?.total || exporting, onSelect: () => void exportMatching() }]}
+          exportFileName="constellation-assets-page" exportLabel="This page" testId={ready ? "assets-table" : "assets-table-loading"} rowTestId={() => "asset-row"}
+          emptyState={!ready ? <LoadingState label="Loading or updating assets" /> : <div className="px-3 py-8 text-center text-sm text-muted-foreground">No assets match the current filters or page.</div>} />
+        {ready && <>
+        <p className="sr-only" data-testid="assets-page-scope">Showing {filtered.length ? page * ASSET_PAGE_SIZE + 1 : 0}–{filtered.length ? page * ASSET_PAGE_SIZE + filtered.length : 0} of {q.data.total} matching assets. Preview and table CSV cover this page.</p>
         {filtered.length > 0 && <Pager page={page} pageSize={ASSET_PAGE_SIZE} total={q.data.total} hasMore={q.data.has_more} rowsOnPage={filtered.length} onPage={setPage} />}
         {page > 0 && !filtered.length && <Button onClick={() => setPage(0)}>First page</Button>}
         {selectedID && !selected ? <p role="status" className="text-sm text-muted-foreground">The selected asset is not in the loaded matches on this page. Change pages or filters to locate it.</p> : <AssetPreview asset={selected} clusterId={clusterId} />}
+        </>}
       </section>}
     </div>
   );

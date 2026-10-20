@@ -19,9 +19,15 @@ afterEach(() => {
 });
 
 describe("NeuVectorCompatibilityChips", () => {
-  it("renders NeuVector mapping labels and linked actions", async () => {
+  it("renders nothing in primary product views", async () => {
+    await render(<NeuVectorCompatibilityChips items={[{ label: "NV DLP Sensors -> DLP Rules" }]} />);
+    expect(host?.textContent).toBe("");
+  });
+
+  it("renders NeuVector mapping labels and linked actions in migration surfaces", async () => {
     await render(
       <NeuVectorCompatibilityChips
+        migration
         items={[
           { label: "NV DLP Sensors -> DLP Rules" },
           { label: "NV dlp_group -> DLP group scope" },

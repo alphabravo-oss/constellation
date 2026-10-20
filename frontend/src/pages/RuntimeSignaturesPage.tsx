@@ -3,9 +3,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useRouteSearchParams } from "@/lib/route-search";
 import {
-  ShieldAlert,
-  ShieldCheck,
-  ListChecks,
   Plus,
   PenLine,
   Trash2,
@@ -15,7 +12,6 @@ import { Button } from "@/components/ui/button";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { ImportExportButtons } from "@/components/ImportExportButtons";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Collapse } from "@/components/ui/collapse";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { StatusPill } from "@/components/ui/status-pill";
@@ -114,18 +110,18 @@ export function RuntimeSignaturesPage() {
 
   if (!clusterID) {
     return <div className="space-y-6" data-testid="runtime-signatures-empty">
-      <PageHeader title="DPI Signatures" description="Configure patterns for inspecting network traffic in a cluster." />
+      <PageHeader title="DPI signatures" description="Configure patterns for inspecting network traffic in a cluster." />
       <EmptyState title="Select a cluster" hint="Choose a cluster to manage its rules and detector scope." />
     </div>;
   }
   return (
     <div className="space-y-6" data-testid="runtime-signatures-page">
       <PageHeader
-        title="DPI Signatures"
-        description="Configure attack patterns for network traffic inspection, including imported WAF rules. New signatures start in monitor mode."
+        title="DPI signatures"
+        description="Attack patterns for network traffic inspection, including imported WAF rules. New signatures start in monitor mode."
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" variant="outline" onClick={() => void q.refetch()} disabled={q.isFetching}>{q.isFetching ? "Refreshing…" : "Refresh"}</Button>
+            <Button size="sm" onClick={() => void q.refetch()} disabled={q.isFetching}>{q.isFetching ? "Refreshing…" : "Refresh"}</Button>
             <ImportExportButtons
               filename="constellation-dpi-signatures.yaml"
               label="WAF/DPI signatures"
@@ -133,7 +129,7 @@ export function RuntimeSignaturesPage() {
               importYaml={(text) => runtimeSignatures.importYaml(clusterID, text)}
               onImported={() => void queryClient.invalidateQueries({ queryKey: ["runtime-signatures", clusterID] })}
             />
-            <Button size="sm" variant="outline" onClick={() => navigate({ href: `${listPath}/new${scopedSearch}` })} data-testid="runtime-signatures-new">
+            <Button size="sm" variant="primary" onClick={() => navigate({ href: `${listPath}/new${scopedSearch}` })} data-testid="runtime-signatures-new">
               <Plus className="mr-1 h-3.5 w-3.5" /> New signature
             </Button>
           </div>
@@ -143,17 +139,13 @@ export function RuntimeSignaturesPage() {
 
       <VerdictBanner detailMode={q.isError && q.data ? "inline" : "disclosure"} status={q.isError ? "degraded" : "info"}
         title={q.isError ? "Signatures could not be refreshed" : !q.data ? "Loading signatures configuration" : rules.length === 0 ? "No signatures configured" : `${enforceCount} signatures configured for enforcement`}
+        numbers={[{ label: "signatures", value: q.data ? rules.length : "—" }, { label: "monitor", value: q.data ? monitorCount : "—" }, { label: "enforce", value: q.data ? enforceCount : "—" }]}
         detail={q.isError && q.data ? "Showing the last loaded configuration. Retry to see current settings. Deployment status is not available here." : "Configured modes describe intended behavior. Group scope and successful detector deployment determine what is inspected or blocked."}
       />
 
-      <StatGrid>
-        <StatCard label="Configured signatures" value={q.data ? rules.length : "—"} icon={<ListChecks className="h-3.5 w-3.5" />} />
-        <StatCard label="Monitor configured" value={q.data ? monitorCount : "—"} icon={<ShieldAlert className="h-3.5 w-3.5" />} />
-        <StatCard label="Enforce configured" value={q.data ? enforceCount : "—"} icon={<ShieldCheck className="h-3.5 w-3.5" />} tone="neutral" />
-      </StatGrid>
 
 
-      <div className="overflow-x-auto rounded-lg border border-border bg-card" data-testid="runtime-signatures-list">
+      <div data-testid="runtime-signatures-list">
         {q.isLoading && <LoadingState />}
         {q.isError && <ErrorState title="Could not load current signatures." action={<Button onClick={() => void q.refetch()}>Retry</Button>} />}
         {q.data && (
@@ -180,9 +172,9 @@ export function RuntimeSignaturesPage() {
           <NeuVectorCompatibilityChips
             testId="runtime-signatures-nv-compatibility"
             items={[
-              { label: "NV WAF Sensors -> WAF/DPI Signatures" },
+              { label: "NV WAF sensors -> DPI signatures" },
               { label: "NV waf_group -> WAF/DPI group scope" },
-              { label: "Migration Imports", to: "/settings/migration" },
+              { label: "NeuVector migration", to: "/settings/migration" },
             ]}
           />
         </div>

@@ -14,6 +14,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Collapse } from "@/components/ui/collapse";
 import { ErrorState, LoadingState } from "@/components/ui/states";
+import { Checkbox } from "@/components/ui/form";
 import { networkReturn } from "./network-secondary";
 type Settings = Awaited<ReturnType<typeof policies.dpiThreatSettings>>;
 export function NetworkDpiSettingsFormPage() {
@@ -218,8 +219,7 @@ function DpiSettingsScope({ scope }: { scope: ReturnType<typeof useCluster> }) {
               />
             )}
             <label className="flex items-center gap-3 text-sm">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={enabled}
                 disabled={save.isPending || !!result}
                 onChange={(e) => {
@@ -237,8 +237,7 @@ function DpiSettingsScope({ scope }: { scope: ReturnType<typeof useCluster> }) {
                   related references in raw flows and flow rollups.
                 </p>
                 <label className="flex items-start gap-3">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={ack}
                     disabled={save.isPending || !!result}
                     onChange={(e) => setAck(e.target.checked)}

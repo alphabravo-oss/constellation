@@ -6,6 +6,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { deployments, type Deployment } from "@/api/client";
 import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
 import { TestRouter } from "@/test/router";
+import { setIncludeSystemPreference } from "@/lib/system-scope";
+import { chooseExport, exportAvailable } from "@/test/export-menu";
 import { DeploymentsPage } from "./DeploymentsPage";
 
 const state = vi.hoisted(() => ({ clusterId: "cluster", cluster: { id: "cluster" } as { id: string } | undefined, isLoading: false, error: null as Error | null }));
@@ -61,15 +63,16 @@ it("pages on the server and sends platform visibility before selection", async (
  expect(deployments.list).toHaveBeenLastCalledWith(expect.objectContaining({ hide_platform: true, offset: 0 }));
  await act(async () => button("Next").click());
  await vi.waitFor(() => { expect(history.location.search).toBe("?page=2"); expect(deployments.list).toHaveBeenLastCalledWith(expect.objectContaining({ offset: 100 })); });
- await act(async () => (host.querySelector('[data-testid="platform-visibility-toggle"]') as HTMLButtonElement).click());
- await vi.waitFor(() => { expect(history.location.search).toBe("?hide_platform=false"); expect(deployments.list).toHaveBeenLastCalledWith(expect.objectContaining({ hide_platform: false, offset: 0 })); });
+ // The header "System workloads" switch drives platform visibility.
+ await act(async () => setIncludeSystemPreference(true));
+ await vi.waitFor(() => { expect(history.location.search).not.toContain("hide_platform"); expect(deployments.list).toHaveBeenLastCalledWith(expect.objectContaining({ hide_platform: false })); });
 });
 
 it("exports all matching filters without carrying the displayed page offset", async () => {
  vi.mocked(deployments.exportCsv).mockResolvedValue(new Blob(["CSV"]));
  vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:export"); vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {}); vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
  await render("/clusters/cluster/deployments?q=customer&namespace=payments&hide_platform=false&platform_role=none&page=2"); await settled();
- await act(async () => button("Export CSV").click());
+ await chooseExport("Matching workloads", host);
  expect(deployments.exportCsv).toHaveBeenCalledWith({ presence: "current", cluster_id: "cluster", q: "customer", namespace: "payments", hide_platform: false, platform_role: "none" });
  expect(URL.createObjectURL).toHaveBeenCalled();
 });
@@ -80,7 +83,7 @@ it.each(["loading", "unresolved", "wrong", "error"])("does not query an %s clust
  if (condition === "wrong") state.cluster = { id: "other" };
  if (condition === "error") state.error = new Error("cluster unavailable");
  await render("/clusters/cluster/deployments");
- expect(deployments.list).not.toHaveBeenCalled(); expect(button("Export CSV").disabled).toBe(true);
+ expect(deployments.list).not.toHaveBeenCalled(); expect(await exportAvailable("Matching workloads", host)).toBe(false);
  expect(host.textContent).not.toContain("Loading deployment inventory");
  expect(host.textContent).toContain(condition === "error" ? "Cluster inventory is unavailable" : condition === "loading" ? "Resolving cluster" : "Select a resolved cluster");
  expect(host.querySelectorAll('[data-testid="deployment-row"]')).toHaveLength(0);
@@ -91,7 +94,7 @@ it("shows unavailable inventory without zero metrics or enabled export", async (
  await render("/clusters/cluster/deployments");
  await vi.waitFor(() => expect(host.textContent).toContain("Could not load deployments"));
  expect(host.querySelector('[data-testid="deployments-summary"]')?.textContent).toContain("—");
- expect(host.textContent).not.toContain("No matching deployments"); expect(button("Export CSV").disabled).toBe(true);
+ expect(host.textContent).not.toContain("No matching deployments"); expect(await exportAvailable("Matching workloads", host)).toBe(false);
 });
 
 it("restores a fact cohort through history and applies it to pages and full CSV", async () => {
@@ -100,7 +103,7 @@ it("restores a fact cohort through history and applies it to pages and full CSV"
  await render("/clusters/cluster/deployments?hide_platform=false&risk_fact=privileged&page=3"); await settled();
  expect(deployments.list).toHaveBeenLastCalledWith(expect.objectContaining({ risk_fact: "privileged", hide_platform: false, offset: 200 }));
  expect(host.textContent).toContain("including zero or null values");
- await act(async () => button("Export CSV").click());
+ await chooseExport("Matching workloads", host);
  expect(deployments.exportCsv).toHaveBeenCalledWith(expect.objectContaining({ risk_fact: "privileged", hide_platform: false }));
  const field = host.querySelector<HTMLSelectElement>('[aria-label="Recorded risk fact"]')!;
  await act(async () => { field.value = "run_as_root"; field.dispatchEvent(new Event("change", { bubbles: true })); });
@@ -114,7 +117,7 @@ it("preserves exact exposure-mode filters across CSV, URL paging and back/forwar
  await render("/clusters/cluster/deployments?hide_platform=false&risk_fact=net_exposure&group_mode=protect&page=2"); await settled();
  expect(deployments.list).toHaveBeenLastCalledWith(expect.objectContaining({ risk_fact: "net_exposure", group_mode: "protect", hide_platform: false, offset: 100 }));
  expect(host.textContent).toContain("Unmatched workloads are excluded"); expect(host.textContent).toContain("including zero or null values");
- await act(async () => button("Export CSV").click()); expect(deployments.exportCsv).toHaveBeenCalledWith(expect.objectContaining({ risk_fact: "net_exposure", group_mode: "protect", hide_platform: false }));
+ await chooseExport("Matching workloads", host); expect(deployments.exportCsv).toHaveBeenCalledWith(expect.objectContaining({ risk_fact: "net_exposure", group_mode: "protect", hide_platform: false }));
  const mode = host.querySelector<HTMLSelectElement>('[aria-label="Strongest group mode"]')!;
  await act(async () => { mode.value="discover"; mode.dispatchEvent(new Event("change",{bubbles:true})); });
  await vi.waitFor(() => { expect(history.location.search).not.toContain("page="); expect(deployments.list).toHaveBeenLastCalledWith(expect.objectContaining({ group_mode:"discover", offset:0 })); });
@@ -123,10 +126,10 @@ it("preserves exact exposure-mode filters across CSV, URL paging and back/forwar
 });
 
 it("discards a pending export after filters change instead of downloading the old cohort",async()=>{
- let finish:(value:Blob)=>void=()=>{};vi.mocked(deployments.exportCsv).mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));const click=vi.spyOn(HTMLAnchorElement.prototype,"click").mockImplementation(()=>{});const create=vi.spyOn(URL,"createObjectURL").mockReturnValue("blob:deployment");await render("/clusters/cluster/deployments?q=old&hide_platform=false");await settled();await act(async()=>button("Export CSV").click());await input("deployment-search","new");await vi.waitFor(()=>expect(deployments.list).toHaveBeenLastCalledWith(expect.objectContaining({q:"new"})));await act(async()=>finish(new Blob(["Name\nold\n"])));expect(click).not.toHaveBeenCalled();expect(create).not.toHaveBeenCalled();expect(host.textContent).not.toContain("Deployment export failed");
+ let finish:(value:Blob)=>void=()=>{};vi.mocked(deployments.exportCsv).mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));const click=vi.spyOn(HTMLAnchorElement.prototype,"click").mockImplementation(()=>{});const create=vi.spyOn(URL,"createObjectURL").mockReturnValue("blob:deployment");await render("/clusters/cluster/deployments?q=old&hide_platform=false");await settled();await chooseExport("Matching workloads", host);await input("deployment-search","new");await vi.waitFor(()=>expect(deployments.list).toHaveBeenLastCalledWith(expect.objectContaining({q:"new"})));await act(async()=>finish(new Blob(["Name\nold\n"])));expect(click).not.toHaveBeenCalled();expect(create).not.toHaveBeenCalled();expect(host.textContent).not.toContain("Deployment export failed");
 });
 it("isolates owner cache and suppresses an old owner's late export feedback",async()=>{
- let reject:(error:Error)=>void=()=>{};vi.mocked(deployments.exportCsv).mockImplementation(()=>new Promise((_resolve,fail)=>{reject=fail;}));await render("/clusters/cluster/deployments?hide_platform=false");await settled();await act(async()=>button("Export CSV").click());identity={org_id:"other",user_id:"other"};await act(async()=>root!.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={identity}><TestRouter history={history}><DeploymentsPage/></TestRouter></TablePreferencesProvider></QueryClientProvider>));await vi.waitFor(()=>expect(client.getQueryCache().findAll({queryKey:["deployments","other:other"]})).toHaveLength(1));await act(async()=>reject(new Error("private old owner failure")));expect(host.textContent).not.toContain("Deployment export failed");expect(host.textContent).not.toContain("private old owner failure");expect(client.getQueryCache().findAll({queryKey:["deployments","org:user"]})).toHaveLength(1);
+ let reject:(error:Error)=>void=()=>{};vi.mocked(deployments.exportCsv).mockImplementation(()=>new Promise((_resolve,fail)=>{reject=fail;}));await render("/clusters/cluster/deployments?hide_platform=false");await settled();await chooseExport("Matching workloads", host);identity={org_id:"other",user_id:"other"};await act(async()=>root!.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={identity}><TestRouter history={history}><DeploymentsPage/></TestRouter></TablePreferencesProvider></QueryClientProvider>));await vi.waitFor(()=>expect(client.getQueryCache().findAll({queryKey:["deployments","other:other"]})).toHaveLength(1));await act(async()=>reject(new Error("private old owner failure")));expect(host.textContent).not.toContain("Deployment export failed");expect(host.textContent).not.toContain("private old owner failure");expect(client.getQueryCache().findAll({queryKey:["deployments","org:user"]})).toHaveLength(1);
 });
 
 it("preserves workload presence in filtering and distinguishes scaled-to-zero controllers", async () => {

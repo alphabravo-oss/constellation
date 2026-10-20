@@ -6,7 +6,6 @@ import { Card } from "@/components/ui/card";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { ModePill } from "@/components/ui/status-pill";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
-import { StatGrid, StatCard } from "@/components/ui/stat-card";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { Collapse } from "@/components/ui/collapse";
 import { ErrorState, LoadingState } from "@/components/ui/states";
@@ -45,9 +44,10 @@ export function BaselineDetailPage() {
   {id:"actor",header:"Actor",kind:"id",cell:r=>r.actor||"Not reported",exportValue:r=>r.actor},
  ];
  return <div className="space-y-5" data-testid="baselines-drawer-body" data-cluster-id={clusterId ?? ""}>
-  <PageHeader title={workload || "Process baseline"} description="Review observed processes, configured rules, and mode changes for one exact workload." backLink={<a href={clusterId ? `/clusters/${clusterId}/runtime/baselines` : "/clusters"}>Back to baselines</a>} actions={<Button disabled={!c.scopeReady||q.isFetching} onClick={c.retry}>Refresh</Button>} />
-  <VerdictBanner status={p ? "info":"degraded"} title={p ? <>Configured mode: <ModePill mode={p.mode}/></>:"Process baseline evidence unavailable"} detail={p ? SOURCE_NOTE:"Load this exact workload in the selected cluster before assessing its profile."}/>
-  <StatGrid><StatCard label="Observed processes" value={p?.learned_processes_count ?? "—"}/><StatCard label="Configured rules" value={p?.rules.length ?? "—"}/><StatCard label="Alerts · retained 24h" value={p?.monitored_alerts_24h ?? "—"}/><StatCard label="Blocks · retained 24h" value={p?.enforced_blocks_24h ?? "—"}/><StatCard label="Last new process" value={p ? p.last_new_process_at || "Not reported" : "—"} valueKind="text"/></StatGrid>
+  <PageHeader title={workload || "Process baseline"} description="Observed processes, configured rules and mode changes for this workload." backLink={<a href={clusterId ? `/clusters/${clusterId}/runtime/baselines` : "/clusters"}>Back to baselines</a>} actions={<Button disabled={!c.scopeReady||q.isFetching} onClick={c.retry}>Refresh</Button>} />
+  <VerdictBanner status={p ? "info":"degraded"} title={p ? <>Configured mode: <ModePill mode={p.mode}/></>:"Process baseline evidence unavailable"}
+    numbers={[{ label: "processes", value: p?.learned_processes_count ?? "—", title: "Observed processes" }, { label: "rules", value: p?.rules.length ?? "—", title: "Configured rules" }, { label: "alerts (24h)", value: p?.monitored_alerts_24h ?? "—" }, { label: "blocks (24h)", value: p?.enforced_blocks_24h ?? "—" }]}
+    detail={<div className="space-y-1"><p>Last new process: {p ? p.last_new_process_at || "Not reported" : "—"}</p><p>{p ? SOURCE_NOTE : "Load this exact workload in the selected cluster before assessing its profile."}</p></div>}/>
   {!c.scopeReady ? c.error ? <ErrorState title="Could not resolve this cluster." action={<Button onClick={c.retry}>Retry</Button>}/>:<LoadingState label="Resolving cluster…"/>:q.isPending?<LoadingState label="Loading baseline…"/>:q.isError?<ErrorState title="Could not load or refresh this profile." error={q.error} action={<Button onClick={c.retry}>Retry</Button>}/>:!p?<ErrorState title="Returned profile does not match this workload and cluster."/>:<>
    {q.isFetching&&<p role="status" className="text-sm text-muted-foreground">Refreshing profile… Authoring is paused.</p>}
    <Tabs key={`${clusterId}/${workload}`} value={["processes","rules","history"].includes(tab)?tab:"processes"} onValueChange={setTab} items={[

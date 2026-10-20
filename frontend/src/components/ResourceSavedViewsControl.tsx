@@ -40,10 +40,10 @@ export function ResourceSavedViewsControl({
     formParams.set(key, value);
   return (
     <div
-      className="space-y-2"
+      className="flex shrink-0 items-center gap-2"
       data-testid={`${inventory}-saved-views-controls`}
     >
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex items-center gap-2">
         <SavedViewsMenu
           views={views}
           onApply={(view) =>
@@ -55,7 +55,9 @@ export function ResourceSavedViewsControl({
         />
         <Button
           size="sm"
-          variant="outline"
+          variant="ghost"
+          aria-label={`Save ${resourceViewLabel[inventory]} view`}
+          title={payload ? resourceFilterEntries(payload).map(([key, value]) => `${key}: ${value}`).join(" · ") : undefined}
           disabled={!ready || !payload || !canPersist}
           onClick={() =>
             void navigate({
@@ -69,12 +71,12 @@ export function ResourceSavedViewsControl({
             })
           }
         >
-          Save {resourceViewLabel[inventory]} view
+          Save view
         </Button>
       </div>
       {payload && (
         <div
-          className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground"
+          className="sr-only"
           aria-label="Active inventory filters"
         >
           {resourceFilterEntries(payload).map(([key, value]) => (
@@ -86,7 +88,7 @@ export function ResourceSavedViewsControl({
         </div>
       )}
       {persistenceError && (
-        <p role="alert" className="text-xs text-destructive">
+        <p role="alert" className="text-meta text-status-error">
           {persistenceError}
         </p>
       )}

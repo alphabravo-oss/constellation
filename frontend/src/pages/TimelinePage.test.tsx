@@ -10,6 +10,7 @@ import { TestRouter } from "@/test/router";
 import { downloadCsv } from "@/lib/csv";
 vi.mock("@/lib/csv",()=>({downloadCsv:vi.fn()}));
 import { TimelinePage } from "./TimelinePage";
+import { chooseExport, exportAvailable } from "@/test/export-menu";
 
 const scope = vi.hoisted(() => ({ clusterId: "cluster", cluster: { id: "cluster", name: "Primary" }, isLoading: false, error: null as Error | null }));
 vi.mock("@/hooks/useCluster", () => ({ useCluster: () => scope }));
@@ -35,7 +36,7 @@ async function render(url = "/clusters/cluster/timeline") {
   await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{ org_id: "org", user_id: "user" }}><TestRouter history={history}><TimelinePage /></TestRouter></TablePreferencesProvider></QueryClientProvider>));
   await act(async () => new Promise(resolve => setTimeout(resolve, 20)));
 }
-async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
+async function settled(check: () => void | Promise<void>) { await vi.waitFor(async () => { await act(async () => {}); await check(); }); }
 function click(label: string) { const button = [...host.querySelectorAll("button")].find((el) => el.textContent?.trim() === label || el.getAttribute("aria-label") === label)!; act(() => { if (label.startsWith("Views (")) button.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })); else button.click(); }); }
 
 it("restores source, severity, text, time and page filters from a shared URL", async () => {
@@ -169,7 +170,7 @@ it.each(["cluster","boundary"])("rejects wrong %s evidence and disables matching
  vi.mocked(securityTimeline.list).mockResolvedValue({...exactResponse(),...(mismatch==="cluster"?{items:[{...item,cluster_id:"other"}]}:{from:"2026-10-11T12:34:56.123455Z"})});
  await render(`/clusters/cluster/timeline?tab=event&after=${encodeURIComponent(boundary)}`);
  await settled(()=>expect(host.textContent).toContain("does not match the selected cluster and event window"));expect(host.querySelector('[data-testid="timeline-summary"]')).toBeNull();
- const exportButton=[...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Export matching events (up to 10,000)" || button.getAttribute("aria-label") === "Export matching events (up to 10,000)")!;expect(exportButton.disabled).toBe(true);
+ expect(await exportAvailable("Matching events",host)).toBe(false);
 });
 it("reports full matching export caps and errors, and blocks duplicate requests while downloading",async()=>{
  vi.mocked(securityTimeline.list).mockResolvedValue(exactResponse(200,12000));
@@ -177,12 +178,11 @@ it("reports full matching export caps and errors, and blocks duplicate requests 
  await settled(()=>expect(host.textContent).toContain("12,000 matching event records"));
  let resolve!: (value:{total:number;exported:number;limit:number;truncated:boolean})=>void;
  vi.mocked(securityTimeline.exportCSV).mockReturnValue(new Promise(done=>{resolve=done;}));
- const button=[...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Export matching events (up to 10,000)" || button.getAttribute("aria-label") === "Export matching events (up to 10,000)")!;
- await act(async()=>{button.click();button.click();});expect(securityTimeline.exportCSV).toHaveBeenCalledTimes(1);expect(button.disabled).toBe(true);
+ await chooseExport("Matching events",host);expect(securityTimeline.exportCSV).toHaveBeenCalledTimes(1);expect(await exportAvailable("Matching events",host)).toBe(false);
  expect(securityTimeline.exportCSV).toHaveBeenCalledWith(expect.objectContaining({cluster_id:"cluster",type:"runtime_event",after:boundary,verdict:"alert,block,quarantine"}), expect.any(Function));
  await act(async()=>resolve({total:12000,exported:10000,limit:10000,truncated:true}));
  await settled(()=>expect(host.textContent).toContain("Exported 10,000 of 12,000 matching records"));
- vi.mocked(securityTimeline.exportCSV).mockRejectedValue(new Error("offline"));await act(async()=>button.click());await settled(()=>expect(host.textContent).toContain("Matching event export failed"));expect(host.textContent).toContain("offline");
+ vi.mocked(securityTimeline.exportCSV).mockRejectedValue(new Error("offline"));await chooseExport("Matching events",host);await settled(()=>expect(host.textContent).toContain("Matching event export failed"));expect(host.textContent).toContain("offline");
 });
 it("does not fetch or export while the cluster registry is invalidated",async()=>{
  client.setQueryData(["clusters"],{clusters:[{id:"cluster"}]});await client.invalidateQueries({queryKey:["clusters"],refetchType:"none"});
@@ -192,7 +192,7 @@ it("does not fetch or export while the cluster registry is invalidated",async()=
 it("exports applicable runtime/threat roles and retains one precise lower-bound caption",async()=>{
  vi.mocked(securityTimeline.list).mockResolvedValue({...exactResponse(0,2,true),items:[{...item,platform_role:"core",verdict:"alert"},{...item,id:"unknown",source:"dpi_threat",platform_role:""}]});
  await render(`/clusters/cluster/timeline?tab=custom&type=runtime_event,dpi_threat&after=${encodeURIComponent(boundary)}&after_exclusive=true`);await settled(()=>expect(host.textContent).toContain("Process observed"));
- expect(host.textContent?.match(/Strictly after/g)).toHaveLength(1);click("Export current page CSV");const [,headers,rows]=vi.mocked(downloadCsv).mock.calls.at(-1)!;expect(rows.map(row=>row[headers.indexOf("platform_role")])).toEqual(["core",""]);expect(new URLSearchParams(history.location.search).get("after")).toBe(boundary);
+ expect(host.textContent?.match(/Strictly after/g)).toHaveLength(1);await chooseExport("This page",host);const [,headers,rows]=vi.mocked(downloadCsv).mock.calls.at(-1)!;expect(rows.map(row=>row[headers.indexOf("platform_role")])).toEqual(["core",""]);expect(new URLSearchParams(history.location.search).get("after")).toBe(boundary);
 });
 
 it("blocks a pending timeline CSV when source refresh completes before its response", async () => {
@@ -204,7 +204,7 @@ it("blocks a pending timeline CSV when source refresh completes before its respo
   }));
   await render("/clusters/cluster/timeline?tab=event");
   await settled(() => expect(host.querySelector('[data-testid="timeline-event-row"]')).not.toBeNull());
-  click("Export matching events (up to 10,000)");
+  await chooseExport("Matching events", host);
   expect(guard()).toBe(true);
   await act(async () => client.invalidateQueries({ queryKey: ["security-timeline"] }));
   await settled(() => expect(client.isFetching()).toBe(0));

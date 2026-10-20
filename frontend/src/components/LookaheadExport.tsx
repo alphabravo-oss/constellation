@@ -19,9 +19,9 @@ function ScopedLookaheadExport({ context, disabled, isCurrent, path, params, fil
     return { context, result: await downloadLookaheadCSV(path, params, filename, current) };
   } });
   const result = request.data?.context === context && !disabled ? request.data.result : undefined;
-  return <div className="flex flex-wrap items-center gap-2 text-xs">
-    <Button variant="outline" disabled={disabled || request.isPending} onClick={() => request.mutate()}>{request.isPending ? "Exporting…" : "Export matching CSV"}</Button>
-    <span className="text-muted-foreground">Up to 100,000 matching records, across pages.</span>
+  return <div className="flex flex-wrap items-center gap-2 text-sm">
+    <Button disabled={disabled || request.isPending} onClick={() => request.mutate()} title="Up to 100,000 matching records, across pages" aria-label="Export matching CSV">{request.isPending ? "Exporting…" : "Export matching CSV"}</Button>
+    <span className="sr-only">Up to 100,000 matching records, across pages.</span>
     {request.isError && <span role="alert">Export failed or its reviewed scope changed. Refresh before retrying.</span>}
     {result && <span role="status">{result.truncated ? `Exported the first ${result.exported.toLocaleString()} matching records; more exist. Narrow the filters for a complete export.` : `Exported all ${result.exported.toLocaleString()} matching records across pages.`}</span>}
   </div>;

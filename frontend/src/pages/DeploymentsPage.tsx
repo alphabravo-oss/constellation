@@ -10,19 +10,18 @@ import { clusterCacheReady } from "@/lib/cluster-evidence";
 import { useState } from "react";
 import { useRouteSearchParams } from "@/lib/route-search";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { TriangleAlert, Flame, Layers, RefreshCw, ShieldAlert } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { deployments, type Deployment } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
-import { PlatformVisibilityToggle } from "@/components/ui/platform-visibility-toggle";
+import { FilterLabel, InventoryMoreFilters, InventorySearch } from "./inventory-workspace";
 import { Pager } from "@/components/ui/pager";
 import { Button } from "@/components/ui/button";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { ErrorState, LoadingState } from "@/components/ui/states";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { usePlatformComponentVisibility } from "@/hooks/usePlatformComponentVisibility";
-import { Select } from "@/components/ui/form";
+import { Select, TextInput } from "@/components/ui/form";
 
 const PAGE_SIZE = 100;
 
@@ -99,7 +98,7 @@ export function DeploymentsPage() {
       id: "risk", kind: "count", size: 88, numeric: true,
       header: "Risk",
       className: "font-mono",
-      cell: (d) => <span className={`rounded-md px-2 py-0.5 ${riskClass(d.risk_score)}`}>{d.risk_score}</span>,
+      cell: (d) => <span className={`font-mono text-13 font-semibold tabular-nums ${riskClass(d.risk_score)}`}>{d.risk_score}</span>,
     },
     {
       id: "deployment", kind: "name", grow: true, minSize: 280, wrap: true,
@@ -129,21 +128,16 @@ export function DeploymentsPage() {
     {
       id: "findings", kind: "count", size: 200, minSize: 176, maxSize: 232, wrap: true,
       header: "Findings",
-      className: "text-xs",
       cell: (d) => (
-        <>
+        <span className="tabular-nums">
           {d.finding_count} total
           {d.critical_count > 0 && (
-            <span className="ml-2 rounded-md bg-[color:var(--color-severity-critical)]/15 px-1.5 py-0.5 text-[color:var(--color-severity-critical)]">
-              {d.critical_count} critical
-            </span>
+            <span className="ml-2"><span className="font-semibold text-severity-critical">{d.critical_count}</span> critical</span>
           )}
           {d.high_count > 0 && (
-            <span className="ml-1 rounded-md bg-[color:var(--color-severity-high)]/15 px-1.5 py-0.5 text-[color:var(--color-severity-high)]">
-              {d.high_count} high
-            </span>
+            <span className="ml-2"><span className="font-semibold text-severity-high">{d.high_count}</span> high</span>
           )}
-        </>
+        </span>
       ),
     },
     {
@@ -160,64 +154,69 @@ export function DeploymentsPage() {
     },
   ];
 
+  const toolbar = <>
+    <InventorySearch value={search} onChange={(value) => updateFilter("q", value)} label="Search workloads" placeholder="Search workloads or namespace/name" testId="deployment-search" className="max-w-xs" />
+    <Select aria-label="Strongest group mode" value={groupMode} onChange={(event) => updateFilter("group_mode", event.target.value)} className="h-9"><option value="">Any group mode</option><option value="discover">Discover</option><option value="monitor">Monitor</option><option value="protect">Protect</option>{groupMode && !["discover", "monitor", "protect"].includes(groupMode) && <option value={groupMode}>Invalid mode: {groupMode}</option>}</Select>
+    <InventoryMoreFilters count={[namespace, riskFact, platformRole !== "all" ? platformRole : "", presence !== "current" ? presence : ""].filter(Boolean).length}>
+      <FilterLabel label="Recorded risk fact">
+    <Select aria-label="Recorded risk fact" value={riskFact} onChange={(event) => updateFilter("risk_fact", event.target.value)} className="w-full"><option value="">Any risk fact</option><option value="privileged">Privileged</option><option value="run_as_root">Runs as root</option><option value="net_exposure">Network exposure</option><option value="host_network">Host network</option>{riskFact && !["privileged", "run_as_root", "net_exposure", "host_network"].includes(riskFact) && <option value={riskFact}>Invalid fact: {riskFact}</option>}</Select>
+      </FilterLabel>
+      <FilterLabel label="Presence">
+    <Select aria-label="Workload presence" value={presence} onChange={event=>updateFilter("presence",event.target.value)} className="w-full">
+      <option value="current">Current and unverified</option><option value="all">Include absent workloads</option><option value="absent">Absent from fresh inventory</option><option value="scaled_to_zero">Scaled to zero</option><option value="unverified">Unverified</option>
+    </Select>
+      </FilterLabel>
+      <FilterLabel label="Namespace"><TextInput value={namespace} onChange={(event) => updateFilter("namespace", event.target.value)} placeholder="All namespaces" data-testid="namespace-filter" /></FilterLabel>
+      <FilterLabel label="Workload type"><Select aria-label="Workload type" value={platformRole} onChange={(event) => {
+        const value = event.target.value;
+        if (value === "core") setPreferredHidden(false);
+        setSearchParams((current) => {
+          if (value === "all") current.delete("platform_role"); else current.set("platform_role", value);
+          if (value === "core") current.set("hide_platform", "false");
+          current.delete("page"); return current;
+        });
+      }} className="w-full" data-testid="deployment-role-filter"><option value="all">All types</option><option value="none">Customer workloads</option><option value="core">Platform workloads</option></Select></FilterLabel>
+    </InventoryMoreFilters>
+  </>;
   return (
     <div className="space-y-4" data-testid="deployments-page" data-cluster-id={clusterId ?? ""}>
       <PageHeader
-        title="Deployments at risk"
-        description="Your riskiest deployments first. The score blends open vulnerabilities, exploit signals (CVSS, KEV), runtime exposure, and workload posture."
+        title="Workloads"
+        description="Riskiest workloads first: open vulnerabilities, exploit signals (CVSS, KEV), runtime exposure and posture."
+        actions={<><ResourceSavedViewsControl inventory="deployments" clusterId={clusterId} ready={scopeReady && q.isSuccess && !q.isFetching} overrides={{hide_platform:String(hidePlatformComponents),presence}}/><Button disabled={!scopeReady || q.isFetching} onClick={() => void q.refetch()}><RefreshCw className="h-4 w-4" />Refresh</Button></>}
       />
       <VerdictBanner
         status={clusterError ? "degraded" : !scopeReady || q.isPending ? "info" : q.isError ? "degraded" : !total ? "info" : (summary?.at_risk ?? 0) > 0 ? "degraded" : "ok"}
-        title={clusterError ? "Cluster inventory is unavailable" : !scopeReady ? clusterLoading ? "Resolving cluster" : "Select a resolved cluster" : q.isPending ? "Loading deployment inventory" : q.isError ? "Deployment inventory is unavailable" : !total ? "No matching deployments" : (summary?.at_risk ?? 0) > 0 ? "Deployments need risk review" : "No high-risk deployments match these filters"}
-        detail="Search, visibility, counts, paging and CSV use the same source filters. Platform visibility does not change collection or protection."
+        title={clusterError ? "Cluster inventory is unavailable" : !scopeReady ? clusterLoading ? "Resolving cluster" : "Select a resolved cluster" : q.isPending ? "Loading workload inventory" : q.isError ? "Workload inventory is unavailable" : !total ? "No matching workloads" : (summary?.at_risk ?? 0) > 0 ? "Workloads need risk review" : "No high-risk workloads match these filters"}
+        numbers={summary ? [
+          { label: "workloads", value: summary.total.toLocaleString() },
+          { label: "at risk", value: summary.at_risk.toLocaleString(), tone: summary.at_risk > 0 ? "high" : "default", title: "Risk score 60 or more" },
+          { label: "critical findings", value: summary.critical_count.toLocaleString(), tone: summary.critical_count > 0 ? "critical" : "default" },
+          { label: "high findings", value: summary.high_count.toLocaleString(), tone: summary.high_count > 0 ? "high" : "default" },
+        ] : undefined}
+        detail={<div className="space-y-1">
+          <p data-testid="deployments-summary">Workloads {summary?.total.toLocaleString() ?? "—"} · at risk {summary?.at_risk.toLocaleString() ?? "—"} · critical findings {summary?.critical_count.toLocaleString() ?? "—"} · high findings {summary?.high_count.toLocaleString() ?? "—"}{platformCount ? ` · ${platformCount} platform workloads ${hidePlatformComponents ? "hidden" : "shown"}` : ""}</p>
+          <p>Search, visibility, counts, paging and CSV use the same source filters. The System workloads scope does not change collection or protection.</p>
+          {groupMode && <p data-testid="deployment-group-mode-scope">Workloads whose strongest configured group mode is {groupMode}. Unmatched workloads are excluded. This describes cached group membership, not applied protection.</p>}
+          {riskFact && <p data-testid="deployment-risk-fact-scope">Recorded risk fact: {riskFact}. Matches workloads reporting this key, including zero or null values; this does not assert that the condition is active.</p>}
+        </div>}
       />
-
-      <ResourceSavedViewsControl inventory="deployments" clusterId={clusterId} ready={scopeReady && q.isSuccess && !q.isFetching} overrides={{hide_platform:String(hidePlatformComponents),presence}}/>
-      <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card p-3">
-        <label className="min-w-48 flex-1 space-y-1 text-xs"><span className="text-muted-foreground">Search</span><input type="search" value={search} onChange={(event) => updateFilter("q", event.target.value)} placeholder="Deployment name or namespace/name" className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm" data-testid="deployment-search" /></label>
-        <label className="space-y-1 text-xs"><span className="text-muted-foreground">Namespace</span><input value={namespace} onChange={(event) => updateFilter("namespace", event.target.value)} placeholder="All namespaces" className="block rounded-md border border-border bg-background px-3 py-2 text-sm" data-testid="namespace-filter" /></label>
-        <label className="space-y-1 text-xs"><span className="text-muted-foreground">Deployment type</span><Select value={platformRole} onChange={(event) => {
-          const value = event.target.value;
-          if (value === "core") setPreferredHidden(false);
-          setSearchParams((current) => {
-            if (value === "all") current.delete("platform_role"); else current.set("platform_role", value);
-            if (value === "core") current.set("hide_platform", "false");
-            current.delete("page"); return current;
-          });
-        }} className="block rounded-md border border-border bg-background px-3 py-2 text-sm" data-testid="deployment-role-filter"><option value="all">All types</option><option value="none">Customer deployments</option><option value="core">Platform deployments</option></Select></label>
-        <label className="space-y-1 text-xs"><span className="text-muted-foreground">Strongest group mode</span><Select aria-label="Strongest group mode" value={groupMode} onChange={(event) => updateFilter("group_mode", event.target.value)} className="block rounded-md border border-border bg-background px-3 py-2 text-sm"><option value="">Any group mode</option><option value="discover">Discover</option><option value="monitor">Monitor</option><option value="protect">Protect</option>{groupMode && !["discover", "monitor", "protect"].includes(groupMode) && <option value={groupMode}>Invalid mode: {groupMode}</option>}</Select></label>
-        <label className="space-y-1 text-xs"><span className="text-muted-foreground">Recorded risk fact</span><Select aria-label="Recorded risk fact" value={riskFact} onChange={(event) => updateFilter("risk_fact", event.target.value)} className="block rounded-md border border-border bg-background px-3 py-2 text-sm"><option value="">Any fact</option><option value="privileged">Privileged</option><option value="run_as_root">Runs as root</option><option value="net_exposure">Network exposure</option><option value="host_network">Host network</option>{riskFact && !["privileged", "run_as_root", "net_exposure", "host_network"].includes(riskFact) && <option value={riskFact}>Invalid fact: {riskFact}</option>}</Select></label>
-        <label className="space-y-1 text-xs"><span className="text-muted-foreground">Presence</span><Select aria-label="Workload presence" value={presence} onChange={event=>updateFilter("presence",event.target.value)} className="block rounded border border-border bg-background px-3 py-2">
-          <option value="current">Current and unverified</option><option value="all">Include absent workloads</option><option value="absent">Absent from fresh inventory</option><option value="scaled_to_zero">Scaled to zero</option><option value="unverified">Unverified</option>
-        </Select></label>
-        <PlatformVisibilityToggle hidden={hidePlatformComponents} onHiddenChange={(hidden) => { setPreferredHidden(hidden); updateFilter("hide_platform", String(hidden)); }} hiddenCount={platformCount} />
-        <Button variant="outline" disabled={!scopeReady || q.isFetching} onClick={() => void q.refetch()}><RefreshCw className="h-4 w-4" />Refresh</Button>
-        <Button variant="outline" disabled={!scopeReady || q.isPending || q.isFetching || q.isError || !total || exporting} onClick={() => void exportMatching()}>{exporting ? "Exporting…" : "Export CSV"}</Button>
-      </div>
-      {groupMode && <p className="text-xs text-muted-foreground" data-testid="deployment-group-mode-scope">Workloads whose strongest configured group mode is {groupMode}. Unmatched workloads are excluded. This describes cached group membership, not applied protection.</p>}
-      {riskFact && <p className="text-xs text-muted-foreground" data-testid="deployment-risk-fact-scope">Recorded risk fact: {riskFact}. Matches deployments reporting this key, including zero or null values; this does not assert that the condition is active.</p>}
-      {exportError?.context === exportContext ? <ErrorState title="Deployment export failed" error={exportError.error} /> : null}
-
-      <StatGrid data-testid="deployments-summary">
-        <StatCard label="Deployments" value={summary?.total.toLocaleString() ?? "—"} icon={<Layers className="h-3.5 w-3.5" />} />
-        <StatCard label="At risk" value={summary?.at_risk.toLocaleString() ?? "—"} icon={<TriangleAlert className="h-3.5 w-3.5" />} tone={(summary?.at_risk ?? 0) > 0 ? "high" : "neutral"} hint="risk score ≥ 60" />
-        <StatCard label="Critical findings" value={summary?.critical_count.toLocaleString() ?? "—"} icon={<Flame className="h-3.5 w-3.5" />} tone={(summary?.critical_count ?? 0) > 0 ? "critical" : "neutral"} />
-        <StatCard label="High findings" value={summary?.high_count.toLocaleString() ?? "—"} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={(summary?.high_count ?? 0) > 0 ? "high" : "neutral"} />
-      </StatGrid>
-
-      {!scopeReady ? clusterError ? <ErrorState title="Cluster inventory is unavailable" error={clusterError} /> : clusterLoading ? <LoadingState label="Resolving cluster…" /> : <p className="text-sm text-muted-foreground">Select a resolved cluster to view deployments.</p> : q.isPending ? <LoadingState label="Loading deployments…" /> : q.isError ? <ErrorState title="Could not load deployments" error={q.error} action={<Button variant="outline" onClick={() => void q.refetch()}>Retry</Button>} /> : <>
+      {exportError?.context === exportContext ? <ErrorState title="Workload export failed" error={exportError.error} /> : null}
+      {!scopeReady ? clusterError ? <ErrorState title="Cluster inventory is unavailable" error={clusterError} /> : clusterLoading ? <LoadingState label="Resolving cluster…" /> : <p className="text-sm text-muted-foreground">Select a resolved cluster to view deployments.</p> : q.isPending ? <LoadingState label="Loading workloads" /> : q.isError ? <ErrorState title="Could not load deployments" error={q.error} action={<Button variant="outline" onClick={() => void q.refetch()}>Retry</Button>} /> : <>
         <DataTable
           rows={rows}
           columns={columns}
           rowKey={(d) => d.id}
+          toolbar={toolbar}
+          exportOptions={[{ label: exporting ? "Exporting…" : "Matching workloads", description: "Every page", disabled: !scopeReady || q.isPending || q.isFetching || q.isError || !total || exporting, onSelect: () => void exportMatching() }]}
           preferencesKey="deployments"
           testId="deployments-table"
           rowTestId={() => "deployment-row"}
           pagination={false}
           className="rounded-lg"
-          emptyState={<div className="px-3 py-6 text-center text-xs text-muted-foreground">{hidePlatformComponents && platformCount ? `${platformCount} matching platform deployments are hidden. Use Platform hidden to show them.` : page > 0 ? "No deployments on this page. Return to the first page or change the filters." : search.trim() || namespace || groupMode || riskFact || platformRole !== "all" ? "No deployments match this search." : "No deployments yet. The operator discovers workloads and persists their risk."}</div>}
+          emptyState={<div className="px-3 py-6 text-center text-sm text-muted-foreground">{hidePlatformComponents && platformCount ? `${platformCount} matching platform workloads are hidden. Turn on System workloads in the header to show them.` : page > 0 ? "No workloads on this page. Return to the first page or change the filters." : search.trim() || namespace || groupMode || riskFact || platformRole !== "all" ? "No workloads match this search." : "No workloads yet. The operator discovers workloads and persists their risk."}</div>}
         />
-        <p className="text-xs text-muted-foreground" data-testid="deployment-page-scope">Showing {rows.length ? page * PAGE_SIZE + 1 : 0}–{page * PAGE_SIZE + rows.length} of {total ?? "unknown"} matching deployments, ranked by risk then last seen. CSV exports all matching deployments.</p>
+        <p className="sr-only" data-testid="deployment-page-scope">Showing {rows.length ? page * PAGE_SIZE + 1 : 0}–{page * PAGE_SIZE + rows.length} of {total ?? "unknown"} matching workloads, ranked by risk then last seen.</p>
         <Pager page={page} pageSize={PAGE_SIZE} total={total} hasMore={q.data?.has_more} rowsOnPage={rows.length} onPage={setPage} />
         {page > 0 && rows.length === 0 ? <Button variant="outline" onClick={() => setPage(0)}>First page</Button> : null}
       </>}
@@ -227,10 +226,10 @@ export function DeploymentsPage() {
 }
 
 function riskClass(score: number): string {
-  if (score >= 80) return "bg-[color:var(--color-severity-critical)]/15 text-[color:var(--color-severity-critical)]";
-  if (score >= 60) return "bg-[color:var(--color-severity-high)]/15 text-[color:var(--color-severity-high)]";
-  if (score >= 30) return "bg-[color:var(--color-severity-medium)]/15 text-[color:var(--color-severity-medium)]";
-  return "bg-muted text-foreground";
+  if (score >= 80) return "text-severity-critical";
+  if (score >= 60) return "text-severity-high";
+  if (score >= 30) return "text-severity-medium";
+  return "text-foreground";
 }
 
 // FactorBar renders a thin stacked bar of risk-factor contributions so the dashboard tells

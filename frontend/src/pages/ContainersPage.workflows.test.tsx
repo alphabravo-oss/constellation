@@ -12,6 +12,7 @@ import {
   type ContainerListParams,
 } from "@/api/client";
 import { TestRouter } from "@/test/router";
+import { chooseExport, exportAvailable } from "@/test/export-menu";
 import { ContainersPage } from "./ContainersPage";
 const scope = vi.hoisted(() => ({
   clusterId: "cluster",
@@ -115,10 +116,10 @@ async function render(url: string) {
     ),
   );
 }
-async function settled(check: () => void) {
+async function settled(check: () => void | Promise<void>) {
   await vi.waitFor(async () => {
     await act(async () => {});
-    check();
+    await check();
   });
 }
 const button = (label: string) =>
@@ -161,7 +162,7 @@ it("loads and exports the exact source cohort beyond the former3000 cap", async 
   expect(host.textContent).toContain(
     "evidence comes from the attributed workload",
   );
-  await act(async () => button("Export matching containers CSV").click());
+  await chooseExport("Matching rows", host);
   expect(containers.exportCSV).toHaveBeenCalledWith(
     "cluster",
     expect.objectContaining({
@@ -285,11 +286,11 @@ it("shows custom platform rows when selected and persists visibility in the URL"
 });
 it("blocks stale export while search debounces or a refresh fails", async () => {
   await render("/clusters/cluster/containers");
-  await settled(() =>
-    expect(button("Export matching containers CSV").disabled).toBe(false),
+  await settled(async () =>
+    expect(await exportAvailable("Matching rows", host)).toBe(true),
   );
   await input("Search containers", "new");
-  expect(button("Export matching containers CSV").disabled).toBe(true);
+  expect(await exportAvailable("Matching rows", host)).toBe(false);
   await settled(() =>
     expect(containers.list).toHaveBeenLastCalledWith(
       "cluster",
@@ -309,7 +310,7 @@ it("blocks stale export while search debounces or a refresh fails", async () => 
       .querySelector('[data-testid="containers-summary"]')
       ?.textContent?.match(/—/g),
   ).toHaveLength(4);
-  expect(button("Export matching containers CSV").disabled).toBe(true);
+  expect(await exportAvailable("Matching rows", host)).toBe(false);
 });
 it.each(["sort=bad", "hide_platform=bad", "platform_role=bad", "page=-1"])(
   "rejects invalid URL filters %s without a broader query",
@@ -317,7 +318,7 @@ it.each(["sort=bad", "hide_platform=bad", "platform_role=bad", "page=-1"])(
     await render(`/clusters/cluster/containers?${query}`);
     expect(containers.list).not.toHaveBeenCalled();
     expect(host.textContent).toContain("unavailable");
-    expect(button("Export matching containers CSV").disabled).toBe(true);
+    expect(await exportAvailable("Matching rows", host)).toBe(false);
   },
 );
 it("keeps duplicate or missing source identity unavailable", async () => {
@@ -346,10 +347,10 @@ it("reports export failures without a success claim", async () => {
     new Error("scope mismatch"),
   );
   await render("/clusters/cluster/containers");
-  await settled(() =>
-    expect(button("Export matching containers CSV").disabled).toBe(false),
+  await settled(async () =>
+    expect(await exportAvailable("Matching rows", host)).toBe(true),
   );
-  await act(async () => button("Export matching containers CSV").click());
+  await chooseExport("Matching rows", host);
   await settled(() =>
     expect(host.textContent).toContain("Container export failed"),
   );
@@ -405,8 +406,8 @@ it("invalidates a pending container export through a scope error and recovery", 
     complete = () => resolve({ total: 4001, exported: 4001, limit: 100000, truncated: false });
   }));
   await render("/clusters/cluster/containers");
-  await settled(() => expect(button("Export matching containers CSV").disabled).toBe(false));
-  await act(async () => button("Export matching containers CSV").click());
+  await settled(async () => expect(await exportAvailable("Matching rows", host)).toBe(true));
+  await chooseExport("Matching rows", host);
   expect(guard()).toBe(true);
   await act(async () => {
     await client.fetchQuery({ queryKey: ["clusters"], queryFn: async () => { throw new Error("Scope refresh failed"); } }).catch(() => {});
@@ -414,6 +415,6 @@ it("invalidates a pending container export through a scope error and recovery", 
   await act(async () => client.setQueryData(["clusters"], { clusters: [{ id: "cluster" }] }));
   expect(guard()).toBe(false);
   await act(async () => complete());
-  await settled(() => expect(button("Export matching containers CSV").disabled).toBe(false));
+  await settled(async () => expect(await exportAvailable("Matching rows", host)).toBe(true));
   expect(host.textContent).not.toContain("Exported 4001");
 });

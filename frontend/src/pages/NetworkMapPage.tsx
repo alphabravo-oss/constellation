@@ -41,10 +41,9 @@ import {
 
 
 import { Button } from "@/components/ui/button";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
+import { FilterLabel, InventoryMoreFilters } from "./inventory-workspace";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { PageHeader } from "@/components/ui/page";
-import { PlatformVisibilityToggle } from "@/components/ui/platform-visibility-toggle";
 import { StatusPill } from "@/components/ui/status-pill";
 import { Sparkline } from "@/components/ui/sparkline";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -712,19 +711,19 @@ function NetworkMapInner() {
   const noData = q.isSuccess && workloads.length === 0 && flowsRaw.length === 0;
   const noVisibleData = q.isSuccess && !noData && visibleWorkloads.length === 0 && flows.length === 0;
 
-  if (!scopeReady) return <div className="space-y-4"><PageHeader title="Network Activity" description="Inspect observed traffic for the selected cluster." />{clusterLoading ? <p role="status">Resolving cluster…</p> : <ErrorState title="The selected cluster could not be resolved." error={clusterError} action={<Button onClick={() => { void queryClient.invalidateQueries({ queryKey: ["clusters"] }); void queryClient.invalidateQueries({ queryKey: ["cluster", clusterId] }); }}>Retry cluster</Button>} />}</div>;
+  if (!scopeReady) return <div className="space-y-4"><PageHeader title="Network map" description="Observed traffic, live connections and network security evidence." />{clusterLoading ? <p role="status">Resolving cluster…</p> : <ErrorState title="The selected cluster could not be resolved." error={clusterError} action={<Button onClick={() => { void queryClient.invalidateQueries({ queryKey: ["clusters"] }); void queryClient.invalidateQueries({ queryKey: ["cluster", clusterId] }); }}>Retry cluster</Button>} />}</div>;
 
   return (
     <NetworkViewContext.Provider value={{ clusterID, snapshot: savedViewSnapshot }}>
     <div className="flex min-h-[calc(100vh-72px)] flex-col gap-4" data-testid="network-activity-page">
       <PageHeader
-        title="Network Activity"
-        description="Inspect traffic, live connections and network security evidence."
+        title="Network map"
+        description="Observed traffic, live connections and network security evidence."
         actions={
-          <div className="flex flex-wrap items-center gap-1.5 text-micro text-mono">
-            <StatusPill label={live ? "Auto refresh" : "paused"} tone={live ? "success" : "neutral"} />
-            <Button size="sm" variant="outline" onClick={() => setLive((c) => !c)}>{live ? "Pause" : "Resume"}</Button>
-            <Button size="sm" variant="outline" onClick={() => { if (workspaceTab === "pcap") { void queryClient.invalidateQueries({ queryKey: ["pcap-captures", clusterID] }); return; } void q.refetch(); void conversationsQ.refetch(); void lifecycleQ.refetch(); void threatsQ.refetch(); void sessionsQ.refetch(); }}>Refresh</Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusPill label={live ? "Live" : "Paused"} tone={live ? "success" : "neutral"} />
+            <Button size="sm" variant="ghost" onClick={() => setLive((c) => !c)}>{live ? "Pause" : "Resume"}</Button>
+            <Button size="sm" onClick={() => { if (workspaceTab === "pcap") { void queryClient.invalidateQueries({ queryKey: ["pcap-captures", clusterID] }); return; } void q.refetch(); void conversationsQ.refetch(); void lifecycleQ.refetch(); void threatsQ.refetch(); void sessionsQ.refetch(); }}>Refresh</Button>
           </div>
         }
       />
@@ -737,14 +736,17 @@ function NetworkMapInner() {
         detail={workspaceTab === "pcap" ? "The ledger reports retained capture requests. A request does not establish a completed capture; its matching counts, files and refresh status appear below." : workspaceTab === "map" ? "The map loads up to 300 rolled-up flows and 50 recent flow events. Narrow filters to inspect more. Missing traffic does not prove a workload is protected."
           : workspaceTab === "sessions" ? "Totals cover all matching sessions reported in the last five minutes. Missing sessions do not establish agent coverage or protection."
           : workspaceTab === "conversations" ? "Totals cover all matching directed pairs in retained hourly rollups for this window. Missing traffic does not prove a workload is protected."
-          : "Reported evidence is limited by its source coverage. Missing activity does not prove a workload is protected."} />
-      {workspaceTab === "map" && <StatGrid data-testid="network-map-summary">
-        <StatCard label="Visible workloads" value={q.isSuccess ? workloadCount : "—"} />
-        <StatCard label="Visible map flows" value={q.isSuccess ? flowCount : "—"} />
-        <StatCard label="Map flow volume" value={q.isSuccess ? volume : "—"} />
-        <StatCard label="Blocked map flows" value={q.isSuccess ? blocked : "—"} tone={blocked > 0 ? "critical" : "neutral"} />
-        <div data-testid="netstat-threats"><StatCard label="Loaded threats" value={threatsAvailable ? threats.length : "—"} hint="Separate DPI source sample" tone={threats.length > 0 ? "critical" : "neutral"} /></div>
-      </StatGrid>}
+          : "Reported evidence is limited by its source coverage. Missing activity does not prove a workload is protected."}
+        numbers={workspaceTab === "map" ? [
+          { label: "workloads", value: q.isSuccess ? workloadCount : "—", title: "Visible workloads" },
+          { label: "flows", value: q.isSuccess ? flowCount : "—", title: "Visible map flows" },
+          { label: "volume", value: q.isSuccess ? volume : "—", title: "Map flow volume" },
+          { label: "blocked", value: q.isSuccess ? blocked : "—", tone: blocked > 0 ? "error" : "default", title: "Blocked map flows" },
+        ] : undefined} />
+      {workspaceTab === "map" && <div className="sr-only" data-testid="network-map-summary">
+        <span>Visible workloads {q.isSuccess ? workloadCount : "—"}</span> <span>Visible map flows {q.isSuccess ? flowCount : "—"}</span> <span>Map flow volume {q.isSuccess ? volume : "—"}</span> <span>Blocked map flows {q.isSuccess ? blocked : "—"}</span>
+        <span>Platform workloads {platformWorkloadCount}</span> <span data-testid="netstat-threats">Loaded threats {threatsAvailable ? threats.length : "—"}</span>
+      </div>}
       <RadixTabs.Root
         value={workspaceTab}
         onValueChange={(value) => setWorkspaceTab(value as NetworkWorkspaceTab)}
@@ -752,7 +754,7 @@ function NetworkMapInner() {
         data-testid="network-workspace-tabs"
       >
         <RadixTabs.List
-          className="flex flex-wrap items-center gap-1 border-b border-border"
+          className="flex items-center gap-6 overflow-x-auto border-b border-border"
           aria-label="Network workspace"
           data-testid="network-workspace-tab-list"
         >
@@ -761,17 +763,12 @@ function NetworkMapInner() {
               key={tab.id}
               value={tab.id}
               className={cn(
-                "relative -mb-px inline-flex min-h-9 items-center gap-2 border-b-2 border-transparent px-3 py-2 text-xs font-medium text-muted-foreground transition-colors",
-                "hover:text-foreground data-[state=active]:border-[color:var(--color-primary)] data-[state=active]:text-foreground",
+                "relative -mb-px inline-flex items-center gap-2 whitespace-nowrap border-b-2 border-transparent pb-3 pt-1 text-sm font-medium text-muted-foreground transition-colors",
+                "hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring data-[state=active]:border-foreground data-[state=active]:text-foreground",
               )}
               data-testid={`network-workspace-tab-${tab.id}`}
             >
               <span>{tab.label}</span>
-              {tab.nvLabel !== tab.label && (
-                <span className="rounded bg-muted px-1.5 py-0.5 text-micro  text-muted-foreground">
-                  NV {tab.nvLabel}
-                </span>
-              )}
             </RadixTabs.Trigger>
           ))}
         </RadixTabs.List>
@@ -782,51 +779,21 @@ function NetworkMapInner() {
       {/* Single-row filter strip. Cluster comes from the URL (we're inside
           /clusters/:id/network). Verdict + namespace are chips, not selects.
           Power-user controls collapse into the "More" dropdown. */}
-      <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1.5" data-testid="network-filter-bar">
+      <div className="flex flex-nowrap items-center gap-2 overflow-x-auto pb-0.5" data-testid="network-filter-bar">
         {["map", "conversations", "sessions", "threats"].includes(workspaceTab) && <>
-        <Filter className="h-3 w-3 text-muted-foreground" aria-hidden />
         {workspaceTab !== "sessions" && <Select
-          className="h-6 rounded border border-input bg-card px-1.5 text-micro text-mono outline-none focus:border-[color:var(--color-primary)]"
+          className="h-9 shrink-0"
           value={hours}
           onChange={(e) => setHours(Number(e.target.value))}
           aria-label="Traffic window"
           data-testid="network-window-select"
         >
-          <option value={1}>1h</option>
-          <option value={24}>24h</option>
-          <option value={168}>7d</option>
+          <option value={1}>Last hour</option>
+          <option value={24}>Last 24 hours</option>
+          <option value={168}>Last 7 days</option>
         </Select>}
-        <input
-          className="h-6 w-16 rounded border border-input bg-card px-1.5 text-micro text-mono"
-          aria-label="Traffic port"
-          data-testid="network-traffic-port"
-          placeholder="Port"
-          inputMode="numeric"
-          value={sessionFilters.port}
-          onChange={(event) => setSessionFilters((current) => ({ ...current, port: event.target.value.replace(/[^\d]/g, "").slice(0, 5) }))}
-        />
-        <input
-          className="h-6 w-28 rounded border border-input bg-card px-1.5 text-micro"
-          aria-label="Traffic peer"
-          data-testid="network-traffic-peer"
-          placeholder="Peer"
-          value={sessionFilters.peer}
-          onChange={(event) => setSessionFilters((current) => ({ ...current, peer: event.target.value }))}
-        />
-        <input
-          className="h-6 w-24 rounded border border-input bg-card px-1.5 text-micro"
-          aria-label="Traffic application"
-          data-testid="network-traffic-application"
-          title="Application names use source-specific protocol or port hints; numeric IDs filter DPI threats"
-          placeholder="App / ID"
-          value={sessionFilters.application}
-          onChange={(event) => setSessionFilters((current) => ({ ...current, application: event.target.value }))}
-        />
-        {/* Server-side verdict / namespace filters — these thread into the
-            network.map / lifecycle queries (distinct from the client-side
-            verdict + namespace chips that only re-filter the in-memory graph). */}
         {(workspaceTab === "map" || workspaceTab === "conversations") && <Select
-          className="h-6 rounded border border-input bg-card px-1.5 text-micro text-mono outline-none focus:border-[color:var(--color-primary)]"
+          className="h-9 shrink-0"
           value={verdict}
           onChange={(e) => setVerdict(e.target.value)}
           aria-label="Verdict filter"
@@ -839,7 +806,7 @@ function NetworkMapInner() {
           <option value="block">Block</option>
         </Select>}
         {workspaceTab !== "sessions" && <Select
-          className="h-6 max-w-[10rem] rounded border border-input bg-card px-1.5 text-micro text-mono outline-none focus:border-[color:var(--color-primary)]"
+          className="h-9 max-w-48 shrink-0"
           value={namespace}
           onChange={(e) => setNamespace(e.target.value)}
           aria-label="Namespace filter"
@@ -853,8 +820,44 @@ function NetworkMapInner() {
             <option value={namespace}>{namespace}</option>
           )}
         </Select>}
+        <InventoryMoreFilters count={[sessionFilters.port, sessionFilters.peer, sessionFilters.application, groupFilter].filter(Boolean).length + (protocolFilter.size ? 1 : 0) + (namespaceFilter.size ? 1 : 0) + (scopeMode !== "both" ? 1 : 0)}>
+          <div className="grid grid-cols-3 gap-2">
+            <FilterLabel label="Port">
+        <input
+          className="h-9 w-full rounded-md border border-input bg-background px-3 font-mono text-sm"
+          aria-label="Traffic port"
+          data-testid="network-traffic-port"
+          placeholder="Port"
+          inputMode="numeric"
+          value={sessionFilters.port}
+          onChange={(event) => setSessionFilters((current) => ({ ...current, port: event.target.value.replace(/[^\d]/g, "").slice(0, 5) }))}
+        />
+            </FilterLabel>
+            <FilterLabel label="Peer">
+        <input
+          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+          aria-label="Traffic peer"
+          data-testid="network-traffic-peer"
+          placeholder="Peer"
+          value={sessionFilters.peer}
+          onChange={(event) => setSessionFilters((current) => ({ ...current, peer: event.target.value }))}
+        />
+            </FilterLabel>
+            <FilterLabel label="App or ID">
+        <input
+          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+          aria-label="Traffic application"
+          data-testid="network-traffic-application"
+          title="Application names use source-specific protocol or port hints; numeric IDs filter DPI threats"
+          placeholder="App / ID"
+          value={sessionFilters.application}
+          onChange={(event) => setSessionFilters((current) => ({ ...current, application: event.target.value }))}
+        />
+            </FilterLabel>
+          </div>
+          <FilterLabel label="Group">
         <Select
-          className="h-6 max-w-[12rem] rounded border border-input bg-card px-1.5 text-micro text-mono outline-none focus:border-[color:var(--color-primary)]"
+          className="w-full"
           value={selectedGroup?.id ?? groupFilter}
           onChange={(e) => setGroupFilter(e.target.value)}
           aria-label="Group filter"
@@ -870,6 +873,8 @@ function NetworkMapInner() {
             <option value={groupFilter}>{groupFilter}</option>
           )}
         </Select>
+          </FilterLabel>
+          {workspaceTab === "map" && <div className="space-y-1.5"><p className="text-meta font-medium text-muted-foreground">Map verdicts and protocols</p><div className="flex flex-wrap items-center gap-1.5">
         {workspaceTab === "map" && <>
         <Chip
           active={verdictsVisible.allow && verdictsVisible.alert && verdictsVisible.block}
@@ -881,13 +886,11 @@ function NetworkMapInner() {
             {VERDICT_LABEL[g]}
           </Chip>
         ))}
-        <span className="mx-1 h-4 w-px bg-border" aria-hidden />
         {observedProtocols.slice(0, 6).map((p) => (
           <Chip key={p} active={protocolFilter.has(p)} onClick={() => toggleProtocol(p)} data-testid={`netchip-proto-${p}`}>
             {p}
           </Chip>
         ))}
-        <span className="mx-1 h-4 w-px bg-border" aria-hidden />
         <NamespaceMultiSelect
           namespaces={namespaces}
           selected={namespaceFilter}
@@ -895,44 +898,38 @@ function NetworkMapInner() {
           onClear={() => setNamespaceFilter(new Set())}
         />
         </>}
-        <PlatformVisibilityToggle
-          hidden={hidePlatformComponents}
-          onHiddenChange={setHidePlatformComponents}
-          hiddenCount={workspaceTab === "map" ? platformWorkloadCount : undefined}
-          compact
-        />
-        {workspaceTab === "map" && <div className="inline-flex overflow-hidden rounded-md border border-border" data-testid="netchip-scope">
+          </div></div>}
+        {workspaceTab === "map" && <div className="flex rounded-md border border-border p-0.5" data-testid="netchip-scope">
           {(["both", "internal", "external"] as ScopeMode[]).map((m) => (
             <button
               key={m}
               type="button"
               className={cn(
-                "px-2 py-0.5 text-micro capitalize transition-colors",
-                scopeMode === m
-                  ? "bg-[color-mix(in_oklab,var(--color-primary)_22%,transparent)] text-[color:var(--color-primary)]"
-                  : "bg-card text-muted-foreground hover:bg-accent",
+                "h-7 flex-1 rounded-sm px-2 text-meta transition-colors",
+                scopeMode === m ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
               )}
               onClick={() => setScopeMode(m)}
               data-testid={`netchip-scope-${m}`}
             >
-              {m === "external" ? "Ext" : m === "internal" ? "Int" : "Both"}
+              {m === "external" ? "External" : m === "internal" ? "Internal" : "Both"}
             </button>
           ))}
         </div>}
+        </InventoryMoreFilters>
         </>}
+        <span className="ml-auto" />
         <NetworkSavedViewsControl
           clusterID={clusterID}
           snapshot={savedViewSnapshot}
           groupLabel={selectedGroupLabel}
           onApply={applySavedViewSnapshot}
         />
-        {["map", "conversations", "sessions", "threats"].includes(workspaceTab) && <span className="ml-auto text-micro text-mono text-muted-foreground" data-testid="network-last-updated">{lastUpdated}</span>}
+        {["map", "conversations", "sessions", "threats"].includes(workspaceTab) && <span className="shrink-0 whitespace-nowrap text-meta text-muted-foreground" data-testid="network-last-updated">{lastUpdated}</span>}
       </div>
-
         <RadixTabs.Content value="map" className="flex min-h-0 flex-1 flex-col outline-none" data-testid="network-workspace-panel-map">
       {/* ReactFlow needs a definite height inside this scrolling workspace.
           The L2 edge-popover is the single inspector now (no right rail). */}
-      <div className="relative h-[max(420px,60vh)] min-h-[420px] rounded-lg border border-border bg-card" data-testid="network-map">
+      <div className="relative h-[max(460px,calc(100vh-330px))] min-h-[420px] rounded-lg border border-border bg-card" data-testid="network-map">
         {/* B2: loading / error / empty states before the ReactFlow canvas. */}
         {q.isLoading ? (
           <div className="flex h-full items-center justify-center" data-testid="network-map-loading">
@@ -964,7 +961,7 @@ function NetworkMapInner() {
                 clusterID ? (
                   <a
                     href={`/clusters/${clusterID}/health`}
-                    className="text-xs font-medium text-[color:var(--color-primary)] hover:underline"
+                    className="text-link text-sm"
                     data-testid="network-map-empty-health-link"
                   >
                     View cluster health →
@@ -981,8 +978,8 @@ function NetworkMapInner() {
               hint="Platform components or the active network filters are hiding all observed workloads and flows. Collection and protection remain active."
               action={
                 hidePlatformComponents ? (
-                  <Button size="sm" variant="outline" onClick={() => setHidePlatformComponents(false)}>
-                    Show platform components
+                  <Button size="sm" onClick={() => setHidePlatformComponents(false)}>
+                    Include system workloads
                   </Button>
                 ) : undefined
               }

@@ -9,7 +9,7 @@ import { Collapse } from "@/components/ui/collapse";
 import { useCluster } from "@/hooks/useCluster";
 import { useEditorVisit } from "@/hooks/useEditorVisit";
 import { KINDS, AUTH_KINDS, CADENCES, PROMOTION_THRESHOLDS, type RegistryScheduleMode, buildScanPolicy, scheduleFromRegistry, buildScanCadence, registryCredentialsForSave } from "@/lib/registry-form";
-import { Select } from "@/components/ui/form";
+import { Select, Checkbox } from "@/components/ui/form";
 
 export function RegistryFormPage() {
   const { regId } = useParams({ strict: false });
@@ -295,24 +295,21 @@ function RegistryForm({ editorContext, editing, onSaved, onCancel }: { editorCon
             </Select>
           </Row>
           <label className="flex min-h-[54px] items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={rescanAfterDBUpdate}
               onChange={(e) => setRescanAfterDBUpdate(e.target.checked)}
             />
             <span>Rescan after DB update</span>
           </label>
           <label className="flex min-h-[54px] items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={ignoreProxy}
               onChange={(e) => setIgnoreProxy(e.target.checked)}
             />
             <span>Ignore proxy</span>
           </label>
           <label className="flex min-h-[54px] items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={scanLayers}
               onChange={(e) => setScanLayers(e.target.checked)}
             />
