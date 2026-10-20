@@ -19,6 +19,12 @@ export default [
   },
   js.configs.recommended,
   {
+    // Pre-paint scripts served as-is from public/ (theme bootstrap).
+    files: ["public/**/*.js"],
+    languageOptions: { sourceType: "script", globals: { ...globals.browser } },
+    rules: { "no-unused-vars": ["error", { caughtErrors: "none" }] },
+  },
+  {
     files: ["**/*.{ts,tsx}"],
     languageOptions: {
       parser: tsParser,
@@ -34,6 +40,8 @@ export default [
         React: "readonly",
         // Type-only fetch global that the `globals` package does not list.
         RequestInit: "readonly",
+        // DOM interface used as a type in test helpers; not in `globals`.
+        ParentNode: "readonly",
         // Build-time constants stamped by vite.config.ts `define`.
         __APP_VERSION__: "readonly",
         __APP_COMMIT__: "readonly",
@@ -58,5 +66,10 @@ export default [
       "no-unused-vars": "off",
       "@typescript-eslint/no-explicit-any": "warn",
     },
+  },
+  {
+    // The shared kit is copied verbatim from Astronomer (docs/ui/KIT.md).
+    files: ["src/ui/**/*.{ts,tsx}"],
+    rules: { "react-refresh/only-export-components": "off" },
   },
 ];

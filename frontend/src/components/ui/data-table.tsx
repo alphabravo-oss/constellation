@@ -658,7 +658,7 @@ function ColumnChooser<T>({
           data-testid={testId ? `${testId}-columns-trigger` : undefined}
         >
           <Columns3 className="h-4 w-4" />
-          <span className="hidden xl:inline">Columns</span>
+          <span className="hidden 2xl:inline">Columns</span>
         </ToolbarButton>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
