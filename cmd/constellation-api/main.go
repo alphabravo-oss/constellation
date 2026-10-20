@@ -47,7 +47,8 @@ func main() {
 		os.Exit(rotateJWTKey(ctx, databaseURL))
 	}
 
-	tel, err := telemetry.Init(ctx, telemetry.ConfigFromEnv("constellation-api"))
+	telCfg := telemetry.ConfigFromEnv("constellation-api")
+	tel, err := telemetry.Init(ctx, telCfg)
 	if err != nil {
 		slog.Error("observability init", slog.String("err", err.Error()))
 		os.Exit(1)
@@ -55,6 +56,15 @@ func main() {
 	// Wave N6: every binary logs its build triplet once on startup so kubectl
 	// logs / journalctl operators can immediately see "what is running."
 	version.LogStartup(tel.Logger, "api")
+	// Air-gap first (guide ch.08/09): one line naming every endpoint outside the
+	// cluster this process may contact; all are opt-in through configuration.
+	telemetry.NewEgress().
+		Add("otlp", telCfg.Endpoint).
+		Add("oidc_issuer", os.Getenv("OIDC_ISSUER_URL")).
+		Add("astronomer_jwks", os.Getenv("ASTRONOMER_JWKS_URL")).
+		Add("ldap", os.Getenv("LDAP_URL")).
+		Add("fed_master", os.Getenv("CONSTELLATION_FED_MASTER_URL")).
+		Log(tel.Logger)
 	defer func() {
 		shutdownCtx, c := context.WithTimeout(context.Background(), 5*time.Second)
 		defer c()
@@ -68,6 +78,9 @@ func main() {
 	}
 	defer database.Close()
 	tel.ObservePool(database.Pool())
+	// Component heartbeat / scanner engine-DB / CVE-feed ages as first-class metrics
+	// (no postgres-exporter needed); queried on scrape, cached 15s.
+	tel.ObserveDBHealth(database.Pool(), 15*time.Second)
 
 	// Guide ch.02: the binary ships its migrations and applies them under a
 	// session-level advisory lock before it accepts traffic; a failed migration

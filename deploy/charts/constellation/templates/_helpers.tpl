@@ -74,6 +74,10 @@ The role name used in the default path is the kebab-case form of the key.
 {{- if eq $role "auditArchiver" -}}{{- $rolePath = "audit-archiver" -}}{{- end -}}
 {{- $registry := $ctx.Values.image.registry | default "ghcr.io/alphabravo-oss/constellation" -}}
 {{- if $ctx.Values.fips.enabled -}}{{- $registry = $ctx.Values.fips.registry -}}{{- end -}}
+{{- /* Air-gap (guide ch.09): global.imageRegistry is the cluster-local registry every
+       role image is pulled from; it overrides image.registry and fips.registry.
+       Paths keep the upstream layout so `constellationctl bundle load` targets match. */ -}}
+{{- if $ctx.Values.global.imageRegistry -}}{{- $registry = printf "%s/alphabravo-oss/constellation" (trimSuffix "/" $ctx.Values.global.imageRegistry) -}}{{- end -}}
 {{- $repo := printf "%s/%s" $registry $rolePath -}}
 {{- $tag := include "constellation.imageTag" $ctx -}}
 {{- $digest := "" -}}
@@ -433,5 +437,21 @@ constellation.apiURL is the API base URL used by in-cluster components.
 {{- .Values.crypto.existingSecret -}}
 {{- else -}}
 {{- printf "%s-age-key" (include "constellation.fullname" .) -}}
+{{- end -}}
+{{- end -}}
+
+{{/* True when a CNPG cluster runs in this namespace: chart-managed (mode cnpg) or an
+     operator-managed one named by networkPolicies.cnpg.clusterName (external mode). */}}
+{{- define "constellation.cnpgInNamespace" -}}
+{{- if or (eq (include "constellation.postgresMode" .) "cnpg") .Values.networkPolicies.cnpg.clusterName -}}true{{- end -}}
+{{- end -}}
+
+{{/* Pod labels of the S3 object store the CNPG archive uses. */}}
+{{- define "constellation.objectStoreSelector" -}}
+{{- if .Values.networkPolicies.cnpg.objectStoreSelector -}}
+{{- toYaml .Values.networkPolicies.cnpg.objectStoreSelector -}}
+{{- else -}}
+app.kubernetes.io/name: {{ include "constellation.name" . }}
+app.kubernetes.io/component: object-store
 {{- end -}}
 {{- end -}}

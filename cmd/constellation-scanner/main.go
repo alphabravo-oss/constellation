@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"math"
 	"net/http"
 	neturl "net/url"
@@ -95,7 +96,7 @@ func main() {
 		goReachabilityEnabled = flag.Bool("go-reachability-enabled", envBool("CONSTELLATION_SCANNER_GO_REACHABILITY_ENABLED", false), "Enable govulncheck binary-mode reachability analysis for Go-binary findings (opt-in; requires govulncheck on PATH)")
 		tlsSkipVerify         = flag.Bool("tls-skip-verify", envBool("CONSTELLATION_SCANNER_TLS_SKIP_VERIFY", false), "Skip TLS certificate verification for outbound artifact downloads (serverless). Mirrors the org egress tls_verify=false opt-out; the proxy honors HTTPS_PROXY/NO_PROXY from the environment.")
 		dbRefreshInterval     = flag.Duration("db-refresh-interval", envDuration("CONSTELLATION_SCANNER_DB_REFRESH_INTERVAL", 6*time.Hour), "Default cadence to refresh Trivy/Grype vuln DBs; overridable at runtime via the UI (system_config scanner_db_refresh_minutes).")
-		offlineDB             = flag.Bool("offline-db", envBool("CONSTELLATION_SCANNER_OFFLINE_DB", false), "Air-gapped mode: never pull Trivy/Grype DBs from the internet (operators pre-load them).")
+		offlineDB             = flag.Bool("offline-db", envBool("CONSTELLATION_SCANNER_OFFLINE_DB", true), "Air-gapped mode (default): never pull Trivy/Grype DBs from the internet; set --offline-db=false (or CONSTELLATION_SCANNER_OFFLINE_DB=false) to opt into online refresh.")
 	)
 	flag.Parse()
 	if err := validateOneShotOutputs(*oneShotRef, *oneShotJSON, *oneShotSARIF); err != nil {
@@ -254,6 +255,13 @@ func main() {
 
 	// Keep Trivy/Grype vuln DBs fresh on a schedule (UI-overridable), so connected
 	// scanners auto-update without a per-scan pull or a redeploy.
+	// Air-gap first (guide ch.08/09): the vulnerability DB mirrors are the only
+	// out-of-cluster endpoints, and only when --offline-db=false.
+	telemetry.NewEgress().
+		AddIf(!*offlineDB, "trivy_db", "ghcr.io/aquasecurity/trivy-db").
+		AddIf(!*offlineDB, "trivy_java_db", "ghcr.io/aquasecurity/trivy-java-db").
+		AddIf(!*offlineDB, "grype_db", "https://toolbox-data.anchore.io/grype/databases").
+		Log(slog.Default())
 	go w.dbRefreshLoop(ctx, *dbRefreshInterval, *offlineDB)
 
 	w.run(ctx, *pollInterval)
