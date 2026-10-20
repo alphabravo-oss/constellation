@@ -1,3 +1,4 @@
+import { log } from "node:console";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { gzipSync } from "node:zlib";
@@ -18,5 +19,5 @@ if (files.size === 0) throw new Error("Bundle budget: no entry JavaScript found"
 let total = 0;
 for (const file of files) total += gzipSync(await readFile(resolve(root, file))).length;
 const budget = 250_000;
-console.log(`Initial JavaScript: ${total} bytes gzip / ${budget} bytes (${files.size} static chunks)`);
+log(`Initial JavaScript: ${total} bytes gzip / ${budget} bytes (${files.size} static chunks)`);
 if (total > budget) throw new Error("Initial JavaScript exceeds the 250 KB gzip budget");

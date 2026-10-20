@@ -88,6 +88,7 @@ test("break-glass signs in with the issuer down and emits an operator alert", as
     expect((await request.get("/api/v1/auth/me",{headers:{Authorization:`Bearer ${bearer}`}})).status()).toBe(200);
     const page = await context.newPage(); await page.goto("/auth/login");
     await page.getByRole("button", { name: "Emergency access", exact: true }).click();
+    await page.screenshot({path:test.info().outputPath("break-glass-login.png"),fullPage:true});
     await page.locator("#login-password").fill(process.env.BREAK_GLASS_PASSWORD!);
     const emergencyCode=totp(process.env.BREAK_GLASS_TOTP_SECRET!);
     await page.locator("#login-totp").fill(emergencyCode);
