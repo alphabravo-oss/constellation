@@ -25,7 +25,7 @@ export default defineConfig({
     video: "retain-on-failure",
   },
   projects: [
-    // auth.setup.ts logs in once over the API and writes both the shared auth state used by
+    // auth.setup.ts signs in once through OIDC and writes the shared auth state used by
     // e2e/utils.ts and the Playwright storageState consumed by the chromium project.
     { name: "setup", testMatch: /auth\.setup\.ts/ },
     {

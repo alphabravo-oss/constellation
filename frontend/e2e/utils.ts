@@ -1,47 +1,23 @@
-import { test, type APIRequestContext, type Page } from "@playwright/test";
-import { setTimeout as delay } from "node:timers/promises";
+import { type Page } from "@playwright/test";
 import { readAuthState, writeAuthState, type BrowserCookie } from "./auth-state";
 
 export const CREDS = {
-  email: "admin@demo.test",
-  password: "Constellation!1",
+  email: process.env.LIVE_EMAIL ?? process.env.E2E_EMAIL ?? "",
+  password: process.env.LIVE_PASSWORD ?? process.env.E2E_PASSWORD ?? "",
 };
 
 const API = process.env.VITE_API_URL ?? "http://localhost:18080";
 const tokenCache = new Map<string, string>();
 const browserSessionCache = new Map<string, BrowserCookie[]>();
-const browserCookieNames = ["__Host-constellation-session", "__Host-constellation-refresh"];
+const browserCookieNames = ["__Host-constellation-session"];
 
 type Credentials = typeof CREDS;
 
-export async function waitForLoginCooldown(retryAfter: string | undefined, deadline: number) {
-  const seconds = Number(retryAfter);
-  const wait = retryAfter && Number.isFinite(seconds)
-    ? seconds * 1000
-    : retryAfter ? Date.parse(retryAfter) - Date.now() : 6000;
-  const milliseconds = Math.max(1000, Number.isFinite(wait) ? wait : 6000);
-  if (Date.now() + milliseconds > deadline) return false;
-  // Extend only time spent honoring the production limiter, never assertions.
-  const info = test.info();
-  info.setTimeout(info.timeout + milliseconds);
-  await delay(milliseconds);
-  return true;
-}
-
-// Setup runs against the production limiter. Auth/security specs deliberately
-// create and revoke sessions; respect its cooldown instead of disabling it or
-// forging client IPs. Invalid credentials and other errors still fail promptly.
-export async function loginRequest(request: APIRequestContext, creds: Credentials, browser = false) {
-  const deadline = Date.now() + 65_000;
-  while (true) {
-    const response = await request.post(`${API}/api/v1/auth/login`, {
-      data: creds,
-      ...(browser ? { headers: { "X-Constellation-Client": "browser", Origin: new URL(API).origin } } : {}),
-    });
-    if (response.status() !== 429) return response;
-    if (!await waitForLoginCooldown(response.headers()["retry-after"], deadline)) return response;
-    await response.dispose();
-  }
+// Test-only browser driver for the throwaway OIDC provider; application code is provider-neutral.
+export async function oidcLogin(page:Page,creds:Credentials=CREDS){
+ await page.goto("/auth/login");await page.getByRole("button",{name:"Continue with SSO"}).click();
+ await page.locator("#username").fill(creds.email);await page.locator("#password").fill(creds.password);await page.locator("#kc-login").click();
+ await page.waitForURL(/\/clusters(?:[/?#]|$)/,{timeout:30000});
 }
 function credentialsKey(creds: Credentials) {
   return JSON.stringify([API, creds.email, creds.password]);
@@ -74,9 +50,9 @@ export async function getAuthToken(page: Page, creds: Credentials = CREDS) {
   }
   tokenCache.delete(key);
 
-  const resp = await loginRequest(page.request, creds);
-  if (!resp.ok()) throw new Error(`login failed: ${resp.status()}`);
-  const { token } = await resp.json();
+  await oidcLogin(page,creds);
+  const token=(await page.context().cookies()).find(c=>c.name==="__Host-constellation-session")?.value;
+  if(!token)throw new Error("OIDC login did not set its session cookie");
   tokenCache.set(key, token);
   updateSharedAuthState(creds, { token });
   return token as string;
@@ -94,16 +70,15 @@ async function ensureBrowserSession(page: Page, creds: Credentials) {
     }
   }
   browserSessionCache.delete(key);
-  await page.context().clearCookies({ name: /^__Host-constellation-(session|refresh)$/ });
-  const response = await loginRequest(page.request, creds, true);
-  if (!response.ok()) throw new Error(`browser login failed: ${response.status()}`);
+  await page.context().clearCookies({name:"__Host-constellation-session"});
+  await oidcLogin(page,creds);
   const cookies = (await page.context().cookies(API)).filter((cookie) => browserCookieNames.includes(cookie.name));
   if (cookies.length !== browserCookieNames.length) throw new Error("browser login did not set session cookies");
   browserSessionCache.set(key, cookies);
   updateSharedAuthState(creds, { cookies });
 }
 
-/** Programmatic login (faster than UI flow for setup steps in other specs). */
+/** Reuse a real OIDC browser session for domain acceptance specs. */
 export async function login(
   page: Page,
   options: { creds?: Credentials; fallbackToDemo?: boolean; theme?: "dark" | "light" } = {},
