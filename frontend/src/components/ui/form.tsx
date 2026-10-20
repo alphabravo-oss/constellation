@@ -96,6 +96,9 @@ export function Select({
     const target = { value: next, name: name ?? "", id: id ?? "" } as unknown as HTMLSelectElement;
     onChange({ target, currentTarget: target, preventDefault() {}, stopPropagation() {} } as unknown as ChangeEvent<HTMLSelectElement>);
   };
+  const fullWidth = /(^|\s)w-full(\s|$)/.test(className ?? "");
+  // Fit the trigger to its longest option so values never ellipsize.
+  const longest = Math.max(placeholder?.length ?? 0, ...options.map((option) => option.text.length), 4);
   const kitOptions = options.map((option) => ({ value: option.value === "" ? EMPTY : option.value, label: option.label, disabled: option.disabled }));
   return (
     <>
@@ -104,6 +107,7 @@ export function Select({
         aria-hidden="true"
         tabIndex={-1}
         data-native-mirror=""
+        data-mirror-for={id}
         data-testid={testId}
         aria-label={ariaLabel}
         name={name}
@@ -116,6 +120,7 @@ export function Select({
           <option key={option.value} value={option.value} disabled={option.disabled}>{option.text}</option>
         ))}
       </select>
+      <span className={cn("inline-flex max-w-full shrink-0", className)} style={fullWidth ? undefined : { minWidth: `min(100%, calc(${longest}ch + 3.25rem))` }}>
       <Form.Select
         id={id}
         options={kitOptions}
@@ -126,8 +131,9 @@ export function Select({
         aria-label={ariaLabel ?? title}
         aria-describedby={ariaDescribedBy}
         aria-invalid={ariaInvalid === true || ariaInvalid === "true" ? true : undefined}
-        className={cn("w-auto min-w-32 max-w-full", className)}
+        className={cn(className, "w-full min-w-0")}
       />
+      </span>
     </>
   );
 }

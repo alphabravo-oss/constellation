@@ -14,8 +14,8 @@ function nativeSelect(root: ParentNode, selector: string): HTMLSelectElement | n
   const element = root.querySelector(selector);
   if (!element) return null;
   if (element.tagName === "SELECT") return element as HTMLSelectElement;
-  const previous = element.previousElementSibling;
-  return previous?.tagName === "SELECT" ? previous as HTMLSelectElement : null;
+  // The kit Select keeps a hidden native mirror tagged with the trigger id.
+  return element.id ? root.querySelector<HTMLSelectElement>(`select[data-mirror-for="${element.id}"]`) : null;
 }
 
 const route = vi.hoisted(() => ({ scheduleId: undefined as string | undefined, orgId: "org", userId: "user", clusterId: "cluster" as string | undefined, cluster: { id: "cluster" } as { id: string } | undefined, loading: false, error: null as Error | null, search: "framework=cis&control_id=1.2&filter=a&filter=b", navigate: vi.fn(), setSearch: vi.fn() }));

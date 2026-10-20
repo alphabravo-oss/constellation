@@ -13,8 +13,8 @@ function nativeSelect(root: ParentNode, selector: string): HTMLSelectElement | n
   const element = root.querySelector(selector);
   if (!element) return null;
   if (element.tagName === "SELECT") return element as HTMLSelectElement;
-  const previous = element.previousElementSibling;
-  return previous?.tagName === "SELECT" ? previous as HTMLSelectElement : null;
+  // The kit Select keeps a hidden native mirror tagged with the trigger id.
+  return element.id ? root.querySelector<HTMLSelectElement>(`select[data-mirror-for="${element.id}"]`) : null;
 }
 const route = vi.hoisted(() => ({ clusterId: "cluster" as string | undefined, cluster: { id: "cluster" } as { id: string } | undefined, loading: false, ruleId: "rule" as string | undefined, search: "", navigate: vi.fn(), setParams: vi.fn() }));
 vi.mock("@/api/client", () => ({ responseRules: { list: vi.fn(), preview: vi.fn(), update: vi.fn() }, responseRulesV2: { list: vi.fn(), delete: vi.fn(), reorder: vi.fn(), exportYaml: vi.fn(), importYaml: vi.fn() } }));

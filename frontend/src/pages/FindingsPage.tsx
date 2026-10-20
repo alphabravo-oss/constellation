@@ -319,26 +319,26 @@ export function FindingsPage() {
     return `${location?.pathname ?? ""}?${next}`;
   };
   const systemTotal = q.isSuccess && !q.isFetching && !q.isPlaceholderData && typeof q.data.system_total === "number" ? q.data.system_total : undefined;
-  const moreFilterCount = [kind, groupMode, idScope, targetType, fixableOnly ? "1" : "", groupBy !== "none" ? groupBy : ""].filter(Boolean).length;
+  const moreFilterCount = [lifecycleValue && lifecycleValue !== "open" ? "1" : "", kind, groupMode, idScope, targetType, fixableOnly ? "1" : "", groupBy !== "none" ? groupBy : ""].filter(Boolean).length;
   const exportMatching = () => exportCSV.mutate({ shouldDownload: captureExport(), request: { ...request, q: activeView === "cve" && !allIds ? [serverQuery, "cve:CVE-"].filter(Boolean).join(" ") : request.q, limit: 100000, offset: 0 } });
   const exportOptions = [{ label: "Matching instances", description: "Up to 100,000 matching instances, across all pages", onSelect: exportMatching, disabled: !ready || exportCSV.isPending }];
   const toolbar = (
     <>
       <QueryInput
         value={query}
-        placeholder="Search or filter (severity:critical)"
+        placeholder="Search findings"
         aria-label="Search findings"
         onChange={(e) => setQuery(e.target.value)}
         onClear={() => setQuery("")}
-        className="min-w-44 flex-1"
+        className="min-w-60 flex-1"
         suggestions={QUERY_HINTS.map((hint) => ({ label: hint.label, value: hint.example }))}
         onSuggestion={(hint) => setQuery((current) => current ? `${current} ${hint.value}` : hint.value)}
       />
       <FilterSelect label="Severity" value={severity} onChange={(value) => setUrlFilter("severity", value)}
         options={[["", "Any severity"], ["critical", "Critical"], ["high", "High"], ["medium", "Medium"], ["low", "Low"], ["info", "Info"]]} />
-      <FilterSelect label="Lifecycle" value={lifecycleValue === "all" ? "all" : lifecycle} onChange={(value) => setFilters({ lifecycle: value || "all" })}
-        options={[["open", "Open"], ["triaged", "Triaged"], ["in_progress", "In progress"], ["accepted", "Accepted"], ["suppressed", "Suppressed"], ["resolved", "Resolved"], ["all", "Any lifecycle"]]} />
       <MoreFilters count={moreFilterCount}>
+        <FilterField label="Lifecycle"><FilterSelect label="Lifecycle" value={lifecycleValue === "all" ? "all" : lifecycle} onChange={(value) => setFilters({ lifecycle: value || "all" })}
+        wide options={[["open", "Open"], ["triaged", "Triaged"], ["in_progress", "In progress"], ["accepted", "Accepted"], ["suppressed", "Suppressed"], ["resolved", "Resolved"], ["all", "Any lifecycle"]]} /></FilterField>
         <FilterField label="Kind"><FilterSelect label="Kind" value={kind} onChange={(v) => setFilters({ kind: v, ...(v && v !== "vulnerability" ? { view: "instances" } : {}) })}
         wide options={[["", "Any kind"], ["vulnerability", "Vulnerability"], ["iac", "IaC"], ["license", "License"], ["cloud-config", "Cloud config"], ["drift", "Drift"], ["signature", "Signature"], ["ml-model", "ML model"], ["compliance", "Compliance"], ["runtime", "Runtime"]]} /></FilterField>
         <FilterField label="Strongest group mode"><FilterSelect label="Strongest group mode" value={groupMode} onChange={(value) => setUrlFilter("group_mode", value)} wide options={[["", "Any group mode"], ["discover", "Discover"], ["monitor", "Monitor"], ["protect", "Protect"], ...(!["", "discover", "monitor", "protect"].includes(groupMode) ? [[groupMode, `Invalid mode: ${groupMode}`] as [string, string]] : [])]} /></FilterField>
@@ -529,7 +529,7 @@ function FilterSelect({
   wide?: boolean;
 }) {
   return (
-    <Select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} className={wide ? "w-full" : "h-9 w-32 min-w-0"}>
+    <Select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} className={wide ? "w-full" : "h-9"}>
       {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
     </Select>
   );

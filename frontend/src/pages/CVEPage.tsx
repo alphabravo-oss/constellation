@@ -184,9 +184,9 @@ export function CVEPage() {
         value={q}
         onChange={(e) => setQ(e.target.value)}
         onClear={() => setQ("")}
-        placeholder="Search by CVE ID, alias or keyword"
+        placeholder="Search CVEs, aliases, keywords"
         aria-label="Search CVEs"
-        className="min-w-44 flex-1"
+        className="min-w-72 flex-1"
         suggestions={["Log4Shell", "Heartbleed", "EternalBlue", "Spring4Shell", "CVE-2024-3094"].map((value) => ({ label: value, value }))}
         onSuggestion={(suggestion) => setQ(suggestion.value)}
       />

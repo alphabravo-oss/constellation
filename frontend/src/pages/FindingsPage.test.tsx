@@ -129,6 +129,7 @@ it("changes global server sort and keeps a chosen Instances view when lifecycle 
   await act(async () => severityHeader.click());
   await settled(() => expect(findings.list).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "severity", order: "desc", offset: 0 })));
   expect(params().get("sort")).toBe("severity");
+  await settled(() => expect(host.querySelector('[data-testid="findings-table"]')).not.toBeNull());
   await selectFilter("Lifecycle", "accepted");
   await settled(() => expect(findings.list).toHaveBeenLastCalledWith(expect.objectContaining({ lifecycle: "accepted" })));
   expect(params().get("view")).toBe("instances");

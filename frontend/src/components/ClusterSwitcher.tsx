@@ -15,8 +15,8 @@ import {
   MenuLabel,
   MenuSeparator,
   MenuTrigger,
-  ScopeChip,
   StatusDot,
+  Tooltip,
   type StatusTone,
 } from "@/ui";
 
@@ -53,19 +53,22 @@ export function ClusterSwitcher() {
 
   return (
     <Menu modal={false} onOpenChange={(open) => { if (open) { setQuery(""); setTimeout(() => inputRef.current?.focus(), 0); } }}>
-      <MenuTrigger asChild>
-        <ScopeChip
-          data-testid="cluster-switcher"
-          aria-label={`Cluster: ${label}. Switch cluster`}
-          dot={<span aria-hidden className={cn("h-2 w-2 shrink-0 rounded-full", toneDot[tone])} />}
-          className="sm:max-w-60"
-        >
-          <span className="flex items-center gap-1">
-            <span className="truncate font-medium">{label}</span>
+      <Tooltip content={cluster?.name ? <span className="font-mono text-micro">{cluster.name}</span> : null} side="bottom">
+        <MenuTrigger asChild>
+          {/* Same chrome as the kit ScopeChip, but the label grows with its
+              content up to 280 px before truncating (full name in the tooltip). */}
+          <button
+            type="button"
+            data-testid="cluster-switcher"
+            aria-label={`Cluster: ${label}. Switch cluster`}
+            className="flex h-8 min-w-0 max-w-[min(20rem,40vw)] shrink-0 items-center gap-1.5 rounded-md border border-border px-2 text-sm text-foreground transition-colors hover:bg-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <span aria-hidden className={cn("h-2 w-2 shrink-0 rounded-full", toneDot[tone])} />
+            <span className="min-w-0 max-w-[280px] truncate font-medium" data-testid="cluster-switcher-name">{label}</span>
             <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-          </span>
-        </ScopeChip>
-      </MenuTrigger>
+          </button>
+        </MenuTrigger>
+      </Tooltip>
       <MenuContent align="start" className="w-72">
         <MenuLabel>Switch cluster</MenuLabel>
         <div className="px-1 pb-1">

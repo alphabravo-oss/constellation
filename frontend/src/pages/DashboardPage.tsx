@@ -1,13 +1,13 @@
 import { useRouteSearchParams } from "@/lib/route-search";
 import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
-import { findingHref, findingRowKey } from "@/lib/finding-instance";
+import { findingHref } from "@/lib/finding-instance";
 import { useMemo, useRef } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient, useIsFetching } from "@tanstack/react-query";
 import { useExportGuard } from "@/hooks/useExportGuard";
 import { clusterCacheReady } from "@/lib/cluster-evidence";
 import { downloadCsv } from "@/lib/csv";
-import { Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Cell, LabelList, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
   OctagonAlert, TriangleAlert, ShieldAlert, ShieldCheck, Activity,
   TrendingUp, ArrowUpRight, ExternalLink, Database, FileWarning,
@@ -326,15 +326,15 @@ export function DashboardPage() {
             />
           ) : (
             <ul className="divide-y divide-border">
-              {topActions.map((f) => (
-                <li key={findingRowKey(f)} className="flex items-center gap-3 px-3 py-2 transition-colors hover:bg-muted/40">
+              {topActions.map(({ finding: f, key, instances }) => (
+                <li key={key} data-testid="action-item" data-advisory={f.external_id ?? f.title} className="flex items-center gap-3 px-3 py-2 transition-colors hover:bg-muted/40">
                   <SeverityBadge severity={f.severity} kev={false} />
                   <div className="min-w-0 flex-1">
                     <a href={findingHref(f, clusterId)} className="text-sm hover:underline truncate block" title={f.title}>
                       {f.title}
                     </a>
                     <div className="text-micro text-mono text-muted-foreground">
-                      {f.external_id ?? f.id.slice(0, 10)} · {f.kind} · {fmtRelative(f.last_seen_at)}
+                      {f.external_id ?? "No advisory id"} · {instances === 1 ? "1 instance" : <a href={clusterPath(`/findings?view=instances&lifecycle=open&q=${encodeURIComponent(`cve:${f.external_id ?? ""}`)}`)} className="hover:underline" data-testid="action-item-instances">{instances} instances</a>} · {fmtRelative(f.last_seen_at)}
                     </div>
                   </div>
                   <RiskScore score={f.risk_score} size="sm" />
@@ -357,16 +357,27 @@ export function DashboardPage() {
             const raw = eventsTimelineQ.data?.events_timeline ?? [];
             const totalAlerts = raw.reduce((a, d) => a + d.total, 0);
             if (totalAlerts === 0) return <EmptyState title="No alerting events" hint="No high/critical security events in the last 14 days." />;
-            const tl = raw.map((d) => ({ date: d.date, high: Math.max(0, d.total - d.critical), critical: d.critical }));
+            // A continuous 14-day axis (days without alerts are zero), one label per bar.
+            const byDate = new Map(raw.map((d) => [d.date.slice(0, 10), d]));
+            const end = raw.length ? new Date(`${raw[raw.length - 1].date.slice(0, 10)}T00:00:00Z`) : new Date();
+            const tl = Array.from({ length: 14 }, (_, index) => {
+              const day = new Date(end.getTime() - (13 - index) * 86_400_000).toISOString().slice(0, 10);
+              const d = byDate.get(day);
+              return { date: day, high: d ? Math.max(0, d.total - d.critical) : 0, critical: d?.critical ?? 0 };
+            });
             return (
               <div className="p-3">
                 <div className="mb-1 flex items-center gap-4 text-meta text-muted-foreground"><span>{totalAlerts.toLocaleString()} alerts · {raw.reduce((a, d) => a + d.critical, 0).toLocaleString()} critical</span><span className="ml-auto flex items-center gap-1.5"><span aria-hidden className="h-2 w-2 rounded-sm bg-muted-foreground/45" />High</span><span className="flex items-center gap-1.5"><span aria-hidden className="h-2 w-2 rounded-sm bg-severity-critical" />Critical</span></div>
-                <ResponsiveContainer width="100%" height={140}>
-                  <BarChart data={tl} barCategoryGap={2}>
-                    <XAxis dataKey="date" tickFormatter={(d: string) => d.slice(5)} tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} interval={1} axisLine={false} tickLine={false} />
+                <ResponsiveContainer width="100%" height={168}>
+                  <BarChart data={tl} barCategoryGap={3} margin={{ top: 16, right: 4, bottom: 0, left: 0 }} data-testid="events-chart">
+                    <CartesianGrid vertical={false} stroke="hsl(var(--border))" />
+                    <XAxis dataKey="date" tickFormatter={(d: string, index: number) => { const day = new Date(`${d}T00:00:00Z`); const n = day.getUTCDate(); return index === 0 || n === 1 ? day.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" }) : String(n); }} tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} interval={0} axisLine={false} tickLine={false} />
+                    <YAxis width={44} tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} axisLine={false} tickLine={false} allowDecimals={false} tickFormatter={(v: number) => v >= 1000 ? `${Math.round(v / 100) / 10}k` : String(v)} />
                     <Tooltip cursor={{ fill: "hsl(var(--muted) / 0.5)" }} contentStyle={tooltipStyle} labelFormatter={(d) => d} formatter={(v: number, n: string) => [v, n === "critical" ? "Critical" : "High"]} />
                     <Bar dataKey="high" stackId="a" fill="hsl(var(--muted-foreground) / 0.45)" radius={[0, 0, 0, 0]} />
-                    <Bar dataKey="critical" stackId="a" fill="var(--color-severity-critical)" radius={[2, 2, 0, 0]} />
+                    <Bar dataKey="critical" stackId="a" fill="var(--color-severity-critical)" radius={[2, 2, 0, 0]}>
+                      <LabelList valueAccessor={(entry: { payload?: { high: number; critical: number } }) => { const total = (entry.payload?.high ?? 0) + (entry.payload?.critical ?? 0); return total ? (total >= 1000 ? `${Math.round(total / 100) / 10}k` : total) : ""; }} position="top" style={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} />
+                    </Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -1283,11 +1294,27 @@ function timeValue(iso?: string): number {
   return Number.isFinite(t) ? t : 0;
 }
 
-function prioritizeActionItems(items: Finding[]): Finding[] {
-  return items
-    .filter((f) => f.severity === "critical" || f.severity === "high")
-    .sort((a, b) => b.risk_score - a.risk_score)
-    .slice(0, 10);
+export interface ActionItem { finding: Finding; key: string; instances: number }
+
+/**
+ * Action items are advisories, not instances: one row per CVE/advisory id
+ * (title when there is no id), carrying how many open instances it has in the
+ * loaded sample. Ordered by the highest instance risk.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function prioritizeActionItems(items: Finding[]): ActionItem[] {
+  const byId = new Map<string, ActionItem>();
+  for (const f of items) {
+    if (f.severity !== "critical" && f.severity !== "high") continue;
+    const key = f.external_id || `title:${f.title}`;
+    const current = byId.get(key);
+    if (!current) byId.set(key, { finding: f, key, instances: 1 });
+    else {
+      current.instances += 1;
+      if (f.risk_score > current.finding.risk_score) current.finding = f;
+    }
+  }
+  return [...byId.values()].sort((a, b) => b.finding.risk_score - a.finding.risk_score || b.instances - a.instances).slice(0, 10);
 }
 
 interface SeverityTrend {
