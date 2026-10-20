@@ -123,6 +123,7 @@ cmd_down() {
     rm -f "$PID_FILE"
   fi
   pkill -f 'tmp/(api|operator|scanner)/constellation-' 2>/dev/null || true
+  pkill -f "vite --host 0.0.0.0 --port ${VITE_PORT:-5173}" 2>/dev/null || true
   "${COMPOSE[@]}" down
 }
 
