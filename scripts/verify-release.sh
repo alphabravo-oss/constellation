@@ -58,7 +58,7 @@ if [[ "${VERIFY_PUBLISHED:-0}" != "1" ]]; then
 fi
 
 command -v cosign >/dev/null
-command -v gh >/dev/null
+[[ -n "${COSIGN_KEY:-}" ]] || command -v gh >/dev/null
 registry="${REGISTRY:-ghcr.io/alphabravo-oss/constellation}"
 chart_ref="${CHART_REF:-oci://ghcr.io/alphabravo-oss/charts/constellation}"
 identity="${COSIGN_IDENTITY_REGEXP:-^https://github.com/alphabravo-oss/constellation/\.github/workflows/.*@refs/tags/${release_tag}$}"
@@ -68,20 +68,29 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 helm pull "$chart_ref" --version "$release_version" --destination "$work"
 published_chart="$work/constellation-${release_version}.tgz"
-cosign verify "${chart_ref#oci://}:${release_version}" \
-  --certificate-identity-regexp "$identity" --certificate-oidc-issuer "$issuer" >/dev/null
+verify_sig() {
+  if [[ -n "${COSIGN_KEY:-}" ]]; then
+    cosign verify --key "$COSIGN_KEY" --insecure-ignore-tlog=true "$1" >/dev/null 2>&1
+  else
+    cosign verify "$1" --certificate-identity-regexp "$identity" --certificate-oidc-issuer "$issuer" >/dev/null
+  fi
+}
+verify_sig "${chart_ref#oci://}:${release_version}"
 scripts/check-chart-images.sh "$published_chart"
 
 mapfile -t refs < <(CHECK_IMAGES_LIST_ONLY=1 scripts/check-chart-images.sh "$published_chart")
 refs+=("$registry/kube-bench-runner:$release_tag")
 for ref in "${refs[@]}"; do
-  cosign verify "$ref" \
-    --certificate-identity-regexp "$identity" \
-    --certificate-oidc-issuer "$issuer" >/dev/null
-  # actions/attest-build-provenance stores a Sigstore bundle as an OCI referrer;
-  # gh verifies it is SLSA provenance from this repository's release workflow.
-  gh attestation verify "oci://$ref" --repo alphabravo-oss/constellation \
-    --signer-workflow alphabravo-oss/constellation/.github/workflows/release.yml >/dev/null
+  verify_sig "$ref"
+  if [[ -n "${COSIGN_KEY:-}" ]]; then
+    docker buildx imagetools inspect "$ref" --format '{{json .Provenance}}' \
+      | grep -q 'github.com/alphabravo-oss/constellation'
+  else
+    # actions/attest-build-provenance stores a Sigstore bundle as an OCI referrer;
+    # gh verifies it is SLSA provenance from this repository's release workflow.
+    gh attestation verify "oci://$ref" --repo alphabravo-oss/constellation \
+      --signer-workflow alphabravo-oss/constellation/.github/workflows/release.yml >/dev/null
+  fi
   echo "verified $ref"
 done
 
