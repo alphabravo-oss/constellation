@@ -386,18 +386,6 @@ unless overridden by .Values.<role>.tokenSecret.
 {{- end -}}
 
 {{/*
-constellation.jwtKeysSecretName returns the Secret holding API JWT signing keys.
-When api.jwtKeysSecret is empty, the chart creates <fullname>-jwt-keys.
-*/}}
-{{- define "constellation.jwtKeysSecretName" -}}
-{{- if .Values.api.jwtKeysSecret -}}
-{{- .Values.api.jwtKeysSecret -}}
-{{- else -}}
-{{- printf "%s-jwt-keys" (include "constellation.fullname" .) -}}
-{{- end -}}
-{{- end -}}
-
-{{/*
 constellation.admissionTLSSecret holds CA cert + server cert/key for the
 admission webhook.
 */}}

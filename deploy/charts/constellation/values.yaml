@@ -302,27 +302,12 @@ api:
     requests: { cpu: 200m, memory: 256Mi }
   env:
     OTEL_EXPORTER_OTLP_ENDPOINT: ""
-    JWT_ISSUER: constellation
-    JWT_AUDIENCE: constellation-api
-    JWT_TTL: 15m
-    # Concurrent live JWT sessions per user before the oldest is evicted (default 5 in
-    # code). Raised so shared automation logins can't evict a human user's session.
-    MAX_CONCURRENT_SESSIONS: "25"
-  # A5: by default (jwtKeysSecret unset) the api signs sessions RS256 with a
-  # shared keypair it generates + persists in the session_signing_keys table on
-  # first boot, so JWT_KEYS is NOT injected and no symmetric secret is created.
-  # Set jwtKeysSecret to a pre-existing Secret (key `keys`) to override with your
-  # own key: a PEM RSA/EC private key (RS256/ES256), or — only with
-  # CONSTELLATION_ALLOW_HS256_JWT=true on the api — a 32+ byte HS256 secret.
-  jwtKeysSecret: ""
+    GOMEMLIMIT: 110MiB
+    GOGC: "75"
   # Optional existing Secret containing the support-bundle Ed25519 private key.
   # The key is mounted read-only; this chart never creates private key material.
   supportBundleSigningKeySecret: ""
   supportBundleSigningKeySecretKey: private-key.pem
-  # Refuse API startup if JWT_KEYS is absent. Now false by default: the absent
-  # JWT_KEYS is the intended RS256 DB-backed path. Set true only when you supply
-  # jwtKeysSecret and want startup to hard-fail if it goes missing.
-  requireJWTKeys: false
   # D5: leader election for singleton background loops (CVE reconcilers,
   # fed-sync, rescan/retention monitors). Enabled because the clean-install
   # default has two API replicas; only the lease holder runs singleton work.
@@ -1068,9 +1053,9 @@ tls:
     createSelfSignedIssuer: false
   bootstrap:
     enabled: true
-    # An image that has both /bin/sh AND kubectl in $PATH. bitnami/kubectl bundles
+    # An image with /bin/sh and Go >= 1.27.3 kubectl. The toolbox bundles
     # both; the chainguard kubectl image is distroless (no shell) so don't use it.
-    image: bitnami/kubectl@sha256:323998cf83a2332f6761706df910870a3fa24dd8d4b999db977aa322de553399
+    image: ghcr.io/alphabravo-oss/constellation/toolbox:v0.3.0-rc.3@sha256:87abcb7a07271f509cfaa97d229f87020abeaa60f6eb0d17a20af244fcaee4bb
     opensslImage: alpine/openssl:3.3.2@sha256:5008e829163320a6e8166883c03e68189e8925ade68cde36584dc2a41cfa5248
 
 # ---------------------------------------------------------------------------
@@ -1080,9 +1065,9 @@ bootstrap:
   enabled: true
   # Image used by the init container to copy a kubectl binary into a shared
   # volume so the psql container can call kubectl. Must have /bin/sh.
-  image: bitnami/kubectl@sha256:323998cf83a2332f6761706df910870a3fa24dd8d4b999db977aa322de553399
+  image: ghcr.io/alphabravo-oss/constellation/toolbox:v0.3.0-rc.3@sha256:87abcb7a07271f509cfaa97d229f87020abeaa60f6eb0d17a20af244fcaee4bb
   # Postgres client image used to seed the org + tokens.
-  psqlImage: postgres:16.10-alpine3.22@sha256:029660641a0cfc575b14f336ba448fb8a75fd595d42e1fa316b9fb4378742297
+  psqlImage: ghcr.io/alphabravo-oss/constellation/postgres:16.15-v0.3.0-fix.1@sha256:5a15cb2867fe8c5c3df0ff766d5f2019970ec2008a69b9fd27ba94bec767850e
   org:
     name: default
     displayName: Default
@@ -1111,9 +1096,9 @@ initBundle:
   # Empty disables consumer mode (default: chart self-mints via bootstrap-job).
   secretName: ""
   # Image used by the consumer Job — must have /bin/sh + kubectl + yq (or python).
-  # bitnami/kubectl ships with sh but not yq; we shell out to a pure-sed pipeline
+  # The purpose-built toolbox ships with sh but not yq; we shell out to a pure-sed pipeline
   # in the consumer script so a vanilla kubectl image suffices.
-  image: bitnami/kubectl@sha256:323998cf83a2332f6761706df910870a3fa24dd8d4b999db977aa322de553399
+  image: ghcr.io/alphabravo-oss/constellation/toolbox:v0.3.0-rc.3@sha256:87abcb7a07271f509cfaa97d229f87020abeaa60f6eb0d17a20af244fcaee4bb
 
 repositoryScans:
   retention:

@@ -193,7 +193,7 @@ the only supported deployment path** (ADR 0007); the chart lives at
 - PostgreSQL 16 (pgvector) through the CloudNativePG operator in production (`postgres.mode=cnpg`),
   or an external DSN (`postgres.mode=external`)
 - Optional in-cluster object store for Barman backups (`backup.objectStore`)
-- Ingress or Gateway API, cert-manager TLS, OIDC/SAML/LDAP, VulnDB bundle import for
+- Ingress or Gateway API, cert-manager TLS, OIDC with emergency TOTP break-glass, VulnDB bundle import for
   connected or air-gapped clusters
 
 ```sh

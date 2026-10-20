@@ -640,10 +640,8 @@ production supply an externally managed `ObjectStore` through
 | `networkPolicies.frontendIngressCIDRs`  | `["0.0.0.0/0"]`                                      | Ingress-controller/client CIDRs allowed to reach frontend pods |
 | `networkPolicies.admissionIngressCIDRs` | `["0.0.0.0/0"]`                                      | Kubernetes API/control-plane CIDRs allowed to call the webhook |
 | `api.replicas`                        | `2`                                                  | Bump for HA                                                     |
-| `api.jwtKeysSecret`                   | `""`                                                 | Existing Secret with JWT signing keys at key `keys`; empty renders a chart-managed Secret |
 | `api.supportBundleSigningKeySecret`  | `""`                                                 | Existing Secret with an Ed25519 PKCS#8 PEM signing key; empty leaves support bundles unsigned |
 | `api.supportBundleSigningKeySecretKey` | `private-key.pem`                                  | Data key within that Secret |
-| `api.requireJWTKeys`                  | `false`                                              | Set true only with `api.jwtKeysSecret` to hard-fail startup if the Secret goes missing |
 | `api.leaderElection.enabled`          | `true`                                               | Only disable with `api.replicas=1`                              |
 | `api.metrics.annotations`             | `true`                                               | Drop the `prometheus.io/*` pod annotations                      |
 | `api.metrics.serviceMonitor.enabled`  | `false`                                              | Render a Prometheus Operator ServiceMonitor for the `admin` port |
@@ -939,7 +937,7 @@ Sessions last at most ten minutes, have no refresh, and are revoked on logout.
 Success and its critical `auth.login.break-glass` audit event commit atomically.
 `constellation_break_glass_logins_total` records outcomes and
 `ConstellationBreakGlassUsed` alerts on successful use (enable
-`api.metrics.prometheusRule.enabled`). Investigate the audit event and rotate the
+`metrics.prometheusRule.enabled`). Investigate the audit event and rotate the
 Secret after recovery. Disable the chart value and roll the API when emergency
 access is no longer needed. Delete the retired `*-admin-credentials` Secret after
 confirming OIDC and emergency login; it cannot authenticate after migration 187.

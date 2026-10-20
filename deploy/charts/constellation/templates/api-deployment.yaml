@@ -72,19 +72,6 @@ spec:
                 secretKeyRef:
                   name: {{ include "constellation.dsnSecret" . }}
                   key: {{ include "constellation.dsnSecretKey" . }}
-{{- if .Values.api.jwtKeysSecret }}
-            # A5: an operator-supplied JWT_KEYS overrides the default DB-backed RS256
-            # session keypair. Only injected when api.jwtKeysSecret names a pre-existing
-            # Secret; otherwise the api signs sessions RS256 with the shared keypair
-            # persisted in session_signing_keys (see internal/auth/sessionkeys.go).
-            - name: JWT_KEYS
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "constellation.jwtKeysSecretName" . }}
-                  key: keys
-{{- end }}
-            - name: CONSTELLATION_REQUIRE_JWT_KEYS
-              value: {{ .Values.api.requireJWTKeys | quote }}
             - name: PARTITION_STATISTICS_MAINTENANCE_ENABLED
               value: {{ .Values.api.partitionStatisticsMaintenanceEnabled | quote }}
 {{- if .Values.api.supportBundleSigningKeySecret }}

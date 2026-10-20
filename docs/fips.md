@@ -72,7 +72,7 @@ those claims. Audit-chain and evidence algorithms are unchanged by the tag.
 ## Remaining release qualification
 
 - Inventory each cryptographic operation, key type and custody boundary, including
-  password KDFs, JWT/session/federation signing, backup encryption, SAML and tools.
+  break-glass KDFs, OIDC verification, federation signing, backup encryption and tools.
 - Exercise identity, ingest, scan, audit, backup/restore and certificate rotation
   with the frozen module in an approved operating environment. Test unsupported
   keys/algorithms and fail-path behavior explicitly.
