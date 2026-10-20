@@ -17,6 +17,8 @@ if [[ -z "${CONSTELLATION_TEST_DATABASE_URL:-}" ]]; then
   command -v docker >/dev/null || { echo "docker is required to start the disposable test database" >&2; exit 127; }
   name="constellation-it-$$"
   port="${TEST_PG_PORT:-15499}"
+  # A previous run that was interrupted leaves its container holding the port; reclaim it.
+  docker ps -aq --filter "name=^constellation-it-" | xargs -r docker rm -f >/dev/null 2>&1 || true
   docker run -d --rm --name "$name" -e POSTGRES_USER=test -e POSTGRES_PASSWORD=test -e POSTGRES_DB=constellation_test \
     -p "127.0.0.1:${port}:5432" pgvector/pgvector:pg16 >/dev/null
   cleanup() { docker rm -f "$name" >/dev/null 2>&1 || true; }

@@ -21,6 +21,12 @@ paths = [
   '''^deploy/e2e/threat-scenarios/[^/]+/captures/''',
   '''^deploy/dev/registry-release/''',
   '''^docs/e2e-results\.md$''',
+  # Deleted parity-programme docs and Python tests (fake tokens in examples).
+  '''^docs/NEUVECTOR-''',
+  '''^scripts/tests/''',
+  # Current files whose localStorage key constants / prose trip generic-api-key in every revision.
+  '''^frontend/src/components/(ScopeBar|CommandPalette)\.tsx$''',
+  '''^docs/deployment-helm\.md$''',
   # Rancher reference checkout once committed under pkg/ (removed; never Constellation code).
   '''^pkg/systemtemplate/''',
   '''^pkg/provisioningv2/''',
@@ -30,6 +36,7 @@ paths = [
   '''^pkg/auth/(requests|providers)/''',
   '''^pkg/controllers/management/''',
   '''^pkg/oidc/provider/''',
+  '''^pkg/auth/model/''',
   '''^\.paperclip-runtime/''',
 ]
 regexes = [
