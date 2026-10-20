@@ -29,7 +29,7 @@ import (
 // scan_evidence) keep compiling unchanged, while exported aliases/wrappers let
 // the scanning sub-package reach the same logic without an import cycle.
 
-// jsonError writes a {"error": msg} JSON body with the given status. It
+// jsonError writes the apiutil error body ({"error":{"code","message"}}) with the given status. It
 // formerly lived in scanjobs.go (now relocated to the handler/scanning
 // sub-package); kept here so the rest of package handler still resolves it.
 func jsonError(w http.ResponseWriter, status int, msg string) {

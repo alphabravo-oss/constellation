@@ -7,7 +7,7 @@ import (
 	"github.com/alphabravocompany/constellation/internal/api/apiutil"
 )
 
-// jsonError writes a {"error": msg} JSON body with the given status. It mirrors
+// jsonError writes the apiutil error body ({"error":{"code","message"}}) with the given status. It mirrors
 // the package-private handler.jsonError helper the policy handlers used before
 // the ARC-1 split; kept domain-local so the sub-package stays self-contained.
 func jsonError(w http.ResponseWriter, status int, msg string) {
