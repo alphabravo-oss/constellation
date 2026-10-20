@@ -1,77 +1,54 @@
-# Constellation Frontend — UX / Design Principles
+# Constellation Frontend — UI rules (C1 "Triage Desk", ADR 0009)
 
-These are hard rules for this UI, from direct user feedback (2026-08). Apply them to
-EVERY page — the platform pages and, next, the cluster view (`/clusters/:id/*`).
-When building or editing any page, conform to all of these.
+Constellation renders on the shared AlphaBravo UI kit in `src/ui/` (copied
+verbatim from Astronomer; see `../docs/ui/KIT.md`). Never edit `src/ui/` for a
+Constellation-only need: extend through `ProductConfig`
+(`src/lib/product-config.tsx`), product tokens in `src/index.css`, or wrapper
+components outside `src/ui/`. A generic kit change goes to Astronomer first and
+is copied back.
 
-## Layout & density
-- **No cramped 2-column "main + narrow aside" layouts.** They feel dated and cramped.
-  Prefer full-width, single-column flow with generous spacing, or an even multi-column
-  grid — never a big column + a squished 360px sidebar of little cards.
-- **Metrics are a full-width stat row**, not a cluster of tiny cards jammed into the
-  PageHeader `actions` slot on one side. Use a proper `StatCard` grid across the top.
-- Modern, spacious, breathing room. Bigger touch targets, clear hierarchy.
+## Identity (the only things that differ from Astronomer)
+- Teal is the single accent: active nav bar, primary buttons, text links
+  (`text-link`), focus ring. No blue/violet anywhere.
+- Severity color appears only on severity pills, severity numerals and risk
+  dots. Never on card borders, backgrounds, bars or decoration. Charts use
+  neutral bars with a severity-colored critical segment.
+- Security icon set, one distinct icon per sidebar item; star-field login.
 
-## Progressive disclosure (verdict-first)
-- Every page answers its ONE question in the first screen: a `VerdictBanner` +
-  a stat row + the primary view. The shared verdict is a compact, unboxed status
-  row; supporting explanation stays behind its Details control. Keep essential
-  action consequences and stale-edit instructions inline when needed. Do not
-  reintroduce large explanatory status panels (October 12 user correction).
-  Everything else is behind tabs / drawers / `Collapse`.
-- Keep pushing disclosure further everywhere — if a page shows everything at once, it's wrong.
+## Page anatomy
+- `PageHeader` (title + at most one short description line; long prose goes
+  into the info tooltip automatically) → one `VerdictBanner` (56 px strip:
+  sentence + up to four `numbers` + Details) → the primary view.
+- No stat-card stacks on list pages. Table metadata ("rows on this page",
+  "selected") is never a KPI. `StatGrid` is only for detail pages.
+- Tables: pass the toolbar into `DataTable` (`toolbar`, `toolbarEnd`,
+  `exportOptions`): search, up to three filters, `MoreFilters`, a view toggle,
+  one `Export` menu. Filter rows never wrap. Dense tables are full-bleed.
+- Tabs are URL-synced (`useTabParam` / route tabs). Hubs (Policies, Agents,
+  Signatures) are route tabs in `components/shell/hubs.tsx`.
 
-## Tabs
-- **Tabs MUST be deep-linkable** via the URL (`?tab=<value>`). A user must be able to
-  link straight to a tab. The shared `ui/tabs.tsx` is URL-synced — use it, don't
-  reinvent local-state tabs.
+## Naming
+- Sentence case for nav, titles, buttons, tabs, filter values. Severity values
+  Title case in pills ("Critical"); lifecycle values sentence case.
+- One verb per action: Add, Create, Register, Export, Refresh.
+- No NeuVector wording in primary navigation (it lives in Settings › Migration).
 
-## Forms & actions — DEDICATED PAGES, NOT DRAWERS
-- **Do NOT use the Drawer (`ui/drawer.tsx`) for add/edit forms anymore.** (User
-  directive, 2026-08.) Astronomer opens a **dedicated page** for each create/edit, and
-  Constellation follows the same pattern.
-- **Add** = a **`+` (add)** affordance that NAVIGATES to a `.../new` route rendering a
-  full form page. **Edit** = a **pencil** (or row click) that navigates to a
-  `.../:id` (or `.../:id/edit`) route. A form page has a `PageHeader` with a `backLink`
-  to the list, the form in a `Card`, and Save/Cancel buttons (Cancel navigates back).
-- Browsing the list page shows lists/cards/verdict only — the form lives on its own URL,
-  so it's deep-linkable and back/forward works.
-- Hide expert fields behind `Collapse` ("Advanced") on the form page.
-- Give users real actions where the backend allows — "force update", "upload",
-  "refresh now" — don't make a page display-only when an action is possible.
-- The Drawer component still exists ONLY for transient read-only detail peeks that are
-  explicitly not forms; prefer a page even then. Never add a new add/edit Drawer.
+## Forms and states
+- Kit controls only: `Select`/`Checkbox`/`Switch`/`TextInput` from
+  `components/ui/form` (they render the kit's Radix controls). No native
+  `<select>` or checkbox chrome.
+- First load = skeleton (`LoadingState`), error = `ErrorState` with retry and
+  correlation id, empty = `EmptyState` with the one action that fixes it.
+  404/403 render inside the shell.
+- Dedicated create/edit pages (no drawers for forms); advanced fields behind
+  `Collapse`.
 
-## Clarity — every page explains itself
-- The user must never ask "what is this page / what is this for?" Each page has a
-  PageHeader `description` in plain language (no unexplained jargon), and sections are
-  labeled for what they DO. If a page's purpose isn't obvious, that's a bug.
+## Scope and breadcrumbs
+- "Include system workloads" is the header switch (`lib/system-scope.ts`);
+  pages read `useIncludeSystem(searchParams)`, never their own checkbox.
+- Breadcrumbs never show ids: entity pages call `useCrumbLabel(name)` from
+  `lib/page-title.ts`.
 
-## Reusable primitives (build on these, keep consistent)
-- `ui/data-table.tsx` is the canonical inventory table. Declare a semantic column
-  `kind` (name, text, status, count, date, actions, etc.); shared
-  `ui/data-table-layout.ts` owns sizing and alignment, and `src/index.css` owns
-  table spacing, typography, wrapping and overflow. Names/descriptions may grow;
-  counts/statuses/actions stay bounded. Use explicit dimensions only for real
-  content needs, such as a formatted timestamp or multiple action buttons.
-- Headers and cells must share alignment and column geometry. Never attach
-  `::before`/`::after` decorations to table rows: they can create anonymous cells
-  and shift body columns away from headers. Use inset shadows for row hover.
-- Use `wrap: true` for evidence and version lists that must remain fully visible.
-  Shared cell clipping exposes the full value on hover/keyboard focus. Avoid
-  page-specific truncation or width rules that compete with these defaults.
-  Narrow tables scroll inside the shared wrapper; do not clip their actions with
-  a page-level `overflow-hidden` table implementation.
-- Semantic tables share column resizing, ordering and left/right pinning. The
-  shared layout menu and resize handles support keyboard input; do not add a
-  page-specific layout editor. Widths, order and pins use the same tenant/user
-  preference namespace as density/visibility. Reset table preferences resets all
-  of them. Narrow layouts temporarily suspend pins to keep every column reachable.
-- `ui/verdict-banner.tsx` — the top-line verdict (ok/degraded/critical/info).
-- `ui/collapse.tsx` — "Advanced"/detail disclosure.
-- `ui/tabs.tsx` — URL-synced tabs.
-- `ui/drawer.tsx` — DEPRECATED for forms; do not use for add/edit (see Forms above).
-- `ui/stat-card.tsx` — use `StatGrid` with `StatCard` for metric rows. Use `valueKind="text"` for timestamps and other metadata so shared typography keeps text readable without inflating numeric KPI rows. Global CSS fits columns to available content width, including beside the sidebar; avoid fixed viewport-based column counts that squeeze labels.
-- `components/SettingsShell.tsx` — the grouped settings surface.
-- Match the Astronomer-cloned design system (Inter, cool-gray, blue→violet, 8px,
-  CSS-var tokens `var(--color-*)`).
+## Type
+- Inter Variable + JetBrains Mono Variable, self-hosted. Nothing below 11 px
+  (`text-micro`); stat labels 12/500; no uppercase data labels.
