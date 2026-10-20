@@ -239,12 +239,14 @@ function FactorBar({ factors }: { factors: Record<string, number> }) {
   const entries = Object.entries(factors ?? {}).filter(([, v]) => v > 0);
   const total = entries.reduce((s, [, v]) => s + v, 0) || 1;
   const colors: Record<string, string> = {
-    cvss:           "bg-[color:var(--color-severity-critical)]",
-    kev:            "bg-[color:var(--color-severity-high)]",
-    epss:           "bg-[color:var(--color-severity-medium)]",
-    privileged:     "bg-[color:var(--color-status-warning)]",
-    net_exposure:   "bg-[color:var(--color-status-info)]",
-    reachability:   "bg-[color:var(--color-status-pending)]",
+    // Neutral steps (C1: severity color is for pills/numerals); KEV keeps the
+    // exploited signal.
+    cvss:           "bg-foreground/70",
+    kev:            "bg-severity-critical",
+    epss:           "bg-foreground/50",
+    privileged:     "bg-foreground/35",
+    net_exposure:   "bg-foreground/25",
+    reachability:   "bg-foreground/15",
   };
   return (
     <div className="flex items-center gap-2">
