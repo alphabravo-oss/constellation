@@ -41,9 +41,20 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["/usr/local/bin/constellation-kube-bench-runner"]
           workingDir: /opt/kube-bench
+          ports:
+            - { containerPort: 9090, name: admin }
+          {{- include "constellation.adminProbes" . | nindent 10 }}
           env:
+            - name: ADMIN_LISTEN_ADDR
+              value: ":9090"
             - name: CONSTELLATION_API_URL
               value: {{ include "constellation.apiURL" . | quote }}
+            - name: CONSTELLATION_KUBE_BENCH_RUNNER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "constellation.runtimeAgentTokenSecret" . }}
+                  key: token
+                  optional: true
             - name: BENCH_PROFILE
               value: kube-bench
             - name: BENCH_BINARY

@@ -22,9 +22,7 @@
 #
 # ---------------------------------------------------------------------------
 postgres:
-  # Explicit canonical mode wins over the legacy toggles.
   mode: cnpg
-  embedded: false
 
   cloudnativepg:
     enabled: true

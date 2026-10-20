@@ -19,8 +19,20 @@
 # NFQUEUE redirects. AF_PACKET TAP mode is used as a fallback when TC is
 # unavailable.
 
-ARG GO_VERSION=1.26.9
-ARG DEBIAN_TAG=bookworm-slim
+# GO_VERSION has NO default: the Makefile passes --build-arg GO_VERSION from go.mod
+# (make check-go-version enforces this). The builder is additionally pinned by
+# multi-arch index digest so a Go bump is one value change per file.
+# Refresh with: docker buildx imagetools inspect golang:<ver>-bookworm
+# NOTE: Docker Hub had not published the Go 1.27.3 bookworm tag at pin time; this
+# is the Go 1.27.2 bookworm index. With name:tag@digest the digest wins, and
+# GOTOOLCHAIN=auto fetches go.mod's toolchain during the build.
+ARG GO_VERSION
+ARG GO_IMAGE_DIGEST=sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61
+# Debian base for the BPF/dp build stages and the runtime (needs iptables, tc,
+# tcpdump and the native dp libraries; see ADR 0005 for why this role is not
+# distroless and runs as root). Pinned by index digest; refresh with:
+#   docker buildx imagetools inspect debian:bookworm-slim
+ARG DEBIAN_TAG=bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
 ARG CRICTL_VERSION=v1.36.0
 ARG CRICTL_SHA256_AMD64=83855e114566a8a8c44c548d515670f51de3a5e1da8b2effb59870e2f10c25a3
 ARG CRICTL_SHA256_ARM64=68328594ccf780a80ae2b092d9f6ce484eec7cf540c275242e8fd954bfd95332
@@ -88,7 +100,7 @@ RUN test -x /src/third_party/neuvector/dp/dp || (echo "dp build produced no bina
 # jemalloc + urcu — this native stack has not been FIPS-qualified.
 # See docs/fips.md for the qualification boundary.
 # -----------------------------------------------------------------------------
-FROM golang:${GO_VERSION}-bookworm AS go-build
+FROM golang:${GO_VERSION}-bookworm@${GO_IMAGE_DIGEST} AS go-build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -182,8 +194,10 @@ RUN mkdir -p /etc/constellation \
         printf 'fips140=on\nbuilt_with=-tags fips GOFIPS140=v1.0.0\n' > /etc/constellation/fips ; \
     fi
 
-# Runs as root (uid 0) because BPF program loads + LSM attach require CAP_BPF +
-# CAP_PERFMON + CAP_SYS_ADMIN, AND the C dp needs CAP_NET_ADMIN for NFQUEUE +
-# TC qdisc installation. On most kernels this still requires uid 0 even with
-# an explicit capabilities.add list.
+# Runs as root (uid 0) — the ONE deliberate exception to the numeric non-root
+# rule (ADR 0005): BPF program loads + LSM attach require CAP_BPF + CAP_PERFMON +
+# CAP_SYS_ADMIN, AND the C dp needs CAP_NET_ADMIN for NFQUEUE + TC qdisc
+# installation. On most kernels this still requires uid 0 even with an explicit
+# capabilities.add list. Stated numerically so the intent is auditable.
+USER 0:0
 ENTRYPOINT ["/usr/local/bin/constellation-runtime-agent"]

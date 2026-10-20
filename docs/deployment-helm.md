@@ -28,9 +28,17 @@ The chart deploys:
 - runtime-agent (DaemonSet)
 - frontend nginx (Deployment + Service + optional Ingress)
 - optional audit-archiver CronJob
-- embedded pgvector StatefulSet (optional; off in prod)
+- CloudNativePG `Cluster` running the chart's pgvector operand image (the
+  default `postgres.mode=cnpg`; `external` points at an operator-managed DSN)
+- optional in-cluster backup object store (`backup.objectStore`: RustFS +
+  Barman Cloud `ObjectStore` + bucket Job) for CNPG WAL archiving
 - bootstrap Jobs (TLS certs + service tokens)
 - optional namespace NetworkPolicies with default-deny and explicit flows
+- optional Prometheus Operator `ServiceMonitor` for the API admin listener
+
+Helm is the only supported deployment path (ADR 0007). There is no embedded
+single-replica Postgres any more: in-cluster Postgres is always CloudNativePG,
+so the CNPG operator is a prerequisite for the default install.
 
 ## Three-node HA and shared Gateway
 
@@ -51,9 +59,11 @@ cert-manager Issuer because a public ACME issuer cannot issue Kubernetes
 PostgreSQL uses CloudNativePG. `instances: 1` is supported for small installs;
 HA mode fails Helm rendering unless it has at least three instances. The
 release includes a CNPG-compatible pgvector operand image. Before calling an
-installation production-ready, configure `postgres.cloudnativepg.backup`,
-enable `scheduledBackup`, and prove a point-in-time restore. Longhorn can be
-selected explicitly and remains the cluster-default CSI in the K3s profile.
+installation production-ready, point `postgres.cloudnativepg.barmanCloud` at
+an off-host `ObjectStore` (or enable the in-cluster `backup.objectStore` for
+development), enable `scheduledBackup`, and prove a point-in-time restore
+(see `docs/cnpg-recovery.md`). Longhorn can be selected explicitly and remains
+the cluster-default CSI in the K3s profile.
 When NetworkPolicies are enabled, the chart also permits the documented CNPG
 operator-to-instance traffic on ports 8000 and 5432; change
 `networkPolicies.cnpgOperator` if the operator uses another namespace or label.
@@ -152,10 +162,17 @@ kubectl -n constellation-system port-forward svc/constellation-frontend 8080:80
 ### Bare-metal k3s
 
 ```bash
+# Once per cluster: the CloudNativePG operator (not bundled by the chart).
+kubectl apply --server-side -f \
+  https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.24/releases/cnpg-1.24.1.yaml
+
 helm upgrade --install constellation deploy/charts/constellation \
   -n constellation-system --create-namespace \
   -f deploy/charts/constellation/examples/values-k3s.yaml
 ```
+
+The k3s profile runs a single CNPG instance on `local-path` storage; raise
+`postgres.cloudnativepg.instances` to 3 for HA.
 
 ### Amazon EKS
 
@@ -286,11 +303,19 @@ networkPolicies:
 
 When enabled, the chart renders a namespace default-deny policy and explicit
 allows for frontend-to-API, scanner/runtime-agent-to-API, API/jobs/admission to
-Postgres, hook Jobs to the Kubernetes API, DNS, and HTTPS egress for registry,
-S3, OCI, OIDC, and webhook integrations. Native NetworkPolicy cannot address
-the Kubernetes API server, ingress controllers, or managed databases by Service
-name, so tighten the CIDR defaults to your cluster, VPC, control-plane, ingress,
-and RDS/Cloud SQL ranges.
+Postgres, CNPG instance-to-instance and operator traffic, the Barman sidecar to
+the in-cluster object store (when `backup.objectStore.enabled`), hook Jobs to
+the Kubernetes API, DNS, and HTTPS egress for registry, S3, OCI, OIDC, and
+webhook integrations. Native NetworkPolicy cannot address the Kubernetes API
+server, ingress controllers, or managed databases by Service name, so tighten
+the CIDR defaults to your cluster, VPC, control-plane, ingress, and RDS/Cloud
+SQL ranges.
+
+The API admin listener (port 9090, `/metrics`) is reachable from any pod in the
+release namespace; add a monitoring namespace with
+`api.metrics.allowFrom: { kubernetes.io/metadata.name: monitoring }`. Kubelet
+readiness/liveness probes come from the node, not from a pod, so default-deny
+does not block them on the supported CNIs.
 
 The Network Map policy lifecycle has a separate applier Deployment. It watches
 approved lifecycle rows in Postgres and applies only protect-mode manifest
@@ -359,7 +384,12 @@ inline network enforcement are disabled.
 
 `namespaced=true` is the default. In that mode the operator watches namespaced
 resources only in the Helm release namespace and receives a namespaced Role for
-services, deployments, daemonsets, cronjobs, HPAs, leases, and events.
+services, deployments, daemonsets, cronjobs, HPAs, leases, and events. The
+leases/events grants back `operator.leaderElection.enabled` (default `true`),
+so `operator.replicas` can be raised without a second reconciler running. The
+chart always passes the managed-workload image flags (`--agent-image`,
+`--runtime-agent-image`, `--scanner-image`, `--admission-image`) derived from
+the same role images it deploys; the operator has no `:latest` fallback.
 
 The `ConstellationCluster` CRD is cluster-scoped, so the operator still receives
 a small ClusterRole for `constellationclusters` and `constellationclusters/status`.
@@ -516,6 +546,63 @@ written. Worker completion waits for a retried audit receipt before advertising
 a bundle as ready for download. The deployment signing key above also signs
 asynchronous bundles.
 
+## Metrics and the admin listener
+
+Every Go role serves `/healthz`, `/readyz` and `/metrics` on an admin listener
+(`ADMIN_LISTEN_ADDR`, `:9090`, container port `admin`); the API additionally
+serves pprof there when enabled. Metrics are never on the API port, so they are
+not reachable through the Ingress/Gateway `/api` route. The chart:
+
+- sets `prometheus.io/scrape|port|path` annotations on API pods
+  (`api.metrics.annotations`, default `true`);
+- exposes `admin` (9090) on the API Service;
+- optionally renders a `monitoring.coreos.com/v1 ServiceMonitor`
+  (`api.metrics.serviceMonitor.enabled`, default `false`; add
+  `serviceMonitor.labels` to match your Prometheus `serviceMonitorSelector`);
+- uses the admin listener for the discoverer, network-policy applier,
+  compliance scheduler and kube-bench worker readiness/liveness probes.
+
+```yaml
+api:
+  metrics:
+    serviceMonitor:
+      enabled: true
+      labels: { release: kube-prometheus-stack }
+    allowFrom: { kubernetes.io/metadata.name: monitoring }
+```
+
+---
+
+## Backups: in-cluster object store
+
+`backup.objectStore.enabled=true` renders a single-replica RustFS StatefulSet
+on one PVC, a Barman Cloud `ObjectStore` pointing at it, random credentials
+(re-used on upgrade), and a revision-scoped Job that creates the bucket with
+the AWS CLI. It requires `postgres.mode=cnpg` and the CNPG Barman Cloud plugin
+installed cluster-wide. With `barmanCloud.objectStoreName` left empty the CNPG
+Cluster archives to the rendered store automatically:
+
+```yaml
+backup:
+  objectStore:
+    enabled: true
+    storage: 8Gi
+    bucket: constellation-recovery
+    retentionPolicy: 7d
+postgres:
+  cloudnativepg:
+    barmanCloud: { enabled: true }
+    scheduledBackup: { enabled: true }
+```
+
+This lives in the same cluster and failure domain as the database: it is a
+development/small-install WAL archive, not off-host disaster recovery. For
+production supply an externally managed `ObjectStore` through
+`postgres.cloudnativepg.barmanCloud.objectStoreName`. See
+`docs/cnpg-recovery.md` for the restore procedure.
+
+---
+
 ## Values reference
 
 | Key                                   | Default                                              | When to change                                                  |
@@ -531,15 +618,22 @@ asynchronous bundles.
 | app workload service account automount | `false` for API/scanner/admission/frontend/importer/archiver | Keep Kubernetes API tokens off pods that do not need them |
 | `networkPolicies.enabled`              | `false`                                              | Enable namespace default-deny and explicit component flows in production |
 | `networkPolicies.kubeAPI.cidrs`         | `["0.0.0.0/0"]`                                      | CIDRs for the Kubernetes API server used by operator/bootstrap/TLS jobs |
-| `networkPolicies.externalPostgres.cidrs`| `["0.0.0.0/0"]`                                      | CIDRs for external managed Postgres when `postgres.embedded=false` |
+| `networkPolicies.externalPostgres.cidrs`| `["0.0.0.0/0"]`                                      | CIDRs for external managed Postgres when `postgres.mode=external` |
 | `networkPolicies.frontendIngressCIDRs`  | `["0.0.0.0/0"]`                                      | Ingress-controller/client CIDRs allowed to reach frontend pods |
 | `networkPolicies.admissionIngressCIDRs` | `["0.0.0.0/0"]`                                      | Kubernetes API/control-plane CIDRs allowed to call the webhook |
 | `api.replicas`                        | `2`                                                  | Bump for HA                                                     |
 | `api.jwtKeysSecret`                   | `""`                                                 | Existing Secret with JWT signing keys at key `keys`; empty renders a chart-managed Secret |
 | `api.supportBundleSigningKeySecret`  | `""`                                                 | Existing Secret with an Ed25519 PKCS#8 PEM signing key; empty leaves support bundles unsigned |
 | `api.supportBundleSigningKeySecretKey` | `private-key.pem`                                  | Data key within that Secret |
-| `api.requireJWTKeys`                  | `true`                                               | Refuse API startup when `JWT_KEYS` is absent; keep true outside one-off dev overrides |
-| `operator.replicas`                   | `1`                                                  | Keep at 1; operator uses leader-election leases                 |
+| `api.requireJWTKeys`                  | `false`                                              | Set true only with `api.jwtKeysSecret` to hard-fail startup if the Secret goes missing |
+| `api.leaderElection.enabled`          | `true`                                               | Only disable with `api.replicas=1`                              |
+| `api.metrics.annotations`             | `true`                                               | Drop the `prometheus.io/*` pod annotations                      |
+| `api.metrics.serviceMonitor.enabled`  | `false`                                              | Render a Prometheus Operator ServiceMonitor for the `admin` port |
+| `api.metrics.serviceMonitor.labels`   | `{}`                                                 | Match your Prometheus `serviceMonitorSelector`                  |
+| `api.metrics.serviceMonitor.interval` | `30s`                                                | Scrape cadence                                                  |
+| `api.metrics.allowFrom`               | `{}`                                                 | namespaceSelector labels admitted to port 9090 by NetworkPolicy |
+| `operator.replicas`                   | `1`                                                  | Raise with leader election on                                   |
+| `operator.leaderElection.enabled`     | `true`                                               | Only disable for single-replica debugging                       |
 | `discoverer.enabled`                  | `true`                                               | Populate local cluster workloads, pod/service IPs, and workload risk rollups |
 | `discoverer.namespaceFilter`          | `*`                                                  | Comma-separated namespace globs; `kube-system` is always excluded |
 | `discoverer.reconcileInterval`        | `30s`                                                | Poll cadence for Kubernetes inventory refresh                   |
@@ -569,13 +663,24 @@ asynchronous bundles.
 | `scanner.cache.size`                  | `8Gi`                                                | Scanner cache PVC size                                           |
 | `frontend.replicas`                   | `2`                                                  | Behind an ingress controller                                    |
 | `runtimeAgent.tolerations`            | tolerate all NoSchedule/NoExecute                    | DaemonSet must land on every node                               |
-| `postgres.embedded`                   | `true`                                               | **Always set to `false` in prod**                               |
-| `postgres.dsn`                        | `""`                                                 | DSN string (alternative to existingSecret)                      |
-| `postgres.existingSecret`             | `""`                                                 | Reference an externally-managed Postgres Secret                 |
-| `postgres.retainStatefulSetForRollback` | `false` | During a validated external-DB cutover, retain the old StatefulSet/Service with zero replicas; requires `existingSecret`. Preserve its previous `embeddedConfig`, credential Secret and PVC. |
-| `postgres.embeddedConfig.image`       | digest-pinned `pgvector/pgvector:pg16`               | Mirror or upgrade the dev/test embedded Postgres image          |
-| `postgres.embeddedConfig.storage`     | `20Gi`                                               | Sizing for the embedded PVC                                     |
-| `postgres.embeddedConfig.storageClass`| `""`                                                 | Override the cluster default StorageClass                       |
+| `postgres.mode`                       | `cnpg`                                               | `external` to use an operator-managed DSN (dev/test or managed Postgres) |
+| `postgres.dsn`                        | `""`                                                 | DSN string for `external` (alternative to existingSecret)       |
+| `postgres.existingSecret`             | `""`                                                 | Reference an externally-managed Postgres Secret (`external`)    |
+| `postgres.cloudnativepg.instances`    | `3`                                                  | `1` for dev; HA rendering requires `>=3`                        |
+| `postgres.cloudnativepg.imageName`    | `""` (chart pgvector build)                          | Pin a `tag@sha256` or supply your own pgvector operand image    |
+| `postgres.cloudnativepg.storage`      | `20Gi`                                               | Per-instance volume size                                        |
+| `postgres.cloudnativepg.storageClass` | `""`                                                 | Override the cluster default StorageClass                       |
+| `postgres.cloudnativepg.barmanCloud.enabled` | `false`                                       | Archive WAL + base backups through the CNPG-I Barman Cloud plugin |
+| `postgres.cloudnativepg.barmanCloud.objectStoreName` | `""`                                  | Externally managed `ObjectStore`; empty uses `backup.objectStore` when enabled |
+| `postgres.cloudnativepg.scheduledBackup.enabled` | `false`                                   | Daily base backup (`schedule`, six-field CNPG cron)             |
+| `backup.objectStore.enabled`          | `false`                                              | Render the in-cluster RustFS store + ObjectStore + bucket Job (cnpg only) |
+| `backup.objectStore.storage`          | `8Gi`                                                | Object store PVC size                                           |
+| `backup.objectStore.storageClass`     | `""`                                                 | Override the cluster default StorageClass                       |
+| `backup.objectStore.credentialsSecret`| `""` (generated)                                     | Existing Secret with `ACCESS_KEY_ID`/`SECRET_ACCESS_KEY`        |
+| `backup.objectStore.bucket`           | `constellation-recovery`                             | Bucket created by the Job and used as `destinationPath`         |
+| `backup.objectStore.retentionPolicy`  | `7d`                                                 | Barman retention                                                |
+| `backup.objectStore.image`            | digest-pinned `rustfs/rustfs:1.0.3`                  | Mirror or upgrade RustFS                                        |
+| `backup.objectStore.bucketJobImage`   | digest-pinned `amazon/aws-cli:2.32.6`                | Mirror the bucket-creation helper                               |
 | `tls.certManager.enabled`             | `false`                                              | Set true when cert-manager is installed                         |
 | `tls.bootstrap.enabled`               | `true`                                               | Set false when using cert-manager                               |
 | `ingress.enabled`                     | `false`                                              | Expose the frontend Service via Ingress                         |

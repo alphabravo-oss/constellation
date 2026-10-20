@@ -61,7 +61,6 @@ tls:
 
 postgres:
   mode: cnpg
-  embedded: false
   cloudnativepg:
     enabled: true
     instances: 3
@@ -72,7 +71,8 @@ postgres:
       enabled: true
       topologyKey: kubernetes.io/hostname
       podAntiAffinityType: required
-    # Backups remain disabled until S3 credentials and a bucket are supplied.
+    # Backups remain disabled until an ObjectStore is supplied (either
+    # barmanCloud.objectStoreName or the chart-rendered backup.objectStore).
     # Production readiness requires enabling ScheduledBackup and testing PITR.
 
 ingress:

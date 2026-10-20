@@ -37,9 +37,9 @@ spec:
             - /bin/sh
             - -c
             {{- /*
-            Fresh CloudNativePG clusters take longer to bootstrap (operator
-            provisions PVCs, initdb, primary election) than the embedded
-            single StatefulSet. Give CNPG up to ~5m; keep embedded at ~2m.
+            Fresh CloudNativePG clusters take a while to bootstrap (operator
+            provisions PVCs, initdb, primary election): give cnpg up to ~5m.
+            An external database is expected to be reachable already (~2m).
             */ -}}
             {{- $waitTries := 60 }}
             {{- if eq (include "constellation.postgresMode" .) "cnpg" }}{{- $waitTries = 150 }}{{- end }}

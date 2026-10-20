@@ -46,12 +46,29 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           {{- include "constellation.containerSecurityContext" . | nindent 10 }}
           args: ["--interval={{ .Values.complianceScheduler.interval }}"]
+          ports:
+            - { containerPort: 9090, name: admin }
+          {{- include "constellation.adminProbes" . | nindent 10 }}
           env:
+            - name: ADMIN_LISTEN_ADDR
+              value: ":9090"
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: {{ include "constellation.dsnSecret" . }}
                   key: {{ include "constellation.dsnSecretKey" . }}
+            # Component heartbeat to the control plane (System Health). Shares
+            # the runtime-agent token like the other in-cluster components.
+            - name: CONSTELLATION_API_URL
+              value: {{ include "constellation.apiURL" . | quote }}
+            - name: CONSTELLATION_COMPLIANCE_SCHEDULER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "constellation.runtimeAgentTokenSecret" . }}
+                  key: token
+                  optional: true
+            - name: RUNTIME_AGENT_TOKEN_FILE
+              value: /var/run/constellation/runtime-agent-token/token
             - name: REPORT_OUT_DIR
               value: /var/lib/constellation-reports/reports
             - name: COSIGN_KEY
@@ -68,6 +85,9 @@ spec:
             - name: signing
               mountPath: /var/run/constellation/report-signing
               readOnly: true
+            - name: runtime-agent-token
+              mountPath: /var/run/constellation/runtime-agent-token
+              readOnly: true
             - name: tmp
               mountPath: /tmp
       volumes:
@@ -78,6 +98,10 @@ spec:
             secretName: {{ $signing | quote }}
             defaultMode: 0440
             items: [{key: cosign.key, path: cosign.key}]
+        - name: runtime-agent-token
+          secret:
+            secretName: {{ include "constellation.runtimeAgentTokenSecret" . }}
+            optional: true
         - name: tmp
           emptyDir: {}
 {{- end }}

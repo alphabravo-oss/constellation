@@ -240,12 +240,12 @@ operator-supplied CIDR blocks in values.
 {{/*
 constellation.dsnSecret returns the secret name + key holding the Postgres DSN.
 
-When postgres.embedded=true the bootstrap Job synthesises
-`constellation-database-url` from the embedded StatefulSet credentials.
+cnpg mode: postgres-secrets.yaml renders `<fullname>-database-url` pointing at
+the CNPG primary Service with the chart-owned credentials.
 
-When postgres.embedded=false the user must either provide `postgres.dsn`
-(rendered into `constellation-database-url` by the chart) or set
-`postgres.existingSecret` to point at a pre-existing Secret.
+external mode: either provide `postgres.dsn` (rendered into
+`<fullname>-database-url` by the chart) or set `postgres.existingSecret` to
+point at a pre-existing Secret.
 */}}
 {{- define "constellation.dsnSecret" -}}
 {{- if .Values.postgres.existingSecret -}}
@@ -265,39 +265,99 @@ url
 
 {{/*
 constellation.postgresMode resolves the single canonical Postgres mode:
-  statefulset | cnpg | external   (default: statefulset)
+  cnpg | external   (default: cnpg)
 
-`postgres.mode` is the canonical toggle (D5). For backward compatibility, when
-`postgres.mode` is unset we derive it from the legacy booleans
-(`postgres.cloudnativepg.enabled`, `postgres.embedded`). When `postgres.mode` IS
-set it wins outright. Invalid values fail the render so typos can't silently
-fall through to the wrong mode.
+`postgres.mode` is the canonical toggle. When it is empty the mode is derived
+from `postgres.cloudnativepg.enabled` (true -> cnpg, false -> external). An
+explicit mode wins. Invalid values fail the render so typos can't silently fall
+through to the wrong mode. The former embedded StatefulSet mode was removed
+(ADR 0007: Helm + CloudNativePG is the only in-cluster database path).
 */}}
 {{- define "constellation.postgresMode" -}}
 {{- $m := .Values.postgres.mode | default "" -}}
 {{- if $m -}}
-  {{- if not (has $m (list "statefulset" "cnpg" "external")) -}}
-    {{- fail (printf "postgres.mode must be one of statefulset|cnpg|external, got %q" $m) -}}
+  {{- if not (has $m (list "cnpg" "external")) -}}
+    {{- fail (printf "postgres.mode must be one of cnpg|external, got %q" $m) -}}
   {{- end -}}
   {{- $m -}}
 {{- else if .Values.postgres.cloudnativepg.enabled -}}
 cnpg
-{{- else if .Values.postgres.embedded -}}
-statefulset
 {{- else -}}
 external
 {{- end -}}
 {{- end -}}
 
 {{/* Per-mode boolean helpers so templates read cleanly. */}}
-{{- define "constellation.postgresIsStatefulset" -}}
-{{- eq (include "constellation.postgresMode" .) "statefulset" -}}
-{{- end -}}
 {{- define "constellation.postgresIsCNPG" -}}
 {{- eq (include "constellation.postgresMode" .) "cnpg" -}}
 {{- end -}}
 {{- define "constellation.postgresIsExternal" -}}
 {{- eq (include "constellation.postgresMode" .) "external" -}}
+{{- end -}}
+
+{{/*
+constellation.cnpgImage resolves the CloudNativePG operand image. Empty
+postgres.cloudnativepg.imageName selects the chart's own pgvector-enabled build
+<image.registry>/postgres:16.14-v<Chart.appVersion> (deploy/docker/Dockerfile.postgres).
+*/}}
+{{- define "constellation.cnpgImage" -}}
+{{- $cfg := .Values.postgres.cloudnativepg -}}
+{{- default (printf "%s/postgres:16.14-v%s" (default "ghcr.io/alphabravo-oss/constellation" .Values.image.registry) (trimPrefix "v" .Chart.AppVersion)) $cfg.imageName -}}
+{{- end -}}
+
+{{/*
+In-cluster object store (backup.objectStore) naming. The Service/StatefulSet,
+the credentials Secret and the Barman Cloud ObjectStore CR all derive from the
+release fullname so several releases can coexist in one namespace.
+*/}}
+{{- define "constellation.objectStoreName" -}}
+{{- printf "%s-object-store" (include "constellation.fullname" .) -}}
+{{- end -}}
+
+{{- define "constellation.objectStoreCredentialsSecret" -}}
+{{- if .Values.backup.objectStore.credentialsSecret -}}
+{{- .Values.backup.objectStore.credentialsSecret -}}
+{{- else -}}
+{{- printf "%s-object-store-credentials" (include "constellation.fullname" .) -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "constellation.objectStoreArchiveName" -}}
+{{- printf "%s-object-store-archive" (include "constellation.fullname" .) -}}
+{{- end -}}
+
+{{/*
+constellation.barmanObjectStoreName is the ObjectStore the CNPG Cluster archives
+to: postgres.cloudnativepg.barmanCloud.objectStoreName when set, otherwise the
+chart-rendered ObjectStore when backup.objectStore.enabled, otherwise "".
+*/}}
+{{- define "constellation.barmanObjectStoreName" -}}
+{{- if .Values.postgres.cloudnativepg.barmanCloud.objectStoreName -}}
+{{- .Values.postgres.cloudnativepg.barmanCloud.objectStoreName -}}
+{{- else if .Values.backup.objectStore.enabled -}}
+{{- include "constellation.objectStoreArchiveName" . -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+constellation.adminProbes renders the readiness/liveness probes every
+Constellation Go role exposes on its admin listener (ADMIN_LISTEN_ADDR, :9090):
+/readyz, /healthz and /metrics. Kubelet probes originate from the node, so the
+namespace default-deny NetworkPolicy does not block them.
+*/}}
+{{- define "constellation.adminProbes" -}}
+readinessProbe:
+  httpGet: { path: /readyz, port: admin }
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+livenessProbe:
+  httpGet: { path: /healthz, port: admin }
+  initialDelaySeconds: 15
+  periodSeconds: 20
+  timeoutSeconds: 3
+  failureThreshold: 3
 {{- end -}}
 
 {{/*

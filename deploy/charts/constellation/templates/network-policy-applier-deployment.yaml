@@ -34,7 +34,12 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["/usr/local/bin/constellation-netpolicy-applier"]
           {{- include "constellation.containerSecurityContext" . | nindent 10 }}
+          ports:
+            - { containerPort: 9090, name: admin }
+          {{- include "constellation.adminProbes" . | nindent 10 }}
           env:
+            - name: ADMIN_LISTEN_ADDR
+              value: ":9090"
             - name: CONSTELLATION_POD_NAMESPACE
               valueFrom:
                 fieldRef:

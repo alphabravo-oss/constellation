@@ -29,6 +29,15 @@ rollouts use Recreate. This is a storage locality requirement, not an HA claim.
 Use a suitable ReadWriteMany claim for multiple-node access; chart configuration
 must match the actual claim's access mode. The worker currently uses one replica.
 
+The scheduler serves `/healthz`, `/readyz` and `/metrics` on its admin listener
+(`ADMIN_LISTEN_ADDR=:9090`, container port `admin`); the chart's readiness and
+liveness probes use it. It also heartbeats to the control plane through
+`CONSTELLATION_API_URL` (the in-cluster API Service unless
+`controlPlane.apiURL` is set) with `CONSTELLATION_COMPLIANCE_SCHEDULER_TOKEN`
+from the shared runtime-agent token Secret, mounted read-only at
+`RUNTIME_AGENT_TOKEN_FILE` like the discoverer and policy applier, so it shows
+up in System Health alongside the other components.
+
 The signing Secret must contain `cosign.key` (encrypted Cosign private key) and
 `password` (its passphrase). Keep `cosign.pub` with recovery material for independent
 verification. Only the scheduler receives this Secret; the API never mounts the

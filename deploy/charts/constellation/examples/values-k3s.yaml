@@ -1,5 +1,8 @@
 # Sample values for a single-node bare-metal k3s cluster.
 # All defaults are sane; this file only shows the knobs you typically tweak.
+#
+# Prerequisite: the CloudNativePG operator (see values.yaml `postgres`). A
+# single CNPG instance replaces the former embedded StatefulSet for dev.
 
 api:
   replicas: 1
@@ -12,10 +15,18 @@ frontend:
 
 # k3s ships with a "local-path" storage class.
 postgres:
-  embedded: true
-  embeddedConfig:
+  mode: cnpg
+  cloudnativepg:
+    instances: 1
     storageClass: local-path
     storage: 10Gi
+    affinity: { enabled: false }
+
+# Optional turnkey WAL archive + base backups on an in-cluster RustFS PVC.
+# backup:
+#   objectStore: { enabled: true, storageClass: local-path }
+# postgres.cloudnativepg.barmanCloud.enabled: true
+# postgres.cloudnativepg.scheduledBackup.enabled: true
 
 ingress:
   enabled: true

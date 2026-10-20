@@ -4,10 +4,18 @@
 # Singleton (leader-elected). Reconciles ConstellationCluster CRs into Deployments,
 # DaemonSets, Services, CronJobs. No scanner CLIs, no API code — pure controller-runtime.
 
-ARG GO_VERSION=1.26.9
+# GO_VERSION has NO default: the Makefile passes --build-arg GO_VERSION from go.mod
+# (make check-go-version enforces this). The builder is additionally pinned by
+# multi-arch index digest so a Go bump is one value change per file.
+# Refresh with: docker buildx imagetools inspect golang:<ver>-bookworm
+# NOTE: Docker Hub had not published the Go 1.27.3 bookworm tag at pin time; this
+# is the Go 1.27.2 bookworm index. With name:tag@digest the digest wins, and
+# GOTOOLCHAIN=auto fetches go.mod's toolchain during the build.
+ARG GO_VERSION
+ARG GO_IMAGE_DIGEST=sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61
 ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian13:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3
 
-FROM golang:${GO_VERSION}-bookworm AS build
+FROM golang:${GO_VERSION}-bookworm@${GO_IMAGE_DIGEST} AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

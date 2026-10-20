@@ -55,9 +55,9 @@ highAvailability:
 # Default pod/container security posture
 # ---------------------------------------------------------------------------
 # Applied to non-privileged Constellation application workloads. Hook helper
-# containers and embedded Postgres render their own non-root restricted
-# contexts, while the runtime agent keeps an explicit privileged context because
-# BPF/TC/NFQUEUE need host privileges.
+# containers and the in-cluster object store render their own non-root
+# restricted contexts (CNPG manages its own pods), while the runtime agent keeps
+# an explicit privileged context because BPF/TC/NFQUEUE need host privileges.
 security:
   podSecurityContext:
     enabled: true
@@ -202,6 +202,32 @@ api:
   service:
     type: ClusterIP
     port: 8080
+  # Observability. The API serves /metrics (and pprof when enabled) on a
+  # separate admin listener (ADMIN_LISTEN_ADDR=:9090, container/Service port
+  # `admin`), never on the API port, so metrics are not reachable through the
+  # Ingress/Gateway /api route.
+  metrics:
+    # prometheus.io/scrape|port|path pod annotations for annotation-based
+    # discovery (kube-prometheus-stack's additionalScrapeConfigs, Grafana
+    # Alloy, Datadog, …).
+    annotations: true
+    # monitoring.coreos.com/v1 ServiceMonitor targeting the `admin` port.
+    # Requires the Prometheus Operator CRDs; off by default so a cluster
+    # without them still installs.
+    serviceMonitor:
+      enabled: false
+      interval: 30s
+      scrapeTimeout: 10s
+      # Extra labels so a Prometheus `serviceMonitorSelector` picks it up,
+      # e.g. { release: kube-prometheus-stack }.
+      labels: {}
+      # Namespace to create the ServiceMonitor in; empty = release namespace.
+      namespace: ""
+    # With networkPolicies.enabled, ingress to the admin port is allowed from
+    # pods in the release namespace only. Set a namespaceSelector (label map)
+    # to also admit a monitoring namespace, e.g.
+    #   allowFrom: { kubernetes.io/metadata.name: monitoring }
+    allowFrom: {}
   resources:
     limits:   { cpu: 1,    memory: 1Gi }
     requests: { cpu: 200m, memory: 256Mi }
@@ -264,9 +290,16 @@ federation:
 operator:
   enabled: true
   replicas: 1
+  # Leader election is on by default so scaling replicas up never runs two
+  # reconcilers; the chart renders the Lease/Event RBAC (operator-workloads
+  # Role/ClusterRole). Disabling is only for single-replica debugging.
   leaderElection:
-    enabled: false
+    enabled: true
   image: {}
+  # Extra args. The chart always passes --leader-elect and the four managed
+  # image flags (--agent-image/--runtime-agent-image/--scanner-image/
+  # --admission-image) derived from the role images, so the operator has no
+  # `:latest` fallback.
   args: []
   resources:
     limits:   { cpu: 500m, memory: 512Mi }
@@ -744,63 +777,27 @@ gateway:
     source: externalGateway # externalGateway is currently the supported mode
 
 # ---------------------------------------------------------------------------
-# Postgres (embedded pgvector or external DSN)
+# Postgres (CloudNativePG in-cluster, or an external DSN)
 # ---------------------------------------------------------------------------
 postgres:
-  # Canonical Postgres mode (D5). One of:
-  #   statefulset — single-replica pgvector StatefulSet + PVC (default; dev).
-  #   cnpg        — HA Postgres managed by the CloudNativePG operator (prod).
-  #   external    — point the app DSN at an external Postgres (RDS, Cloud SQL…).
-  # When empty, the mode is derived from the legacy toggles below
-  # (cloudnativepg.enabled → cnpg, else embedded → statefulset, else external)
-  # so existing values files keep working unchanged. Set `mode` explicitly in
-  # new installs; an explicit mode wins over the legacy toggles.
-  # MUST default empty: a non-empty default here would override the legacy
-  # toggles and silently flip existing cnpg/external users to a StatefulSet.
-  mode: ""
-  # --- Legacy toggles (kept for back-compat; prefer `mode` above) ----------
-  # When true, the chart deploys a single-replica pgvector StatefulSet with a
-  # PVC. Use external in production (RDS, Cloud SQL, Crunchy, etc.).
-  embedded: true
+  # Canonical Postgres mode. One of:
+  #   cnpg     — HA Postgres managed by the CloudNativePG operator (default;
+  #              the production path, see ADR 0007).
+  #   external — point the app DSN at an external Postgres (RDS, Cloud SQL,
+  #              a CNPG cluster managed outside this release…); dev/test.
+  # When empty the mode is derived from `cloudnativepg.enabled`. An explicit
+  # mode wins. The former embedded single-replica StatefulSet mode was removed;
+  # there is no in-chart Postgres other than CNPG.
+  mode: cnpg
   # Set for external mode. Either supply a DSN string here OR reference an
   # existing Secret with key `url`.
   dsn: ""
   existingSecret: ""        # if set, takes precedence over `dsn`
   existingSecretKey: url
-  # Upgrade-only cutover option: retain the legacy StatefulSet and Service, with
-  # zero replicas, while the app uses a separately validated target Secret.
-  # Requires mode=external and existingSecret. Preserve embeddedConfig values
-  # and the old credential Secret/PVC. Removing this flag removes the old workload;
-  # rollback after target writes requires reconciliation, not merely scaling it up.
-  retainStatefulSetForRollback: false
-  embeddedConfig:
-    image: pgvector/pgvector:pg16@sha256:00ba258a66dac104fd5171074a0084462a64a1369d8513f3d0a634e2f24d15bc
-    storage: 20Gi
-    storageClass: ""        # empty = cluster default
-    podSecurityContext:
-      fsGroup: 999
-      fsGroupChangePolicy: OnRootMismatch
-      seccompProfile:
-        type: RuntimeDefault
-    containerSecurityContext:
-      allowPrivilegeEscalation: false
-      capabilities:
-        drop: ["ALL"]
-      runAsGroup: 999
-      runAsNonRoot: true
-      runAsUser: 999
-    resources:
-      limits:   { cpu: 2,   memory: 2Gi }
-      requests: { cpu: 200m, memory: 256Mi }
-    database: constellation
-    username: constellation
-    # Password generated at install time if blank.
-    password: ""
 
   # -------------------------------------------------------------------------
   # CloudNativePG (CNPG) mode — production HA Postgres managed by the CNPG
-  # operator. This is a THIRD, mutually-exclusive alternative to `embedded`
-  # and the external `dsn`/`existingSecret` paths.
+  # operator.
   #
   # PREREQUISITE: the CloudNativePG operator MUST already be installed in the
   # cluster (it is NOT bundled by this chart). Install it once, cluster-wide,
@@ -809,35 +806,24 @@ postgres:
   #     https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.24/releases/cnpg-1.24.1.yaml
   # (or `helm install cnpg cnpg/cloudnative-pg -n cnpg-system --create-namespace`).
   # Docs: https://cloudnative-pg.io/documentation/current/installation_upgrade/
-  # A ready-made opt-in profile lives at examples/values-cnpg.yaml.
+  # A ready-made profile lives at examples/values-cnpg.yaml.
   #
-  # To use: set `postgres.embedded=false` and `postgres.cloudnativepg.enabled=true`.
   # CNPG auto-creates the services <fullname>-postgres-rw (primary/read-write),
   # -ro (replicas) and -r (any); the chart points DATABASE_URL at the -rw one.
   # -------------------------------------------------------------------------
   cloudnativepg:
-    enabled: false
+    # Only consulted when `postgres.mode` is empty.
+    enabled: true
     # 1 = dev/single instance, 3 = HA (1 primary + 2 replicas). Use 3 in prod.
     instances: 3
     # CRITICAL: this image MUST include the pgvector extension — the schema uses
     # `embedding vector(1536)` in the findings table. The default CNPG image
-    # (ghcr.io/cloudnative-pg/postgresql) does NOT include pgvector. Supply a
-    # pgvector-enabled, CNPG-compatible image. The placeholder default below
-    # MUST be overridden in real installs — otherwise migrations that create the
-    # vector column will fail.
+    # (ghcr.io/cloudnative-pg/postgresql) does NOT include pgvector.
     #
-    # Two ways to get a pgvector-enabled operand image:
-    #   1. Build one FROM the CNPG base + pgvector (few lines; keeps CNPG
-    #      compatibility): FROM ghcr.io/cloudnative-pg/postgresql:16 then
-    #      `apt-get install -y postgresql-16-pgvector`.
-    #   2. Use a community image that bundles pgvector and follows the CNPG
-    #      operand contract (verify `CREATE EXTENSION vector;` works).
-    #
-    # NOTES.txt emits an install-time WARNING when mode=cnpg and this value does
-    # not look pgvector-enabled (no "pgvector" in the ref) — a heuristic guard,
-    # not a hard gate. See examples/values-cnpg.yaml for a worked profile.
-    # Empty -> <image.registry>/postgres:16.14-v<Chart.appVersion>.
-    # Independent of image.tag; use a version-bearing tag@digest override to pin CNPG.
+    # Empty -> <image.registry>/postgres:16.14-v<Chart.appVersion>, the chart's
+    # own CNPG-compatible pgvector build (deploy/docker/Dockerfile.postgres).
+    # Independent of image.tag; use a version-bearing tag@digest override to pin.
+    # NOTES.txt warns when a CUSTOM imageName does not contain "pgvector".
     imageName: ""
     storage: 20Gi
     storageClass: ""        # empty = cluster default
@@ -850,8 +836,8 @@ postgres:
       enabled: true
       topologyKey: kubernetes.io/hostname
       podAntiAffinityType: required
-    # Optional raw CNPG backup spec. Production should configure WAL archiving
-    # and object-store backups (or a CNPG backup plugin) and test PITR.
+    # Optional raw CNPG backup spec (legacy in-core barmanObjectStore). Prefer
+    # barmanCloud below (CNPG-I plugin); the two are mutually exclusive.
     # Example:
     # backup:
     #   barmanObjectStore:
@@ -862,8 +848,11 @@ postgres:
     #       secretAccessKey: { name: cnpg-backup, key: SECRET_ACCESS_KEY }
     #   retentionPolicy: "30d"
     backup: {}
-    # CNPG-I Barman Cloud plugin and ObjectStore CRs are installed separately.
-    # Prefer this path for new deployments; backup above is legacy compatibility.
+    # CNPG-I Barman Cloud plugin. The plugin itself is installed separately
+    # (https://github.com/cloudnative-pg/plugin-barman-cloud). The ObjectStore
+    # CR it archives to is either supplied by the infrastructure operator
+    # (objectStoreName) or rendered by this chart from backup.objectStore
+    # (objectStoreName left empty + backup.objectStore.enabled=true).
     barmanCloud:
       enabled: false
       pluginName: barman-cloud.cloudnative-pg.io
@@ -883,8 +872,51 @@ postgres:
       backupOwnerReference: self
     database: constellation
     username: constellation
-    # Password generated at install time if blank (same idempotent logic as embedded).
+    # Password generated at install time if blank (idempotent across upgrades:
+    # the existing Secret is looked up and re-used).
     password: ""
+
+# ---------------------------------------------------------------------------
+# Backup object store (opt-in, cnpg mode only)
+# ---------------------------------------------------------------------------
+# Renders an in-cluster S3-compatible object store (RustFS, single replica on
+# one PVC), a Barman Cloud `ObjectStore` CR pointing at it, and a one-shot Job
+# that creates the bucket. This replaces the hand-applied manifests formerly in
+# deploy/dev/cnpg-rustfs/. It gives a turnkey WAL archive + base backup target
+# for development and small installs; it is NOT an off-host recovery target
+# (same cluster, same failure domain). Production should point
+# postgres.cloudnativepg.barmanCloud.objectStoreName at an ObjectStore backed by
+# external, replicated storage instead.
+#
+# Typical opt-in:
+#   backup.objectStore.enabled=true
+#   postgres.cloudnativepg.barmanCloud.enabled=true   (objectStoreName stays "")
+#   postgres.cloudnativepg.scheduledBackup.enabled=true
+backup:
+  objectStore:
+    enabled: false
+    # RustFS server image, pinned by multi-arch index digest.
+    # Refresh with: docker buildx imagetools inspect rustfs/rustfs:<ver>
+    image: rustfs/rustfs:1.0.3@sha256:9ca9559533b537d10482fe923288b676ad08f92a7069d9a17327fbae3cab688b
+    # Image for the bucket-creation Job (needs /bin/sh + the `aws` CLI).
+    # minio/mc is no longer published on a public registry, so amazon/aws-cli
+    # is used; pinned by index digest.
+    # Refresh with: docker buildx imagetools inspect amazon/aws-cli:<ver>
+    bucketJobImage: amazon/aws-cli:2.32.6@sha256:79e492dfe333fe420d41990fa958c673671b44e30877d65a2aed3391033f37dd
+    storage: 8Gi
+    storageClass: ""        # empty = cluster default
+    # Existing Secret with keys ACCESS_KEY_ID and SECRET_ACCESS_KEY. Empty = the
+    # chart generates <fullname>-object-store-credentials with random keys and
+    # re-uses them on upgrade (lookup-idempotent, resource-policy keep).
+    credentialsSecret: ""
+    bucket: constellation-recovery
+    # Barman Cloud retention for base backups + WAL in this store.
+    retentionPolicy: 7d
+    # SigV4 signing region advertised to the Barman sidecar / bucket Job.
+    region: us-east-1
+    resources:
+      limits:   { cpu: 1,    memory: 1Gi }
+      requests: { cpu: 100m, memory: 256Mi }
 
 # ---------------------------------------------------------------------------
 # TLS bootstrap for the admission webhook

@@ -24,6 +24,14 @@ spec:
       labels:
         app.kubernetes.io/name: {{ include "constellation.name" . }}
         app.kubernetes.io/component: api
+      {{- if .Values.api.metrics.annotations }}
+      # Annotation-based scrape discovery. Metrics live on the admin listener
+      # (:9090), never on the API port.
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: /metrics
+      {{- end }}
     spec:
       {{- include "constellation.pullSecrets" . | nindent 6 }}
       {{- include "constellation.podSecurityContext" . | nindent 6 }}
@@ -60,7 +68,11 @@ spec:
           {{- with .Values.api.args }}
           args: {{- toYaml . | nindent 12 }}
           {{- end }}
-          ports: [{ containerPort: 8080, name: http }]
+          ports:
+            - { containerPort: 8080, name: http }
+            # Admin listener: /metrics, /healthz, /readyz and pprof (when
+            # enabled). Not exposed through the Ingress/Gateway.
+            - { containerPort: 9090, name: admin }
           env:
             {{- if .Values.clusterRegistration.clusterId }}
             # Local cluster UUID binds trusted protection to this installation only.
@@ -69,6 +81,8 @@ spec:
             {{- end }}
             - name: LISTEN_ADDR
               value: ":8080"
+            - name: ADMIN_LISTEN_ADDR
+              value: ":9090"
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -237,6 +251,39 @@ spec:
       targetPort: http
       protocol: TCP
       name: http
+    - port: 9090
+      targetPort: admin
+      protocol: TCP
+      name: admin
+{{- if .Values.api.metrics.serviceMonitor.enabled }}
+---
+# Prometheus Operator discovery of the admin listener. Requires the
+# monitoring.coreos.com CRDs; gated so clusters without them still install.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "constellation.fullname" . }}-api
+  namespace: {{ .Values.api.metrics.serviceMonitor.namespace | default .Release.Namespace }}
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+    {{- with .Values.api.metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: api
+  endpoints:
+    - port: admin
+      path: /metrics
+      interval: {{ .Values.api.metrics.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.api.metrics.serviceMonitor.scrapeTimeout }}
+{{- end }}
 {{- if .Values.api.leaderElection.enabled }}
 ---
 # D5: leader election RBAC. Only rendered when api.leaderElection.enabled — the

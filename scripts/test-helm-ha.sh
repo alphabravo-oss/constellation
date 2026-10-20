@@ -43,11 +43,13 @@ api_policy="$(sed -n '/name: constellation-api-egress$/,/^---$/p' "$rendered")"
 grep -q 'port: 443' <<<"$api_policy"
 grep -q 'port: 6443' <<<"$api_policy"
 
-if helm template constellation "$chart" --set highAvailability.enabled=true >"$error_output" 2>&1; then
+# A single-instance CNPG cluster must not pass as "HA".
+if helm template constellation "$chart" --set highAvailability.enabled=true \
+  --set postgres.cloudnativepg.instances=1 >"$error_output" 2>&1; then
   echo "unsafe HA values unexpectedly rendered" >&2
   exit 1
 fi
-grep -q 'requires postgres.mode=cnpg or postgres.mode=external' "$error_output"
+grep -q 'HA CloudNativePG requires postgres.cloudnativepg.instances>=3' "$error_output"
 
 if helm template constellation "$chart" --set gateway.enabled=true --set ingress.enabled=true >"$error_output" 2>&1; then
   echo "simultaneous Gateway and Ingress unexpectedly rendered" >&2

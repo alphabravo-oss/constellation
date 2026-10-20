@@ -35,7 +35,7 @@ spec:
       app.kubernetes.io/name: {{ include "constellation.name" . }}
       app.kubernetes.io/component: postgres
   instances: {{ $cfg.instances }}
-  imageName: {{ default (printf "%s/postgres:16.14-v%s" (default "ghcr.io/alphabravo-oss/constellation" .Values.image.registry) (trimPrefix "v" .Chart.AppVersion)) $cfg.imageName }}
+  imageName: {{ include "constellation.cnpgImage" . }}
   {{- include "constellation.pullSecrets" . | nindent 2 }}
   primaryUpdateStrategy: {{ $cfg.primaryUpdateStrategy }}
   enableSuperuserAccess: false
@@ -60,7 +60,8 @@ spec:
     - name: {{ $cfg.barmanCloud.pluginName | quote }}
       isWALArchiver: true
       parameters:
-        barmanObjectName: {{ $cfg.barmanCloud.objectStoreName | quote }}
+        # Explicit objectStoreName, else the chart-rendered backup.objectStore.
+        barmanObjectName: {{ include "constellation.barmanObjectStoreName" . | quote }}
   {{- end }}
   {{- if $cfg.barmanCloud.recovery.enabled }}
   externalClusters:

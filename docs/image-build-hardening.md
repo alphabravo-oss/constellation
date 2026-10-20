@@ -17,6 +17,17 @@ with a fixed scanner/database before attributing totals or claiming reductions.
   each bundled executable has its own compiler and dependency inventory.
 - Pin approved base digests and tool checksums, verify provenance/signatures,
   and regularly refresh the pins. Pinning alone does not keep an image patched.
+  Every `deploy/docker/Dockerfile.*` takes `ARG GO_VERSION` with no default
+  (the Makefile passes go.mod's version) and pins the `golang` builder by
+  multi-arch index digest (`ARG GO_IMAGE_DIGEST`); Debian, Alpine, distroless,
+  kube-bench and CNPG bases are digest-pinned the same way. Each pin carries a
+  `refresh with: docker buildx imagetools inspect <ref>` comment.
+- Every runtime stage sets a numeric `USER` (10001:10001 for the Go roles,
+  65532:65532 for the distroless-nonroot bootstrap image, 26 for the Postgres
+  operand). The runtime-agent is the one deliberate `USER 0:0` exception
+  (BPF/LSM/NFQUEUE; ADR 0005). Roles that bundle tools on a Debian base
+  (scanner tool stage, archiver, kube-bench-runner, runtime-agent) keep that
+  base per ADR 0005 but are digest-pinned.
 - Keep scanners and diagnostic tools out of unrelated service images. Remove
   runtime packages only after checking real callers and exercising workflows.
 - Run as non-root with read-only filesystems and dropped capabilities where the
@@ -87,11 +98,19 @@ image. The default remains runtime DB refresh or operator-preloaded caches.
 ## Patched scanner tool builds
 
 The scanner Dockerfile rebuilds Syft 1.54.1, Grype 0.120.1 and Cosign 3.1.3
-from checksum-pinned upstream source modules with Go 1.26.9. Their upstream
-release binaries still embed vulnerable Go runtimes/dependencies. Reviewed
-`go.mod`/`go.sum` locks update x/net to 0.60.0 and Cosign's gRPC to 1.83.2;
-transitive x/* upgrades follow the module graph. Versions carry a
-`-constellation.1` suffix and the upstream source commit remains recorded.
+from checksum-pinned upstream source modules with the go.mod toolchain
+(`GO_VERSION`). Their upstream release binaries still embed vulnerable Go
+runtimes/dependencies. Reviewed `go.mod`/`go.sum` locks update x/net to 0.60.0
+and Cosign's gRPC to 1.83.2; transitive x/* upgrades follow the module graph.
+Versions carry a `-constellation.1` suffix and the upstream source commit
+remains recorded.
+
+The rebuild driver is the in-tree Go tool `cmd/tools/scanner-tools`
+(`--locks <dir> --work <dir> --output <dir> [--tool syft|grype|cosign]
+[--prepare-only]`); the scanner and compliance-scheduler Dockerfiles build it
+for the build platform and run it with `GOARCH=$TARGETARCH`, so the tool stage
+no longer installs Python. The compliance-scheduler image reuses the same
+stage with `--tool cosign`.
 
 See [source locks and rebuild procedure](../deploy/docker/scanner-tools/README.md).
 This changes actual embedded code and preserves package evidence. It does not
@@ -182,9 +201,10 @@ identities, package counts, remaining advisory and runtime checks are recorded i
 
 ## Migration runtime hardening
 
-The migration image builds Goose v3.27.1 with Go 1.26.9, verifies the upstream
-module archive checksum, and applies the checked-in `deploy/docker/goose` module
-locks. The PostgreSQL-only build excludes unused database drivers and their
+The migration image builds Goose v3.27.1 with the digest-pinned go.mod
+toolchain image (`GOTOOLCHAIN=local` against `deploy/docker/goose/go.mod`),
+verifies the upstream module archive checksum, and applies the checked-in
+`deploy/docker/goose` module locks. The PostgreSQL-only build excludes unused database drivers and their
 transitive dependencies. Dependency locks also pin patched x/net, x/text and gRPC
 versions; builds use `-mod=readonly`.
 

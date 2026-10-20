@@ -84,7 +84,6 @@ tls:
 # Postgres remains supported with mode=external + existingSecret.
 postgres:
   mode: cnpg
-  embedded: false
   cloudnativepg:
     enabled: true
     instances: 3

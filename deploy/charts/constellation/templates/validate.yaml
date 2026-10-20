@@ -4,26 +4,30 @@
 {{- if and .Values.highAvailability.enabled .Values.api.enabled (gt (int .Values.api.replicas) 1) (not .Values.api.leaderElection.enabled) }}
 {{- fail "HA API replicas require api.leaderElection.enabled=true" }}
 {{- end }}
-{{- if and .Values.highAvailability.enabled .Values.operator.enabled (gt (int .Values.operator.replicas) 1) (not .Values.operator.leaderElection.enabled) }}
-{{- fail "HA operator replicas require operator.leaderElection.enabled=true" }}
-{{- end }}
-{{- if and .Values.highAvailability.enabled (eq (include "constellation.postgresMode" .) "statefulset") }}
-{{- fail "highAvailability.enabled=true requires postgres.mode=cnpg or postgres.mode=external; embedded statefulset is single-instance" }}
+{{- if and .Values.operator.enabled (gt (int .Values.operator.replicas) 1) (not .Values.operator.leaderElection.enabled) }}
+{{- fail "operator.replicas>1 requires operator.leaderElection.enabled=true" }}
 {{- end }}
 {{- if and .Values.highAvailability.enabled (eq (include "constellation.postgresMode" .) "cnpg") (lt (int .Values.postgres.cloudnativepg.instances) 3) }}
 {{- fail "HA CloudNativePG requires postgres.cloudnativepg.instances>=3" }}
+{{- end }}
+{{- if and (eq (include "constellation.postgresMode" .) "external") (not .Values.postgres.dsn) (not .Values.postgres.existingSecret) }}
+{{- fail "postgres.mode=external requires postgres.dsn or postgres.existingSecret" }}
 {{- end }}
 {{- if and .Values.gateway.enabled .Values.ingress.enabled }}
 {{- fail "enable only one of gateway.enabled or ingress.enabled" }}
 {{- end }}
 {{- $cnpg := .Values.postgres.cloudnativepg }}
-{{- if .Values.postgres.retainStatefulSetForRollback }}
-{{- if ne (include "constellation.postgresMode" .) "external" }}
-{{- fail "retainStatefulSetForRollback requires postgres.mode=external" }}
-{{- end }}
-{{- $_ := required "retainStatefulSetForRollback requires postgres.existingSecret for the validated target" .Values.postgres.existingSecret }}
-{{- end }}
 {{- $barman := $cnpg.barmanCloud }}
+{{- $objectStore := .Values.backup.objectStore }}
+{{- if $objectStore.enabled }}
+{{- if ne (include "constellation.postgresMode" .) "cnpg" }}
+{{- fail "backup.objectStore.enabled=true requires postgres.mode=cnpg" }}
+{{- end }}
+{{- $_ := required "backup.objectStore.bucket is required" $objectStore.bucket }}
+{{- if not (regexMatch "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$" $objectStore.bucket) }}
+{{- fail "backup.objectStore.bucket must be a valid S3 bucket name (3-63 chars, lowercase letters, digits, dots, hyphens)" }}
+{{- end }}
+{{- end }}
 {{- if or $barman.enabled $barman.recovery.enabled }}
 {{- if ne (include "constellation.postgresMode" .) "cnpg" }}
 {{- fail "Barman Cloud configuration requires postgres.mode=cnpg" }}
@@ -34,13 +38,13 @@
 {{- $_ := required "Barman Cloud pluginName is required" $barman.pluginName }}
 {{- end }}
 {{- if $barman.enabled }}
-{{- $_ := required "Barman Cloud objectStoreName is required" $barman.objectStoreName }}
+{{- $_ := required "Barman Cloud objectStoreName is required (or enable backup.objectStore to render one in-cluster)" (include "constellation.barmanObjectStoreName" .) }}
 {{- end }}
 {{- if $barman.recovery.enabled }}
 {{- $_ := required "Barman Cloud recovery sourceName is required" $barman.recovery.sourceName }}
 {{- $_ := required "Barman Cloud recovery objectStoreName is required" $barman.recovery.objectStoreName }}
 {{- $_ := required "Barman Cloud recovery serverName is required" $barman.recovery.serverName }}
-{{- if and $barman.enabled (eq $barman.objectStoreName $barman.recovery.objectStoreName) (eq $barman.recovery.serverName (printf "%s-postgres" (include "constellation.fullname" .))) }}
+{{- if and $barman.enabled (eq (include "constellation.barmanObjectStoreName" .) $barman.recovery.objectStoreName) (eq $barman.recovery.serverName (printf "%s-postgres" (include "constellation.fullname" .))) }}
 {{- fail "recovery source must differ from the destination archive identity" }}
 {{- end }}
 {{- end }}
@@ -53,6 +57,9 @@
 {{- if ne (lower (trim (toString (index .Values.api.env "CONSTELLATION_PCAP_RETENTION_ENABLED")))) $expected }}
 {{- fail "api.env.CONSTELLATION_PCAP_RETENTION_ENABLED conflicts with chart-controlled api.pcapStorage.retentionEnabled" }}
 {{- end }}
+{{- end }}
+{{- if hasKey .Values.api.env "ADMIN_LISTEN_ADDR" }}
+{{- fail "api.env.ADMIN_LISTEN_ADDR is chart-controlled (the admin listener is always :9090, port name `admin`)" }}
 {{- end }}
 
 {{- if and .Values.api.enabled .Values.api.pcapStorage.enabled }}

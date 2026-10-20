@@ -1,21 +1,23 @@
 # CNPG backup, recovery and cutover
 
 The chart supports CNPG-I Barman Cloud backups and recovery into a new cluster.
-The main development deployment runs **PostgreSQL 16.14 on CNPG**. The October
-12 cutover at schema172 retained the stopped original StatefulSet and passed
-application continuity checks with a separate restored cluster; see
-[main cutover evidence](#main-development-cutover). Later deployments and schema
-versions are recorded in the [canonical parity plan](NEUVECTOR-PARITY-PLAN.md).
-Local RustFS backup does not establish an off-host recovery target or independent
-failure domains.
+CloudNativePG is the only in-cluster Postgres the chart renders
+(`postgres.mode=cnpg`, the default); `postgres.mode=external` points the
+application at a DSN managed outside the release. The main development
+deployment runs **PostgreSQL 16.14 on CNPG**; the October 12 cutover evidence is
+kept below for the record. Local RustFS backup does not establish an off-host
+recovery target or independent failure domains.
 
 Install a compatible CloudNativePG operator and Barman Cloud plugin separately.
-Create an ObjectStore resource with externally managed credentials, trusted TLS,
-WAL archival and a reviewed retention policy. Pin a CNPG-compatible PG16 image
-containing pgvector, pgcrypto and pg_trgm. Qualify it with the full migration set.
-Treat a PG major upgrade as a separate migration.
+Pin a CNPG-compatible PG16 image containing pgvector, pgcrypto and pg_trgm
+(the chart's default operand image does). Qualify it with the full migration
+set. Treat a PG major upgrade as a separate migration.
 
-Enable backups with these non-secret values:
+There are two ways to provide the archive target:
+
+**Production — externally managed ObjectStore.** Create an `ObjectStore`
+resource with externally managed credentials, trusted TLS, WAL archival and a
+reviewed retention policy, then reference it:
 
 ```yaml
 postgres:
@@ -29,10 +31,36 @@ postgres:
       schedule: "0 0 2 * * *"
 ```
 
+**Development / small installs — chart-rendered object store.** The chart can
+render the whole target itself (this replaces the hand-applied manifests that
+used to live in `deploy/dev/cnpg-rustfs/`): a single-replica RustFS StatefulSet
+on one PVC, a `barmancloud.cnpg.io/v1 ObjectStore` named
+`<release>-object-store-archive` (gzip WAL/data, `retentionPolicy`, SigV4
+region `us-east-1`), random credentials in `<release>-object-store-credentials`
+(re-used on upgrade), and a revision-scoped `aws-cli` Job that creates the
+bucket idempotently. Leave `objectStoreName` empty and the Cluster archives to
+the rendered store:
+
+```yaml
+backup:
+  objectStore:
+    enabled: true          # requires postgres.mode=cnpg
+    storage: 8Gi
+    bucket: constellation-recovery
+    retentionPolicy: 7d
+postgres:
+  cloudnativepg:
+    barmanCloud: { enabled: true }
+    scheduledBackup: { enabled: true, schedule: "0 0 2 * * *" }
+```
+
+With NetworkPolicies enabled the chart also allows the Barman sidecar (in the
+CNPG pods) and the bucket Job to reach the store on 9000, and nothing else.
+
 The chart renders `method: plugin` and the plugin's WAL-archiver configuration.
-It rejects missing ObjectStore names, plugin configuration in another DB mode,
-and simultaneous legacy/native and plugin backup configuration. ObjectStore
-credentials and bucket lifecycle remain owned by the infrastructure operator.
+It rejects a missing ObjectStore name (unless `backup.objectStore` supplies
+one), plugin configuration in another DB mode, `backup.objectStore` outside
+cnpg mode, and simultaneous legacy/native and plugin backup configuration.
 See the [CNPG backup contract](https://cloudnative-pg.io/docs/1.28/backup/).
 
 For recovery, use a new release/cluster identity and empty PVCs:
@@ -57,7 +85,8 @@ recovery path; PostgreSQL backup alone does not capture Kubernetes Secrets.
 Choose a separate archive destination for the restored cluster. Never disable
 CNPG's empty-archive safeguard. See [CNPG recovery](https://cloudnative-pg.io/docs/1.28/recovery/).
 
-Before switching the existing StatefulSet:
+Before moving an existing database (an external Postgres, or a CNPG cluster
+managed outside the release) into a chart-managed CNPG cluster:
 
 1. Record source image digests, migration version, DB extensions, chart values,
    service/Secret identities, row counts and audit head. Keep secrets out of the
@@ -66,29 +95,22 @@ Before switching the existing StatefulSet:
    external decryption/signing material separately under restricted access.
    Verify the dump and independently restore into an isolated PG16/pgvector
    target. Compare counts, audit continuity and credential decryption.
-3. Initialize the new CNPG cluster, import the validated logical backup for the
-   first StatefulSet transition, and test the application's connection as its
-   non-superuser. Plugin physical recovery requires an existing compatible base
-   backup/WAL archive; it cannot consume a plain logical dump directly.
-   Set a distinct `nameOverride` as well as `fullnameOverride` for the parallel
-   database release. The old headless Service selects the chart's application
-   name and PostgreSQL component labels: reusing those pod labels would route
-   source traffic to both databases before cutover. Verify its EndpointSlice
-   still contains only the source pod after the CNPG pod becomes ready.
+3. Initialize the new CNPG cluster, import the validated logical backup, and
+   test the application's connection as its non-superuser. Plugin physical
+   recovery requires an existing compatible base backup/WAL archive; it cannot
+   consume a plain logical dump directly. When the target is rendered by a
+   parallel release in the same namespace, set a distinct `nameOverride` as
+   well as `fullnameOverride` so its pod labels and Services cannot be selected
+   by the live release's policies and DSN.
 4. Freeze application writers for the final transfer, verify a final consistent
-   copy, and change the owning deployment's DSN through reviewed Helm values.
-   Do not perform an in-place mode flip that removes the source StatefulSet
-   before the replacement has passed recovery and application checks. Retain
-   the source PVC and rollback configuration until cutover is accepted.
-   For a separately managed CNPG target, use `postgres.mode: external`, a new
-   `postgres.existingSecret` containing its validated DSN, and
-   `postgres.retainStatefulSetForRollback: true`. The chart keeps the source
-   StatefulSet/Service under Helm ownership at **zero replicas**, preserves its
-   volume claim template and does not regenerate its credentials. Keep the old
-   `embeddedConfig` and credential Secret. The flag is rejected in other modes
-   or without a target Secret. Enable it only after validating the transferred
-   database; it stops the source. Removing it removes the old workload from the
-   release, so retain it until rollback storage can be retired deliberately.
+   copy, and change the owning deployment's DSN through reviewed Helm values:
+   keep the live release on `postgres.mode: external` with a new
+   `postgres.existingSecret` containing the validated target DSN until the
+   replacement has passed recovery and application checks, then flip the live
+   release to `postgres.mode: cnpg` (or keep `external` if the CNPG cluster
+   stays separately managed). Retain the source database and its credentials
+   outside the release until cutover is accepted; the chart no longer keeps a
+   stopped legacy workload around for rollback.
 5. Verify authenticated login, scans, flow ingestion/rollups, policy reads and
    writes, audit append/verification and key-dependent operations. If rollback
    occurs after new writes, reconcile those writes first; pointing back to an
@@ -133,23 +155,26 @@ These commands do not replace the CNPG WAL/PITR recovery procedure above.
 
 ## Local RustFS rehearsal (October 11, 2026)
 
-The user selected local RustFS for initial testing. The non-secret contract is:
+The user selected local RustFS for initial testing. The same contract is now
+rendered by the chart's `backup.objectStore` values (defaults in brackets):
 
 | Setting | Value |
 | --- | --- |
-| Bucket | `constellation-recovery` |
-| ObjectStore | `rustfs-archive` (same namespace as CNPG) |
-| Endpoint | `http://rustfs:9000` inside the isolated test namespace |
-| Signing region | `us-east-1` |
-| Retention / schedule | 7 days; daily at 02:00 UTC, plus immediate first backup |
-| Tested versions | RustFS 1.0.1; CNPG 1.30.1; Barman plugin 0.15.1; cert-manager 1.21.2; PostgreSQL 16.14 with pgvector |
+| Bucket | `backup.objectStore.bucket` (`constellation-recovery`) |
+| ObjectStore | `<release>-object-store-archive` (same namespace as CNPG) |
+| Endpoint | `http://<release>-object-store:9000` inside the namespace |
+| Signing region | `backup.objectStore.region` (`us-east-1`) |
+| Retention / schedule | `backup.objectStore.retentionPolicy` (`7d`); `scheduledBackup.schedule` (`0 0 2 * * *`) plus immediate first backup |
+| Images | `rustfs/rustfs:1.0.3` and `amazon/aws-cli:2.32.6`, both digest-pinned in values.yaml |
+| Tested versions (manual rehearsal) | RustFS 1.0.1; CNPG 1.30.1; Barman plugin 0.15.1; cert-manager 1.21.2; PostgreSQL 16.14 with pgvector |
 
-Credentials are generated randomly into Kubernetes Secrets and a restricted
-temporary evidence directory. There is no public S3 ingress. Source and target
-use different CNPG server prefixes in the same test bucket; recovery never
-reuses the source archive identity. Plain HTTP is confined to this disposable
-local test network. This single-host test does not establish off-host disaster
-recovery, high availability or a production storage policy.
+Credentials are generated randomly into the chart-managed Secret (or supplied
+through `backup.objectStore.credentialsSecret`). There is no public S3 ingress.
+Source and target use different CNPG server prefixes in the same test bucket;
+recovery never reuses the source archive identity. Plain HTTP is confined to
+the cluster network and, with NetworkPolicies, to the CNPG pods and the bucket
+Job. This single-host setup does not establish off-host disaster recovery,
+high availability or a production storage policy.
 
 To reproduce, create an isolated k3d cluster without changing the default
 kubeconfig, install the pinned operators, and import the repository images:
@@ -361,12 +386,14 @@ attempt failed on a verification-script type error before switching connections;
 its recovery path resumed the original writers, and a new dump was taken for the
 successful attempt.
 
-Helm release **19** uses `postgres.mode=external` with the new Secret
-`constellation-cnpg-database-url` and `retainStatefulSetForRollback=true`. The old
-StatefulSet is retained at zero replicas, along with its original PVC and
-credentials. The new cluster uses distinct pod labels, so the old headless
-Service cannot accidentally select it. Do not simply point back at the old data
-after writes reach CNPG; rollback now requires reconciliation.
+Helm release **19** used `postgres.mode=external` with the new Secret
+`constellation-cnpg-database-url` and the (since removed)
+`retainStatefulSetForRollback=true` flag, which kept the old StatefulSet at
+zero replicas along with its original PVC and credentials. That rollback
+scaffold no longer exists in the chart: the embedded StatefulSet mode was
+deleted, so a future cutover retains the source database outside the release
+(step 4 above). Do not simply point back at old data after writes reach CNPG;
+rollback requires reconciliation.
 
 All application roles returned ready. Fresh API and real-browser login passed;
 clusters, scan status, organization settings and registries returned HTTP 200.

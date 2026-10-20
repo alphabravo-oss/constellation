@@ -33,7 +33,12 @@ spec:
           {{- with .Values.discoverer.args }}
           args: {{- toYaml . | nindent 12 }}
           {{- end }}
+          ports:
+            - { containerPort: 9090, name: admin }
+          {{- include "constellation.adminProbes" . | nindent 10 }}
           env:
+            - name: ADMIN_LISTEN_ADDR
+              value: ":9090"
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:

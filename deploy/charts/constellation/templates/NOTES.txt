@@ -33,7 +33,20 @@ the -rw (primary) service. Watch bootstrap with:
 
   kubectl -n {{ .Release.Namespace }} get cluster {{ include "constellation.fullname" . }}-postgres -w
 
-{{- if not (contains "pgvector" (lower .Values.postgres.cloudnativepg.imageName)) }}
+{{- if .Values.backup.objectStore.enabled }}
+
+Backup object store: {{ include "constellation.objectStoreName" . }} (bucket
+"{{ .Values.backup.objectStore.bucket }}", ObjectStore
+"{{ include "constellation.objectStoreArchiveName" . }}"). Single replica in
+this cluster: a convenient WAL archive, NOT off-host disaster recovery.
+{{- if not .Values.postgres.cloudnativepg.barmanCloud.enabled }}
+  NOTE: postgres.cloudnativepg.barmanCloud.enabled=false — nothing archives to
+  it yet. Set barmanCloud.enabled=true and scheduledBackup.enabled=true.
+{{- end }}
+{{- end }}
+{{- /* The chart's own operand build is pgvector-enabled; only warn on a custom
+       imageName that does not advertise pgvector. */ -}}
+{{- if and .Values.postgres.cloudnativepg.imageName (not (contains "pgvector" (lower .Values.postgres.cloudnativepg.imageName))) (not (hasPrefix (printf "%s/postgres" (default "ghcr.io/alphabravo-oss/constellation" .Values.image.registry)) .Values.postgres.cloudnativepg.imageName)) }}
 
 ****************************************************************************
 * WARNING: postgres.cloudnativepg.imageName does not look pgvector-enabled *
@@ -54,6 +67,6 @@ check on the image ref — if your pgvector image simply lacks "pgvector" in its
 name, you can ignore this warning.)
 {{- else }}
 
-pgvector check: imageName contains "pgvector" — OK.
+pgvector check: operand image {{ include "constellation.cnpgImage" . }} — OK.
 {{- end }}
 {{- end }}
