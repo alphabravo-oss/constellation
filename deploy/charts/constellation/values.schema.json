@@ -276,6 +276,11 @@
               "default": true
             }
           }
+        },
+        "registryConfigSecret": {
+          "type": "string",
+          "title": "Registry pull configuration Secret for discovered images",
+          "default": ""
         }
       }
     },

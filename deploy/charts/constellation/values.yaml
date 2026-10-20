@@ -596,6 +596,8 @@ admission:
 # Scanner (image / SBOM scanning worker)
 # ---------------------------------------------------------------------------
 scanner:
+  # Existing pull configuration used by the image already deployed on the live cluster.
+  registryConfigSecret: ""
   # Registry hosts (host[:port]) the scanner reaches over plain HTTP — the air-gap
   # cluster-local registry. Empty = TLS everywhere.
   insecureRegistries: []
