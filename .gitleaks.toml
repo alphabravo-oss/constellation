@@ -1,0 +1,40 @@
+# gitleaks configuration: default rules plus a reviewed allow-list.
+# Reviewed 2026-10-20 (Phase 0 re-alignment). Every entry is either a test fixture, a scan
+# artefact, or a path from the Rancher reference checkout that was committed in 2026-07..09 and
+# has since been removed (history is not rewritten). Re-review when a path below reappears.
+title = "constellation"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Reviewed allow-list"
+paths = [
+  # Our own scanner output and local tooling state.
+  '''^artifacts/''',
+  '''^test-results/''',
+  '''\.playwright-auth/''',
+  # Test fixtures: deliberately fake credentials, keys and tokens.
+  '''_test\.go$''',
+  '''(^|/)testdata/''',
+  '''^tests/''',
+  '''^deploy/e2e/threat-scenarios/[^/]+/captures/''',
+  '''^deploy/dev/registry-release/''',
+  '''^docs/e2e-results\.md$''',
+  # Rancher reference checkout once committed under pkg/ (removed; never Constellation code).
+  '''^pkg/systemtemplate/''',
+  '''^pkg/provisioningv2/''',
+  '''^pkg/capr/''',
+  '''^pkg/catalogv2/''',
+  '''^pkg/cluster/''',
+  '''^pkg/auth/(requests|providers)/''',
+  '''^pkg/controllers/management/''',
+  '''^pkg/oidc/provider/''',
+  '''^\.paperclip-runtime/''',
+]
+regexes = [
+  # localStorage key constants and prose that the generic-api-key rule mistakes for secrets.
+  '''STORAGE_KEY = "constellation''',
+  '''RECENT_KEY = "constellation''',
+  '''runtime-agent-to-API''',
+]
