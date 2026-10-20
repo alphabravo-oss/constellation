@@ -7,11 +7,13 @@ import (
 	"crypto/x509"
 	_ "embed"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // trustedKeyPEM is the vendor bundle-signing public key compiled into every
@@ -118,7 +120,46 @@ func Verify(dir string, pub *ecdsa.PublicKey) (*Manifest, error) {
 			return nil, fmt.Errorf("%w: %s", ErrTampered, f.Path)
 		}
 	}
+	if err := checkLayout(filepath.Join(dir, ImagesDir), m); err != nil {
+		return nil, err
+	}
 	return m, nil
+}
+
+// ErrIncomplete is returned when an image manifest references a blob the
+// layout does not contain (the BOM can only vouch for files that exist).
+var ErrIncomplete = errors.New("bundle: image layout incomplete")
+
+// checkLayout proves every BOM image is in the layout with its manifest,
+// config and layer blobs present.
+func checkLayout(dir string, m *Manifest) error {
+	blob := func(digest string) string {
+		algo, hex, _ := strings.Cut(digest, ":")
+		return filepath.Join(dir, "blobs", algo, hex)
+	}
+	for _, im := range m.Images {
+		raw, err := os.ReadFile(blob(im.Digest))
+		if err != nil {
+			return fmt.Errorf("%w: manifest %s for %s", ErrIncomplete, im.Digest, im.Ref)
+		}
+		var man struct {
+			Config struct{ Digest string }   `json:"config"`
+			Layers []struct{ Digest string } `json:"layers"`
+		}
+		if err := json.Unmarshal(raw, &man); err != nil {
+			return fmt.Errorf("%w: manifest %s: %w", ErrIncomplete, im.Digest, err)
+		}
+		refs := []string{man.Config.Digest}
+		for _, l := range man.Layers {
+			refs = append(refs, l.Digest)
+		}
+		for _, d := range refs {
+			if _, err := os.Stat(blob(d)); err != nil {
+				return fmt.Errorf("%w: %s references missing blob %s", ErrIncomplete, im.Ref, d)
+			}
+		}
+	}
+	return nil
 }
 
 func trimSpace(b []byte) []byte {

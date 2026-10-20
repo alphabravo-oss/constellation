@@ -6,11 +6,13 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/google/go-containerregistry/pkg/name"
@@ -85,6 +87,20 @@ func TestBuildVerifyLoadRoundTripWithLayeredResolver(t *testing.T) {
 		t.Fatalf("tampered payload accepted: %v", err)
 	}
 	_ = os.WriteFile(chartYAML, orig, 0o644)
+	// A layout whose manifest points at a missing blob: rejected even though
+	// every listed file still hashes correctly.
+	victim := filepath.Join(out, ImagesDir, "blobs", "sha256", strings.TrimPrefix(m.Images[0].Digest, "sha256:"))
+	manifestRaw, _ := os.ReadFile(victim)
+	var man struct{ Config struct{ Digest string } }
+	_ = json.Unmarshal(manifestRaw, &man)
+	cfgPath := filepath.Join(out, ImagesDir, "blobs", "sha256", strings.TrimPrefix(man.Config.Digest, "sha256:"))
+	_ = os.Rename(cfgPath, cfgPath+".gone")
+	m2 := *m
+	m2.Files = nil
+	if err := checkLayout(filepath.Join(out, ImagesDir), &m2); !errors.Is(err, ErrIncomplete) {
+		t.Fatalf("missing config blob not detected: %v", err)
+	}
+	_ = os.Rename(cfgPath+".gone", cfgPath)
 	// Unsigned: rejected.
 	_ = os.Rename(filepath.Join(out, SignatureFile), filepath.Join(out, "bom.sig.bak"))
 	if _, err := Load(ctx, LoadOptions{Dir: out, TrustKey: pub, Registry: lo, Insecure: true}); !errors.Is(err, ErrUnsigned) {

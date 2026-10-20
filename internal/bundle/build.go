@@ -16,6 +16,7 @@ import (
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/daemon"
 	"github.com/google/go-containerregistry/pkg/v1/layout"
+	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 	"github.com/google/go-containerregistry/pkg/v1/tarball"
 	"github.com/google/go-containerregistry/pkg/v1/types"
@@ -126,7 +127,19 @@ func copyChart(opts BuildOptions, m *Manifest) error {
 
 func fetch(ctx context.Context, ref name.Reference, fromDaemon bool) (v1.Image, error) {
 	if fromDaemon {
-		return daemon.Image(ref, daemon.WithContext(ctx))
+		img, err := daemon.Image(ref, daemon.WithContext(ctx))
+		if err != nil {
+			return nil, err
+		}
+		// Docker's containerd image store reports a manifest config digest that
+		// differs from the config bytes `docker save` returns, which would leave
+		// the layout pointing at a blob that is never written. Re-serialising the
+		// config makes the manifest, the config blob and its digest agree.
+		cfg, err := img.ConfigFile()
+		if err != nil {
+			return nil, err
+		}
+		return mutate.ConfigFile(img, cfg)
 	}
 	return remote.Image(ref, remote.WithContext(ctx), remote.WithAuthFromKeychain(authn.DefaultKeychain))
 }
