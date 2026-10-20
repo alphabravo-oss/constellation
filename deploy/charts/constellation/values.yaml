@@ -27,7 +27,7 @@ global:
 image:
   registry: ghcr.io/alphabravo-oss/constellation
   pullPolicy: IfNotPresent
-  # Empty -> uses v-prefixed .Chart.appVersion (currently "v0.2.0"). Use immutable
+  # Empty -> uses v-prefixed .Chart.appVersion (currently "v0.3.0"). Use immutable
   # release tags or digest-qualified role overrides in production.
   tag: ""
   # Optional list of imagePullSecrets applied to every Deployment / DaemonSet /
@@ -215,7 +215,7 @@ crypto:
 toolbox:
   image: {}
     # repository: ghcr.io/alphabravo-oss/constellation/toolbox
-    # tag: v0.2.0
+    # tag: v0.3.0
 
 # ---------------------------------------------------------------------------
 # Monitoring (Prometheus Operator). Off by default: the monitoring.coreos.com
@@ -256,7 +256,7 @@ api:
   replicas: 2
   image: {}
     # repository: ghcr.io/alphabravo-oss/constellation/api
-    # tag: v0.2.0
+    # tag: v0.3.0
   args: []
   # Durable packet evidence is opt-in and always uses an operator-owned PVC.
   # Single-replica RWO uses Recreate; multiple replicas require shared RWX.

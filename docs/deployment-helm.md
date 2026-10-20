@@ -68,7 +68,7 @@ When NetworkPolicies are enabled, the chart also permits the documented CNPG
 operator-to-instance traffic on ports 8000 and 5432; change
 `networkPolicies.cnpgOperator` if the operator uses another namespace or label.
 
-Run `make release-check VERSION=v0.2.0` before publishing. After images are
+Run `make release-check VERSION=v0.3.0` before publishing. After images are
 published, run the same command with `VERIFY_PUBLISHED=1`; it fails unless
 every role image has a trusted keyless signature and source-bound SLSA
 provenance.
@@ -699,7 +699,7 @@ production supply an externally managed `ObjectStore` through
 | `ai.enabled`                          | `false`                                              | Enable Abbot GenAI integration                                  |
 | `fips.enabled`                        | `false`                                              | Switch to FIPS-validated base images for every role             |
 
-Release images use `v`-prefixed application versions, such as `api:v0.2.0`.
+Release images use `v`-prefixed application versions, such as `api:v0.3.0`.
 An explicit `image.tag` or per-role tag is used verbatim; per-role digest pins
 still take precedence. The CNPG default is
 `<image.registry>/postgres:16.14-v<Chart.appVersion>` and follows the chart version
@@ -953,3 +953,40 @@ imports straight into the node image store (`image.pullPolicy: Never`). The
 scanner defaults to `--offline-db` (baked DBs; `CONSTELLATION_SCANNER_OFFLINE_DB=false`
 opts into online refresh) and every binary logs one `egress endpoints` line at
 start-up naming every out-of-cluster endpoint it may contact.
+
+### Bundle-signing key
+
+Bundles are signed with the AlphaBravo **vendor bundle-signing key**: ECDSA P-256,
+PKCS#8 PEM, signatures over SHA-256 of `bom.json` (ASN.1 DER, base64), i.e. the
+`cosign sign-blob --key` format. Only the public half is in the source tree
+(`internal/bundle/trust/bundle-signing.pub`, compiled into `constellationctl`).
+
+| | |
+|---|---|
+| Public key | `internal/bundle/trust/bundle-signing.pub` |
+| Fingerprint | SHA-256 of the DER SubjectPublicKeyInfo: `b7ca3ba6fe84afb131c20440589dc8c2fa5431647e11b550d2d8c880a6adad91` (`openssl pkey -pubin -in bundle-signing.pub -outform DER \| sha256sum`) |
+| Private key | never in git; held by the release owner. On the dev install it is Secret `constellation-system/constellation-bundle-signing` (keys `bundle-signing.key`, `bundle-signing.pub`), which the namespace secrets backup (`backup.secrets`) includes, plus an offline copy (mode 600) |
+| Introduced | 0.3.0 (replaces the session-generated development key used during Phase 1) |
+
+Sign: `constellationctl bundle build --sign-key bundle-signing.key ...`.
+Verify against something other than the embedded key: `bundle verify --trust-key old.pub`.
+
+**Rotation** (scheduled yearly, immediately on suspected compromise):
+
+1. Generate the new pair offline:
+   `openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out bundle-signing.key`
+   and `openssl pkey -in bundle-signing.key -pubout -out bundle-signing.pub`.
+2. Replace `internal/bundle/trust/bundle-signing.pub`, update the fingerprint above and
+   note the rotation in `CHANGELOG.md`; cut a release. Bundles signed with the previous key
+   are then rejected by the new `constellationctl` unless an operator passes
+   `--trust-key <previous>.pub` explicitly (keep the previous public key published next to
+   the release notes for one release cycle).
+3. Replace the private key wherever it is held (`kubectl -n constellation-system create
+   secret generic constellation-bundle-signing --from-file=... --dry-run=client -o yaml |
+   kubectl apply -f -`), let the next secrets backup run (or trigger it), then destroy the
+   old private key.
+4. On compromise: also re-sign and re-publish every supported bundle with the new key, and
+   announce the revoked fingerprint.
+
+Moving the private key into cosign KMS/HSM (`cosign sign-blob --key awskms://...`) keeps the
+same verification format; only step 1 and the custody row change.

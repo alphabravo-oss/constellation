@@ -2,7 +2,7 @@
 # Prerequisites: Gateway API/controller, platform-gateway/public with an HTTPS
 # listener for this hostname, cert-manager, CloudNativePG, and Longhorn default.
 image:
-  tag: v0.2.0
+  tag: v0.3.0
 
 clusterRegistration:
   name: astro-const-dev-k3s
@@ -64,7 +64,7 @@ postgres:
   cloudnativepg:
     enabled: true
     instances: 3
-    imageName: ghcr.io/alphabravo-oss/constellation/postgres:16.10-v0.2.0
+    imageName: ghcr.io/alphabravo-oss/constellation/postgres:16.14-v0.3.0
     storage: 50Gi
     storageClass: longhorn
     affinity:

@@ -5,7 +5,7 @@ import { cn } from "@/lib/cn";
 import { BUILD_INFO } from "@/lib/build-info";
 
 /** Footer version: the stamped release, or the package version in dev builds. */
-export const APP_VERSION = BUILD_INFO.version && BUILD_INFO.version !== "dev" ? BUILD_INFO.version : "0.2.0";
+export const APP_VERSION = BUILD_INFO.version && BUILD_INFO.version !== "dev" ? BUILD_INFO.version : "0.3.0";
 
 /** Router-aware link handed to the shared kit (string hrefs, no typed routes). */
 const ConstellationLink = forwardRef<HTMLAnchorElement, ProductLinkProps>(
