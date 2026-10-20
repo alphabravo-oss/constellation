@@ -59,7 +59,9 @@ type LastKnown struct {
 // Counts refer to open critical/high vulnerability findings. CVEs are unique
 // within each severity; occurrences retain asset multiplicity. Unmatched images
 // remain unverified because runtime configuration and manifest digests can differ.
-const countsSQL = `WITH classified AS (
+// Materialize classification once per finding; aggregate FILTERs otherwise repeat
+// JSONB inventory lookups and decompression for every count.
+const countsSQL = `WITH classified AS MATERIALIZED (
  SELECT c.id AS cluster_id,s.observed_at,s.expires_at,f.id AS finding_id,
  COALESCE(NULLIF(f.external_id,''),f.id::text) AS external_id,f.severity,
  CASE WHEN s.expires_at IS NULL OR s.expires_at<=NOW() OR a.cluster_id IS DISTINCT FROM c.id THEN 'unverified'

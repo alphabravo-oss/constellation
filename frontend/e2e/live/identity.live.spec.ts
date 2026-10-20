@@ -74,7 +74,7 @@ function totp(secret: string): string {
 
 test("break-glass signs in with the issuer down and emits an operator alert", async ({ browser, request, baseURL }) => {
   test.skip(!process.env.BREAK_GLASS_PASSWORD || !process.env.IDENTITY_PROOF_KUBE_NAMESPACE, "requires live emergency proof credentials");
-  test.setTimeout(180_000);
+  test.setTimeout(240_000);
   const namespace = process.env.IDENTITY_PROOF_KUBE_NAMESPACE!;
   const deployment = process.env.IDENTITY_PROOF_KUBE_DEPLOYMENT ?? "issuer";
   const context = await browser.newContext({ baseURL, storageState: { cookies: [], origins: [] } });
@@ -104,7 +104,16 @@ test("break-glass signs in with the issuer down and emits an operator alert", as
     }, { timeout: 90_000, intervals: [1000, 2000, 5000] }).toBeGreaterThan(0);
     await page.goto("/settings/identity"); await expect(page.getByText("TOTP required", { exact: true })).toBeVisible();
     const emergencyHeaders={Origin:baseURL!,"X-Constellation-Client":"browser"};
-    const attempt=(password:string,totp:string)=>context.request.post("/api/v1/auth/break-glass",{headers:emergencyHeaders,data:{password,totp}});
+    const attempt=async(password:string,totp:string)=>{
+      const deadline=Date.now()+65_000;
+      for(;;){
+        const response=await context.request.post("/api/v1/auth/break-glass",{headers:emergencyHeaders,data:{password,totp}});
+        const cooldown=Number(response.headers()["retry-after"]);
+        // Honor the public IP limiter while testing the separate database guard.
+        if(response.status()!==429 || cooldown>=300 || !Number.isFinite(cooldown) || Date.now()+cooldown*1000>deadline)return response;
+        await new Promise(resolve=>setTimeout(resolve,Math.max(1,cooldown)*1000+100));
+      }
+    };
     expect((await attempt(process.env.BREAK_GLASS_PASSWORD!,emergencyCode)).status()).toBe(401); // one-use TOTP
     expect((await attempt(process.env.BREAK_GLASS_PASSWORD!,"")).status()).toBe(401); // mandatory TOTP
     expect((await attempt("incorrect-password",emergencyCode)).status()).toBe(401);
