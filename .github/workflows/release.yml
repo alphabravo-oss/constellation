@@ -64,7 +64,7 @@ jobs:
           - { role: bootstrap, dockerfile: deploy/docker/Dockerfile.bootstrap }
           - { role: compliance-scheduler, dockerfile: deploy/docker/Dockerfile.compliance-scheduler }
           - { role: toolbox, dockerfile: deploy/docker/Dockerfile.toolbox }
-          - { role: postgres, dockerfile: deploy/docker/Dockerfile.postgres, tag_prefix: "16.14-" }
+          - { role: postgres, dockerfile: deploy/docker/Dockerfile.postgres, tag_prefix: "16.15-" }
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
@@ -165,7 +165,7 @@ jobs:
         run: printf '%s' "$GH_TOKEN" | helm registry login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
       # The packaged chart is stamped with the full tag (0.3.0-rc.1 for v0.3.0-rc.1)
       # so _helpers.tpl renders exactly the image tags the images job promoted:
-      # <role>:v<appVersion> and postgres:16.14-v<appVersion>.
+      # <role>:v<appVersion> and postgres:16.15-v<appVersion>.
       - name: Package chart at the release tag
         run: |
           version="${GITHUB_REF_NAME#v}"
