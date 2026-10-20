@@ -80,6 +80,11 @@ Phase 1 backend foundations) and the C1 "Triage Desk" UI on the shared AlphaBrav
   age/kubectl/crictl/kube-bench (go-tools) already were. A probe built with the release
   toolchain inside the API image rejects dv-g3b-emudhra and dv-g3b-aaa-emudhra
   (`x509: no valid chains built`); the same probe on go1.27.2 accepts both.
+- CloudNativePG operator 1.30.1 and Barman Cloud plugin/sidecar 0.15.1 (installed outside the
+  chart, previously go1.27.2 builds) are rebuilt from verified upstream tag commits on go1.27.3
+  with reviewed golang.org/x bumps by `deploy/cnpg/build-images.sh`; pinned in
+  `deploy/cnpg/images.env`, roll procedure in docs/cnpg-recovery.md. The superseded
+  `Dockerfile.barman-sidecar` Expat wrapper is removed (the rebuilt sidecar ships expat 2.9.0).
 - Base image digests refreshed on 2026-10-20 (distroless static-debian13 and wolfi-base
   moved; golang 1.27.3-bookworm, debian bookworm/trixie-slim, alpine 3.24, nginx-unprivileged,
   CNPG postgresql 16.14 and kube-bench were already current).
