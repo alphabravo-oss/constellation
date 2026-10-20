@@ -142,11 +142,8 @@ func New(ctx context.Context, cfg Config, tel *telemetry.Telemetry, database *db
 	// a cipher/CA failure leaves fedCA nil — the fed surface then stays on the D1 bearer-only
 	// path rather than failing startup.
 	var fedCA *auth.FedCA
-	// sealer is the install-KEK cipher used to seal at-rest secrets: the fed-CA key, registry creds,
-	// and (H2) the IdP secret fields in auth_servers.config. nil when no KEK is available, in which
-	// case those paths fall back to their pre-seal behavior rather than failing startup.
 	if cipher, cerr := colcrypto.Default(); cerr != nil {
-		tel.Logger.Warn("install KEK cipher unavailable; per-joint mTLS + IdP secret sealing disabled", slog.String("err", cerr.Error()))
+		tel.Logger.Warn("install KEK cipher unavailable; per-joint mTLS wrapping disabled", slog.String("err", cerr.Error()))
 	} else {
 		if ca, lerr := auth.LoadFedCA(ctx, database.Pool(), cipher); lerr != nil {
 			tel.Logger.Warn("federation CA load failed; per-joint mTLS disabled", slog.String("err", lerr.Error()))
