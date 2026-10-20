@@ -8,7 +8,10 @@ import { BenchmarksWorkspace } from "./BenchmarksWorkspace";
 import { ComplianceEvidenceInventory } from "./ComplianceEvidenceInventory";
 import { useEntityClusterScope } from "./entity-detail-scope";
 import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
-import { useInventoryRoute, ScanInventoryExport } from "./inventory-workspace";
+import { useInventoryRoute, useScanInventoryExport } from "./inventory-workspace";
+import { StatusPill } from "@/components/ui/status-pill";
+import { SeverityBadge } from "@/components/ui/severity-badge";
+import type { Severity } from "@/api/client";
 import { Pager } from "@/components/ui/pager";
 import { useRouteSearchParams } from "@/lib/route-search";
 import { LoadingState, ErrorState, EmptyState } from "@/components/ui/states";
@@ -16,7 +19,7 @@ import { PageHeader } from "@/components/ui/page";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { Collapse } from "@/components/ui/collapse";
 import { Button } from "@/components/ui/button";
-import { Field, Select, TextInput } from "@/components/ui/form";
+import { Select, TextInput } from "@/components/ui/form";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { exportQueryReady, useExportGuard } from "@/hooks/useExportGuard";
@@ -84,8 +87,15 @@ export function CompliancePage() {
   }, onSuccess: invalidate });
   const selectFramework = (value: string) => route.update({ framework: value, control_id: null });
   const refreshControls = () => { void checks.refetch(); void summary.refetch(); void fws.refetch(); if (tab === "controls") void exemptions.refetch(); };
+  const controlsToolbar = <>
+    <div className="relative w-full max-w-72"><TextInput id="compliance-search" aria-label="Search control evidence" value={route.query} onChange={event => route.setQuery(event.target.value)} placeholder="Search controls and evidence" className="h-9" /></div>
+    <Select id="compliance-framework" aria-label="Framework" className="h-9 w-48 min-w-0" value={active} onChange={event => selectFramework(event.target.value)}><option value="all">All frameworks</option>{!validFramework && <option value={active}>Reported framework: {active}</option>}{Object.entries(groupBy(frameworks, framework => framework.category)).map(([category, items]) => <optgroup key={category} label={category}>{items!.map(framework => <option key={framework.id} value={framework.id}>{framework.name}</option>)}</optgroup>)}</Select>
+    <Select id="compliance-status" aria-label="Status cohort" className="h-9 w-44 min-w-0" value={status} onChange={event => route.update({ status: event.target.value === "all" ? null : event.target.value })}>{["all", "graded", "ungraded", "pass", "fail", "manual", "not_applicable", "exempted"].map(value => <option key={value} value={value}>{value === "all" ? "All evidence statuses" : value === "graded" ? "Graded: pass or fail" : value.replaceAll("_", " ")}</option>)}</Select>
+  </>;
+  const refreshButton = <Button disabled={checks.isFetching || !validFilters || route.debouncing} onClick={refreshControls}>Refresh</Button>;
+  const matchingExport = useScanInventoryExport({ context, disabled: checks.isFetching || !available, download: shouldDownload => compliance.exportChecksCSV(request, shouldDownload), label: "Matching rows" });
   const checkColumns: Column<ComplianceCheck>[] = [
-    { id: "framework", header: "Framework", kind: "text", wrap: true, size: 200, minSize: 160, sort: () => 0, exportValue: item => item.framework, cell: item => frameworks.find(framework => framework.id === item.framework)?.name || item.framework },
+    { id: "framework", header: "Framework", kind: "text", wrap: true, size: 160, minSize: 136, sort: () => 0, exportValue: item => item.framework, cell: item => frameworks.find(framework => framework.id === item.framework)?.name || item.framework },
     {
       id: "control", sort: () => 0, kind: "id", size: 160, minSize: 128, wrap: true,
       hideable: false, exportValue: (c) => c.control_id,
@@ -136,9 +146,7 @@ export function CompliancePage() {
       cell: (c) => {
         const effectiveStatus = c.effective_status ?? c.status;
         return (
-          <span className={`rounded-md px-1.5 py-0.5 text-xs ${statusClass(effectiveStatus)}`}>
-            {effectiveStatus}
-          </span>
+          <StatusPill label={effectiveStatus} tone={statusTone(effectiveStatus)} />
         );
       },
     },
@@ -146,11 +154,11 @@ export function CompliancePage() {
       id: "severity", sort: () => 0, kind: "badge", size: 112, minSize: 104,
       exportValue: (c) => c.severity,
       header: "Severity",
-      cell: (c) => <span className="text-xs text-muted-foreground">{c.severity}</span>,
+      cell: (c) => ["critical", "high", "medium", "low", "info"].includes(c.severity) ? <SeverityBadge severity={c.severity as Severity} /> : <span className="text-meta text-muted-foreground">{c.severity || "—"}</span>,
     },
-    { id: "evaluated", header: "Evaluated", kind: "date", size: 224, minSize: 208, maxSize: 240, sort: () => 0, cell: item => formatDateTime(item.evaluated_at), exportValue: item => item.evaluated_at },
+    { id: "evaluated", header: "Evaluated", kind: "date", size: 184, minSize: 168, maxSize: 240, sort: () => 0, cell: item => formatDateTime(item.evaluated_at), exportValue: item => item.evaluated_at },
     {
-      id: "action", kind: "actions", size: 136, minSize: 128,
+      id: "action", kind: "actions", size: 112, minSize: 104,
       hideable: false, exportable: false,
       header: "Action",
       cell: (c) => {
@@ -198,12 +206,7 @@ export function CompliancePage() {
       </>}
       <Tabs value={tab} onValueChange={setTab} items={[
         { value: "controls", label: "Controls", content: <div className="space-y-5">
-          <div className="flex flex-wrap items-end gap-3">
-            <Field label="Framework" htmlFor="compliance-framework" className="min-w-56 flex-1"><Select id="compliance-framework" value={active} onChange={event => selectFramework(event.target.value)}><option value="all">All frameworks</option>{!validFramework && <option value={active}>Reported framework: {active}</option>}{Object.entries(groupBy(frameworks, framework => framework.category)).map(([category, items]) => <optgroup key={category} label={category}>{items!.map(framework => <option key={framework.id} value={framework.id}>{framework.name}</option>)}</optgroup>)}</Select></Field>
-            <Field label="Status cohort" htmlFor="compliance-status"><Select id="compliance-status" value={status} onChange={event => route.update({ status: event.target.value === "all" ? null : event.target.value })}>{["all", "graded", "ungraded", "pass", "fail", "manual", "not_applicable", "exempted"].map(value => <option key={value} value={value}>{value === "all" ? "All evidence statuses" : value === "graded" ? "Graded: pass or fail" : value.replaceAll("_", " ")}</option>)}</Select></Field>
-            <Field label="Search control evidence" htmlFor="compliance-search" className="min-w-64 flex-1"><TextInput id="compliance-search" value={route.query} onChange={event => route.setQuery(event.target.value)} placeholder="Framework, control, title or evidence" /></Field>
-            <Button disabled={checks.isFetching || !validFilters || route.debouncing} onClick={refreshControls}>Refresh</Button>
-          </div>
+          {!available && <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2" data-slot="table-toolbar">{controlsToolbar}<span className="ml-auto">{refreshButton}</span></div>}
           {search.get("profile") && <p className="text-sm text-muted-foreground">Profile mapping filter: {search.get("profile")} <Button size="sm" onClick={() => route.update({ profile: null })}>Clear profile</Button></p>}
           {search.get("control_id") && <p className="text-sm text-muted-foreground">Exact control filter: {search.get("control_id")} <Button size="sm" onClick={() => route.update({ control_id: null })}>Clear control</Button></p>}
           {(fws.isError || summary.isError) && <ErrorState title="Framework labels or the source summary could not be refreshed. The control table uses its own scoped source." action={<Button onClick={() => { void fws.refetch(); void summary.refetch(); }}>Retry framework sources</Button>} />}
@@ -211,9 +214,9 @@ export function CompliancePage() {
             {checks.isFetching && <p role="status" className="text-sm text-muted-foreground">Refreshing control evidence…</p>}
             <section className="space-y-4" data-testid="framework-detail">
               <p className="sr-only">{totals!.total.toLocaleString()} evidence rows match the server filters across {active === "all" ? "all reported frameworks" : active}. Metrics cover all matches. Matching CSV covers up to 100,000 rows across pages, independent of visible columns.</p>
-              <ScanInventoryExport context={context} disabled={checks.isFetching} download={shouldDownload => compliance.exportChecksCSV(request, shouldDownload)} />
+              {matchingExport.status}
               {revokeExemption.isError && <p role="alert" className="text-sm text-status-error">Could not revoke this exemption. Refresh the controls and try again.</p>}
-              <DataTable rows={checkRows} columns={checkColumns} rowKey={item => item.id!} preferencesKey="compliance-controls" testId="compliance-controls-table" pagination={false} manualSorting sort={{ id: sort, dir: order as "asc" | "desc" }} onSortChange={next => route.update({ sort: next?.id ?? null, order: next?.dir ?? null })} emptyState={<EmptyState title="No evaluated controls match these filters" hint="This is a filtered evidence cohort, not a claim that the cluster has no compliance checks." />} />
+              <DataTable rows={checkRows} columns={checkColumns} rowKey={item => item.id!} preferencesKey="compliance-controls" testId="compliance-controls-table" toolbar={controlsToolbar} toolbarEnd={refreshButton} exportOptions={[matchingExport.option]} pagination={false} manualSorting sort={{ id: sort, dir: order as "asc" | "desc" }} onSortChange={next => route.update({ sort: next?.id ?? null, order: next?.dir ?? null })} emptyState={<EmptyState title="No evaluated controls match these filters" hint="This is a filtered evidence cohort, not a claim that the cluster has no compliance checks." />} />
               {route.page > 0 && checkRows.length === 0 && <Button onClick={() => route.setPage(0)}>First page</Button>}
               <Pager page={route.page} pageSize={100} rowsOnPage={checkRows.length} total={totals!.total} onPage={route.setPage} />
               <Collapse label="Advanced: status counts and exemption history">
@@ -504,4 +507,8 @@ function groupBy<T>(items: T[], key: (item: T) => string): Record<string, T[]> {
   const out: Record<string, T[]> = {};
   for (const item of items) { const category = key(item); (out[category] ||= []).push(item); }
   return out;
+}
+
+function statusTone(status: string): "success" | "error" | "info" | "warning" | "neutral" {
+  return status === "pass" ? "success" : status === "fail" ? "error" : status === "exempted" ? "info" : status === "manual" ? "warning" : "neutral";
 }

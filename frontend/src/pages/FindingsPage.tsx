@@ -319,18 +319,18 @@ export function FindingsPage() {
     return `${location?.pathname ?? ""}?${next}`;
   };
   const systemTotal = q.isSuccess && !q.isFetching && !q.isPlaceholderData && typeof q.data.system_total === "number" ? q.data.system_total : undefined;
-  const moreFilterCount = [groupMode, idScope, targetType, fixableOnly ? "1" : "", groupBy !== "none" ? groupBy : ""].filter(Boolean).length;
+  const moreFilterCount = [kind, groupMode, idScope, targetType, fixableOnly ? "1" : "", groupBy !== "none" ? groupBy : ""].filter(Boolean).length;
   const exportMatching = () => exportCSV.mutate({ shouldDownload: captureExport(), request: { ...request, q: activeView === "cve" && !allIds ? [serverQuery, "cve:CVE-"].filter(Boolean).join(" ") : request.q, limit: 100000, offset: 0 } });
   const exportOptions = [{ label: "Matching instances", description: "Up to 100,000 matching instances, across all pages", onSelect: exportMatching, disabled: !ready || exportCSV.isPending }];
   const toolbar = (
     <>
       <QueryInput
         value={query}
-        placeholder="Search findings or type a filter (severity:critical, kev:true…)"
+        placeholder="Search or filter (severity:critical)"
         aria-label="Search findings"
         onChange={(e) => setQuery(e.target.value)}
         onClear={() => setQuery("")}
-        className="w-full max-w-md"
+        className="min-w-44 flex-1"
         suggestions={QUERY_HINTS.map((hint) => ({ label: hint.label, value: hint.example }))}
         onSuggestion={(hint) => setQuery((current) => current ? `${current} ${hint.value}` : hint.value)}
       />
@@ -338,9 +338,9 @@ export function FindingsPage() {
         options={[["", "Any severity"], ["critical", "Critical"], ["high", "High"], ["medium", "Medium"], ["low", "Low"], ["info", "Info"]]} />
       <FilterSelect label="Lifecycle" value={lifecycleValue === "all" ? "all" : lifecycle} onChange={(value) => setFilters({ lifecycle: value || "all" })}
         options={[["open", "Open"], ["triaged", "Triaged"], ["in_progress", "In progress"], ["accepted", "Accepted"], ["suppressed", "Suppressed"], ["resolved", "Resolved"], ["all", "Any lifecycle"]]} />
-      <FilterSelect label="Kind" value={kind} onChange={(v) => setFilters({ kind: v, ...(v && v !== "vulnerability" ? { view: "instances" } : {}) })}
-        options={[["", "Any kind"], ["vulnerability", "Vulnerability"], ["iac", "IaC"], ["license", "License"], ["cloud-config", "Cloud config"], ["drift", "Drift"], ["signature", "Signature"], ["ml-model", "ML model"], ["compliance", "Compliance"], ["runtime", "Runtime"]]} />
       <MoreFilters count={moreFilterCount}>
+        <FilterField label="Kind"><FilterSelect label="Kind" value={kind} onChange={(v) => setFilters({ kind: v, ...(v && v !== "vulnerability" ? { view: "instances" } : {}) })}
+        wide options={[["", "Any kind"], ["vulnerability", "Vulnerability"], ["iac", "IaC"], ["license", "License"], ["cloud-config", "Cloud config"], ["drift", "Drift"], ["signature", "Signature"], ["ml-model", "ML model"], ["compliance", "Compliance"], ["runtime", "Runtime"]]} /></FilterField>
         <FilterField label="Strongest group mode"><FilterSelect label="Strongest group mode" value={groupMode} onChange={(value) => setUrlFilter("group_mode", value)} wide options={[["", "Any group mode"], ["discover", "Discover"], ["monitor", "Monitor"], ["protect", "Protect"], ...(!["", "discover", "monitor", "protect"].includes(groupMode) ? [[groupMode, `Invalid mode: ${groupMode}`] as [string, string]] : [])]} /></FilterField>
         <FilterField label="Vulnerability IDs"><FilterSelect label="Vulnerability IDs" value={idScope} onChange={(value) => setUrlFilter("id_scope", value)} wide options={[["", "CVE-only rollups"], ["all", "All non-null IDs"], ...(!["", "all"].includes(idScope) ? [[idScope, `Invalid scope: ${idScope}`] as [string, string]] : [])]} /></FilterField>
         <FilterField label="Target type"><FilterSelect label="Target type" value={targetType} onChange={(value) => setUrlFilter("target_type", value)} wide options={[["", "Any target"], ["image-workload", "Image workload"], ["host", "Host"], ["platform", "Platform"], ["image", "Image"], ["registry", "Registry"], ["repository", "Repository"], ["serverless", "Serverless"], ["workload", "Workload"], ...(!["", "image-workload", "host", "platform", "image", "registry", "repository", "serverless", "workload"].includes(targetType) ? [[targetType, `Invalid target: ${targetType}`] as [string, string]] : [])]} /></FilterField>
@@ -529,7 +529,7 @@ function FilterSelect({
   wide?: boolean;
 }) {
   return (
-    <Select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} className={wide ? "w-full" : "h-9 w-auto min-w-36"}>
+    <Select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} className={wide ? "w-full" : "h-9 w-32 min-w-0"}>
       {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
     </Select>
   );

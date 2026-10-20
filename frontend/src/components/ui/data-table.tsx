@@ -416,7 +416,7 @@ function DataTableView<T>({
     <div className={cn("app-data-table min-w-0 max-w-full overflow-hidden rounded-lg border border-border bg-card", className)} data-testid={testId}>
       {shouldShowToolbar && (
         <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2" data-slot="table-toolbar">
-          {toolbar ? <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">{toolbar}</div> : <div className="flex-1" />}
+          {toolbar ? <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 2xl:flex-nowrap">{toolbar}</div> : <div className="flex-1" />}
           <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
             {toolbarEnd}
             {shouldShowColumnChooser && (

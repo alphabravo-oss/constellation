@@ -57,7 +57,7 @@ it("opens the dashboard graded cross-framework cohort with its exact denominator
 it("reads stable server pages, keeps full totals and exports the same cohort across pages",async()=>{
  vi.mocked(compliance.checks).mockImplementation(async params=>response(params as ComplianceChecksParams,Array.from({length:205},(_,i)=>row(i,i<150?"pass":"fail",i%2?"pci":"cis"))));
  await render("?framework=all&status=graded&page=2");await settle(()=>expect(rows()).toHaveLength(100));expect(host.textContent).toContain("Evidence target 100");expect(host.textContent).not.toContain("Evidence target 0");expect(host.querySelector('[data-testid="compliance-summary"]')!.textContent).toContain("Matching evidence rows205");
- await act(async()=>button("Export matching CSV").click());expect(compliance.exportChecksCSV).toHaveBeenCalledWith(expect.objectContaining({framework:"all",status:"graded",offset:100}), expect.any(Function));await settle(()=>expect(host.textContent).toContain("Exported all 3 matching records across pages"));
+ await act(async()=>button("Matching rows").click());expect(compliance.exportChecksCSV).toHaveBeenCalledWith(expect.objectContaining({framework:"all",status:"graded",offset:100}), expect.any(Function));await settle(()=>expect(host.textContent).toContain("Exported all 3 matching records across pages"));
  await act(async()=>button("Next").click());await settle(()=>expect(rows()).toHaveLength(5));expect(history.location.search).toContain("page=3");
 });
 it("updates filter URL and restores the earlier cohort on Back without losing repeated context or hash",async()=>{
@@ -81,12 +81,12 @@ it("keeps server order and a controlled sorting header synchronized with URL his
 });
 it("retains current successful reads during refresh then withholds failed evidence and export",async()=>{
  await render("?status=graded");await settle(()=>expect(rows()).toHaveLength(3));let reject!:(reason:Error)=>void;vi.mocked(compliance.checks).mockImplementation(()=>new Promise((_resolve,no)=>{reject=no;}));
- let refresh!:Promise<void>;await act(async()=>{refresh=client.invalidateQueries({queryKey:["compliance","checks"]});});await settle(()=>expect(host.textContent).toContain("Refreshing control evidence"));expect(rows()).toHaveLength(3);expect(button("Export matching CSV").disabled).toBe(true);
- await act(async()=>{reject(new Error("private failure"));await refresh;});await settle(()=>expect(host.textContent).toContain("Controls could not be loaded or refreshed"));expect(rows()).toHaveLength(0);expect(host.querySelector('[data-testid="compliance-summary"]')!.textContent).not.toContain("67%");expect(button("Export matching CSV")).toBeUndefined();expect(host.textContent).not.toContain("private failure");expect(host.textContent).not.toContain("No evaluated controls match");
+ let refresh!:Promise<void>;await act(async()=>{refresh=client.invalidateQueries({queryKey:["compliance","checks"]});});await settle(()=>expect(host.textContent).toContain("Refreshing control evidence"));expect(rows()).toHaveLength(3);expect(button("Matching rows").disabled).toBe(true);
+ await act(async()=>{reject(new Error("private failure"));await refresh;});await settle(()=>expect(host.textContent).toContain("Controls could not be loaded or refreshed"));expect(rows()).toHaveLength(0);expect(host.querySelector('[data-testid="compliance-summary"]')!.textContent).not.toContain("67%");expect(button("Matching rows")).toBeUndefined();expect(host.textContent).not.toContain("private failure");expect(host.textContent).not.toContain("No evaluated controls match");
 });
 it.each(["mismatched scope","mismatched filter","duplicated row identity","wrong page"])("withholds %s response instead of accepting evidence",async condition=>{
  vi.mocked(compliance.checks).mockImplementation(async params=>{const data=response(params as ComplianceChecksParams);if(condition==="mismatched scope")data.checks[0].cluster_id="foreign";if(condition==="mismatched filter")data.status="fail";if(condition==="duplicated row identity")data.checks[1].id=data.checks[0].id;if(condition==="wrong page")data.offset=100;return data;});
- await render("?status=graded");await settle(()=>expect(host.textContent).toContain("Controls could not be loaded or refreshed"));expect(rows()).toHaveLength(0);expect(button("Export matching CSV")).toBeUndefined();
+ await render("?status=graded");await settle(()=>expect(host.textContent).toContain("Controls could not be loaded or refreshed"));expect(rows()).toHaveLength(0);expect(button("Matching rows")).toBeUndefined();
 });
 it("clears old scope evidence on cluster change and rejects unresolved cluster reads",async()=>{
  await render("?status=graded");await settle(()=>expect(rows()).toHaveLength(3));scope.id="other";scope.resolved="cluster";await rerender();expect(rows()).toHaveLength(0);expect(compliance.checks).toHaveBeenCalledTimes(1);
