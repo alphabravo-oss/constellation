@@ -114,14 +114,17 @@ fmt-fix: ## Rewrite files with gofmt + goimports
 lint-shell: ## shellcheck every tracked shell script
 	bash scripts/lint-shell.sh
 
-frontend-lint: ## eslint + tsc for the frontend
+frontend-lint: frontend/node_modules/.package-lock.json ## eslint + tsc for the frontend
 	cd frontend && npm run lint && npm run type-check
 
-frontend-test: ## vitest
+frontend-test: frontend/node_modules/.package-lock.json ## vitest
 	cd frontend && npm test --silent
 
-frontend-build: ## Production bundle
-	cd frontend && npm ci && npm run build
+frontend/node_modules/.package-lock.json: frontend/package.json frontend/package-lock.json
+	cd frontend && npm ci --no-audit --no-fund
+
+frontend-build: frontend/node_modules/.package-lock.json ## Production bundle and initial JavaScript budget
+	cd frontend && npm run build
 
 generate: ## Regenerate code (controller-gen deepcopy for the operator CRDs); sqlc/buf join in Phase 2
 	$(GO) generate ./...
