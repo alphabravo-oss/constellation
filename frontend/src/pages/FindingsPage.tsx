@@ -86,7 +86,7 @@ export function FindingsPage() {
   const scopeReady = !!identity?.org_id && !!identity?.user_id && !!clusterId && cluster?.id === clusterId && !clusterLoading && !clusterError;
   const [searchParams, setSearchParams] = useRouteSearchParams();
   const location = useLocation();
-  const locationHash = location.hash;
+  const locationHash = location?.hash ?? "";
   const severity = (["critical", "high", "medium", "low", "info"] as const).find((value) => value === searchParams.get("severity")) ?? "";
   const kind = (["vulnerability", "iac", "license", "cloud-config", "drift", "signature", "ml-model", "compliance", "runtime"] as const).find((value) => value === searchParams.get("kind")) ?? "";
   const groupMode = searchParams.get("group_mode") ?? "";
@@ -316,12 +316,12 @@ export function FindingsPage() {
     const next = new URLSearchParams(searchParams);
     next.set("lifecycle", value);
     next.delete("page");
-    return `${location.pathname}?${next}`;
+    return `${location?.pathname ?? ""}?${next}`;
   };
   const systemTotal = q.isSuccess && !q.isFetching && !q.isPlaceholderData && typeof q.data.system_total === "number" ? q.data.system_total : undefined;
   const moreFilterCount = [groupMode, idScope, targetType, fixableOnly ? "1" : "", groupBy !== "none" ? groupBy : ""].filter(Boolean).length;
   const exportMatching = () => exportCSV.mutate({ shouldDownload: captureExport(), request: { ...request, q: activeView === "cve" && !allIds ? [serverQuery, "cve:CVE-"].filter(Boolean).join(" ") : request.q, limit: 100000, offset: 0 } });
-  const exportOptions = [{ label: "Matching instances", description: "Every page, up to 100,000 instances", onSelect: exportMatching, disabled: !ready || exportCSV.isPending }];
+  const exportOptions = [{ label: "Matching instances", description: "Up to 100,000 matching instances, across all pages", onSelect: exportMatching, disabled: !ready || exportCSV.isPending }];
   const toolbar = (
     <>
       <QueryInput
@@ -351,7 +351,7 @@ export function FindingsPage() {
         </label>
       </MoreFilters>
       <div className="inline-flex h-9 items-center rounded-md border border-border p-0.5" role="group" aria-label="Rows">
-        {([["instances", "Instances"], ["cve", allIds ? "By ID" : "By CVE"]] as Array<["instances" | "cve", string]>).map(([v, l]) => (
+        {([["instances", "Instances"], ["cve", allIds ? "By vulnerability ID" : "By CVE"]] as Array<["instances" | "cve", string]>).map(([v, l]) => (
           <button
             key={v}
             type="button"
@@ -378,8 +378,8 @@ export function FindingsPage() {
   const verdictDetail = (
     <div className="space-y-1.5">
       <p>{activeView === "cve" ? `Rollups are ordered by highest risk across all matching ${idLabel}; the CVE table export contains the rollups on this page.` : "Search and ordering apply to the complete matching inventory; the table export and selections cover this page."}</p>
-      <p data-testid="findings-system-scope">{systemTotal !== undefined ? `${systemTotal.toLocaleString()} Constellation system findings ${includeSystem ? "included" : "hidden"} (header switch: System workloads).` : "Constellation system finding count unavailable."}</p>
-      {groupMode && <p data-testid="findings-mode-scope">Image-workload vulnerabilities linked by image digest to workloads whose strongest configured group mode is {groupMode}. Unmatched workloads are excluded; this describes cached group membership, not applied protection.</p>}
+      <p data-testid="findings-system-scope">{systemTotal !== undefined ? `${systemTotal.toLocaleString()} Constellation findings ${includeSystem ? "included" : "hidden"} by the System workloads switch.` : "Constellation finding count unavailable."}</p>
+      {groupMode && <p data-testid="findings-mode-scope">Image-workload vulnerabilities linked by image digest to workloads whose strongest configured group mode is {groupMode}. Unmatched workloads are excluded; an ID may appear in more than one mode through different workloads. This describes cached group membership, not applied protection.</p>}
       {allIds && <p>All non-null vulnerability IDs, including advisories without a CVE prefix.</p>}
       {activeView === "cve" && fixableOnly && <p>Fixable rollups count all matching instances of an ID with an available fix.</p>}
     </div>
@@ -400,19 +400,19 @@ export function FindingsPage() {
       />
 
       {persistenceError && <ErrorState title={persistenceError} />}
-      <VerdictBanner
+      <div data-testid="finding-state-tabs"><VerdictBanner
         status={activeQ.isError || !scopeReady ? "degraded" : "info"}
         title={ready ? `${total?.toLocaleString()} matching ${activeView === "cve" ? idLabel : "finding instances"}` : "Finding results are updating"}
         numbers={STATE_TABS.map((tab) => ({ label: tab.label, value: lifecycleCount(tab.lifecycle)?.toLocaleString() ?? "—", href: lifecycleHref(tab.lifecycle), tone: tab.lifecycle === lifecycle ? "default" as const : "muted" as const, testId: `finding-state-${tab.lifecycle}` }))}
         detail={verdictDetail}
-      />
+      /></div>
       {chips}
       {exportCSV.isError && exportCSV.variables?.shouldDownload() && <ErrorState title="Could not export matching instances. Try again." />}
       {bulkAction.isError && <ErrorState title="Some selected findings could not be updated. Refresh and review their current states before retrying." />}
       {activeView === "cve" && q.isError && <ErrorState title="Lifecycle counts could not be loaded." action={<Button onClick={() => void q.refetch()}>Retry counts</Button>} />}
-      {!scopeReady ? <ErrorState title="The active cluster could not be resolved. Findings are unavailable until its scope recovers." />
-        : activeView === "instances" && !validInstances ? <ErrorState title="Finding observations could not be identified safely." action={<Button onClick={() => void q.refetch()}>Retry</Button>} /> : activeQ.isError ? <ErrorState title="Could not load findings. Review your query and retry." error={activeQ.error} action={<Button onClick={() => void activeQ.refetch()}>Retry</Button>} />
-        : !ready ? <><div className="rounded-lg border border-border bg-card px-3 py-2"><div className="flex flex-wrap items-center gap-2">{toolbar}</div></div><LoadingState label={activeQ.isPending ? "Loading findings" : "Updating findings"} /></>
+      {!scopeReady ? <><ToolbarRow toolbar={toolbar} exportOptions={exportOptions} /><ErrorState title="The active cluster could not be resolved. Findings are unavailable until its scope recovers." /></>
+        : activeView === "instances" && !validInstances ? <ErrorState title="Finding observations could not be identified safely." action={<Button onClick={() => void q.refetch()}>Retry</Button>} /> : activeQ.isError ? <><ToolbarRow toolbar={toolbar} exportOptions={exportOptions} /><ErrorState title="Could not load findings. Review your query and retry." action={<Button onClick={() => void activeQ.refetch()}>Retry</Button>} /></>
+        : !ready ? <><ToolbarRow toolbar={toolbar} exportOptions={exportOptions} /><LoadingState label={activeQ.isPending ? "Loading findings" : "Updating findings"} /></>
         : outOfRange ? <EmptyState title="This page is outside the current results" hint="The inventory may have changed." action={<Button onClick={() => setPage(0)}>First page</Button>} />
         : <>
           {activeView === "cve" ? <CVETable rows={cveRows} clusterId={clusterId} allIds={allIds} targetType={targetType} toolbar={toolbar} exportOptions={exportOptions} />
@@ -426,8 +426,8 @@ export function FindingsPage() {
                 emptyState={<EmptyState title="No findings match" hint="Adjust your filters or clear the query." icon={<Tag />} action={<Button onClick={() => setFilters({ q: "", kind: "", group_mode: "", id_scope: "", target_type: "", severity: "", lifecycle: "open", fixable: "", page: "" })}>Reset filters</Button>} />}
               />
             : <div className="space-y-3">
-                <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2">{toolbar}<span className="ml-auto"><ExportMenu options={exportOptions} /></span></div>
-                <p className="text-meta text-muted-foreground" data-testid="findings-group-scope">{grouped.length} groups from {rows.length} instances on this page</p>
+                <ToolbarRow toolbar={toolbar} exportOptions={exportOptions} />
+                <p className="text-meta text-muted-foreground" data-testid="findings-group-scope">{grouped.length} groups from {rows.length} instances on this server page</p>
                 {grouped.map((group) => <details key={group.label} open className="rounded-lg border border-border bg-card">
                   <summary className="flex cursor-pointer list-none items-center justify-between gap-2 border-b border-border px-3 py-2"><span className="flex items-center gap-2"><ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /><span className="text-sm font-semibold">{sentenceValue(group.label)}</span><span className="text-meta text-muted-foreground">{group.items.length} on this page</span></span></summary>
                   <DataTable rows={group.items} columns={columns} rowKey={findingRowKey} density={density} onDensityChange={setDensity}
@@ -532,6 +532,16 @@ function FilterSelect({
     <Select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} className={wide ? "w-full" : "h-9 w-auto min-w-36"}>
       {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
     </Select>
+  );
+}
+
+/** The table toolbar outside a table (loading, error and grouped views). */
+function ToolbarRow({ toolbar, exportOptions }: { toolbar: React.ReactNode; exportOptions: ExportOption[] }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2" data-slot="table-toolbar">
+      {toolbar}
+      <span className="ml-auto" data-testid="findings-table-export-menu"><ExportMenu options={exportOptions} /></span>
+    </div>
   );
 }
 
