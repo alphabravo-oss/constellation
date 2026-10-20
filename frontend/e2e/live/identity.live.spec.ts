@@ -84,6 +84,11 @@ test("break-glass signs in with the issuer down and emits an operator alert", as
     const bearer=(await tokenResponse.json()).access_token;
     // First sighting after the issuer is down still uses the last-good JWKS.
     execFileSync("kubectl", ["-n", namespace, "scale", `deployment/${deployment}`, "--replicas=0"]);
+    const fixture = JSON.parse(execFileSync("kubectl", ["-n", namespace, "get", `deployment/${deployment}`, "-o", "json"], { encoding: "utf8" }));
+    const selector = Object.entries(fixture.spec.selector.matchLabels).map(([key,value])=>`${key}=${value}`).join(",");
+    // CNI interface teardown can cancel Chromium requests with ERR_NETWORK_CHANGED.
+    // Finish deleting the fixture pods before submitting a one-use authenticator.
+    execFileSync("kubectl", ["-n", namespace, "wait", "--for=delete", "pod", "-l", selector, "--timeout=60s"]);
     await expect.poll(async () => (await request.get(`${process.env.IDENTITY_PROOF_ROOT}/realms/constellation-proof/.well-known/openid-configuration`)).status(), { timeout: 30_000 }).toBe(503);
     expect((await request.get("/api/v1/auth/me",{headers:{Authorization:`Bearer ${bearer}`}})).status()).toBe(200);
     const page = await context.newPage(); await page.goto("/auth/login");
