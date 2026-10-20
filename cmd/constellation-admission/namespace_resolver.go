@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/informers"
@@ -48,8 +49,12 @@ func newNamespaceLabelResolver(ctx context.Context, kubeconfig string, log *slog
 	// Instantiate the underlying informer before Start so the factory runs it.
 	informer := nsInformer.Informer()
 	factory.Start(ctx.Done())
-	if !cache.WaitForCacheSync(ctx.Done(), informer.HasSynced) {
-		return nil, errors.New("namespace informer cache did not sync")
+	// Bounded: an unreachable API server must not hold the webhook listener (and
+	// its liveness probe) hostage; the resolver is optional and logged as disabled.
+	syncCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	if !cache.WaitForCacheSync(syncCtx.Done(), informer.HasSynced) {
+		return nil, errors.New("namespace informer cache did not sync within 15s")
 	}
 	log.Info("admission namespace label resolver synced")
 	return &namespaceLabelResolver{lister: lister, log: log}, nil

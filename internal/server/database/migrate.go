@@ -122,6 +122,9 @@ func Migrate(ctx context.Context, db *sql.DB, logger *slog.Logger) (Result, erro
 	if err != nil {
 		return res, fmt.Errorf("read schema version: %w", err)
 	}
+	if err := EnsureMetricsGrants(ctx, db); err != nil {
+		return res, err
+	}
 	res.Duration = time.Since(start)
 	logger.Info("database migrated",
 		slog.Int("applied", len(res.Applied)),
@@ -129,6 +132,30 @@ func Migrate(ctx context.Context, db *sql.DB, logger *slog.Logger) (Result, erro
 		slog.Int64("latest", LatestVersion()),
 		slog.Duration("duration", res.Duration))
 	return res, nil
+}
+
+// MetricsRole is the read-only role the chart's metrics.postgresRole creates.
+const MetricsRole = "constellation_metrics"
+
+// EnsureMetricsGrants re-applies the metrics role's read-only grants when the
+// role exists (idempotent; a no-op otherwise). See migration 186.
+func EnsureMetricsGrants(ctx context.Context, db *sql.DB) error {
+	var exists bool
+	if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1)`, MetricsRole).Scan(&exists); err != nil {
+		return fmt.Errorf("metrics role lookup: %w", err)
+	}
+	if !exists {
+		return nil
+	}
+	for _, stmt := range []string{
+		`GRANT USAGE ON SCHEMA public TO ` + MetricsRole,
+		`GRANT SELECT ON component_heartbeats, cve_feed_checkpoints TO ` + MetricsRole,
+	} {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("metrics role grant: %w", err)
+		}
+	}
+	return nil
 }
 
 // MigratePool runs Migrate over an existing pgx pool. Goose speaks

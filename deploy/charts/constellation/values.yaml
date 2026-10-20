@@ -657,7 +657,8 @@ scanner:
   # optionally pointing Trivy at an internal OCI mirror via trivyDBRepository.
   vulnDB:
     refreshInterval: 6h
-    offline: false
+    # Air-gap first (guide ch.08/09): scanners never fetch DBs unless this is false.
+    offline: true
     trivyDBRepository: ""
     trivyJavaDBRepository: ""
   signatures:
