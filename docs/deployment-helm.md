@@ -443,28 +443,47 @@ auditArchiver:
 
 ---
 
-## Astronomer Integration
+## Single sign-on provider (OIDC)
 
-`astronomer.enabled=true` exposes `/api/v1/security/*` routes that validate
-Astronomer-issued JWTs against `astronomer.jwksURL`. Set
-`astronomer.jwtIssuer` and `astronomer.jwtAudience` when the Astronomer token
-contract is known so Constellation rejects tokens signed by the same JWKS for
-other audiences.
-
-Each Astronomer principal must be linked before it can use Constellation:
-`astronomer_identity_map.astronomer_user_id` stores the JWT `sub` value and maps
-it to an existing Constellation `users.id` and `orgs.id`. Unmapped, deleted, or
-disabled users are rejected before RBAC checks run.
+Constellation is a plain OIDC relying party. Configure one provider through Helm:
 
 ```yaml
-astronomer:
-  enabled: true
-  jwksURL: https://astronomer.example/.well-known/jwks.json
-  jwtIssuer: https://astronomer.example
-  jwtAudience: constellation-security
+auth:
+  oidc:
+    enabled: true
+    issuerURL: https://identity.example.com
+    clientID: constellation
+    clientSecretName: constellation-oidc # existing Secret, key client-secret
+    audience: constellation
+    redirectURL: https://constellation.example.com/api/v1/auth/oidc/callback
+    rolesClaim: alphabravo_roles
+    roleMapping:
+      security-admins: SecurityAdmin
+      analysts: Analyst
+    orgName: default
 ```
 
----
+The roles claim accepts a flat string/array, or the platform object
+`{"constellation":["security-admins"]}`. Mapping is exact and grants no default
+role. Other claim names (for example `groups`) work directly against an existing
+external provider. Request the client’s own audience; no cross-project audience
+scopes are required. Configure ID and access token lifetimes to **ten minutes or
+less**, with `iat`, `exp` and a stable `sub`. HTTPS discovery and endpoints are
+mandatory. Settings → Single sign-on displays the configuration and role map;
+secrets remain in Kubernetes Secrets. Changes take effect on the API rollout.
+
+The browser uses authorization code + PKCE and a one-use, cookie-bound nonce/state
+record. It receives an opaque, HttpOnly, Secure host cookie that expires with the
+verified ID token. No local refresh extends the role lifetime. Removing a group
+removes access on the next token, within ten minutes. Logout ends local sessions;
+the provider’s SSO session remains active. `constellationctl login --server …`
+reads an OIDC access token or API token from stdin and validates it before saving
+it to the protected local config file.
+
+This destructive identity cutover requires a CNPG backup first. Migration 187
+drops legacy provider configuration, passwords, policies and refresh sessions.
+Roll the API and frontend together; old API builds cannot use the new schema.
+SSO identities are keyed by issuer + subject and never auto-linked by email.
 
 ## Signed support bundles
 
@@ -692,10 +711,6 @@ production supply an externally managed `ObjectStore` through
 | `auditArchiver.bucket`                | `""`                                                 | Required when audit archiver is enabled                          |
 | `auditArchiver.sign.mode`             | `none`                                               | Set `static-key` or `keyless` to emit signed manifests           |
 | `auditArchiver.sign.keySecretName`    | `""`                                                 | Secret containing the static signing key when `mode=static-key`  |
-| `astronomer.enabled`                  | `false`                                              | Enable `/api/v1/security/*` routes authenticated with Astronomer JWKS |
-| `astronomer.jwksURL`                  | `""`                                                 | Required when `astronomer.enabled=true`                              |
-| `astronomer.jwtIssuer`                | `""`                                                 | Optional required `iss` claim for Astronomer JWTs                    |
-| `astronomer.jwtAudience`              | `""`                                                 | Optional required `aud` claim for Astronomer JWTs                    |
 | `ai.enabled`                          | `false`                                              | Enable Abbot GenAI integration                                  |
 | `fips.enabled`                        | `false`                                              | Switch to FIPS-validated base images for every role             |
 
@@ -899,26 +914,35 @@ grants owned by migration 186) for an optional exporter. With
 `networkPolicies.enabled`, `networkPolicies.monitoring.namespace` is admitted
 to every metrics port.
 
-## Changing the bootstrap admin password
+## Emergency administrator (break-glass)
 
-`bootstrap.admin` mints `<release>-admin-credentials` once and the
-bootstrap-admin Job is idempotent: editing the Secret later does **not**
-change the password stored in the database. Rotate through the API, which
-also revokes the admin's other sessions:
+Disabled by default. Provision an Argon2id hash and a random, base32 TOTP seed of
+at least 20 bytes in an existing Secret with keys `password-hash` and `totp-secret`.
+`constellationctl break-glass-hash` reads the password from stdin and writes the
+PHC hash (64 MiB / three passes / four lanes). Use a password of at least 16 bytes.
+Enroll the seed in an authenticator under your own organization’s label.
 
-```sh
-TOKEN=$(curl -sf -X POST https://constellation.example.com/api/v1/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"admin@constellation.local","password":"<current>"}' | jq -r .token)
-curl -sf -X POST https://constellation.example.com/api/v1/auth/change-password \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"current_password":"<current>","new_password":"<new>"}'
-kubectl -n constellation-system create secret generic constellation-admin-credentials \
-  --from-literal=password='<new>' --dry-run=client -o yaml | kubectl apply -f -   # keep the Secret in step
+```yaml
+auth:
+  breakGlass:
+    enabled: true
+    existingSecret: constellation-break-glass
+    orgName: default
+    sessionTTL: 5m
 ```
 
-`bootstrap.admin.forcePasswordChange=true` makes the UI demand this on first
-login.
+Select **Emergency access** on the sign-in page, enter the password and the
+six-digit authenticator code. Postgres must be available; the OIDC provider need
+not be. Every TOTP step can be used once across all replicas. A global database
+limit permits five attempts per five minutes, in addition to the public IP limit.
+Sessions last at most ten minutes, have no refresh, and are revoked on logout.
+Success and its critical `auth.login.break-glass` audit event commit atomically.
+`constellation_break_glass_logins_total` records outcomes and
+`ConstellationBreakGlassUsed` alerts on successful use (enable
+`api.metrics.prometheusRule.enabled`). Investigate the audit event and rotate the
+Secret after recovery. Disable the chart value and roll the API when emergency
+access is no longer needed. Delete the retired `*-admin-credentials` Secret after
+confirming OIDC and emergency login; it cannot authenticate after migration 187.
 
 ## Pod Security Admission and the k3s host profile
 

@@ -37,3 +37,5 @@ internal/runtime/ebpf/bpf/*.o
 
 # stray go build outputs at the repo root (use make build -> bin/)
 /constellation-*
+
+/frontend/node_modules

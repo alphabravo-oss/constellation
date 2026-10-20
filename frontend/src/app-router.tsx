@@ -34,6 +34,7 @@ const IntegrationsPage    = lazy(() => import("./pages/IntegrationsPage").then((
 const ConnectorCoveragePage = lazy(() => import("./pages/ConnectorCoveragePage").then((m) => ({ default: m.ConnectorCoveragePage })));
 const CoveragePage        = lazy(() => import("./pages/CoveragePage").then((m) => ({ default: m.CoveragePage })));
 const SystemHealthPage    = lazy(() => import("./pages/SystemHealthPage").then((m) => ({ default: m.SystemHealthPage })));
+const IdentitySettingsPage = lazy(() => import("./pages/IdentitySettingsPage").then(m=>({default:m.IdentitySettingsPage})));
 const AccessControlPage   = lazy(() => import("./pages/AccessControlPage").then((m) => ({ default: m.AccessControlPage })));
 const FederationPage      = lazy(() => import("./pages/FederationPage").then((m) => ({ default: m.FederationPage })));
 const FederationPeerFormPage = lazy(() => import("./pages/FederationPeerFormPage").then((m) => ({ default: m.FederationPeerFormPage })));
@@ -45,9 +46,7 @@ const MigrationPage       = lazy(() => import("./pages/MigrationPage").then((m) 
 const RegisterClusterPage = lazy(() => import("./pages/RegisterClusterPage").then((m) => ({ default: m.RegisterClusterPage })));
 const RoleBindingFormPage = lazy(() => import("./pages/access/RoleBindingFormPage").then((m) => ({ default: m.RoleBindingFormPage })));
 const ServiceAccountFormPage = lazy(() => import("./pages/access/ServiceAccountFormPage").then((m) => ({ default: m.ServiceAccountFormPage })));
-const LocalUserFormPage   = lazy(() => import("./pages/access/LocalUserFormPage").then((m) => ({ default: m.LocalUserFormPage })));
 const CustomRoleFormPage  = lazy(() => import("./pages/access/CustomRoleFormPage").then((m) => ({ default: m.CustomRoleFormPage })));
-const AuthProviderFormPage = lazy(() => import("./pages/access/AuthProviderFormPage").then((m) => ({ default: m.AuthProviderFormPage })));
 const ApiTokenCreatePage  = lazy(() => import("./pages/ApiTokenCreatePage").then((m) => ({ default: m.ApiTokenCreatePage })));
 const NvdConfigPage       = lazy(() => import("./pages/NvdConfigPage").then((m) => ({ default: m.NvdConfigPage })));
 const BackupDestinationPage = lazy(() => import("./pages/backup/BackupDestinationPage").then((m) => ({ default: m.BackupDestinationPage })));
@@ -60,7 +59,6 @@ const ReceiverFormPage    = lazy(() => import("./pages/integrations/ReceiverForm
 const AttestationPolicyFormPage = lazy(() => import("./pages/AttestationPolicyFormPage").then((m) => ({ default: m.AttestationPolicyFormPage })));
 const ConnectorFormPage   = lazy(() => import("./pages/connectors/ConnectorFormPage").then((m) => ({ default: m.ConnectorFormPage })));
 const QueueScanPage       = lazy(() => import("./pages/connectors/QueueScanPage").then((m) => ({ default: m.QueueScanPage })));
-const SecurityPolicyPage  = lazy(() => import("./pages/SecurityPolicyPage").then((m) => ({ default: m.SecurityPolicyPage })));
 const NetworkProxyPage    = lazy(() => import("./pages/NetworkProxyPage").then((m) => ({ default: m.NetworkProxyPage })));
 const DataRetentionPage   = lazy(() => import("./pages/DataRetentionPage").then((m) => ({ default: m.DataRetentionPage })));
 const AttestationTrustPage = lazy(() => import("./pages/AttestationTrustPage").then((m) => ({ default: m.AttestationTrustPage })));
@@ -371,6 +369,7 @@ const settings_indexRoute = createRoute({ getParentRoute: () => app_settingsRout
 const settings_system_healthRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "system-health", beforeLoad: aliasRedirect({ to: "/settings/health" }) });
 const settings_tokens_splatRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "tokens/$", beforeLoad: aliasRedirect({ to: "/settings/api-tokens", from: "settings/tokens" }) });
 const settings_attestation_splatRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "attestation/$", beforeLoad: aliasRedirect({ to: "/settings/attestation-trust", from: "settings/attestation" }) });
+const settings_identityRoute=createRoute({getParentRoute:()=>app_settingsRoute,path:"identity",component:()=>(<SuspenseRoute><IdentitySettingsPage /></SuspenseRoute>)});
 const settings_access_control_splatRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "access-control/$", beforeLoad: aliasRedirect({ to: "/settings/access", from: "settings/access-control" }) });
 const settings_notifications_splatRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "notifications/$", beforeLoad: aliasRedirect({ to: "/settings/integrations", from: "settings/notifications" }) });
 const settings_clusters_newRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "clusters/new", component: () => (<SuspenseRoute><RegisterClusterPage /></SuspenseRoute>) });
@@ -378,13 +377,9 @@ const settings_cluster_bundle_rotateRoute = createRoute({ getParentRoute: () => 
 const settings_accessRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "access", component: () => (<SuspenseRoute><AccessControlPage /></SuspenseRoute>) });
 const settings_access_bindings_newRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "access/bindings/new", component: () => (<SuspenseRoute><RoleBindingFormPage /></SuspenseRoute>) });
 const settings_access_service_accounts_newRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "access/service-accounts/new", component: () => (<SuspenseRoute><ServiceAccountFormPage /></SuspenseRoute>) });
-const settings_access_users_newRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "access/users/new", component: () => (<SuspenseRoute><LocalUserFormPage /></SuspenseRoute>) });
 const settings_access_roles_newRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "access/roles/new", component: () => (<SuspenseRoute><CustomRoleFormPage /></SuspenseRoute>) });
-const settings_access_sso_newRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "access/sso/new", component: () => (<SuspenseRoute><AuthProviderFormPage /></SuspenseRoute>) });
-const settings_access_sso_idRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "access/sso/$id", component: () => (<SuspenseRoute><AuthProviderFormPage /></SuspenseRoute>) });
 const settings_api_tokensRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "api-tokens", component: () => (<SuspenseRoute><ApiTokensPage /></SuspenseRoute>) });
 const settings_api_tokens_newRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "api-tokens/new", component: () => (<SuspenseRoute><ApiTokenCreatePage /></SuspenseRoute>) });
-const settings_security_policyRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "security-policy", component: () => (<SuspenseRoute><SecurityPolicyPage /></SuspenseRoute>) });
 const settings_attestation_trustRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "attestation-trust", component: () => (<SuspenseRoute><AttestationTrustPage /></SuspenseRoute>) });
 const settings_attestation_trust_newRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "attestation-trust/new", component: () => (<SuspenseRoute><AttestationPolicyFormPage /></SuspenseRoute>) });
 const settings_attestation_trust_idRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "attestation-trust/$id", component: () => (<SuspenseRoute><AttestationPolicyFormPage /></SuspenseRoute>) });
@@ -612,7 +607,7 @@ authenticatedRoute.addChildren([
   app_tokens_splatRoute,
   app_attestation_trust_splatRoute,
   app_attestation_splatRoute,
-  app_settingsRoute.addChildren([
+  app_settingsRoute.addChildren([settings_identityRoute,
   settings_indexRoute,
   settings_system_healthRoute,
   settings_tokens_splatRoute,
@@ -624,13 +619,9 @@ authenticatedRoute.addChildren([
   settings_accessRoute,
   settings_access_bindings_newRoute,
   settings_access_service_accounts_newRoute,
-  settings_access_users_newRoute,
   settings_access_roles_newRoute,
-  settings_access_sso_newRoute,
-  settings_access_sso_idRoute,
   settings_api_tokensRoute,
   settings_api_tokens_newRoute,
-  settings_security_policyRoute,
   settings_attestation_trustRoute,
   settings_attestation_trust_newRoute,
   settings_attestation_trust_idRoute,

@@ -1,10 +1,10 @@
 import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ArrowRight, Pencil, Plus, Trash2, UserPlus } from "lucide-react";
+import { ArrowRight, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
-import { accessControl, accessControlAdmin, authServersApi, type AccessControlRole, type AccessControlUser, type AccessControlPermissionMatrixRow, type AccessControlAPIToken } from "@/api/client";
+import { accessControl, accessControlAdmin,  type AccessControlRole, type AccessControlUser, type AccessControlPermissionMatrixRow, type AccessControlAPIToken } from "@/api/client";
 import { PageHeader, PageContainer } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
@@ -26,13 +26,13 @@ const userColumns: Column<AccessControlUser>[] = [
       </div>
     ),
   },
-  { id: "auth", header: "Auth", exportValue: (u) => `${u.auth_provider_id}; mfa=${u.mfa_enabled}`, kind: "text", wrap: true, size: 176, minSize: 144, maxSize: 208, cell: (u) => <>{u.auth_provider_id} · {u.mfa_enabled ? "MFA" : "no MFA"}</>, className: "text-xs" },
+  { id: "auth", header: "Auth", exportValue: (u) => u.auth_provider_id, kind: "text", wrap: true, size: 176, minSize: 144, maxSize: 208, cell: (u) => <>{u.auth_provider_id.startsWith("oidc:") ? "Single sign-on" : "Break-glass"}</>, className: "text-xs" },
   {
     id: "roles",
     header: "Roles", exportValue: (u) => u.roles.join("; "), kind: "text", wrap: true, size: 224, minSize: 160, maxSize: 320,
     cell: (u) => <div className="flex flex-wrap gap-1">{u.roles.map((role) => <Badge key={role}>{role}</Badge>)}</div>,
   },
-  { id: "status", header: "Status", exportValue: (u) => [u.status, u.locked ? "locked" : "", u.password_reset_required ? "reset required" : ""].filter(Boolean).join("; "), kind: "status", size: 176, minSize: 144, maxSize: 224, wrap: true, cell: (u) => <div className="flex flex-wrap gap-1"><Status value={u.status} />{u.locked && <Status value="locked" />}{u.password_reset_required && <Status value="reset required" />}</div> },
+  { id: "status",header:"Status",exportValue:u=>u.status,kind:"status",cell:u=><Status value={u.status}/> },
   { id: "last_seen", header: "Last seen", exportValue: (u) => u.last_login_at ?? "", kind: "date", size: 224, minSize: 208, maxSize: 240, cell: (u) => formatDate(u.last_login_at), className: "text-xs text-muted-foreground" },
 ];
 
@@ -81,7 +81,7 @@ const tokenColumns: Column<AccessControlAPIToken>[] = [
       </div>
     ),
   },
-  { id: "status", header: "Status", exportValue: (u) => u.status, kind: "status", size: 176, minSize: 144, maxSize: 224, wrap: true, cell: (token) => <Status value={token.status} /> },
+  { id: "status",header:"Status",exportValue:u=>u.status,kind:"status",cell:u=><Status value={u.status}/> },
   { id: "expires", header: "Expires", exportValue: (t) => t.expires_at ?? "", kind: "date", size: 224, minSize: 208, maxSize: 240, cell: (token) => formatDate(token.expires_at), className: "text-xs text-muted-foreground" },
 ];
 
@@ -92,49 +92,12 @@ export function AccessControlPage() {
   const roles = useMemo(() => q.data?.roles ?? [], [q.data?.roles]);
   const [tab, setTab] = useTabParam("tab", "users");
 
-  const authServersQuery = useQuery({ queryKey: ["auth-servers"], queryFn: () => authServersApi.list() });
-  const authProviders = authServersQuery.isSuccess ? authServersQuery.data : [];
-
   const invalidate = () => qc.invalidateQueries({ queryKey: ["access-control"] });
-  const invalidateAuth = () => qc.invalidateQueries({ queryKey: ["auth-servers"] });
   const deleteBinding = useMutation({
     mutationFn: (id: string) => accessControlAdmin.deleteRoleBinding(id),
     onSuccess: () => { toast.success("Role binding removed"); void invalidate(); },
     onError: () => toast.error("Failed to remove binding"),
   });
-  const deleteProvider = useMutation({
-    mutationFn: (id: string) => authServersApi.delete(id),
-    onSuccess: () => { toast.success("Provider deleted"); void invalidateAuth(); },
-    onError: () => toast.error("Failed to delete provider"),
-  });
-  const unlockUser = useMutation({
-    mutationFn: (id: string) => accessControl.unlockLocalUser(id),
-    onSuccess: () => { toast.success("Local user unlocked"); void invalidate(); },
-    onError: () => toast.error("Failed to unlock local user"),
-  });
-  const forceResetUser = useMutation({
-    mutationFn: (id: string) => accessControl.forceLocalPasswordReset(id),
-    onSuccess: () => { toast.success("Password reset required; active credentials revoked"); void invalidate(); },
-    onError: () => toast.error("Failed to require password reset"),
-  });
-  const localUserColumns: Column<AccessControlUser>[] = [
-    ...userColumns,
-    {
-      id: "recovery",
-      header: "Recovery", exportable: false, kind: "actions", size: 224, minSize: 208, maxSize: 240,
-      cell: (user) => user.local_password ? (
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" size="sm" disabled={!user.locked || unlockUser.isPending || forceResetUser.isPending} onClick={() => {
-            if (window.confirm(`Unlock ${user.email}? This clears the login lockout.`)) unlockUser.mutate(user.id);
-          }}>Unlock</Button>
-          <Button variant="ghost" size="sm" disabled={user.password_reset_required || unlockUser.isPending || forceResetUser.isPending} onClick={() => {
-            if (window.confirm(`Require ${user.email} to reset their password? Active sessions and tokens will be revoked.`)) forceResetUser.mutate(user.id);
-          }}>Require reset</Button>
-        </div>
-      ) : <span className="text-xs text-muted-foreground">No local password</span>,
-    },
-  ];
-
   if (q.isPending) return <p className="text-sm text-muted-foreground">Loading access control...</p>;
   if (q.isError || !q.data) return <PageContainer><PageHeader title="Access control" description="Users, roles and scoped access for your organization." /><VerdictBanner status="degraded" title="Access inventory unavailable" /><ErrorState error={q.error} action={<Button onClick={() => void q.refetch()}>Retry</Button>} /></PageContainer>;
   const data = q.data;
@@ -146,18 +109,9 @@ export function AccessControlPage() {
       count: data?.users?.length,
       content: (
         <div className="space-y-3">
-          <div className="flex justify-end">
-            <button
-              type="button"
-              onClick={() => navigate({ href: "/settings/access/users/new" })}
-              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-brand px-3 text-meta font-medium text-brand-foreground transition-colors hover:bg-brand/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
-            >
-              <UserPlus className="h-3.5 w-3.5" /> New user
-            </button>
-          </div>
           <Card padded={false}>
             <div className="overflow-x-auto" data-testid="access-users">
-              <DataTable preferencesKey="access-users" exportFileName="access-users" rows={data?.users ?? []} columns={localUserColumns} rowKey={(u) => u.id} />
+              <DataTable preferencesKey="access-users" exportFileName="access-users" rows={data?.users ?? []} columns={userColumns} rowKey={(u) => u.id} />
             </div>
           </Card>
         </div>
@@ -228,69 +182,6 @@ export function AccessControlPage() {
             </div>
           </Card>
         </div>
-      ),
-    },
-    {
-      value: "sso",
-      label: "Single sign-on",
-      count: authServersQuery.isSuccess ? authProviders.length : undefined,
-      content: (
-        <Card
-          title="Authentication providers"
-          description="Identity providers (LDAP, SAML, OIDC) that federate sign-in for your organization."
-          action={
-            <Button variant="primary" size="sm" onClick={() => navigate({ href: "/settings/access/sso/new" })}>
-              <Plus className="h-3.5 w-3.5" /> Add provider
-            </Button>
-          }
-        >
-          <div className="space-y-2" data-testid="auth-providers">
-            {authServersQuery.isPending && <p className="text-xs text-muted-foreground">Loading providers…</p>}
-            {authServersQuery.isError && <ErrorState title="Authentication providers unavailable" error={authServersQuery.error} action={<Button onClick={() => void authServersQuery.refetch()}>Retry</Button>} />}
-            {authServersQuery.isSuccess && authProviders.length === 0 && (
-              <p className="text-xs text-muted-foreground">No authentication providers yet. Add one to federate sign-in.</p>
-            )}
-            {authProviders.map((provider) => {
-              const detail =
-                provider.type === "ldap" ? provider.config.url
-                : provider.type === "oidc" ? provider.config.issuer_url
-                : provider.config.entity_id;
-              return (
-                <article key={provider.id} className="flex items-center justify-between gap-2 rounded-lg border border-border p-3">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <div className="truncate text-sm font-medium">{provider.name}</div>
-                      <Badge>{provider.type}</Badge>
-                      <Status value={provider.enabled ? "enabled" : "disabled"} />
-                    </div>
-                    <p className="mt-1 truncate font-mono text-xs text-muted-foreground">{detail || "—"}</p>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label="Edit provider"
-                      onClick={() => navigate({ href: `/settings/access/sso/${provider.id}` })}
-                      className="text-muted-foreground hover:text-foreground"
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      aria-label="Delete provider"
-                      disabled={deleteProvider.isPending}
-                      onClick={() => { if (window.confirm(`Delete ${provider.name}?`)) deleteProvider.mutate(provider.id!); }}
-                      className="text-muted-foreground hover:text-destructive"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        </Card>
       ),
     },
     {

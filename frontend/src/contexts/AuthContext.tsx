@@ -13,7 +13,7 @@ interface Me {
 interface AuthState {
   me: Me | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (password: string, totp: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -50,8 +50,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     identityChannel.current?.postMessage("changed");
   }
 
-  async function login(email: string, password: string) {
-    await auth.login(email, password);
+  async function login(password: string, totp: string) {
+    await auth.login(password, totp);
     await queryClient.cancelQueries();
     queryClient.clear();
     const m = await auth.me();

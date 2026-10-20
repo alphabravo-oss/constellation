@@ -32,10 +32,6 @@ if grep -Eqi 'vulndb|constellation-vulndb' "$rendered"; then
   echo "removed VulnDB subsystem unexpectedly rendered" >&2
   exit 1
 fi
-grep -A2 'name: BOOTSTRAP_FORCE_PASSWORD_CHANGE' "$rendered" | grep -q 'value: "false"'
-helm template constellation "$chart" --kube-version 1.35.0 -f "$profile" \
-  --set bootstrap.admin.forcePasswordChange=true >"$rendered"
-grep -A2 'name: BOOTSTRAP_FORCE_PASSWORD_CHANGE' "$rendered" | grep -q 'value: "true"'
 grep -A12 'app.kubernetes.io/component: network-policy-applier' "$rendered" | grep -q 'port: 5432'
 # HA API replicas must reach the Lease API or none of the leader-only passive
 # workers (including network-flow rollups) will start.

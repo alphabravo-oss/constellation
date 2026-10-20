@@ -1086,45 +1086,6 @@ bootstrap:
   org:
     name: default
     displayName: Default
-  # Wave E (testnode fix): post-install admin-credentials Job.
-  # Mints the initial human admin user so `helm install` yields a
-  # cluster you can immediately log into. Idempotent: re-runs on
-  # `helm upgrade` are no-ops if the org already has local-login users.
-  #
-  # Retrieve the generated password after install with:
-  #   kubectl -n <ns> get secret <release>-admin-credentials \
-  #     -o jsonpath='{.data.password}' | base64 -d
-  admin:
-    enabled: true
-    email: admin@constellation.local
-    displayName: Constellation Admin
-    # Require the generated bootstrap credential to be changed after login.
-    # Keep false unless the client implements the forced-change flow.
-    forcePasswordChange: false
-    # password: ""   # leave empty to auto-generate (recommended)
-
-  # B4: declarative identity providers (LDAP/SAML/OIDC) seeded at install into auth_servers —
-  # Constellation's equivalent of NeuVector's LoadInitCfg *initcfg.yaml ConfigMaps. Leave empty
-  # to manage providers only through the API/UI. Each entry mirrors the /api/v1/auth-servers
-  # body. Rendered into a Secret (carries client_secret / bind_password) the bootstrap-admin Job
-  # mounts. Seeding is idempotent: a provider is inserted only if none of its type exists for the
-  # org yet, so it never clobbers one later edited through the API. Example:
-  #   authProviders:
-  #     - type: oidc
-  #       name: corp-okta
-  #       enabled: true
-  #       auth_order: 100
-  #       config:
-  #         issuer_url: https://corp.okta.com
-  #         client_id: 0oa...
-  #         client_secret: "<secret>"
-  #         redirect_url: https://constellation.example.com/auth/oidc/callback
-  #         scopes: [openid, email, profile]
-  #       role_mapping:
-  #         rules: { "group:platform-admins": GlobalAdmin }
-  #         default: Viewer
-  authProviders: []
-
 # ---------------------------------------------------------------------------
 # Init-bundle consumer (Wave N1)
 # ---------------------------------------------------------------------------
@@ -1190,17 +1151,24 @@ auditArchiver:
   # - name: AWS_ENDPOINT_URL_S3
   #   value: https://s3.us-gov-west-1.amazonaws.com
 
-# ---------------------------------------------------------------------------
-# Astronomer integration (off by default)
-# ---------------------------------------------------------------------------
-astronomer:
-  # Enables /api/v1/security/* routes authenticated with Astronomer-issued
-  # JWTs. jwksURL is required when enabled; jwtIssuer/jwtAudience are optional
-  # hardening constraints for iss/aud validation.
-  enabled: false
-  jwksURL: ""
-  jwtIssuer: ""
-  jwtAudience: ""
+# Human authentication. Secrets are created separately and never rendered in values.
+auth:
+  oidc:
+    enabled: false
+    issuerURL: ""
+    clientID: ""
+    clientSecretName: "" # key: client-secret; empty for a public PKCE client
+    audience: "" # defaults to clientID
+    redirectURL: "" # https://<public-host>/api/v1/auth/oidc/callback
+    rolesClaim: alphabravo_roles
+    roleMapping: {} # exact claim value -> canonical product role; no fallback grant
+    orgName: default
+    scopes: [openid, email, profile]
+  breakGlass:
+    enabled: false
+    existingSecret: "" # required when enabled; keys: password-hash, totp-secret
+    orgName: default
+    sessionTTL: 5m
 
 # ---------------------------------------------------------------------------
 # Abbot GenAI integration (off by default)
