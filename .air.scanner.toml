@@ -1,0 +1,21 @@
+# Air live-reload for constellation-scanner. One file per binary (guide ch.04).
+root = "."
+tmp_dir = "tmp/scanner"
+
+[build]
+  cmd = "go build -trimpath -ldflags=\"-X github.com/alphabravocompany/constellation/pkg/version.Version=dev-air -X github.com/alphabravocompany/constellation/pkg/version.Commit=$(git rev-parse --short HEAD 2>/dev/null || echo dev) -X github.com/alphabravocompany/constellation/pkg/version.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)\" -o tmp/scanner/constellation-scanner ./cmd/constellation-scanner"
+  bin = "tmp/scanner/constellation-scanner"
+  entrypoint = ["env", "CONSTELLATION_DEV_MODE=true", "tmp/scanner/constellation-scanner", "--listen=:18084"]
+  include_ext = ["go", "yaml", "sql"]
+  exclude_dir = ["tmp", "bin", "frontend", "node_modules", "deploy", "docs", "scripts", "third_party", "tests", "artifacts", "test-results", "db/migrations/README.md", "internal/runtime/ebpf/bpf"]
+  exclude_regex = ["_test\\.go$"]
+  delay = 1000
+  stop_on_error = true
+  send_interrupt = true
+  kill_delay = 3000
+
+[log]
+  time = true
+
+[misc]
+  clean_on_exit = false
