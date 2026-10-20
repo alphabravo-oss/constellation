@@ -42,7 +42,7 @@ func TestBaselinesSetModePersistsAcrossHandlers(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, display_name) VALUES ($1, $2, 'Process Baseline Test')`, orgID, "process-baseline-"+orgID.String()); err != nil {
 		t.Fatalf("org: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO users (id, org_id, email, display_name, password_hash) VALUES ($1, $2, $3, 'Test User', 'x')`, userID, orgID, "process-baseline@example.test"); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO users (id, org_id, email, display_name) VALUES ($1, $2, $3, 'Test User')`, userID, orgID, "process-baseline@example.test"); err != nil {
 		t.Fatalf("user: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO clusters (id, org_id, name, distro, state) VALUES ($1, $2, 'baseline-cluster', 'k3s', 'connected')`, clusterID, orgID); err != nil {

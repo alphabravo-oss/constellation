@@ -34,7 +34,7 @@ func TestProcessRulesClusterScopeAndPreconditions(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = ANY($1::uuid[])`, []uuid.UUID{org, foreign})
 	})
-	if _, err := pool.Exec(ctx, `INSERT INTO users(id,org_id,email,display_name,password_hash) VALUES($1,$2,$3,'Rule author','x')`, user, org, user.String()+"@example.test"); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO users(id,org_id,email,display_name) VALUES($1,$2,$3,'Rule author')`, user, org, user.String()+"@example.test"); err != nil {
 		t.Fatal(err)
 	}
 	for _, cluster := range []uuid.UUID{a, b} {
@@ -168,7 +168,7 @@ func TestBaselinesModePreconditionIsAtomic(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id=$1`, org) })
-	if _, err := pool.Exec(ctx, `INSERT INTO users(id,org_id,email,display_name,password_hash) VALUES($1,$2,$3,'Author','x')`, user, org, user.String()+"@example.test"); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO users(id,org_id,email,display_name) VALUES($1,$2,$3,'Author')`, user, org, user.String()+"@example.test"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO clusters(id,org_id,name,distro,state) VALUES($1,$2,'mode-cas','k3s','connected')`, cluster, org); err != nil {

@@ -294,9 +294,8 @@ const baselineSQL = `
 INSERT INTO orgs (name, display_name, region, ai_enabled)
 VALUES ('demo', 'Demo Org', 'us-east-1', FALSE)
 ON CONFLICT (name) DO NOTHING;
-INSERT INTO users (org_id, email, display_name, password_hash)
-SELECT id, 'admin@demo.test', 'Demo Admin',
-  '$argon2id$v=19$m=65536,t=3,p=4$oEB1sGsCdO2qoCMVKzKLqg$O8sGORyt+IXFuQ7Mwt0dQVqa/VVvolCVBvJNJrWXtYg'
+INSERT INTO users (org_id, email, display_name)
+SELECT id, 'admin@demo.test', 'Demo Admin'
 FROM orgs WHERE name = 'demo'
 ON CONFLICT (org_id, email) DO NOTHING;
 INSERT INTO role_assignments (user_id, role, scope_org_id)

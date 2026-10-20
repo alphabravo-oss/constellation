@@ -14,7 +14,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/alphabravocompany/constellation/internal/auth"
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/rbac"
@@ -331,15 +330,11 @@ func (h *AccessControl) loadOverview(r *http.Request, orgID uuid.UUID) (accessCo
 		PermissionMatrix: accessControlPermissionMatrix,
 		Guardrails:       accessControlGuardrails,
 	}
-	lockoutWindow := loginLockoutWindow
-	if policy, _, err := auth.LoadSecurityPolicy(ctx, h.db.Pool(), orgID); err == nil {
-		lockoutWindow = policy.EffectiveLockoutWindow(loginLockoutWindow)
-	}
 
 	// Users from DB.
 	userRows, err := h.db.Pool().Query(ctx, `
-SELECT id, email, display_name, disabled, COALESCE(oidc_issuer, ''), created_at,
-       password_hash IS NOT NULL, block_login_since, must_change_password
+SELECT id, email, display_name, disabled, COALESCE(oidc_issuer, ''), COALESCE(last_login_at,created_at),
+       FALSE, NULL::timestamptz, FALSE
   FROM users WHERE org_id = $1 ORDER BY display_name`, orgID)
 	if err != nil {
 		return out, fmt.Errorf("query users: %w", err)
@@ -362,8 +357,8 @@ SELECT id, email, display_name, disabled, COALESCE(oidc_issuer, ''), created_at,
 		if disabled {
 			status = "suspended"
 		}
-		provider := "local"
-		if oidcIssuer != "" {
+		provider := "break-glass"
+		if oidcIssuer != "" && oidcIssuer != "break-glass" {
 			provider = "oidc:" + oidcIssuer
 		}
 		out.Users = append(out.Users, accessControlUserDTO{
@@ -371,7 +366,7 @@ SELECT id, email, display_name, disabled, COALESCE(oidc_issuer, ''), created_at,
 			AuthProviderID: provider, Roles: []string{},
 			LastLoginAt:           createdAt.UTC().Format(time.RFC3339),
 			LocalPassword:         localPassword,
-			Locked:                blockSince != nil && time.Since(*blockSince) < lockoutWindow,
+			Locked:                false,
 			PasswordResetRequired: resetRequired,
 		})
 	}

@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strings"
 
@@ -12,7 +11,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/alphabravocompany/constellation/internal/auth"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/rbac"
 )
@@ -87,104 +85,6 @@ func callerCanGrantRole(subj Subject, custom map[string][]rbac.Verb, role string
 	return true
 }
 
-// Create provisions a password-authenticated local user in the caller's org with a single
-// org-scoped role and a forced temporary password (must_change_password = TRUE — the admin
-// sets an initial secret and the user is forced through change-password on first login).
-// Org-scoped, privilege-guarded, audited (user.create). POST /users.
-func (h *Users) Create(w http.ResponseWriter, r *http.Request) {
-	if h.db == nil {
-		apiutil.WriteStatus(r.Context(), w, http.StatusServiceUnavailable, "db unavailable")
-		return
-	}
-	subj, ok := SubjectFrom(r.Context())
-	if !ok {
-		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "no subject")
-		return
-	}
-	var body createUserBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid body")
-		return
-	}
-	body.Email = strings.ToLower(strings.TrimSpace(body.Email))
-	body.DisplayName = strings.TrimSpace(body.DisplayName)
-	body.Role = strings.TrimSpace(body.Role)
-	if body.Email == "" || !strings.Contains(body.Email, "@") {
-		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "a valid email is required")
-		return
-	}
-	if body.DisplayName == "" {
-		body.DisplayName = body.Email
-	}
-	if !rbac.IsRole(body.Role) {
-		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid role")
-		return
-	}
-	custom := orgCustomRoleVerbs(r.Context(), h.db.Pool(), subj.OrgID)
-	if !callerCanGrantRole(subj, custom, body.Role) {
-		apiutil.WriteStatus(r.Context(), w, http.StatusForbidden, "cannot grant a role more privileged than your own")
-		return
-	}
-	// Enforce the org's password policy at creation, same profile the change-password path uses.
-	profile := auth.LoadPasswordProfile(r.Context(), h.db.Pool(), subj.OrgID)
-	if err := auth.ValidatePassword(profile, body.Password); err != nil {
-		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
-		return
-	}
-	hash, err := auth.HashPassword(body.Password)
-	if err != nil {
-		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "hash password")
-		return
-	}
-
-	tx, err := h.db.Pool().Begin(r.Context())
-	if err != nil {
-		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "begin")
-		return
-	}
-	defer func() { _ = tx.Rollback(r.Context()) }()
-
-	var id uuid.UUID
-	err = tx.QueryRow(r.Context(), `
-INSERT INTO users (org_id, email, display_name, password_hash, must_change_password)
-VALUES ($1, $2, $3, $4, TRUE)
-ON CONFLICT (org_id, email) DO NOTHING
-RETURNING id`, subj.OrgID, body.Email, body.DisplayName, hash).Scan(&id)
-	if errors.Is(err, pgx.ErrNoRows) {
-		apiutil.WriteStatus(r.Context(), w, http.StatusConflict, "a user with that email already exists")
-		return
-	}
-	if err != nil {
-		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "create user")
-		return
-	}
-	if _, err := tx.Exec(r.Context(), `
-INSERT INTO role_assignments (user_id, role, scope_org_id)
-VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, id, body.Role, subj.OrgID); err != nil {
-		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "grant role")
-		return
-	}
-	if err := tx.Commit(r.Context()); err != nil {
-		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "commit")
-		return
-	}
-	if h.audit != nil {
-		oid, aid := subj.OrgID, subj.UserID
-		_, _, _ = h.audit.Log(r.Context(), audit.Event{
-			OrgID: &oid, ActorID: &aid, Action: "user.create",
-			TargetKind: "user", TargetID: id.String(),
-			After: map[string]any{"email": body.Email, "role": body.Role},
-		})
-	}
-	writeJSON(w, http.StatusCreated, map[string]any{"id": id.String(), "email": body.Email, "role": body.Role})
-}
-
-// Update changes an existing user's email, org-scoped role, and/or active state in the
-// caller's org. A role change replaces the user's org-scoped assignments and bumps
-// session_epoch (stale role set in live JWTs is rejected on next request); deactivating a
-// user runs the same revocation cascade Disable uses. A caller cannot change their own role
-// or active state (self-lockout guard). Org-scoped, privilege-guarded, audited (user.update).
-// PUT /users/{id}.
 func (h *Users) Update(w http.ResponseWriter, r *http.Request) {
 	if h.db == nil {
 		apiutil.WriteStatus(r.Context(), w, http.StatusServiceUnavailable, "db unavailable")

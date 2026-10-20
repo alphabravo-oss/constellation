@@ -349,8 +349,8 @@ VALUES ($1, $2, $3)`, orgID, "scan-object-"+suffix+"-"+orgID.String(), "Scan Obj
 		t.Fatalf("org: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
-INSERT INTO users (id, org_id, email, display_name, password_hash)
-VALUES ($1, $2, $3, 'Test User', 'x')`, userID, orgID, "scan-object-"+suffix+"@example.test"); err != nil {
+INSERT INTO users (id, org_id, email, display_name)
+VALUES ($1, $2, $3, 'Test User')`, userID, orgID, "scan-object-"+suffix+"@example.test"); err != nil {
 		t.Fatalf("user: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `

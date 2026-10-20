@@ -5,21 +5,20 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/alphabravocompany/constellation/internal/auth"
+	"github.com/alphabravocompany/constellation/internal/identity"
 )
 
 func (s *Server) browserCSRF(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.Method == http.MethodGet || request.Method == http.MethodHead || request.Method == http.MethodOptions || request.URL.Path == "/api/v1/auth/saml/acs" {
+		if request.Method == http.MethodGet || request.Method == http.MethodHead || request.Method == http.MethodOptions {
 			next.ServeHTTP(writer, request)
 			return
 		}
-		_, accessErr := request.Cookie(auth.AccessCookie)
-		_, refreshErr := request.Cookie(auth.RefreshCookie)
-		cookieAuth := request.Header.Get("Authorization") == "" && (accessErr == nil || refreshErr == nil)
-		browserLogin := auth.BrowserRequest(request) && (request.URL.Path == "/api/v1/auth/login" || request.URL.Path == "/api/v1/auth/ldap/login")
-		if cookieAuth || browserLogin || request.URL.Path == "/api/v1/auth/refresh" {
-			if request.Header.Get(auth.BrowserHeader) != "browser" || !s.browserOriginAllowed(request) {
+		_, accessErr := request.Cookie(identity.AccessCookie)
+		cookieAuth := request.Header.Get("Authorization") == "" && accessErr == nil
+		browserLogin := request.URL.Path == "/api/v1/auth/break-glass"
+		if cookieAuth || browserLogin {
+			if request.Header.Get(identity.BrowserHeader) != "browser" || !s.browserOriginAllowed(request) {
 				writeError(writer, http.StatusForbidden, "browser request origin rejected")
 				return
 			}

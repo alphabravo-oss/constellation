@@ -165,3 +165,10 @@ func TestPartitionStatisticsRespectsCancellation(t *testing.T) {
 		t.Fatalf("canceled refresh: result=%+v err=%v", result, err)
 	}
 }
+
+func execSessionSQL(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) {
+	t.Helper()
+	if _, err := pool.Exec(t.Context(), sql, args...); err != nil {
+		t.Fatal(err)
+	}
+}

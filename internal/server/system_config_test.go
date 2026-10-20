@@ -21,7 +21,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/alphabravocompany/constellation/internal/auth"
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/telemetry"
 )
@@ -29,7 +28,7 @@ import (
 // newSysConfigTestServer boots a Server (keeping the *Server handle so the test can
 // assert the in-process accessor) plus an httptest server, a GlobalAdmin user, and an
 // Auditor user (no VerbManageSystemConfig). Skips when the test DB is unreachable.
-func newSysConfigTestServer(t *testing.T) (*Server, *httptest.Server, *pgxpool.Pool, *auth.Signer, uuid.UUID, uuid.UUID, uuid.UUID) {
+func newSysConfigTestServer(t *testing.T) (*Server, *httptest.Server, *pgxpool.Pool, *testSessionIssuer, uuid.UUID, uuid.UUID, uuid.UUID) {
 	t.Helper()
 	t.Setenv("CONSTELLATION_ALLOW_HS256_JWT", "true")
 	ctx := context.Background()
@@ -101,20 +100,13 @@ VALUES ($1, $2, $3, $4, 0)`, u.id, orgID, u.role+"-"+u.id.String()+"@example.tes
 	cfg := Config{
 		ListenAddr:  ":0",
 		DatabaseURL: url,
-		JWTKeys:     [][]byte{[]byte("0123456789abcdef0123456789abcdef")},
-		JWTIssuer:   "constellation-test",
-		JWTAudience: "constellation-api",
-		JWTTTL:      time.Hour,
 		CORSOrigins: []string{"http://localhost:5173"},
 	}
 	srv, err := New(ctx, cfg, tel, dbHandle)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	signer, err := auth.NewSigner(cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTTTL, cfg.JWTKeys...)
-	if err != nil {
-		t.Fatalf("signer: %v", err)
-	}
+	signer := &testSessionIssuer{pool: pool}
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return srv, ts, pool, signer, adminID, auditorID, orgID

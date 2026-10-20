@@ -44,7 +44,7 @@ func newBackupSigningFixture(t *testing.T) backupSigningFixture {
 			t.Error(err)
 		}
 	})
-	if _, err := database.Pool().Exec(t.Context(), `INSERT INTO users(id,org_id,email,display_name,password_hash) VALUES($1,$2,$3,'signing operator','test-only')`, f.user, f.org, "signing-"+f.user.String()+"@example.test"); err != nil {
+	if _, err := database.Pool().Exec(t.Context(), `INSERT INTO users(id,org_id,email,display_name) VALUES($1,$2,$3,'signing operator')`, f.user, f.org, "signing-"+f.user.String()+"@example.test"); err != nil {
 		t.Fatal(err)
 	}
 	return f

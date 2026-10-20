@@ -26,7 +26,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/alphabravocompany/constellation/internal/api/apiutil"
-	"github.com/alphabravocompany/constellation/internal/astronomer"
 	"github.com/alphabravocompany/constellation/internal/auth"
 	colcrypto "github.com/alphabravocompany/constellation/internal/crypto"
 	"github.com/alphabravocompany/constellation/internal/db"
@@ -40,6 +39,7 @@ import (
 	"github.com/alphabravocompany/constellation/internal/handler/policy"
 	"github.com/alphabravocompany/constellation/internal/handler/runtime"
 	"github.com/alphabravocompany/constellation/internal/handler/scanning"
+	"github.com/alphabravocompany/constellation/internal/identity"
 	"github.com/alphabravocompany/constellation/internal/lifecycle"
 	"github.com/alphabravocompany/constellation/internal/logging"
 	"github.com/alphabravocompany/constellation/internal/syscfg"
@@ -64,26 +64,17 @@ type Config struct {
 	// EnablePprof mounts net/http/pprof on the admin listener.
 	EnablePprof bool
 	DatabaseURL string
-	JWTKeys     [][]byte // active key in [0]; older keys still accepted
-	JWTIssuer   string
-	JWTAudience string
-	JWTTTL      time.Duration
 	// SessionIdleTimeout is the inactivity window (A7). A JWT session whose
 	// last authenticated request is older than this is rejected even though the
 	// JWT itself is unexpired (it sits inside the absolute JWTTTL). Zero disables
 	// idle expiry, leaving only the absolute TTL.
-	SessionIdleTimeout time.Duration
 	// PATMaxLifetime caps how far in the future a minted PAT's expires_at may be,
 	// and forbids unbounded (never-expiring) PATs (A7). Zero disables the cap
 	// (back-compat: any expiry, including none, is accepted).
 	PATMaxLifetime       time.Duration
-	OIDC                 *auth.OIDCConfig // nil to disable OIDC login
-	SAML                 *auth.SAMLConfig // nil to disable SAML login
-	LDAP                 *auth.LDAPConfig // nil to disable LDAP login
+	BreakGlass           identity.BreakGlassConfig
+	OIDC                 *identity.OIDCConfig // nil to disable OIDC login
 	CORSOrigins          []string
-	AstronomerJWKSURL    string // empty to disable Astronomer adapter
-	AstronomerIssuer     string // optional iss claim required for Astronomer JWTs
-	AstronomerAudience   string // optional aud claim required for Astronomer JWTs
 	VulnDBReadyRequired  bool
 	VulnDBReadyMaxAge    time.Duration
 	VulnDBRescanInterval time.Duration
@@ -102,7 +93,6 @@ type Server struct {
 	tel      *telemetry.Telemetry
 	db       *db.DB
 	auditLog *audit.Logger
-	signer   *auth.Signer
 	// fedSigner signs/verifies federation join tokens + per-cluster sync tickets (D1). It
 	// is loaded from the dedicated fed_signing_keys table (auto-generated on first boot)
 	// so federation trust is isolated from user-session signing. nil only if the key load
@@ -112,18 +102,9 @@ type Server struct {
 	// anchors mTLS verification on /sync. Loaded (or first-boot generated) from fed_ca with
 	// its private key encrypted under the install KEK. nil when no KEK/cipher is available;
 	// the fed surface then stays on the D1 bearer-only path.
-	fedCA *auth.FedCA
-	// dbBackedSessionKeys is true when the session signer was loaded from the
-	// session_signing_keys table (no operator JWT_KEYS). Only then does Run start
-	// the A5 rotation poller that hot-reloads the signer after --rotate-jwt-key.
-	dbBackedSessionKeys bool
-	oidc                *auth.OIDCClient
-	saml                *auth.SAMLProvider
-	ldap                *auth.LDAPProvider
-	dispatcher          *notify.Dispatcher
-	router              chi.Router
-	astronomerJWT       *astronomer.Validator
-	astronomerMap       *astronomer.Mapper
+	fedCA      *auth.FedCA
+	dispatcher *notify.Dispatcher
+	router     chi.Router
 	// live is the optional in-memory conversation-graph cache + SSE fan-out
 	// (plan B5). nil unless CONSTELLATION_LIVEGRAPH is enabled; when nil every
 	// consumer degrades to the durable Postgres path (default behavior).
@@ -134,22 +115,11 @@ type Server struct {
 	// writes through it and the consumers (shared outbound HTTP client + syslog/SIEM
 	// sender) read the live config from it; a background reloader polls each org's
 	// revision so a PATCH propagates to every replica without a restart.
-	syscfg *syscfg.Provider
-	// authProviders is the B4 DB-backed, hot-reloadable auth-provider (IdP) set the login
-	// handler reads the live LDAP/SAML/OIDC providers through. It is seeded from the env-wired
-	// providers on first boot, then owned by the auth_servers rows; a background reloader polls
-	// the max revision so a CRUD change rebuilds the live verifier set without a restart.
-	authProviders *auth.ProviderSet
-	// bootstrapOrgID is the org whose auth_servers rows drive the process-wide provider set
-	// (the auth endpoints are anonymous, so the provider set is single-instance per process,
-	// matching the historical env-wired model). Defaults to the first org at boot.
-	bootstrapOrgID uuid.UUID
-	// sealer is the install-KEK cipher (H2) the auth-server CRUD handler seals IdP secret fields
-	// with before persisting them to auth_servers.config. nil when no KEK is available.
-	sealer                auth.Sealer
-	supportBundleJobs     *handler.SupportBundleJobs
+	syscfg                *syscfg.Provider
+	identity              *identity.Service
 	sessionCleanupMetrics *lifecycle.Metrics
 	partitionStatsMetrics *lifecycle.StatisticsMetrics
+	supportBundleJobs     *handler.SupportBundleJobs
 }
 
 // New constructs the server. Caller must Run() and Shutdown().
@@ -157,25 +127,7 @@ func New(ctx context.Context, cfg Config, tel *telemetry.Telemetry, database *db
 	if err := database.RequireSchema(ctx); err != nil {
 		return nil, err
 	}
-	// A5: session JWTs are signed RS256 by default. When no JWT_KEYS env secret is
-	// provided we load (or first-boot generate + persist) a shared RSA keypair from the
-	// session_signing_keys table so every replica signs with the same key and a rotation
-	// keeps prior tokens valid until they expire. An explicit JWTKeys (env-provided HS256
-	// secret or PEM key) still wins, preserving the operator-supplied-key path.
-	keys := cfg.JWTKeys
-	dbBackedSessionKeys := false
-	if len(keys) == 0 {
-		loaded, err := auth.LoadSessionKeysPEM(ctx, database.Pool())
-		if err != nil {
-			return nil, err
-		}
-		keys = loaded
-		dbBackedSessionKeys = true
-	}
-	signer, err := auth.NewSigner(cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTTTL, keys...)
-	if err != nil {
-		return nil, err
-	}
+	var err error
 	// D1: load (or first-boot generate) the dedicated federation signing keypair so the
 	// master can mint signed join tokens / per-cluster sync tickets without any operator
 	// secret, and every replica shares one fed identity. Best-effort: a load failure
@@ -197,51 +149,15 @@ func New(ctx context.Context, cfg Config, tel *telemetry.Telemetry, database *db
 	// sealer is the install-KEK cipher used to seal at-rest secrets: the fed-CA key, registry creds,
 	// and (H2) the IdP secret fields in auth_servers.config. nil when no KEK is available, in which
 	// case those paths fall back to their pre-seal behavior rather than failing startup.
-	var sealer auth.Sealer
 	if cipher, cerr := colcrypto.Default(); cerr != nil {
 		tel.Logger.Warn("install KEK cipher unavailable; per-joint mTLS + IdP secret sealing disabled", slog.String("err", cerr.Error()))
 	} else {
-		sealer = cipher
 		if ca, lerr := auth.LoadFedCA(ctx, database.Pool(), cipher); lerr != nil {
 			tel.Logger.Warn("federation CA load failed; per-joint mTLS disabled", slog.String("err", lerr.Error()))
 		} else {
 			fedCA = ca
 		}
 	}
-	var oidcClient *auth.OIDCClient
-	if cfg.OIDC != nil {
-		c, err := auth.NewOIDCClient(ctx, *cfg.OIDC)
-		if err != nil {
-			tel.Logger.Warn("OIDC discovery failed; OIDC login disabled", slog.String("err", err.Error()))
-		} else {
-			oidcClient = c
-		}
-	}
-	// Per-deployment SAML/LDAP, mirroring OIDC: build the provider once, warn-and-disable on
-	// misconfig rather than failing startup.
-	var samlProvider *auth.SAMLProvider
-	if cfg.SAML != nil {
-		p, err := auth.NewSAMLProvider(*cfg.SAML)
-		if err != nil {
-			tel.Logger.Warn("SAML setup failed; SAML login disabled", slog.String("err", err.Error()))
-		} else {
-			samlProvider = p
-		}
-	}
-	var ldapProvider *auth.LDAPProvider
-	if cfg.LDAP != nil {
-		p, err := auth.NewLDAPProvider(*cfg.LDAP)
-		if err != nil {
-			tel.Logger.Warn("LDAP setup failed; LDAP login disabled", slog.String("err", err.Error()))
-		} else {
-			ldapProvider = p
-		}
-	}
-	// B4: the auth-provider set starts as the env-wired providers (so behavior is unchanged
-	// before the first DB reload), then a first-boot seed writes them into auth_servers and the
-	// background reloader makes the DB rows the source of truth — runtime IdP CRUD takes effect
-	// without a restart.
-	authProviders := auth.NewStaticProviderSet(oidcClient, samlProvider, ldapProvider, sealer)
 	// B1: the system-config accessor is built here so the dispatcher's syslog/SIEM
 	// mirror reads the LIVE target (consumer b) through the same Provider the HTTP
 	// handler writes to.
@@ -252,19 +168,6 @@ func New(ctx context.Context, cfg Config, tel *telemetry.Telemetry, database *db
 		SMTPServer:   sysCfgProvider.SMTPSender,
 	})
 	dispatcher.Start(ctx)
-	var astronomerJWT *astronomer.Validator
-	var astronomerMap *astronomer.Mapper
-	if strings.TrimSpace(cfg.AstronomerJWKSURL) != "" {
-		opts := []astronomer.ValidatorOption{}
-		if cfg.AstronomerIssuer != "" {
-			opts = append(opts, astronomer.WithIssuer(cfg.AstronomerIssuer))
-		}
-		if cfg.AstronomerAudience != "" {
-			opts = append(opts, astronomer.WithAudience(cfg.AstronomerAudience))
-		}
-		astronomerJWT = astronomer.NewValidator(cfg.AstronomerJWKSURL, opts...)
-		astronomerMap = astronomer.NewMapper(database.Pool())
-	}
 	// Plan B5: opt-in in-memory conversation graph + StreamFlows SSE. Off by
 	// default so the durable Postgres path stays the only behavior unless a
 	// deployment sets CONSTELLATION_LIVEGRAPH=1 (TTL overridable for tuning).
@@ -274,26 +177,17 @@ func New(ctx context.Context, cfg Config, tel *telemetry.Telemetry, database *db
 		tel.Logger.Info("livegraph enabled (in-memory conversation graph + StreamFlows SSE)")
 	}
 	s := &Server{
-		cfg:                 cfg,
-		tel:                 tel,
-		log:                 tel.Log,
-		db:                  database,
-		auditLog:            audit.New(database.Pool()),
-		signer:              signer,
-		fedSigner:           fedSigner,
-		fedCA:               fedCA,
-		dbBackedSessionKeys: dbBackedSessionKeys,
-		oidc:                oidcClient,
-		saml:                samlProvider,
-		ldap:                ldapProvider,
-		dispatcher:          dispatcher,
-		astronomerJWT:       astronomerJWT,
-		astronomerMap:       astronomerMap,
-		live:                liveStore,
-		customRoles:         handler.NewCustomRoles(database.Pool()),
-		syscfg:              sysCfgProvider,
-		authProviders:       authProviders,
-		sealer:              sealer,
+		cfg:         cfg,
+		tel:         tel,
+		log:         tel.Log,
+		db:          database,
+		auditLog:    audit.New(database.Pool()),
+		fedSigner:   fedSigner,
+		fedCA:       fedCA,
+		dispatcher:  dispatcher,
+		live:        liveStore,
+		customRoles: handler.NewCustomRoles(database.Pool()),
+		syscfg:      sysCfgProvider,
 	}
 	s.sessionCleanupMetrics, err = lifecycle.NewMetrics(tel.Registry)
 	if err != nil {
@@ -311,91 +205,15 @@ func New(ctx context.Context, cfg Config, tel *telemetry.Telemetry, database *db
 	if err := seedSystemConfig(ctx, database.Pool(), s.syscfg, tel); err != nil {
 		tel.Logger.Warn("system config seed failed", slog.String("err", err.Error()))
 	}
-	// B4: pick the bootstrap org, seed the env-wired IdPs into auth_servers on first boot
-	// (idempotent — a row of a type already present wins), then load the live provider set
-	// from the DB so the rows are the source of truth. Best-effort: a failure leaves the
-	// env-wired static set in place.
-	if id, ok := firstOrgID(ctx, database.Pool()); ok {
-		s.bootstrapOrgID = id
-		seedAuthServers(ctx, database.Pool(), id, cfg, sealer, tel)
-		if errs := s.authProviders.Reload(ctx, database.Pool(), id); len(errs) > 0 {
-			for _, e := range errs {
-				tel.Logger.Warn("auth provider build (seed reload)", slog.String("err", e.Error()))
-			}
-		}
+	var identityErr error
+	s.identity, identityErr = identity.New(ctx, identity.Store{Pool: database.Pool()}, cfg.OIDC, cfg.BreakGlass, s.auditLog, tel.Registry)
+	if identityErr != nil {
+		return nil, identityErr
 	}
 	s.router = s.buildRouter()
 	return s, nil
 }
 
-// firstOrgID returns the lowest-created org's id (the bootstrap org whose auth_servers rows drive
-// the process-wide provider set). Returns false when no org exists yet.
-func firstOrgID(ctx context.Context, pool *pgxpool.Pool) (uuid.UUID, bool) {
-	var id uuid.UUID
-	err := pool.QueryRow(ctx, `SELECT id FROM orgs ORDER BY created_at, id LIMIT 1`).Scan(&id)
-	if err != nil {
-		return uuid.Nil, false
-	}
-	return id, true
-}
-
-// seedAuthServers writes the env/Helm-wired LDAP/SAML/OIDC providers into auth_servers as
-// bootstrap rows for org if no row of that type exists yet (so the DB then owns them). Best-effort:
-// a seed error is logged, not fatal — the static provider set stays in effect until a row exists.
-func seedAuthServers(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, cfg Config, sealer auth.Sealer, tel *telemetry.Telemetry) {
-	var seeds []auth.AuthServer
-	if cfg.OIDC != nil {
-		seeds = append(seeds, auth.AuthServer{
-			OrgID: orgID, Type: auth.ServerTypeOIDC, Name: "oidc (bootstrap)", Enabled: true, AuthOrder: 100,
-			Config: auth.ServerConfig{
-				IssuerURL:    cfg.OIDC.IssuerURL,
-				ClientID:     cfg.OIDC.ClientID,
-				ClientSecret: cfg.OIDC.ClientSecret,
-				RedirectURL:  cfg.OIDC.RedirectURL,
-				Scopes:       cfg.OIDC.Scopes,
-			},
-		})
-	}
-	if cfg.SAML != nil {
-		seeds = append(seeds, auth.AuthServer{
-			OrgID: orgID, Type: auth.ServerTypeSAML, Name: "saml (bootstrap)", Enabled: true, AuthOrder: 100,
-			Config: auth.ServerConfig{
-				IdPMetadataXML: string(cfg.SAML.IdPMetadataXML),
-				EntityID:       cfg.SAML.EntityID,
-				ACSURL:         cfg.SAML.ACSURL,
-				SPCertPEM:      string(cfg.SAML.SPCertPEM),
-				SPKeyPEM:       string(cfg.SAML.SPKeyPEM),
-				GroupAttribute: cfg.SAML.GroupAttribute,
-				EmailAttribute: cfg.SAML.EmailAttribute,
-			},
-			RoleMapping: cfg.SAML.RoleMapping,
-		})
-	}
-	if cfg.LDAP != nil {
-		seeds = append(seeds, auth.AuthServer{
-			OrgID: orgID, Type: auth.ServerTypeLDAP, Name: "ldap (bootstrap)", Enabled: true, AuthOrder: 100,
-			Config: auth.ServerConfig{
-				URL:            cfg.LDAP.URL,
-				BindDN:         cfg.LDAP.BindDN,
-				BindPassword:   cfg.LDAP.BindPassword,
-				BaseDN:         cfg.LDAP.BaseDN,
-				UserFilter:     cfg.LDAP.UserFilter,
-				GroupAttribute: cfg.LDAP.GroupAttribute,
-				EmailAttribute: cfg.LDAP.EmailAttribute,
-			},
-			RoleMapping: cfg.LDAP.RoleMapping,
-		})
-	}
-	for _, srv := range seeds {
-		if _, err := auth.SeedAuthServer(ctx, pool, srv, sealer); err != nil {
-			tel.Logger.Warn("auth server seed failed",
-				slog.String("type", srv.Type), slog.String("err", err.Error()))
-		}
-	}
-}
-
-// seedSystemConfig seeds env-derived bootstrap defaults into every existing org's
-// system_config row if absent, and warms the Provider cache for each. New orgs created
 // later get Default() via the accessor's load-or-default path until their first PATCH.
 func seedSystemConfig(ctx context.Context, pool *pgxpool.Pool, p *syscfg.Provider, tel *telemetry.Telemetry) error {
 	defaults := syscfg.DefaultsFromEnv()
@@ -571,7 +389,7 @@ func (s *Server) buildRouter() chi.Router {
 	corsOpts := cors.Options{
 		AllowedOrigins:   corsAllowedOrigins(s.cfg.CORSOrigins),
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Authorization", "Content-Type", "If-Match", "X-Request-Id", "Idempotency-Key", auth.BrowserHeader},
+		AllowedHeaders:   []string{"Authorization", "Content-Type", "If-Match", "X-Request-Id", "Idempotency-Key", identity.BrowserHeader},
 		ExposedHeaders:   []string{"X-Export-Total", "X-Export-Limit", "X-Export-Truncated", "X-Export-Org-ID", "X-Export-Scope", "X-Report-Org-ID", "X-Report-Cluster-ID", "X-Report-Limit", "X-Report-Total", "X-Report-Truncated", "X-Constellation-PDF-Fallback", "Content-Disposition", apiutil.RequestIDHeader},
 		AllowCredentials: true,
 		MaxAge:           300,
@@ -615,26 +433,19 @@ func (s *Server) buildRouter() chi.Router {
 		// baselines.BaselineMode feeds the events-ingest drift classifier.
 		baselines := runtime.NewBaselines(s.db, s.auditLog)
 
-		// Anonymous endpoints. A3: a strict per-IP rate limit on the unauthenticated
-		// /auth/* surface (login/OIDC/SAML/LDAP) blunts credential-stuffing /
-		// password-spray from a single source — complementing the per-account lockout
-		// (A2), which a botnet rotating accounts would otherwise sidestep. RealIP (set in
-		// buildRouter) feeds httprate the real client address behind the proxy.
-		auth := handler.NewAuth(s.db, s.signer, s.oidc, s.saml, s.ldap, s.auditLog).WithProviderSet(s.authProviders).WithBrowserSessionTimeout(s.cfg.SessionIdleTimeout)
-		r.With(httprate.Limit(60, time.Minute, httprate.WithKeyByIP(), httprate.WithLimitHandler(rateLimited))).Post("/auth/refresh", auth.Refresh)
+		// Anonymous identity and enrollment endpoints share a per-IP limit.
+		// Break-glass additionally enforces a global, cross-replica database limit.
+		auth := s.identity
 		r.Group(func(r chi.Router) {
 			r.Use(httprate.Limit(
 				authIPRateLimit, time.Minute,
 				httprate.WithKeyByIP(),
 				httprate.WithLimitHandler(rateLimited),
 			))
-			r.Post("/auth/login", auth.Login)
+			r.Post("/auth/break-glass", auth.BreakGlass)
 			r.Get("/auth/providers", auth.Providers)
 			r.Get("/auth/oidc/start", auth.OIDCStart)
 			r.Get("/auth/oidc/callback", auth.OIDCCallback)
-			r.Get("/auth/saml/login", auth.SAMLLogin)
-			r.Post("/auth/saml/acs", auth.SAMLACS)
-			r.Post("/auth/ldap/login", auth.LDAPLogin)
 			// D1: federation join/exchange. Anonymous like /auth/login — the request is
 			// authenticated by the join token it carries (a signed, master-minted token or
 			// the pre-shared fixed token), and returns a per-cluster sync secret. Shares the
@@ -652,7 +463,6 @@ func (s *Server) buildRouter() chi.Router {
 		r.Group(func(r chi.Router) {
 			r.Use(s.authMiddleware)
 			r.Post("/auth/logout", auth.Logout)
-			r.Post("/auth/change-password", auth.ChangePassword)
 			r.Get("/auth/me", auth.Me)
 
 			findingsH := findings.NewFindings(s.db, s.auditLog, s.dispatcher)
@@ -1019,7 +829,6 @@ func (s *Server) buildRouter() chi.Router {
 			r.Post("/access-control/role-bindings", s.requireVerb(rbac.VerbManageUsers, accessControl.CreateRoleBinding))
 			r.Delete("/access-control/role-bindings/{id}", s.requireVerb(rbac.VerbManageUsers, accessControl.DeleteRoleBinding))
 			r.Post("/access-control/service-accounts", s.requireVerb(rbac.VerbManageUsers, accessControl.CreateServiceAccount))
-			r.Post("/access-control/local-users", s.requireVerb(rbac.VerbManageUsers, accessControl.CreateLocalUser))
 
 			// A1/A4: user-management mutations that drive the credential-revocation cascade.
 			// Disable/Delete bump session_epoch + revoke PATs + tear down role_assignments
@@ -1027,11 +836,8 @@ func (s *Server) buildRouter() chi.Router {
 			users := handler.NewUsers(s.db, s.auditLog)
 			r.Post("/users/{id}/disable", s.requireVerb(rbac.VerbManageUsers, users.Disable))
 			r.Delete("/users/{id}", s.requireVerb(rbac.VerbManageUsers, users.Delete))
-			r.Post("/users/{id}/force-password-reset", s.requireVerb(rbac.VerbManageUsers, users.ForcePasswordReset))
 			// AUTH-LOCKOUT-17: clear a brute-force lockout (failed-login counter + block window).
-			r.Post("/users/{id}/unlock", s.requireVerb(rbac.VerbManageUsers, users.Unlock))
 			// AUTH-USERCRUD-20: local-user create/update (org-scoped, priv-escalation-guarded).
-			r.Post("/users", s.requireVerb(rbac.VerbManageUsers, users.Create))
 			r.Put("/users/{id}", s.requireVerb(rbac.VerbManageUsers, users.Update))
 
 			dashboard := handler.NewDashboard(s.db)
@@ -1054,32 +860,7 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/support/bundle/jobs/{id}", s.requireVerb(rbac.VerbManageSystemConfig, s.supportBundleJobs.GetJob))
 			r.Get("/support/bundle/jobs/{id}/download", s.requireVerb(rbac.VerbManageSystemConfig, s.supportBundleJobs.DownloadJob))
 
-			// B4: DB-backed auth-provider (IdP) CRUD. GET redacts provider secrets; a mutation
-			// hot-reloads the live verifier set the login endpoints read through. All routes are
-			// gated by VerbManageAuthServers.
-			authServers := handler.NewAuthServers(s.db, s.auditLog, s.authProviders, s.sealer)
-			r.Get("/auth-servers", s.requireVerb(rbac.VerbManageAuthServers, authServers.List))
-			r.Post("/auth-servers", s.requireVerb(rbac.VerbManageAuthServers, authServers.Create))
-			r.Get("/auth-servers/{id}", s.requireVerb(rbac.VerbManageAuthServers, authServers.Get))
-			r.Post("/auth-servers/{id}/role-preview", s.requireVerb(rbac.VerbManageAuthServers, authServers.PreviewRoles))
-			r.Post("/auth-servers/{id}/test", s.requireVerb(rbac.VerbManageAuthServers, authServers.TestConnection))
-			r.Put("/auth-servers/{id}", s.requireVerb(rbac.VerbManageAuthServers, authServers.Update))
-			r.Delete("/auth-servers/{id}", s.requireVerb(rbac.VerbManageAuthServers, authServers.Delete))
-
-			// P0-10: per-(cluster, namespace) group->role grants (sso_role_mappings) — the WRITE
-			// side that finally gives the scoped-role resolver data in a real deployment. A mutation
-			// bumps the parent auth server's revision so the ProviderSet poller re-attaches the
-			// scoped rules on every replica. Gated by the same VerbManageAuthServers.
-			r.Get("/auth-servers/{id}/scoped-mappings", s.requireVerb(rbac.VerbManageAuthServers, authServers.ListScopedMappings))
-			r.Post("/auth-servers/{id}/scoped-mappings", s.requireVerb(rbac.VerbManageAuthServers, authServers.CreateScopedMapping))
-			r.Delete("/auth-servers/{id}/scoped-mappings/{mid}", s.requireVerb(rbac.VerbManageAuthServers, authServers.DeleteScopedMapping))
-
-			// A1: admin-configurable password policy + session/idle timeout. GET returns the
-			// org's policy (built-in default when unconfigured); PUT replaces it (optimistic
-			// concurrency by revision). Supersedes the hardcoded auth.DefaultPasswordProfile.
-			authPolicy := handler.NewAuthSecurityPolicy(s.db, s.auditLog)
-			r.Get("/auth/security-policy", s.requireVerb(rbac.VerbManageSystemConfig, authPolicy.Get))
-			r.Put("/auth/security-policy", s.requireVerb(rbac.VerbManageSystemConfig, authPolicy.Put))
+			r.Get("/settings/identity", s.requireVerb(rbac.VerbManageAuthServers, s.identity.Settings))
 
 			settings := handler.NewSettings(s.db, s.auditLog)
 			r.Get("/settings/org", s.requireVerb(rbac.VerbReadFindings, settings.GetOrg))
@@ -1645,15 +1426,6 @@ func (s *Server) buildRouter() chi.Router {
 			r.Post("/platform-facts:report", platformFacts.Report)
 		})
 
-		// Astronomer-mounted routes (validated against Astronomer JWKS rather than our JWT).
-		if s.cfg.AstronomerJWKSURL != "" {
-			r.Group(func(r chi.Router) {
-				r.Use(s.astronomerJWTMiddleware)
-				r.Get("/security/findings", s.requireVerb(rbac.VerbReadFindings,
-					findings.NewFindings(s.db, s.auditLog, nil).List))
-				// (Other /security/* mounts are added as Astronomer's UI shells expand them.)
-			})
-		}
 	})
 
 	return r
@@ -1687,13 +1459,6 @@ func (s *Server) Run(ctx context.Context) error {
 	s.startBackgroundWork(ctx)
 	go s.supportBundleJobs.RunWorker(ctx)
 
-	// A5: hot-reload the session signing keys so a `--rotate-jwt-key` rotation
-	// propagates to this already-running replica without a restart. Only runs on
-	// the DB-backed RS256 path (an operator-supplied JWT_KEYS is static).
-	if s.dbBackedSessionKeys {
-		go s.runSessionKeyReloader(ctx)
-	}
-
 	// B1: hot-reload the system config so a PATCH on any replica reaches this
 	// already-running replica's in-process accessor (and thus its consumers) without
 	// a restart. Polls each cached org's revision every 30s, mirroring the session-key
@@ -1704,12 +1469,7 @@ func (s *Server) Run(ctx context.Context) error {
 		})
 	}
 
-	// B4: hot-reload the auth-provider (IdP) set so a CRUD change on any replica reaches this
-	// running replica's login handler without a restart. Polls the bootstrap org's max
-	// auth_servers revision every 30s, mirroring the session-key + system-config reloaders.
-	if s.authProviders != nil && s.bootstrapOrgID != uuid.Nil {
-		go s.runAuthProviderReloader(ctx)
-	}
+	go s.identity.Run(ctx)
 
 	select {
 	case <-ctx.Done():
@@ -1727,79 +1487,6 @@ func (s *Server) Run(ctx context.Context) error {
 			return nil
 		}
 		return err
-	}
-}
-
-// runSessionKeyReloader periodically reloads the session signing keys from
-// session_signing_keys and hot-swaps the in-process Signer when they change, so an
-// out-of-band `constellation-api --rotate-jwt-key` rotation reaches this running
-// replica without a restart. The new active key signs new tokens; the retained
-// previous key keeps already-issued tokens verifiable until they expire — closing
-// the cross-replica verification gap during rotation. Best-effort: a transient DB or
-// parse error logs and retries on the next tick, leaving the current keys in place.
-func (s *Server) runSessionKeyReloader(ctx context.Context) {
-	const interval = 30 * time.Second
-	t := time.NewTicker(interval)
-	defer t.Stop()
-	var lastActive string
-	if keys, err := auth.LoadSessionKeysPEM(ctx, s.db.Pool()); err == nil && len(keys) > 0 {
-		lastActive = string(keys[0])
-	}
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			keys, err := auth.LoadSessionKeysPEM(ctx, s.db.Pool())
-			if err != nil {
-				s.tel.Logger.Warn("session key reload: load failed", slog.String("err", err.Error()))
-				continue
-			}
-			if len(keys) == 0 || string(keys[0]) == lastActive {
-				continue // unchanged
-			}
-			if err := s.signer.ReloadKeys(keys...); err != nil {
-				s.tel.Logger.Warn("session key reload: swap failed", slog.String("err", err.Error()))
-				continue
-			}
-			lastActive = string(keys[0])
-			s.tel.Logger.Info("session signing key reloaded after rotation")
-		}
-	}
-}
-
-// runAuthProviderReloader periodically rebuilds the auth-provider (IdP) set from the bootstrap
-// org's auth_servers rows and atomically swaps it in, so a CRUD change reaches this running
-// replica's login handler without a restart. It polls the org's max revision and only rebuilds
-// when it advances (cheap: one aggregate query per tick). Best-effort: a transient DB or build
-// error logs and retries on the next tick, leaving the current providers in place. Mirrors
-// runSessionKeyReloader / syscfg.Provider.Run.
-func (s *Server) runAuthProviderReloader(ctx context.Context) {
-	const interval = 30 * time.Second
-	t := time.NewTicker(interval)
-	defer t.Stop()
-	last := s.authProviders.Revision()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			rev, err := auth.MaxRevision(ctx, s.db.Pool(), s.bootstrapOrgID)
-			if err != nil {
-				s.tel.Logger.Warn("auth provider reload: revision check failed", slog.String("err", err.Error()))
-				continue
-			}
-			if rev == last {
-				continue // unchanged
-			}
-			if errs := s.authProviders.Reload(ctx, s.db.Pool(), s.bootstrapOrgID); len(errs) > 0 {
-				for _, e := range errs {
-					s.tel.Logger.Warn("auth provider reload: build", slog.String("err", e.Error()))
-				}
-			}
-			last = rev
-			s.tel.Logger.Info("auth providers reloaded after CRUD change", slog.Int64("revision", rev))
-		}
 	}
 }
 
@@ -1907,7 +1594,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 		// requests are still CSRF-guarded by browserCSRF.
 		tok := bearerToken(r)
 		if r.Header.Get("Authorization") == "" {
-			if cookie, err := r.Cookie(auth.AccessCookie); err == nil {
+			if cookie, err := r.Cookie(identity.AccessCookie); err == nil {
 				tok = cookie.Value
 			}
 		}
@@ -1930,131 +1617,12 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
-		claims, err := s.signer.Verify(tok)
+		subj, err := s.identity.Authenticate(r.Context(), tok)
 		if err != nil {
-			writeError(w, http.StatusUnauthorized, "invalid token")
+			writeError(w, http.StatusUnauthorized, "invalid session or OIDC token")
 			return
 		}
-		// A1: DB-backed session revocation. Re-read the user's disabled flag and
-		// current session_epoch on every request (per-request, not cached) so a
-		// disabled account or a bumped epoch (logout / delete / password-change /
-		// role-change) invalidates an already-issued JWT on its next call —
-		// consistently across API replicas. A missing row also rejects (deleted user).
-		// must_change_password (A4) is read here too so the forced-reset gate below
-		// can block everything except the password-change endpoint.
-		var (
-			disabled     bool
-			sessionEpoch int64
-			mustChange   bool
-		)
-		err = s.db.Pool().QueryRow(r.Context(),
-			`SELECT disabled, session_epoch, must_change_password FROM users WHERE id = $1 AND org_id = $2`, claims.UserID, claims.OrgID,
-		).Scan(&disabled, &sessionEpoch, &mustChange)
-		if errors.Is(err, pgx.ErrNoRows) {
-			writeError(w, http.StatusUnauthorized, "user not found")
-			return
-		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "load user")
-			return
-		}
-		if disabled {
-			writeError(w, http.StatusUnauthorized, "user disabled")
-			return
-		}
-		if claims.Epoch != sessionEpoch {
-			writeError(w, http.StatusUnauthorized, "session revoked")
-			return
-		}
-		if claims.Tracked && claims.SessionID() == uuid.Nil {
-			writeError(w, http.StatusUnauthorized, "invalid session")
-			return
-		}
-		if sid := claims.SessionID(); sid != uuid.Nil {
-			var (
-				exists, anySession bool
-				lastSeen           *time.Time
-			)
-			if qerr := s.db.Pool().QueryRow(r.Context(), `
-SELECT EXISTS (SELECT 1 FROM user_sessions WHERE session_id = $1 AND user_id = $2),
-       EXISTS (SELECT 1 FROM user_sessions WHERE user_id = $2),
-       (SELECT last_seen_at FROM user_sessions WHERE session_id = $1 AND user_id = $2)`,
-				sid, claims.UserID).Scan(&exists, &anySession, &lastSeen); qerr == nil {
-				if (claims.Tracked || anySession) && !exists {
-					writeError(w, http.StatusUnauthorized, "session evicted")
-					return
-				}
-				// A7: idle/inactivity timeout. A tracked session whose last
-				// authenticated request is older than the idle window is expired
-				// even though the JWT is still inside its absolute TTL. We then
-				// stamp last_seen_at = now() so an active session keeps sliding.
-				// Untracked legacy/test tokens (no session row) skip this entirely.
-				// A1: a per-org SecurityPolicy may override the deploy-time idle window
-				// (falls back to the SESSION_IDLE_TIMEOUT env default when unconfigured).
-				var idle time.Duration
-				if pol, _, perr := auth.LoadSecurityPolicy(r.Context(), s.db.Pool(), claims.OrgID); perr == nil {
-					idle = pol.IdleTimeout(s.cfg.SessionIdleTimeout)
-				} else {
-					writeError(w, http.StatusInternalServerError, "load session policy")
-					return
-				}
-				if exists && idle > 0 && lastSeen != nil {
-					if time.Since(*lastSeen) > idle {
-						deleted, deleteErr := s.db.Pool().Exec(r.Context(),
-							`DELETE FROM user_sessions WHERE session_id = $1 AND last_seen_at <= $2`, sid, *lastSeen)
-						if deleteErr != nil {
-							writeError(w, http.StatusInternalServerError, "expire idle session")
-							return
-						}
-						if deleted.RowsAffected() == 0 {
-							writeError(w, http.StatusUnauthorized, "session state changed; retry authentication")
-							return
-						}
-						if !claims.Tracked {
-							_, _ = s.db.Pool().Exec(r.Context(),
-								`UPDATE users SET session_epoch = session_epoch + 1 WHERE id = $1`, claims.UserID)
-						}
-						// RSP-AUDIT-05: an idle-timeout session rejection is a security-relevant
-						// auth event; record it so inactivity expiries are visible in /audit/events
-						// and the SIEM alongside failed logins.
-						oid := claims.OrgID
-						uid := claims.UserID
-						_, _, _ = s.auditLog.Log(r.Context(), audit.Event{
-							OrgID: &oid, ActorID: &uid, ActorIP: remoteHostIP(r.RemoteAddr),
-							Action: "auth.session.idle_timeout", TargetKind: "user", TargetID: uid.String(),
-						})
-						writeError(w, http.StatusUnauthorized, "session idle timeout")
-						return
-					}
-					if _, uerr := s.db.Pool().Exec(r.Context(),
-						`UPDATE user_sessions SET last_seen_at = GREATEST(last_seen_at, clock_timestamp()) WHERE session_id = $1`, sid); uerr != nil {
-						s.tel.Logger.Warn("update session last_seen_at", slog.String("err", uerr.Error()))
-					}
-				}
-			} else {
-				writeError(w, http.StatusInternalServerError, "load session")
-				return
-			}
-		}
-		// A4: forced password reset. While must_change_password is set, the only thing the
-		// user may do is change their password (and logout). Everything else 403s until the
-		// flag clears (ChangePassword clears it).
-		if mustChange && !isPasswordChangePath(r) {
-			writeError(w, http.StatusForbidden, "password change required")
-			return
-		}
-		// Resolve role assignments from DB.
-		assignments, err := loadRoleAssignments(r.Context(), s.db, claims.UserID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "load role assignments")
-			return
-		}
-		ctx := authctx.WithSubject(r.Context(), authctx.Subject{
-			UserID:      claims.UserID,
-			OrgID:       claims.OrgID,
-			Email:       claims.Email,
-			Assignments: assignments,
-		})
+		ctx := authctx.WithSubject(r.Context(), subj)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
@@ -2066,72 +1634,6 @@ func loadRoleAssignmentsAdapter(database *db.DB) func(context.Context, uuid.UUID
 	return func(ctx context.Context, uid uuid.UUID) ([]rbac.RoleAssignment, error) {
 		return loadRoleAssignments(ctx, database, uid)
 	}
-}
-
-// astronomerJWTMiddleware validates an Astronomer-issued JWT via JWKS and maps the Astronomer
-// identity to a Constellation subject via the astronomer_identity_map table.
-func (s *Server) astronomerJWTMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.astronomerJWT == nil || s.astronomerMap == nil {
-			writeError(w, http.StatusServiceUnavailable, "astronomer adapter disabled")
-			return
-		}
-		tok := bearerToken(r)
-		if tok == "" {
-			writeError(w, http.StatusUnauthorized, "missing bearer token")
-			return
-		}
-		claims, err := s.astronomerJWT.Verify(r.Context(), tok)
-		if err != nil {
-			writeError(w, http.StatusUnauthorized, "invalid astronomer token")
-			return
-		}
-		astronomerUserID, err := astronomer.SubjectID(claims)
-		if err != nil {
-			writeError(w, http.StatusUnauthorized, "astronomer token missing subject")
-			return
-		}
-		userID, orgID, err := s.astronomerMap.Resolve(r.Context(), astronomerUserID)
-		if errors.Is(err, astronomer.ErrUnmapped) {
-			writeError(w, http.StatusForbidden, "astronomer identity not mapped")
-			return
-		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "resolve astronomer identity")
-			return
-		}
-
-		var email string
-		var disabled bool
-		err = s.db.Pool().QueryRow(r.Context(),
-			`SELECT email, disabled FROM users WHERE id = $1 AND org_id = $2`,
-			userID, orgID,
-		).Scan(&email, &disabled)
-		if errors.Is(err, pgx.ErrNoRows) {
-			writeError(w, http.StatusForbidden, "mapped constellation user not found")
-			return
-		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "load mapped constellation user")
-			return
-		}
-		if disabled {
-			writeError(w, http.StatusForbidden, "mapped constellation user disabled")
-			return
-		}
-		assignments, err := loadRoleAssignments(r.Context(), s.db, userID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "load role assignments")
-			return
-		}
-		ctx := authctx.WithSubject(r.Context(), authctx.Subject{
-			UserID:      userID,
-			OrgID:       orgID,
-			Email:       email,
-			Assignments: assignments,
-		})
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
 }
 
 func (s *Server) requireVerb(verb rbac.Verb, h http.HandlerFunc) http.HandlerFunc {
@@ -2492,17 +1994,6 @@ func defaultTrustedProxyNets() []*net.IPNet {
 		}
 	}
 	return out
-}
-
-// isPasswordChangePath reports whether the request targets an endpoint a
-// must-change-password user is still allowed to reach (A4): the password-change endpoint
-// itself and logout. Everything else is blocked until the flag clears.
-func isPasswordChangePath(r *http.Request) bool {
-	switch r.URL.Path {
-	case "/api/v1/auth/change-password", "/api/v1/auth/logout":
-		return true
-	}
-	return false
 }
 
 func bearerToken(r *http.Request) string {

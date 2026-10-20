@@ -16,9 +16,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
+
 	"github.com/alphabravocompany/constellation/internal/identity/jwks"
 	"github.com/alphabravocompany/constellation/pkg/rbac"
-	"github.com/golang-jwt/jwt/v5"
 )
 
 const MaxTokenLifetime = 10 * time.Minute
@@ -67,14 +68,6 @@ func (c OIDCConfig) validate() error {
 		}
 	}
 	return nil
-}
-
-type tokenClaims struct {
-	jwt.RegisteredClaims
-	Email           string `json:"email"`
-	Name            string `json:"name"`
-	Nonce           string `json:"nonce"`
-	AuthorizedParty string `json:"azp"`
 }
 
 type Principal struct {
@@ -135,29 +128,7 @@ func (v *Verifier) Verify(raw string) (*Principal, error) {
 	p.Email, _ = claims["email"].(string)
 	p.Name, _ = claims["name"].(string)
 	p.Nonce, _ = claims["nonce"].(string)
-	values := claims[v.claim]
-	// The platform emits {"constellation":[...]}; external providers may emit a flat array.
-	if projects, ok := values.(map[string]any); ok {
-		values = projects["constellation"]
-	}
-	var groups []string
-	switch a := values.(type) {
-	case string:
-		groups = []string{a}
-	case []any:
-		for _, x := range a {
-			if s, ok := x.(string); ok {
-				groups = append(groups, s)
-			}
-		}
-	}
-	seen := map[string]bool{}
-	for _, g := range groups {
-		if role := v.mapping[g]; role != "" && !seen[role] {
-			seen[role] = true
-			p.Roles = append(p.Roles, role)
-		}
-	}
+	p.Roles = v.mapRoles(claims[v.claim])
 	v.mu.Lock()
 	if len(v.memo) >= memoLimit {
 		clear(v.memo)
@@ -227,7 +198,7 @@ func (r *RP) request(ctx context.Context, method, endpoint string, form url.Valu
 	if err != nil {
 		return errors.New("OIDC provider unavailable")
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("OIDC provider status %d", resp.StatusCode)
 	}
@@ -269,4 +240,33 @@ func (r *RP) Exchange(ctx context.Context, code, verifier, nonce string) (*Princ
 		return nil, errors.New("OIDC nonce mismatch")
 	}
 	return p, nil
+}
+
+func (v *Verifier) mapRoles(value any) []string {
+	var roles []string
+	values := value
+	// The platform emits {"constellation":[...]}; external providers may emit a flat array.
+	if projects, ok := values.(map[string]any); ok {
+		values = projects["constellation"]
+	}
+	var groups []string
+	switch a := values.(type) {
+	case string:
+		groups = []string{a}
+	case []any:
+		for _, x := range a {
+			if s, ok := x.(string); ok {
+				groups = append(groups, s)
+			}
+		}
+	}
+	seen := map[string]bool{}
+	for _, g := range groups {
+		if role := v.mapping[g]; role != "" && !seen[role] {
+			seen[role] = true
+			roles = append(roles, role)
+		}
+	}
+
+	return roles
 }
