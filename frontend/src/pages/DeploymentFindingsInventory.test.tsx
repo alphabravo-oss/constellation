@@ -113,7 +113,7 @@ it("supports the continuation ceiling and recovers an empty page", async () => {
 
 it("retains legacy lifecycle observations under all without claiming a healthy or completed status", async () => {
  const row={...deploymentFindingFixture(),lifecycle:"legacy-retained-state"};vi.mocked(deployments.findings).mockImplementation(async(id,params)=>deploymentFindingPage(params,[row],id));
- await render("?findings_lifecycle=all");await settled(()=>expect(host.querySelector("tbody")?.textContent).toContain("legacy-retained-state"));expect(host.textContent).toContain("1 matching workload finding records");
+ await render("?findings_lifecycle=all");await settled(()=>expect(host.querySelector("tbody")?.textContent).toContain("Legacy retained state"));expect(host.textContent).toContain("1 matching workload finding records");
  await inspect();expect(document.querySelector('[data-testid="deployment-finding-record"]')?.textContent).toContain("legacy-retained-state");
 });
 

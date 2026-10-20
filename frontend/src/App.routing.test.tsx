@@ -57,15 +57,15 @@ describe("route contract", () => {
   });
   it("does not redirect or render protected content while identity is loading", async () => {
     identity.loading = true;
-    const router = await render("/settings");
-    expect(router.state.location.pathname).toBe("/settings");
+    const router = await render("/settings/access");
+    expect(router.state.location.pathname).toBe("/settings/access");
     expect(host.textContent).toContain("Loading");
     expect(host.textContent).not.toContain("Settings");
   });
   it("preserves push, replace, back and forward semantics", async () => {
     const router = await render("/clusters");
-    await act(async () => { await router.navigate({ to: "/settings", search: { tab: "first" } }); });
-    await act(async () => { await router.navigate({ to: "/settings", search: { tab: "second" }, replace: true }); });
+    await act(async () => { await router.navigate({ to: "/settings/access", search: { tab: "first" } }); });
+    await act(async () => { await router.navigate({ to: "/settings/access", search: { tab: "second" }, replace: true }); });
     expect(router.history.length).toBe(2);
     await act(async () => { router.history.back(); });
     expect(router.state.location.pathname).toBe("/clusters");
