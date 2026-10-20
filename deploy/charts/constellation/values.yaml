@@ -15,6 +15,15 @@
 # `<role>.image.tag`. For immutable deployments use `<role>.image.digest`
 # (sha256 plus 64 lowercase hex characters); it takes precedence over tags.
 # Digests are per-role because each role is a separate image.
+# ---------------------------------------------------------------------------
+# Air-gap: cluster-local registry every image is pulled from (guide ch.09).
+# `constellationctl bundle load --registry <host:port> --values-out values-bundle.yaml`
+# pushes every bundled image there and writes a values file pinning each role to
+# its digest; pass both files to helm. Empty = pull from image.registry.
+# ---------------------------------------------------------------------------
+global:
+  imageRegistry: ""
+
 image:
   registry: ghcr.io/alphabravo-oss/constellation
   pullPolicy: IfNotPresent
@@ -109,6 +118,28 @@ networkPolicies:
   # enabled: include the Kubernetes node/private-network CIDRs so node-sourced
   # inventory and telemetry can reach the API Service.
   apiIngressCIDRs: []
+  # Node/private CIDRs admitted to in-cluster Postgres, the object store and the
+  # metrics ports (kubelet probes and host-network pods originate here).
+  nodeCIDRs: []
+  # Prometheus scrapes: ingress from this namespace to every metrics port.
+  monitoring:
+    enabled: true
+    namespace: monitoring
+    ports: [8080, 8081, 8082, 8090, 8443, 9090, 9187, 9404]
+  # In-cluster CNPG (postgres.mode=cnpg, or external mode pointing at a CNPG
+  # cluster in this namespace): policies for the instance pods, the object
+  # store, the backup/sync jobs and optional exporters.
+  cnpg:
+    enabled: true
+    clusterName: ""            # empty = <fullname>-postgres
+    exporterLabels: [postgres-exporter, prometheus-postgres-exporter]
+    # extra namespaces that may reach the object store (recovery drills)
+    objectStoreClientNamespaces: []
+    # Pod labels of an object store not rendered by this chart (e.g. a
+    # hand-deployed RustFS labelled app: rustfs); empty = backup.objectStore.
+    objectStoreSelector: {}
+  # Off-host endpoints the backup/sync jobs may reach (CIDR, TCP 9000 unless :port given).
+  offhostCIDRs: []
 
 # ---------------------------------------------------------------------------
 # Cluster registration
@@ -185,6 +216,35 @@ toolbox:
   image: {}
     # repository: ghcr.io/alphabravo-oss/constellation/toolbox
     # tag: v0.2.0
+
+# ---------------------------------------------------------------------------
+# Monitoring (Prometheus Operator). Off by default: the monitoring.coreos.com
+# CRDs are not bundled. Component heartbeat age, scanner engine-DB age (incl.
+# Trivy java-db) and CVE-feed age are first-class API metrics, so no
+# postgres-exporter is required; metrics.postgresRole still renders a read-only
+# role for an optional exporter.
+# ---------------------------------------------------------------------------
+metrics:
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}          # e.g. { release: kube-prometheus-stack }
+    namespace: ""       # empty = release namespace
+  prometheusRule:
+    enabled: false
+    namespace: ""
+    labels: {}
+    includeClusterRules: true   # node/pod/PVC generic alerts
+    thresholds:
+      heartbeatStaleSeconds: 120
+      engineDBStaleSeconds: 172800
+      cveFeedStaleSeconds: 172800
+  # Read-only Postgres role for an external exporter (CNPG managed.roles +
+  # migration-owned grants on component_heartbeats / cve_feed_checkpoints).
+  postgresRole:
+    enabled: false
+    name: constellation_metrics
 
 # ---------------------------------------------------------------------------
 # Control plane API
@@ -467,6 +527,12 @@ admission:
     type: ClusterIP
     port: 443        # ValidatingWebhookConfiguration always calls 443
     targetPort: 8443 # The pod listens on 8443 TLS
+  # Built-in rules (block-privileged/host-network/host-pid) are skipped for these
+  # namespaces and for any namespace labelled
+  # constellation.alphabravo.io/admission=ignore — node-exporter, CNI, ingress
+  # controllers and the operator stack legitimately use hostNetwork.
+  exemptNamespaces: [kube-system, kube-public, kube-node-lease, cnpg-system, cert-manager, ingress-nginx, monitoring]
+  exemptNamespaceLabel: constellation.alphabravo.io/admission
   # ValidatingWebhookConfiguration tuning. failurePolicy=Ignore is the safe
   # default so a degraded webhook never blocks pod admission cluster-wide.
   webhook:
@@ -879,6 +945,11 @@ postgres:
       schedule: "0 0 2 * * *"
       immediate: true
       backupOwnerReference: self
+    # CNPG instance-manager exporter (:9187, pg_* + barman-cloud plugin metrics):
+    # render a PodMonitor and the CNPG alert group when metrics.serviceMonitor /
+    # metrics.prometheusRule are enabled.
+    monitoring:
+      enablePodMonitor: true
     database: constellation
     username: constellation
     # Password generated at install time if blank (idempotent across upgrades:
@@ -926,6 +997,45 @@ backup:
     resources:
       limits:   { cpu: 1,    memory: 1Gi }
       requests: { cpu: 100m, memory: 256Mi }
+  # Off-host copy of the archive (a second failure domain). Renders a second
+  # Barman ObjectStore at endpointURL, an rclone CronJob mirroring the local
+  # bucket to it every sync.schedule, and (recovery.enabled) a recovery
+  # ObjectStore for PITR drills. Credentials: Secret with ACCESS_KEY_ID and
+  # SECRET_ACCESS_KEY. docs/cnpg-recovery.md: switch WAL twice before a drill.
+  offhost:
+    enabled: false
+    endpointURL: ""             # e.g. http://backup-host:9000
+    bucket: constellation-recovery-offhost
+    credentialsSecret: ""
+    region: us-east-1
+    retentionPolicy: 7d
+    sync:
+      enabled: true
+      schedule: "*/15 * * * *"
+      transfers: 4
+      checkers: 8
+      resources:
+        limits:   { cpu: 1,    memory: 512Mi }
+        requests: { cpu: 100m, memory: 128Mi }
+    recovery:
+      enabled: true
+      namespace: ""             # empty = release namespace
+  # Daily age-encrypted backup of the namespace's Secrets to an S3 remote
+  # (toolbox image: age + kubectl + rclone, non-root).
+  secrets:
+    enabled: false
+    schedule: "15 4 * * *"
+    ageRecipient: ""            # age1... public key; keep the identity off-cluster
+    namespaces: []              # empty = release namespace
+    retentionDays: 30
+    remote:
+      endpointURL: ""
+      bucket: constellation-recovery-offhost
+      credentialsSecret: ""
+      region: us-east-1
+    resources:
+      limits:   { cpu: 500m, memory: 256Mi }
+      requests: { cpu: 50m,  memory: 64Mi }
 
 # ---------------------------------------------------------------------------
 # TLS bootstrap for the admission webhook

@@ -20,7 +20,7 @@ grep -q 'storageClass: longhorn' "$rendered"
 grep -q 'imageName: ghcr.io/alphabravo-oss/constellation/postgres:16.10-v0.2.0' "$rendered"
 grep -q 'CREATE EXTENSION IF NOT EXISTS vector' "$rendered"
 grep -q 'port: 8000' "$rendered"
-grep -q 'name: wait-for-migrations' "$rendered"
+! grep -q "name: wait-for-migrations" "$rendered"  # migrations run in-process (embedded goose)
 grep -q 'name: constellation-bootstrap-1' "$rendered"
 grep -A5 'name: CONSTELLATION_SCANNER_TOKEN$' "$rendered" | grep -q 'secretKeyRef:'
 if grep -A8 'name: CONSTELLATION_SCANNER_TOKEN$' "$rendered" | grep -q 'optional: true'; then

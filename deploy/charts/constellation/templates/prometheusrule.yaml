@@ -1,0 +1,188 @@
+{{- /*
+Alert rules from the runtime hardening stream (metrics.prometheusRule.enabled).
+constellation.components uses the API's first-class metrics
+(constellation_component_heartbeat_age_seconds, constellation_scanner_engine_db_*,
+constellation_cve_feed_age_seconds) so no postgres-exporter is needed; the
+node/pod/CNPG groups are generic and gated by includeClusterRules.
+*/ -}}
+{{- $pr := .Values.metrics.prometheusRule -}}
+{{- if $pr.enabled -}}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "constellation.fullname" . }}
+  namespace: {{ $pr.namespace | default .Release.Namespace }}
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    {{- with $pr.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: constellation.components
+      rules:
+        - alert: ConstellationComponentHeartbeatStale
+          expr: constellation_component_heartbeat_age_seconds{component!="k8s-compliance-collector"} > {{ $pr.thresholds.heartbeatStaleSeconds }}
+          for: 2m
+          labels: { severity: critical }
+          annotations:
+            summary: "Constellation component {{ `{{ $labels.component }}` }} has not written a heartbeat for {{ `{{ $value | humanizeDuration }}` }}"
+        - alert: ConstellationComplianceCollectorStale
+          expr: constellation_component_heartbeat_age_seconds{component="k8s-compliance-collector"} > 8 * 3600
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "k8s-compliance-collector CronJob (6h interval) last ran {{ `{{ $value | humanizeDuration }}` }} ago"
+        - alert: ConstellationHeartbeatMetricAbsent
+          expr: absent(constellation_component_heartbeat_age_seconds)
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "API heartbeat metrics missing (API down or not scraped)"
+        - alert: ConstellationScannerEngineDBStale
+          expr: constellation_scanner_engine_db_age_seconds > {{ $pr.thresholds.engineDBStaleSeconds }}
+          for: 30m
+          labels: { severity: warning }
+          annotations:
+            summary: "Scanner {{ `{{ $labels.engine }}` }} vulnerability DB is {{ `{{ $value | humanizeDuration }}` }} old"
+        - alert: ConstellationScannerEngineDBNotReady
+          expr: constellation_scanner_engine_db_ready == 0
+          for: 30m
+          labels: { severity: warning }
+          annotations:
+            summary: "Scanner {{ `{{ $labels.engine }}` }} reports its vulnerability DB as not ready"
+        - alert: ConstellationCVEFeedStale
+          expr: constellation_cve_feed_age_seconds > {{ $pr.thresholds.cveFeedStaleSeconds }}
+          for: 30m
+          labels: { severity: warning }
+          annotations:
+            summary: "CVE enrichment feed {{ `{{ $labels.feed }}` }} checkpoint is {{ `{{ $value | humanizeDuration }}` }} old"
+        - alert: ConstellationAdmissionWebhookDown
+          expr: |
+            up{job="admission",namespace="{{ .Release.Namespace }}"} == 0
+              or kube_deployment_status_replicas_available{namespace="{{ .Release.Namespace }}",deployment="{{ include "constellation.fullname" . }}-admission"} < 1
+          for: 2m
+          labels: { severity: critical }
+          annotations:
+            summary: "Constellation admission webhook has no healthy replica — with failurePolicy=Fail workload creation is blocked"
+        - alert: ConstellationScrapeTargetDown
+          expr: up{namespace="{{ .Release.Namespace }}"} == 0
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: "Scrape target {{ `{{ $labels.job }}` }}/{{ `{{ $labels.pod }}` }} in {{ .Release.Namespace }} is down"
+        - alert: ConstellationAPIHighErrorRate
+          expr: |
+            sum(rate(constellation_http_request_duration_seconds_count{job="api",status=~"5.."}[5m]))
+              / sum(rate(constellation_http_request_duration_seconds_count{job="api"}[5m])) > 0.05
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "Constellation API 5xx ratio is {{ `{{ $value | humanizePercentage }}` }}"
+{{- if and (include "constellation.cnpgInNamespace" .) .Values.postgres.cloudnativepg.monitoring.enablePodMonitor }}
+    - name: constellation.cnpg
+      rules:
+        - alert: CNPGContinuousArchivingFailing
+          expr: cnpg_pg_stat_archiver_last_failed_time > cnpg_pg_stat_archiver_last_archived_time
+          for: 5m
+          labels: { severity: critical }
+          annotations:
+            summary: "WAL archiving failing on {{ `{{ $labels.cnpg_cluster }}` }}/{{ `{{ $labels.pod }}` }}"
+            description: "pg_stat_archiver reports a failure newer than the last successful archive; the PITR window is no longer advancing."
+        - alert: CNPGWALArchiveErrors
+          expr: increase(cnpg_pg_stat_archiver_failed_count[30m]) > 0
+          labels: { severity: warning }
+          annotations:
+            summary: "{{ `{{ $value | humanize }}` }} WAL archive failures in 30m on {{ `{{ $labels.pod }}` }}"
+        - alert: CNPGNoWALArchivedRecently
+          expr: cnpg_pg_stat_archiver_seconds_since_last_archival > 7200
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "No WAL archived for {{ `{{ $value | humanizeDuration }}` }} on {{ `{{ $labels.pod }}` }}"
+        - alert: CNPGLastBackupOlderThan26h
+          expr: |
+            (time() - max by (pod) (
+                (barman_cloud_cloudnative_pg_io_last_available_backup_timestamp > 0)
+                or (cnpg_collector_last_available_backup_timestamp > 0)
+            )) > 26 * 3600
+          for: 10m
+          labels: { severity: critical }
+          annotations:
+            summary: "Last successful CNPG base backup on {{ `{{ $labels.pod }}` }} is {{ `{{ $value | humanizeDuration }}` }} old"
+        - alert: CNPGBackupMetricAbsent
+          expr: absent(barman_cloud_cloudnative_pg_io_last_available_backup_timestamp) and absent(cnpg_collector_last_available_backup_timestamp)
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "No CNPG backup metric scraped — exporter down or no backup has ever completed"
+        - alert: CNPGLastBackupFailed
+          expr: |
+            max by (pod) (barman_cloud_cloudnative_pg_io_last_failed_backup_timestamp or cnpg_collector_last_failed_backup_timestamp)
+              > max by (pod) ((barman_cloud_cloudnative_pg_io_last_available_backup_timestamp > 0) or (cnpg_collector_last_available_backup_timestamp > 0))
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: "Most recent CNPG backup attempt on {{ `{{ $labels.pod }}` }} failed"
+        - alert: CNPGInstanceDown
+          expr: cnpg_collector_up == 0 or absent(cnpg_collector_up)
+          for: 2m
+          labels: { severity: critical }
+          annotations:
+            summary: "CNPG instance exporter reports PostgreSQL down"
+{{- end }}
+{{- if $pr.includeClusterRules }}
+    - name: constellation.node
+      rules:
+        - alert: NodeFilesystemAbove80Percent
+          expr: (1 - node_filesystem_avail_bytes{job="node-exporter",fstype!~"tmpfs|overlay|squashfs|ramfs|iso9660|fuse.*"} / node_filesystem_size_bytes{job="node-exporter",fstype!~"tmpfs|overlay|squashfs|ramfs|iso9660|fuse.*"}) * 100 > 80
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "{{ `{{ $labels.instance }}` }} {{ `{{ $labels.mountpoint }}` }} is {{ `{{ $value | humanize }}` }}% full"
+            description: "On k3s the kubelet imagefs/containerd store and local-path PVs share the root filesystem; DiskPressure evictions start at 85-90%."
+        - alert: NodeFilesystemAbove90Percent
+          expr: (1 - node_filesystem_avail_bytes{job="node-exporter",fstype!~"tmpfs|overlay|squashfs|ramfs|iso9660|fuse.*"} / node_filesystem_size_bytes{job="node-exporter",fstype!~"tmpfs|overlay|squashfs|ramfs|iso9660|fuse.*"}) * 100 > 90
+          for: 5m
+          labels: { severity: critical }
+          annotations:
+            summary: "{{ `{{ $labels.instance }}` }} {{ `{{ $labels.mountpoint }}` }} is {{ `{{ $value | humanize }}` }}% full — evictions imminent"
+        - alert: NodeImageFsAbove80Percent
+          expr: (container_fs_usage_bytes{id="/",job="kubelet"} / container_fs_limit_bytes{id="/",job="kubelet"}) * 100 > 80
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "kubelet imagefs on {{ `{{ $labels.node }}` }} is {{ `{{ $value | humanize }}` }}% full (image GC threshold)"
+        - alert: NodeDiskPressure
+          expr: kube_node_status_condition{condition="DiskPressure",status="true"} == 1
+          for: 2m
+          labels: { severity: critical }
+          annotations:
+            summary: "{{ `{{ $labels.node }}` }} reports DiskPressure"
+    - name: constellation.pods
+      rules:
+        - alert: PodEvicted
+          expr: sum by (namespace, pod) (kube_pod_status_reason{reason="Evicted"}) > 0
+          for: 1m
+          labels: { severity: warning }
+          annotations:
+            summary: "{{ `{{ $labels.namespace }}` }}/{{ `{{ $labels.pod }}` }} was evicted"
+        - alert: PodRestartingFrequently
+          expr: increase(kube_pod_container_status_restarts_total{namespace=~"{{ .Release.Namespace }}|cnpg-system|monitoring|ingress-nginx|cert-manager|kube-system"}[1h]) > 3
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: "{{ `{{ $labels.namespace }}` }}/{{ `{{ $labels.pod }}` }}/{{ `{{ $labels.container }}` }} restarted {{ `{{ $value | humanize }}` }} times in 1h"
+        - alert: PersistentVolumeAbove80Percent
+          expr: (kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes) * 100 > 80
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "PVC {{ `{{ $labels.namespace }}` }}/{{ `{{ $labels.persistentvolumeclaim }}` }} is {{ `{{ $value | humanize }}` }}% full"
+        - alert: PersistentVolumeAbove95Percent
+          expr: (kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes) * 100 > 95
+          for: 5m
+          labels: { severity: critical }
+          annotations:
+            summary: "PVC {{ `{{ $labels.namespace }}` }}/{{ `{{ $labels.persistentvolumeclaim }}` }} is {{ `{{ $value | humanize }}` }}% full"
+{{- end }}
+{{- end }}

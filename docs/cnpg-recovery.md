@@ -451,3 +451,13 @@ it does not identify its cause or prove the remaining chain intact. No historica
 rows or hashes were rewritten. Preserve this baseline in any transfer and resolve
 historical integrity/archival acceptance separately; successful verification of
 the new disposable fixture does not certify the existing database's history.
+
+## Chart-managed off-host archive and PITR drills
+
+`backup.offhost` (see docs/deployment-helm.md) renders the off-host
+`ObjectStore`, the `archive-offhost-sync` CronJob and a `-recovery`
+ObjectStore. Before a point-in-time drill against either store **switch WAL
+twice** on the primary (`SELECT pg_switch_wal();` run twice, or wait two
+`archive_timeout` periods) so the segment holding the target time is archived
+and mirrored; a drill whose target sits in the current, unarchived segment
+recovers to the previous checkpoint instead.

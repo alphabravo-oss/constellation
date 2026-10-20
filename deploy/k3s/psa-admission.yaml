@@ -1,0 +1,29 @@
+# PodSecurity admission configuration for k3s/RKE2 hosting Constellation.
+# Install: copy to /etc/rancher/k3s/psa-admission.yaml and reference it from
+# /etc/rancher/k3s/config.yaml (kube-apiserver-arg admission-control-config-file,
+# see deploy/k3s/config.yaml). Every chart pod is `restricted`-clean except the
+# runtime agent (hostNetwork/hostPID/host mounts by design, ADR 0003/0005).
+# PSA evaluates the *requesting* user: DaemonSet pods are created by the
+# daemon-set-controller, so the agent is exempted through that controller and
+# through its own ServiceAccount (direct creates). Raise per-namespace levels
+# with the pod-security.kubernetes.io/<mode> labels.
+apiVersion: apiserver.config.k8s.io/v1
+kind: AdmissionConfiguration
+plugins:
+  - name: PodSecurity
+    configuration:
+      apiVersion: pod-security.admission.config.k8s.io/v1
+      kind: PodSecurityConfiguration
+      defaults:
+        enforce: privileged
+        enforce-version: latest
+        audit: baseline
+        audit-version: latest
+        warn: baseline
+        warn-version: latest
+      exemptions:
+        usernames:
+          - system:serviceaccount:constellation-system:constellation-runtime-agent
+          - system:serviceaccount:kube-system:daemon-set-controller
+        runtimeClasses: []
+        namespaces: [kube-system]

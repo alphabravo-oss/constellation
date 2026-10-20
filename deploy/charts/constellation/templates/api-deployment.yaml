@@ -242,7 +242,7 @@ spec:
       targetPort: admin
       protocol: TCP
       name: admin
-{{- if .Values.api.metrics.serviceMonitor.enabled }}
+{{- if (or .Values.api.metrics.serviceMonitor.enabled .Values.metrics.serviceMonitor.enabled) }}
 ---
 # Prometheus Operator discovery of the admin listener. Requires the
 # monitoring.coreos.com CRDs; gated so clusters without them still install.
