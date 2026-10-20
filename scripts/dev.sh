@@ -9,7 +9,6 @@ RUN_DIR="$ROOT/tmp/dev"
 LOG_DIR="$RUN_DIR/logs"
 PID_FILE="$RUN_DIR/pids"
 COMPOSE=(docker compose -f deploy/dev/compose.yaml)
-PROCS=(api operator scanner web)
 
 usage() { echo "usage: $0 up|down|status|logs [api|operator|scanner|web|compose]|migrate|migrate-down|seed" >&2; exit 2; }
 
@@ -55,8 +54,7 @@ start_bg() { # name, command...
 }
 
 wait_for_pg() {
-  local i
-  for i in $(seq 1 60); do
+  for _ in $(seq 1 60); do
     if "${COMPOSE[@]}" exec -T postgres pg_isready -q -U "$DEV_PG_USER" -d "$DEV_PG_DB" 2>/dev/null; then return 0; fi
     sleep 1
   done

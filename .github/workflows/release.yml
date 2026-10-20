@@ -77,9 +77,11 @@ jobs:
       - name: Read runtime pins
         id: runtime
         run: |
-          echo "node-version=$(cat .node-version)" >> "$GITHUB_OUTPUT"
-          echo "go-version=$(awk '/^go /{print $2}' go.mod)" >> "$GITHUB_OUTPUT"
-          echo "build-time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          {
+            echo "node-version=$(cat .node-version)"
+            echo "go-version=$(awk '/^go /{print $2}' go.mod)"
+            echo "build-time=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >> "$GITHUB_OUTPUT"
       - name: Install pinned image scanner
         run: bash scripts/install-ci-tools.sh grype
       - id: build
