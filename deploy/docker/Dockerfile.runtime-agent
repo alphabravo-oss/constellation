@@ -135,7 +135,7 @@ FROM golang:${GO_VERSION}-bookworm@${GO_IMAGE_DIGEST} AS crictl-build
 # (deploy/docker/go-tools/go.mod); upstream release binaries embed stale ones.
 WORKDIR /go-tools
 COPY deploy/docker/go-tools/ ./
-ENV CGO_ENABLED=0 GOFLAGS="-trimpath -mod=readonly"
+ENV CGO_ENABLED=0 GOTOOLCHAIN=local GOFLAGS="-trimpath -mod=readonly"
 ARG CRICTL_VERSION
 RUN go build -ldflags="-s -w -X sigs.k8s.io/cri-tools/pkg/version.Version=${CRICTL_VERSION}" \
       -o /usr/local/bin/crictl sigs.k8s.io/cri-tools/cmd/crictl \
