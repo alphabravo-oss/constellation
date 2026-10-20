@@ -24,8 +24,8 @@ export function ResponseCatalogOverrideFormPage() {
   const backTo = clusterId ? `/clusters/${clusterId}/response${search.size ? `?${search}` : ""}` : "/clusters";
   return <div className="space-y-6" data-testid="response-catalog-override-form-page">
     <PageHeader title="Edit response catalog override" description="Change the mode or enabled state of a built-in response rule. This override is shared across every cluster in the organization."
-      backLink={<Link to="." href={backTo} className="inline-flex items-center gap-2 hover:text-foreground"><ArrowLeft className="h-4 w-4" /> Response Catalog</Link>} />
-    {isLoading ? <LoadingState label="Loading cluster…" /> : !clusterId || !cluster ? <ErrorState title="The selected cluster could not be loaded. Return to the cluster list and try again." /> : !ruleId ? <ErrorState title="Choose a built-in rule from Response Catalog before editing an override." /> : <OverrideScope key={visit.context} editorContext={visit.context} ruleId={ruleId} backTo={backTo} />}
+      backLink={<Link to="." href={backTo} className="inline-flex items-center gap-2 hover:text-foreground"><ArrowLeft className="h-4 w-4" /> Built-in response catalog</Link>} />
+    {isLoading ? <LoadingState label="Loading cluster…" /> : !clusterId || !cluster ? <ErrorState title="The selected cluster could not be loaded. Return to the cluster list and try again." /> : !ruleId ? <ErrorState title="Choose a built-in rule from response catalog before editing an override." /> : <OverrideScope key={visit.context} editorContext={visit.context} ruleId={ruleId} backTo={backTo} />}
   </div>;
 }
 

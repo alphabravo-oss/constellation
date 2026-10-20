@@ -5,6 +5,15 @@ import { afterEach, expect, it, vi } from "vitest";
 import { receivers, type Receiver } from "@/api/client";
 import { ReceiverFormPage } from "./ReceiverFormPage";
 
+/** Kit Select keeps a hidden native mirror right before its trigger. */
+function nativeSelect(root: ParentNode, selector: string): HTMLSelectElement | null {
+  const element = root.querySelector(selector);
+  if (!element) return null;
+  if (element.tagName === "SELECT") return element as HTMLSelectElement;
+  const previous = element.previousElementSibling;
+  return previous?.tagName === "SELECT" ? previous as HTMLSelectElement : null;
+}
+
 const route = vi.hoisted(() => ({ id: "receiver", navigate: vi.fn() }));
 vi.mock("@/api/client", () => ({ receivers: { list: vi.fn(), create: vi.fn(), patch: vi.fn(), testFire: vi.fn(), rotateSecret: vi.fn() } }));
 vi.mock("@tanstack/react-router", () => ({ useParams: () => ({ id: route.id || undefined }), useNavigate: () => route.navigate, Link: ({ children, to, ...props }: { children: ReactNode; to?: string }) => <a href={to} {...props}>{children}</a> }));
@@ -21,7 +30,7 @@ function saveButton() { return host.querySelector<HTMLButtonElement>('[data-test
 function button(name: string) { return [...host.querySelectorAll("button")].find((item) => item.textContent?.trim() === name || item.getAttribute("aria-label") === name)!; }
 async function input(selector: string, value: string) { const control = host.querySelector<HTMLInputElement>(selector)!; await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(control, value); control.dispatchEvent(new Event("input", { bubbles: true })); }); }
 async function textarea(selector: string, value: string) { const control = host.querySelector<HTMLTextAreaElement>(selector)!; await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(control, value); control.dispatchEvent(new Event("input", { bubbles: true })); }); }
-async function select(selector: string, value: string) { const control = host.querySelector<HTMLSelectElement>(selector)!; await act(async () => { control.value = value; control.dispatchEvent(new Event("change", { bubbles: true })); }); }
+async function select(selector: string, value: string) { const control = nativeSelect(host, selector)!; await act(async () => { control.value = value; control.dispatchEvent(new Event("change", { bubbles: true })); }); }
 
 it.each(["failed", "missing", "duplicate"])("does not render an editable receiver for a %s exact-ID load", async (scenario) => {
   if (scenario === "failed") vi.mocked(receivers.list).mockRejectedValue(new Error("private backend details"));
@@ -32,8 +41,8 @@ it.each(["failed", "missing", "duplicate"])("does not render an editable receive
 it("loads the saved receiver and leaves its immutable kind and custom template intact", async () => {
   vi.mocked(receivers.list).mockResolvedValue(response()); await renderPage(); await settled(() => expect(host.querySelector("form")).not.toBeNull());
   expect(host.querySelector<HTMLInputElement>("#receiver-name")?.value).toBe("Saved destination");
-  expect(host.querySelector<HTMLSelectElement>("#receiver-kind")?.disabled).toBe(true);
-  expect(host.querySelector<HTMLSelectElement>("#receiver-template")?.value).toBe("custom-layout");
+  expect(nativeSelect(host, "#receiver-kind")?.disabled).toBe(true);
+  expect(nativeSelect(host, "#receiver-template")?.value).toBe("custom-layout");
   expect(host.querySelector<HTMLInputElement>("#receiver-rate")?.value).toBe("42");
   expect(host.querySelector<HTMLTextAreaElement>("#receiver-events")?.value).toBe("finding.escalated\nruntime.");
   expect(host.querySelector("details")?.open).toBe(false);
@@ -75,7 +84,7 @@ it("preserves edited values through a background refresh and a failed save", asy
   vi.mocked(receivers.list).mockResolvedValue(response()); vi.mocked(receivers.patch).mockRejectedValue(new Error("private backend details"));
   await renderPage(); await settled(() => expect(host.querySelector("form")).not.toBeNull()); await input("#receiver-name", "Draft destination"); await input("#receiver-rate", "90");
   await act(async () => client.setQueryData(["receiver-editor", "receiver"], response({ ...receiver, name: "Remote rename", rate_per_min: 100, template_id: "verbose" })));
-  expect(host.querySelector<HTMLInputElement>("#receiver-name")?.value).toBe("Draft destination"); expect(host.querySelector<HTMLInputElement>("#receiver-rate")?.value).toBe("90"); expect(host.querySelector<HTMLSelectElement>("#receiver-template")?.value).toBe("custom-layout");
+  expect(host.querySelector<HTMLInputElement>("#receiver-name")?.value).toBe("Draft destination"); expect(host.querySelector<HTMLInputElement>("#receiver-rate")?.value).toBe("90"); expect(nativeSelect(host, "#receiver-template")?.value).toBe("custom-layout");
   await submit(); await settled(() => expect(host.textContent).toContain("Your draft is preserved")); expect(receivers.patch).toHaveBeenCalledWith("receiver", { name: "Draft destination", rate_per_min: 90 }); expect(route.navigate).not.toHaveBeenCalled(); expect(host.textContent).not.toContain("private backend details");
 });
 it.each(["missing", "failed"])("keeps the draft visible and blocks Save when a refresh is %s", async (scenario) => {

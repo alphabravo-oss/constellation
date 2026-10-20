@@ -101,7 +101,7 @@ function AdmissionProfileImporter({ backTo }: { backTo: string }) {
   return <>
     <VerdictBanner status="info" title="This import applies across the organization" detail="These rules are organization defaults shared across clusters. Import can replace matching profile policy names. Review every change before saving." />
     {profilesQ.isPending && source === "catalog" && <LoadingState label="Loading admission profiles…" />}
-    {profilesQ.isError && source === "catalog" && <ErrorState title="Could not load admission profiles. Your draft is preserved." action={<Button onClick={() => void profilesQ.refetch()}>Retry</Button>} />}
+    {profilesQ.isError && source === "catalog" && <ErrorState title="Could not load admission profiles. your draft is preserved." action={<Button onClick={() => void profilesQ.refetch()}>Retry</Button>} />}
     {installedQ.isPending && <LoadingState label="Loading installed policies for comparison…" />}
     {installedQ.isError && <ErrorState title="Could not load installed policies for comparison. Your draft is preserved. Refresh before importing." action={<Button onClick={() => void installedQ.refetch()}>Retry</Button>} />}
     <Card title="Choose an admission profile" description="Use a built-in profile or upload a portable JSON bundle. Preview is required before importing.">

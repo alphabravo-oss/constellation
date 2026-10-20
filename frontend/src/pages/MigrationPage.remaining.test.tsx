@@ -147,7 +147,7 @@ it("previews remaining families without a cluster and distinguishes create, upda
   expect(registries.textContent).toMatch(/reissue/i);
   expect(registries.textContent).toMatch(/manual scans/i);
   expect(registries.textContent).toContain("no credentials imported");
-  expect(statistic("Vulnerability Profiles")).toBe("2");
+  expect(statistic("Vulnerability profiles")).toBe("2");
   expect(statistic("Registries")).toBe("1");
   expect(statistic("Unchanged")).toBe("1");
 });
@@ -240,7 +240,7 @@ it("refreshes partial apply and rollback history, downloads the bundle, and appl
   expect(enterprise.migrationApply).toHaveBeenCalledWith("remaining-import-1");
   expect(element<HTMLButtonElement>("migration-import-apply-active").disabled).toBe(true);
   await tab("Import history");
-  expect(element("migration-import-history").textContent).toContain("partial applied");
+  expect(element("migration-import-history").textContent).toContain("Partial applied");
   expect(element("migration-import-history").textContent).toContain("1 vulnerability profiles");
   expect(element("migration-import-history").textContent).toContain("1 registries");
   await tab("Readiness");
@@ -303,7 +303,7 @@ it("supports older previews and histories with omitted remaining arrays and coun
   vi.mocked(enterprise.migrationPreview).mockResolvedValue(legacy);
   await render();
   await previewExport();
-  expect(statistic("Vulnerability Profiles")).toBe("0");
+  expect(statistic("Vulnerability profiles")).toBe("0");
   expect(statistic("Registries")).toBe("0");
   expect(statistic("Unchanged")).toBe("0");
   expect(host.querySelector('[data-testid="migration-preview-vulnerability-profile"]')).toBeNull();
@@ -317,8 +317,8 @@ function deferred<T>() { let resolve!: (value: T) => void; let reject!: (reason:
 async function editDraft(value: string) { const input = element<HTMLTextAreaElement>("migration-export-input"); await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); }); }
 async function chooseTarget(id: string) { const select = element<HTMLSelectElement>("migration-target-cluster-select"); await act(async () => { select.value = id; select.dispatchEvent(new Event("change", { bubbles: true })); }); }
 
-it("has five primary metrics, one URL workspace, and preserves a draft through Back and Forward", async () => {
-  await render("/settings/migration?context=keep"); expect(host.querySelectorAll(".app-stat-card")).toHaveLength(5);
+it("has four inline metrics (the fifth in Details), one URL workspace, and preserves a draft through Back and Forward", async () => {
+  await render("/settings/migration?context=keep"); expect(host.querySelector('[data-testid="verdict-numbers"]')!.children).toHaveLength(4);
   expect(host.querySelector('[data-testid="migration-import-history"]')).toBeNull(); expect(host.querySelector('[data-testid="migration-readiness-checklist"]')).toBeNull();
   await editDraft("Reviewed draft"); await tab("Import history"); expect(routerHistory.location.href).toBe("/settings/migration?context=keep&tab=history"); await tab("Report and follow-up");
   await act(async () => routerHistory.back()); await vi.waitFor(() => expect(host.querySelector('[data-testid="migration-import-history"]')).not.toBeNull());

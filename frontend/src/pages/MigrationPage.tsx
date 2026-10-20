@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, CircleCheck, Download, RotateCcw, ShieldCheck, WandSparkles } from "lucide-react";
 import { toast } from "sonner";
+import { Link } from "@tanstack/react-router";
 
 import { clusters as clustersApi, enterprise, type MigrationImportListItem, type MigrationPreview, type MigrationUnsupported } from "@/api/client";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
@@ -15,17 +16,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Field, Select, Textarea } from "@/components/ui/form";
 import { StatusPill } from "@/components/ui/status-pill";
-import {
-  buildMigrationReadiness,
-  buildMigrationReport,
-  countReadiness,
-  MIGRATION_RECOMMENDED_ACTIONS,
-  migrationAppliedSummaryLabel,
-  migrationSourceLabel,
-  migrationSummaryLabel,
-  migrationVulnerabilityScopeLabel,
-  type MigrationReadinessCategory,
-} from "@/lib/migration-readiness";
+import { buildMigrationReadiness, buildMigrationReport, countReadiness, MIGRATION_RECOMMENDED_ACTIONS, migrationAppliedSummaryLabel, migrationSourceLabel, migrationSummaryLabel, migrationVulnerabilityScopeLabel, type MigrationReadinessCategory } from "@/lib/migration-readiness";
 import { downloadJson } from "@/lib/download";
 
 type MigrationPolicy = MigrationPreview["policies"][number];
@@ -535,20 +526,15 @@ export function MigrationPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Migration Imports"
-        description="Preview policies, runtime profiles, groups, network rules, vulnerability profiles, and registry metadata from another security tool before applying."
+        title="NeuVector migration"
+        description="Preview and apply configuration exported from NeuVector."
       />
+      <MigrationClusterLinks clusters={clusterOptions} />
 
       <VerdictBanner status={sourcesQ.isError || importsQ.isError ? "degraded" : "info"}
         title={sourcesQ.isError || importsQ.isError ? "Migration evidence is unavailable" : data ? "Review this preview before applying" : "Preview an export before changing live configuration"}
-        detail="Migration imports are organization-wide. Cluster-bound objects use the explicitly selected target; unsupported records and credentials are not imported." />
-          <StatGrid>
-            <StatCard label="Source Objects" value={data?.summary.source_total ?? data?.summary.total ?? "—"} />
-            <StatCard label="Create" value={data?.summary.create ?? "—"} tone="low" />
-            <StatCard label="Update" value={data?.summary.update ?? "—"} tone="medium" />
-            <StatCard label="Enforce" value={data?.summary.enforce ?? "—"} tone="high" />
-            <StatCard label="Unsupported Diagnostics" value={data?.summary.unsupported ?? "—"} tone={(data?.summary.unsupported ?? 0) > 0 ? "medium" : "neutral"} />
-          </StatGrid>
+         numbers={[{ label: "Source objects", value: data?.summary.source_total ?? data?.summary.total ?? "—" }, { label: "Create", value: data?.summary.create ?? "—", tone: "default" }, { label: "Update", value: data?.summary.update ?? "—", tone: "warning" }, { label: "Enforce", value: data?.summary.enforce ?? "—", tone: "warning" }]} detail={<><p>Migration imports are organization-wide. Cluster-bound objects use the explicitly selected target; unsupported records and credentials are not imported.</p><p>{"Unsupported Diagnostics"}: {data?.summary.unsupported ?? "—"}</p></>} />
+          
       {(applyImport.isError || rollbackImport.isError || rollbackBundleDownload.isError) && <p role="alert" className="text-sm text-destructive">{migrationErrorMessage(applyImport.error ?? rollbackImport.error ?? rollbackBundleDownload.error, "Migration action failed")}</p>}
       <Tabs value={tab} onValueChange={setTab} items={[
         { value: "import", label: "Preview import", content: <div className="space-y-6">
@@ -605,7 +591,7 @@ export function MigrationPage() {
             {preview.isError && preview.variables?.draftKey === draftKey && <p role="alert" className="text-sm text-destructive">{migrationErrorMessage(preview.error, "Migration preview failed. Your draft is preserved")}</p>}
             {preview.data && preview.variables?.draftKey !== draftKey && <p role="status" className="text-sm text-muted-foreground">The draft changed. Preview again before applying.</p>}
             <p className="text-xs text-muted-foreground">Preview is read-only for live configuration: it saves an import preview but does not write live policies, profiles, or registries. Apply is a separate action.</p>
-            <Field label="Upload export (maximum 2 MiB)">
+            <Field label="Upload export (maximum 2 miB)">
               <input
                 type="file"
                 accept=".json,.yaml,.yml,.txt,application/json,application/yaml,text/plain"
@@ -673,13 +659,13 @@ export function MigrationPage() {
             <StatGrid>
               <StatCard label="Policies" value={data.policies.length} />
               <StatCard label="Unchanged" value={data.summary.unchanged ?? 0} />
-              <StatCard label="File Profiles" value={data.summary.file_profiles} />
-              <StatCard label="Process Profiles" value={data.summary.process_profiles ?? processProfiles.length} />
+              <StatCard label="File profiles" value={data.summary.file_profiles} />
+              <StatCard label="Process profiles" value={data.summary.process_profiles ?? processProfiles.length} />
               <StatCard label="Groups" value={data.summary.groups ?? groups.length} />
-              <StatCard label="Network Rules" value={data.summary.network_rules ?? networkRules.length} />
+              <StatCard label="Network rules" value={data.summary.network_rules ?? networkRules.length} />
               <StatCard label="DLP / WAF" value={data.summary.dpi_rules} />
-              <StatCard label="Group Scopes" value={data.summary.dpi_bindings ?? dpiBindings.length} />
-              <StatCard label="Vulnerability Profiles" value={data.summary.vulnerability_profiles ?? vulnerabilityProfiles.length} />
+              <StatCard label="Group scopes" value={data.summary.dpi_bindings ?? dpiBindings.length} />
+              <StatCard label="Vulnerability profiles" value={data.summary.vulnerability_profiles ?? vulnerabilityProfiles.length} />
               <StatCard label="Registries" value={data.summary.registries ?? registries.length} />
             </StatGrid>
           </Collapse>
@@ -824,7 +810,7 @@ export function MigrationPage() {
             { value: "diagnostics", label: "Diagnostics", content: <>
           {(data.unsupported?.length ?? 0) > 0 ? (
             <Card
-              title="Unsupported Diagnostics"
+              title="Unsupported diagnostics"
               description="Unsupported records and omitted fields are not imported or queued. Diagnostics can overlap supported object counts. Review reasons and reissue instructions before cutover."
               padded={false}
             >
@@ -855,7 +841,7 @@ export function MigrationPage() {
         { value: "readiness", label: "Readiness", content: <>
       <section className="space-y-4" data-testid="migration-switch-readiness">
         {importsQ.isPending ? <LoadingState label="Loading migration readiness evidence…" /> : importsQ.isError && !importsQ.isFetchNextPageError ? <ErrorState title="Migration readiness evidence is unavailable." action={<Button onClick={() => void importsQ.refetch()}>Retry history</Button>} /> : <Card
-          title="Switch Readiness"
+          title="Switch readiness"
           description="Current preview, loaded import history, manual mapping work and rollback evidence. These checks do not validate the complete organization inventory."
         >
           <p className="text-sm text-muted-foreground">{readinessCounts.blocker} blockers · {readinessCounts.warning} warnings · {readinessCounts.ready} ready checks · {imports.length} loaded imports</p>
@@ -870,7 +856,7 @@ export function MigrationPage() {
                   <StatusPill label={item.category} tone={readinessTone(item.category)} />
                 </div>
                 {item.href ? (
-                  <a href={item.href} className="mt-2 inline-flex items-center gap-1 text-xs text-[color:var(--color-primary)] hover:underline">
+                  <a href={item.href} className="mt-2 inline-flex items-center gap-1 text-xs text-link">
                     Open <ArrowRight className="h-3 w-3" aria-hidden />
                   </a>
                 ) : null}
@@ -882,9 +868,9 @@ export function MigrationPage() {
       </section>
         </> },
         { value: "report", label: "Report and follow-up", content: <div className="space-y-6">
-        {importsQ.isError && !importsQ.isFetchNextPageError && <ErrorState title="Report history is unavailable. Export is paused." action={<Button onClick={() => void importsQ.refetch()}>Retry history</Button>} />}
+        {importsQ.isError && !importsQ.isFetchNextPageError && <ErrorState title="Report history is unavailable. export is paused." action={<Button onClick={() => void importsQ.refetch()}>Retry history</Button>} />}
         <Card
-          title="Migration Report"
+          title="Migration report"
           description="Export a cutover summary with imported counts, unsupported objects, rollback state, and recommended follow-up."
         >
           <div className="space-y-3" data-testid="migration-report-panel">
@@ -907,9 +893,8 @@ export function MigrationPage() {
           </div>
         </Card>
 
-
       <Card
-        title="Post-Import Actions"
+        title="Post-Import actions"
         description="Controls that should be reviewed after policy migration so the cutover uses Constellation's stronger evidence and operations model."
         padded={false}
       >
@@ -922,7 +907,7 @@ export function MigrationPage() {
               data-testid={`migration-action-${action.id}`}
             >
               <div className="flex items-center gap-2 text-sm font-medium">
-                <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground group-hover:text-[color:var(--color-primary)]" aria-hidden />
+                <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground group-hover:underline" aria-hidden />
                 {action.title}
               </div>
               <p className="mt-1 text-xs text-muted-foreground">{action.detail}</p>
@@ -934,13 +919,13 @@ export function MigrationPage() {
         </div> },
         { value: "history", label: "Import history", content: <>
       <Card
-        title="Import History"
+        title="Import history"
         description="Persisted previews, applied imports, partial imports, failures, and rollback state for the current organization. Load more to inspect older records."
         padded={false}
       >
         <div className="flex flex-wrap items-center justify-between gap-2 px-6 pt-4 text-xs text-muted-foreground">
           <span>The table’s CSV includes loaded rows only.</span>
-          <a href="/api/v1/migration/imports/export" download="migration-imports.ndjson" className="font-medium text-primary underline underline-offset-2" data-testid="migration-import-history-export-all">
+          <a href="/api/v1/migration/imports/export" download="migration-imports.ndjson" className="text-link font-medium" data-testid="migration-import-history-export-all">
             Download all history (NDJSON)
           </a>
         </div>
@@ -1062,4 +1047,28 @@ function readinessTone(category: MigrationReadinessCategory): "neutral" | "succe
     default:
       return "info";
   }
+}
+
+/** Per-cluster NeuVector tools that left the primary navigation (C1). */
+function MigrationClusterLinks({ clusters }: { clusters: Array<{ id: string; name: string }> }) {
+  if (clusters.length === 0) return null;
+  return (
+    <section className="rounded-lg border border-border bg-card" aria-labelledby="migration-cluster-tools" data-testid="migration-cluster-tools">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
+        <h2 id="migration-cluster-tools" className="text-section-title font-semibold text-foreground">Cluster migration tools</h2>
+        <p className="text-meta text-muted-foreground">NeuVector concept map and policy transfer per cluster</p>
+      </div>
+      <ul className="divide-y divide-border">
+        {clusters.map((cluster) => (
+          <li key={cluster.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5">
+            <span className="text-sm font-medium text-foreground">{cluster.name}</span>
+            <span className="flex flex-wrap items-center gap-4 text-sm">
+              <Link to="." href={`/clusters/${cluster.id}/neuvector`} className="text-link">NeuVector switchboard</Link>
+              <Link to="." href={`/clusters/${cluster.id}/policy`} className="text-link">Policy transfer</Link>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
 }

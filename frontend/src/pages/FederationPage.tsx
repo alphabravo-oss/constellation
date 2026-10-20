@@ -1,10 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { Crown, GitBranch, Hash, LogOut as LeaveIcon, Plus, Users } from "lucide-react";
+import { LogOut as LeaveIcon, Plus } from "lucide-react";
 import { federation, type FedMember, type FedMembership } from "@/api/client";
 import { PageHeader, PageContainer } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { Collapse } from "@/components/ui/collapse";
 import { Button } from "@/components/ui/button";
@@ -43,13 +42,8 @@ export function FederationPage() {
   });
   return <PageContainer>
     <PageHeader title="Federation" description="Organization-wide federation membership and policy synchronization. Runtime data remains local to each member cluster." actions={<Button disabled={state.isFetching || members.isFetching} onClick={() => { void state.refetch(); void members.refetch(); }}>Refresh</Button>} />
-    <VerdictBanner status={state.isError || members.isError ? "degraded" : "info"} title={state.isError ? "Federation state is unavailable" : members.isError ? "Federation members are unavailable" : !stateReady || !membersReady ? "Loading federation evidence" : `Federation state: ${cur?.state}`} detail="Membership actions require the latest settled federation state. Member counts describe only the loaded organization inventory." />
-    <StatGrid>
-      <StatCard label="State" value={cur?.state ?? "Unavailable"} valueKind="text" icon={<Crown className="h-3.5 w-3.5" />} />
-      <StatCard label="Master" value={stateReady ? cur?.master_id?.slice(0, 12) ?? "None reported" : "Unavailable"} valueKind="text" hint={cur?.master_id} icon={<GitBranch className="h-3.5 w-3.5" />} />
-      <StatCard label="Revision" value={cur?.revision ?? "Unavailable"} valueKind={stateReady ? "number" : "text"} icon={<Hash className="h-3.5 w-3.5" />} />
-      <StatCard label="Loaded members" value={membersReady ? rows.length : "Unavailable"} valueKind={membersReady ? "number" : "text"} icon={<Users className="h-3.5 w-3.5" />} />
-    </StatGrid>
+    <VerdictBanner status={state.isError || members.isError ? "degraded" : "info"} title={state.isError ? "Federation state is unavailable" : members.isError ? "Federation members are unavailable" : !stateReady || !membersReady ? "Loading federation evidence" : `Federation state: ${cur?.state}`} detail="Membership actions require the latest settled federation state. Member counts describe only the loaded organization inventory." numbers={[{ label: "State", value: cur?.state ?? "Unavailable" }, { label: "Master", value: stateReady ? cur?.master_id?.slice(0, 12) ?? "None reported" : "Unavailable", title: cur?.master_id }, { label: "Revision", value: cur?.revision ?? "Unavailable" }, { label: "Loaded members", value: membersReady ? rows.length : "Unavailable" }]} />
+    
     {state.isError && <ErrorState title="Federation state could not be loaded or refreshed." action={<Button onClick={() => void state.refetch()}>Retry state</Button>} />}
     <section className="space-y-3">
       <h2 className="text-sm font-semibold">Members</h2>
@@ -57,7 +51,7 @@ export function FederationPage() {
       {members.isError ? <ErrorState title="Federation members could not be loaded or refreshed." action={<Button onClick={() => void members.refetch()}>Retry members</Button>} /> : !membersReady ? <LoadingState label="Loading federation members…" /> : <DataTable rows={memberRows} columns={memberColumns} rowKey={member => member.id} preferencesKey="federation-members" exportFileName="constellation-federation-loaded-members" exportLabel="Export loaded matches CSV" emptyState={<p className="p-6 text-sm text-muted-foreground">No federation members match the loaded inventory.</p>} />}
     </section>
     <Collapse label="Membership actions">
-      {transit.isError && <ErrorState title="The federation transition failed. Refresh state and retry." />}
+      {transit.isError && <ErrorState title="The federation transition failed. refresh state and retry." />}
       <div className="flex flex-wrap gap-2">
         <Button disabled={cur?.state !== "standalone" || transit.isPending} onClick={() => transit.mutate("promote")}>Promote → Master</Button>
         <Button disabled={cur?.state !== "master" || transit.isPending} onClick={() => transit.mutate("demote")}>Demote → Standalone</Button>

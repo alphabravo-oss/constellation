@@ -141,7 +141,7 @@ describe("PolicyCenterPage", () => {
 
     const migrationLinks = host?.querySelectorAll<HTMLAnchorElement>('a[href="/settings/migration"]');
     expect(migrationLinks).toHaveLength(1);
-    expect(migrationLinks?.[0].textContent).toBe("Migration Imports");
+    expect(migrationLinks?.[0].textContent).toBe("NeuVector migration");
 
     for (const slug of ["admission", "runtime-policies", "runtime-baselines", "file-monitor", "response-rules", "policies", "response"]) {
       const family = familyElement(slug);
@@ -156,11 +156,11 @@ describe("PolicyCenterPage", () => {
 
     const network = familyElement("network-rules").querySelector('[data-testid="policy-family-network-rules-reorder"]');
     const response = familyElement("response-rules").querySelector('[data-testid="policy-family-response-rules-reorder"]');
-    expect(network?.querySelector('a[aria-label="Manage Network Rules precedence"]')?.getAttribute("href"))
+    expect(network?.querySelector('a[aria-label="Manage Network rules precedence"]')?.getAttribute("href"))
       .toBe("/clusters/cluster-1/network-rules");
     expect(network?.textContent).toContain("Move a network rule to the top; arbitrary positions are not supported");
     expect(network?.textContent).toContain("initially follows evaluation order");
-    expect(response?.querySelector('a[aria-label="Manage Response Rules precedence"]')?.getAttribute("href"))
+    expect(response?.querySelector('a[aria-label="Manage Response rules precedence"]')?.getAttribute("href"))
       .toBe("/clusters/cluster-1/response-rules");
     expect(response?.textContent).toContain("Move response rules up or down in the visible cluster and org-wide list");
     expect(familyElement("admission").querySelector('[data-testid$="-reorder"]')).toBeNull();

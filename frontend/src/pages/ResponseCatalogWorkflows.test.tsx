@@ -7,6 +7,15 @@ import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
 import { ResponsePage } from "./ResponsePage";
 import { ResponseRulesPage } from "./ResponseRulesPage";
 import { ResponseCatalogOverrideFormPage } from "./ResponseCatalogOverrideFormPage";
+
+/** Kit Select keeps a hidden native mirror right before its trigger. */
+function nativeSelect(root: ParentNode, selector: string): HTMLSelectElement | null {
+  const element = root.querySelector(selector);
+  if (!element) return null;
+  if (element.tagName === "SELECT") return element as HTMLSelectElement;
+  const previous = element.previousElementSibling;
+  return previous?.tagName === "SELECT" ? previous as HTMLSelectElement : null;
+}
 const route = vi.hoisted(() => ({ clusterId: "cluster" as string | undefined, cluster: { id: "cluster" } as { id: string } | undefined, loading: false, ruleId: "rule" as string | undefined, search: "", navigate: vi.fn(), setParams: vi.fn() }));
 vi.mock("@/api/client", () => ({ responseRules: { list: vi.fn(), preview: vi.fn(), update: vi.fn() }, responseRulesV2: { list: vi.fn(), delete: vi.fn(), reorder: vi.fn(), exportYaml: vi.fn(), importYaml: vi.fn() } }));
 vi.mock("@/hooks/useCluster", () => ({ useCluster: () => ({ clusterId: route.clusterId, cluster: route.cluster, isLoading: route.loading }) }));
@@ -28,7 +37,7 @@ async function rerenderPage(page = "form") { await act(async () => root.render(<
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
 function button(label: string) { return [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === label || b.getAttribute("aria-label") === label)!; }
 async function click(label: string) { await act(async () => button(label).click()); }
-async function change(selector: string, value: string) { await act(async () => { const input = host.querySelector<HTMLSelectElement | HTMLTextAreaElement | HTMLInputElement>(selector)!; const proto = input instanceof HTMLSelectElement ? HTMLSelectElement.prototype : input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(input, value); input.dispatchEvent(new Event(input instanceof HTMLSelectElement ? "change" : "input", { bubbles: true })); }); }
+async function change(selector: string, value: string) { await act(async () => { const input = (nativeSelect(host, selector) ?? host.querySelector<HTMLSelectElement | HTMLTextAreaElement | HTMLInputElement>(selector))!; const proto = input instanceof HTMLSelectElement ? HTMLSelectElement.prototype : input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(input, value); input.dispatchEvent(new Event(input instanceof HTMLSelectElement ? "change" : "input", { bubbles: true })); }); }
 async function ready() { await settled(() => expect(button("Preview")?.disabled).toBe(false)); }
 async function runPreview() { await click("Preview"); await settled(() => expect(button("Save").disabled).toBe(false)); }
 
@@ -43,7 +52,7 @@ it.each(["failed", "missing"])("does not hydrate a %s built-in rule", async (sce
   await renderPage(); await settled(() => expect(host.textContent).toContain("could not be loaded from the organization catalog")); expect(host.querySelector("form")).toBeNull(); expect(host.textContent).not.toContain("private transport"); expect(responseRules.update).not.toHaveBeenCalled();
 });
 it("hydrates the saved rule and requires a matching organization preview", async () => {
-  await renderPage(); await ready(); expect(host.querySelector<HTMLSelectElement>("#response-override-mode")?.value).toBe("monitor"); expect(host.querySelector('[role="switch"]')?.getAttribute("aria-checked")).toBe("false"); expect(button("Save").disabled).toBe(true); expect(host.textContent).toContain("changes organization-wide settings"); expect(host.querySelector("details")?.open).toBe(false);
+  await renderPage(); await ready(); expect(nativeSelect(host, "#response-override-mode")?.value).toBe("monitor"); expect(host.querySelector('[role="switch"]')?.getAttribute("aria-checked")).toBe("false"); expect(button("Save").disabled).toBe(true); expect(host.textContent).toContain("changes organization-wide settings"); expect(host.querySelector("details")?.open).toBe(false);
   await runPreview(); expect(responseRules.preview).toHaveBeenCalledWith("rule", { mode: "monitor", enabled: false, reason: "Approved audit reason" }); expect(host.textContent).toContain("Agent required");
 });
 it.each(["mode", "enabled", "reason"])("requires a fresh preview when %s changes", async (field) => {
@@ -58,7 +67,7 @@ it.each(["wrong-rule", "wrong-mode", "wrong-enabled", "persisted"])("rejects a %
 it("retains the draft but invalidates preview when saved catalog data changes", async () => {
   await renderPage(); await ready(); await change("textarea", "Unsaved audit draft"); await runPreview();
   await act(async () => { client.setQueryData(["response-rules"], { ...catalog, rules: [{ ...rule, mode: "enforce", enabled: true, override_reason: "Remote reason" }] }); });
-  await settled(() => expect(button("Save").disabled).toBe(true)); expect(host.querySelector("textarea")?.value).toBe("Unsaved audit draft"); expect(host.querySelector<HTMLSelectElement>("#response-override-mode")?.value).toBe("monitor");
+  await settled(() => expect(button("Save").disabled).toBe(true)); expect(host.querySelector("textarea")?.value).toBe("Unsaved audit draft"); expect(nativeSelect(host, "#response-override-mode")?.value).toBe("monitor");
 });
 it("preserves failed-save drafts and sends the previewed saved-rule settings", async () => {
   vi.mocked(responseRules.update).mockRejectedValue(new Error("private transport")); await renderPage(); await ready(); await change("textarea", "Current audit draft"); await runPreview(); await click("Save"); await settled(() => expect(host.textContent).toContain("Could not save this override. Your draft is preserved"));

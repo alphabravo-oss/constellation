@@ -18,7 +18,6 @@ import { useCluster } from "@/hooks/useCluster";
 import { PageContainer, PageHeader, PageSection } from "@/components/ui/page";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/status-pill";
@@ -56,7 +55,7 @@ const changeScopes: Record<ChangeFamily, string> = {
 
 const policyFamilies: PolicyFamily[] = [
   {
-    title: "Network Rules",
+    title: "Network rules",
     nvName: "Network policy",
     route: "network-rules",
     createRoute: "network-rules/new",
@@ -67,7 +66,7 @@ const policyFamilies: PolicyFamily[] = [
     portable: "network-rules",
   },
   {
-    title: "Admission Control",
+    title: "Admission control",
     nvName: "Admission rules",
     route: "admission",
     createRoute: "admission/new",
@@ -76,7 +75,7 @@ const policyFamilies: PolicyFamily[] = [
     ordered: true,
   },
   {
-    title: "Runtime Policies",
+    title: "Runtime policies",
     nvName: "Response protection",
     route: "runtime-policies",
     createRoute: "runtime-policies/new",
@@ -84,14 +83,14 @@ const policyFamilies: PolicyFamily[] = [
     mode: "monitor",
   },
   {
-    title: "Process Baselines",
+    title: "Process baselines",
     nvName: "Process profile",
     route: "runtime/baselines",
     icon: <GitMerge className="h-4 w-4" aria-hidden />,
     mode: "learn",
   },
   {
-    title: "File Monitor",
+    title: "File monitor",
     nvName: "File profile",
     route: "file-monitor",
     createRoute: "file-monitor/new",
@@ -99,7 +98,7 @@ const policyFamilies: PolicyFamily[] = [
     mode: "monitor",
   },
   {
-    title: "DLP Rules",
+    title: "DLP rules",
     nvName: "DLP sensors",
     switchTerms: ["NV DLP Sensors -> DLP Rules", "NV dlp_group -> DLP group scope"],
     route: "runtime-dlp",
@@ -109,7 +108,7 @@ const policyFamilies: PolicyFamily[] = [
     portable: "dlp",
   },
   {
-    title: "WAF / DPI Signatures",
+    title: "WAF / DPI signatures",
     nvName: "WAF sensors",
     switchTerms: ["NV WAF Sensors -> WAF/DPI Signatures", "NV waf_group -> WAF/DPI group scope"],
     route: "runtime-signatures",
@@ -119,7 +118,7 @@ const policyFamilies: PolicyFamily[] = [
     portable: "signatures",
   },
   {
-    title: "Response Rules",
+    title: "Response rules",
     nvName: "Response rules",
     route: "response-rules",
     createRoute: "response-rules/new",
@@ -128,7 +127,7 @@ const policyFamilies: PolicyFamily[] = [
     reorder: "up-down",
   },
   {
-    title: "Vulnerability Profiles",
+    title: "Vulnerability profiles",
     nvName: "Vulnerability profile",
     route: "vuln-profiles",
     icon: <FileWarning className="h-4 w-4" aria-hidden />,
@@ -143,7 +142,7 @@ const policyFamilies: PolicyFamily[] = [
     portable: "groups",
   },
   {
-    title: "Declarative Policies",
+    title: "Declarative policies",
     nvName: "Policy list",
     route: "policies",
     createRoute: "policies/new",
@@ -151,7 +150,7 @@ const policyFamilies: PolicyFamily[] = [
     mode: "monitor",
   },
   {
-    title: "Response Catalog",
+    title: "Response catalog",
     nvName: "Response actions",
     route: "response",
     icon: <RadioTower className="h-4 w-4" aria-hidden />,
@@ -222,28 +221,24 @@ export function PolicyCenterPage() {
   return (
     <PageContainer data-testid="policy-center-page">
       <PageHeader
-        title="Policy Center"
+        title="Policy transfer"
         description="Manage this cluster’s policies, review migration diagnostics, and open the workflow for each policy family."
         actions={
           <Button asChild variant="outline">
-            <Link to="/settings/migration">Migration Imports</Link>
+            <Link to="/settings/migration">NeuVector migration</Link>
           </Button>
         }
       />
 
       <VerdictBanner status={!clusterId || importsQuery.isError ? "degraded" : "info"}
         title={!clusterId ? "Select a cluster to manage policies" : importsQuery.isError ? "Migration diagnostics could not be refreshed" : "Choose a policy family to review or change"}
-        detail="This directory links to configured policies. Enforcement status must be checked in the selected policy workflow." />
-      <StatGrid>
-        <StatCard label="Policy families" value={policyFamilies.length} />
-        <StatCard label="Families with YAML transfer" value={policyFamilies.filter((family) => family.portable).length} />
-        <StatCard label="Loaded import diagnostics" value={importsQuery.data ? diagnostics.length : "—"} hint="Organization import history" />
-      </StatGrid>
+        detail="This directory links to configured policies. Enforcement status must be checked in the selected policy workflow." numbers={[{ label: "Policy families", value: policyFamilies.length }, { label: "Families with YAML transfer", value: policyFamilies.filter((family) => family.portable).length }, { label: "Loaded import diagnostics", value: importsQuery.data ? diagnostics.length : "—", title: "Organization import history" }]} />
+      
       <Tabs value={tab} onValueChange={setTab} items={[
         { value: "families", label: "Policy families", content: (
       <PageSection
-        title="Policy Families"
-        description="Every enforcement and detection surface reachable from one place. Saved migration diagnostics are import-time findings, not this cluster's current policies. Selected-cluster records are labeled; missing IDs remain unknown or unspecified. Other-cluster records are in the Migration diagnostics tab."
+        title="Policy families"
+        description="Diagnostics are import-time findings; missing IDs remain unknown or unspecified."
       >
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3" data-testid="policy-family-grid">
           {policyFamilies.map((family) => (
@@ -275,7 +270,7 @@ export function PolicyCenterPage() {
                   {family.portable === "network-rules" ? <NetworkRuleMatchStats clusterId={clusterId} /> : null}
                   {family.reorder && clusterId ? (
                     <div className="text-xs text-muted-foreground" data-testid={`policy-family-${familySlug(family.route)}-reorder`}>
-                      <Link to="." href={to(family.route)} className="font-medium text-primary underline underline-offset-2" aria-label={`Manage ${family.title} precedence`}>
+                      <Link to="." href={to(family.route)} className="text-link font-medium" aria-label={`Manage ${family.title} precedence`}>
                         Manage precedence
                       </Link>
                       <div>{family.reorder === "move-top"
@@ -309,7 +304,7 @@ export function PolicyCenterPage() {
       </PageSection>
         ) },
         { value: "migration", label: "Migration diagnostics", content: (
-      <PageSection title="Migration Diagnostics" description="Org-wide saved NeuVector import history. Only records with a matching target ID are attributed to the selected cluster; missing IDs remain unknown or unspecified. Loaded pages may not cover all history.">
+      <PageSection title="Migration diagnostics" description="Org-wide saved NeuVector import history. Only records with a matching target ID are attributed to the selected cluster; missing IDs remain unknown or unspecified. Loaded pages may not cover all history.">
         {importsQuery.isPending ? <p role="status">Loading migration diagnostics…</p> : null}
         {importsQuery.isError && !importsQuery.isFetchNextPageError ? (
           <p role="alert">{importsQuery.data
@@ -339,7 +334,7 @@ export function PolicyCenterPage() {
         ) },
         { value: "modes", label: "Mode guide", content: (
       <PageSection
-        title="Mode Vocabulary"
+        title="Mode vocabulary"
         description="NeuVector modes are shown beside the Constellation mode used by the target policy family."
       >
         <div className="grid gap-3 md:grid-cols-3" data-testid="policy-mode-vocabulary">

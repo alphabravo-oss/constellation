@@ -1,17 +1,17 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation, useParams } from "@tanstack/react-router";
-import { Activity, Boxes, KeyRound, ShieldCheck, CloudUpload } from "lucide-react";
+import { KeyRound, CloudUpload } from "lucide-react";
 import { clusters } from "@/api/client";
 import { PageHeader, PageContainer } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 import { Button } from "@/components/ui/button";
 import { sortClustersByActivity } from "@/lib/clusters";
 import { componentDiagnosticsHref, nvRoleAlias } from "@/lib/component-roles";
+import { StatusPill } from "@/components/ui/status-pill";
 type HealthComponent = Awaited<ReturnType<typeof clusters.health>>["components"][number];
 export function ClusterHealthPage() {
   const { id: clusterID } = useParams({ strict: false });
@@ -39,7 +39,7 @@ export function ClusterHealthPage() {
         return (
           <a
             href={componentDiagnosticsHref({ clusterId: selected?.id, component: c.name, role: role.id })}
-            className="font-medium hover:text-[color:var(--color-primary)]"
+            className="font-medium hover:underline"
             data-testid={`cluster-health-component-link-${safeTestID(c.name)}`}
             title={`Open ${role.label.toLowerCase()} diagnostics`}
           >
@@ -55,16 +55,12 @@ export function ClusterHealthPage() {
   ];
 
   return <PageContainer className="space-y-4">
-    <PageHeader title="Cluster Health" description="Reported sensor readiness, platform facts and registration for the selected cluster."
+    <PageHeader title="Sensor health" description="Reported sensor readiness, platform facts and registration for the selected cluster."
       actions={<Button variant="outline" disabled={list.isFetching || health.isFetching || platform.isFetching} onClick={() => { void list.refetch(); if (selected) { void health.refetch(); void platform.refetch(); } }}>Refresh</Button>} />
-    <VerdictBanner status={list.isError || healthUnavailable ? "degraded" : h?.summary.status === "healthy" ? "ok" : h ? "degraded" : "info"}
+    <div data-testid="clusters-stats"><VerdictBanner status={list.isError || healthUnavailable ? "degraded" : h?.summary.status === "healthy" ? "ok" : h ? "degraded" : "info"}
       title={list.isError ? "Cluster inventory unavailable" : list.isPending ? "Loading cluster scope" : !selected ? "Cluster not found" : healthUnavailable ? "Cluster health unavailable" : !h ? "Loading cluster health" : `${selected.name}: ${h.summary.status}`}
-      detail="Health reflects returned sensor and gate reports. Platform facts and registration details are separate workspaces." />
-    <StatGrid data-testid="clusters-stats">
-      <StatCard label="Reported components" value={h ? h.components.length : "—"} icon={<Boxes className="h-3.5 w-3.5" />} />
-      <StatCard label="Connected sensors" value={h ? h.summary.connected_sensors : "—"} hint={h ? `${h.summary.expected_sensors} expected` : undefined} icon={<Activity className="h-3.5 w-3.5" />} />
-      <StatCard label="Reported gates" value={h ? h.gates.length : "—"} icon={<ShieldCheck className="h-3.5 w-3.5" />} />
-    </StatGrid>
+      detail="Health reflects returned sensor and gate reports. Platform facts and registration details are separate workspaces." numbers={[{ label: "Reported components", value: h ? h.components.length : "—" }, { label: "Connected sensors", value: h ? h.summary.connected_sensors : "—", title: h ? `${h.summary.expected_sensors} expected` : undefined }, { label: "Reported gates", value: h ? h.gates.length : "—" }]} /></div>
+    
     <div className="space-y-4" data-testid="cluster-health-panel">
       {list.isPending ? <LoadingState label="Loading clusters…" /> : list.isError ? <ErrorState title="Cluster inventory unavailable" error={list.error} action={<Button onClick={() => void list.refetch()}>Retry clusters</Button>} /> : !selected ? <ErrorState title="Cluster not found" /> : <>
       <h2 className="text-lg font-semibold">{selected.name}</h2>
@@ -117,12 +113,12 @@ function CommandBlock({ icon: Icon, label, value }: { icon: typeof CloudUpload; 
 }
 
 function Status({ value }: { value: string }) {
-  const cls = value === "healthy" || value === "connected" || value === "ready" || value === "pass"
-    ? "bg-[color:var(--color-status-success)]/15 text-[color:var(--color-status-success)]"
+  const tone: "success" | "warning" | "error" | "info" | "pending" | "neutral" = value === "healthy" || value === "connected" || value === "ready" || value === "pass"
+    ? "success"
     : value === "warn" || value === "degraded" || value === "staged"
-      ? "bg-[color:var(--color-status-warning)]/15 text-[color:var(--color-status-warning)]"
-      : "bg-[color:var(--color-status-error)]/15 text-[color:var(--color-status-error)]";
-  return <span className={`rounded-md px-2 py-1 text-xs ${cls}`}>{value}</span>;
+      ? "warning"
+      : "error";
+  return <StatusPill label={value} tone={tone} />;
 }
 
 function formatDate(value?: string) {

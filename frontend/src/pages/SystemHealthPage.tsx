@@ -31,6 +31,7 @@ import { Button } from "@/components/ui/button";
 import { componentDiagnosticsHref, nvRoleAlias } from "@/lib/component-roles";
 import { downloadJson } from "@/lib/download";
 import { ScannerDbCapacity } from "@/components/ScannerDbCapacity";
+import { StatusPill as KitStatusPill } from "@/components/ui/status-pill";
 
 const heartbeatColumns: Column<SystemHealthHeartbeat>[] = [
   {
@@ -43,7 +44,7 @@ const heartbeatColumns: Column<SystemHealthHeartbeat>[] = [
       return (
         <Link
           to="." href={componentDiagnosticsHref({ clusterId: hb.cluster_id, component: hb.component, role: role.id })}
-          className="hover:text-[color:var(--color-primary)]"
+          className="hover:underline"
           data-testid={`system-health-component-link-${safeTestID(hb.component)}`}
           title={`Open ${role.label.toLowerCase()} diagnostics`}
         >
@@ -218,7 +219,7 @@ export function SystemHealthPage() {
                   </div>
                   <p className="text-muted-foreground">Created {formatBundleTime(job.created_at)}{job.started_at ? ` · started ${formatBundleTime(job.started_at)}` : ""}{job.finished_at ? ` · finished ${formatBundleTime(job.finished_at)}` : ""}</p>
                   {job.bundle_id && <p className="font-mono text-muted-foreground">Bundle {job.bundle_id}</p>}
-                  {job.audit_event_id && <Link to="." href={`/audit?support_bundle_job_id=${job.id}`} className="text-[color:var(--color-primary)] hover:underline">Audit history</Link>}
+                  {job.audit_event_id && <Link to="." href={`/audit?support_bundle_job_id=${job.id}`} className="text-link">Audit history</Link>}
                   {job.status === "queued" && <p className="text-muted-foreground">Waiting for a worker. Status refreshes automatically.</p>}
                   {job.status === "running" && <p className="text-muted-foreground">Preparing the redacted bundle. Status refreshes automatically.</p>}
                   {job.status === "ready" && job.expires_at && <p className="text-muted-foreground">Download before {formatBundleTime(job.expires_at)}.</p>}
@@ -240,7 +241,7 @@ export function SystemHealthPage() {
     },
     {
       value: "incidents",
-      label: "Incidents & Actions",
+      label: "Incidents & actions",
       count: incidents.length + actions.length,
       content: (
         <div className="grid gap-4 lg:grid-cols-2">
@@ -286,7 +287,7 @@ export function SystemHealthPage() {
       {license && license.banner_visible && <LicenseBanner license={license} />}
 
       <PageHeader
-        title="System Health"
+        title="System health"
         description="Fleet-wide build version, restart history, drift, and licensing for the control plane and every connected cluster."
         actions={
           <div className="flex flex-wrap items-center justify-end gap-2">
@@ -557,14 +558,14 @@ function Stat({ label, value, tone }: { label: string; value: number; tone: "suc
 }
 
 function Status({ value }: { value: string }) {
-  const cls = value === "healthy" || value === "done" || value === "ready"
-    ? "bg-[color:var(--color-status-success)]/15 text-[color:var(--color-status-success)]"
+  const tone: "success" | "warning" | "error" | "info" | "pending" | "neutral" = value === "healthy" || value === "done" || value === "ready"
+    ? "success"
     : value === "warning" || value === "mitigating" || value === "in_progress" || value === "medium" || value === "queued" || value === "running"
-      ? "bg-[color:var(--color-status-warning)]/15 text-[color:var(--color-status-warning)]"
+      ? "warning"
       : value === "degraded" || value === "critical" || value === "high" || value === "failed"
-        ? "bg-[color:var(--color-status-error)]/15 text-[color:var(--color-status-error)]"
-        : "bg-muted text-muted-foreground";
-  return <span className={`rounded-md px-2 py-1 text-xs ${cls}`}>{value}</span>;
+        ? "error"
+        : "neutral";
+  return <KitStatusPill label={value} tone={tone} />;
 }
 
 // -----------------------------------------------------------------------------

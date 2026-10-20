@@ -9,7 +9,6 @@ import { PageHeader } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Pager } from "@/components/ui/pager";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Button } from "@/components/ui/button";
 import { LookaheadExport } from "@/components/LookaheadExport";
 import { exportQueryReady } from "@/hooks/useExportGuard";
@@ -50,7 +49,7 @@ const auditColumns: Column<AuditEvent>[] = [
   { id: "actor", header: "Actor", kind: "id", size: 128, minSize: 112, maxSize: 160, exportValue: (e) => e.actor_id ?? "", cell: (e) => e.actor_id ?? "—", className: "font-mono text-xs" },
   { id: "action", header: "Action", kind: "text", code: true, size: 240, minSize: 160, grow: true, wrap: true, exportValue: (e) => e.action, cell: (e) => e.action, className: "font-mono text-xs" },
   { id: "target", header: "Target", kind: "id", size: 220, minSize: 160, maxSize: 320, wrap: true, exportValue: (e) => `${e.target_kind ?? ""}:${e.target_id ?? ""}`, cell: (e) => <>{e.target_kind}:{e.target_id ?? ""}</>, className: "text-xs" },
-  { id: "chain", header: "Chain Hash", kind: "id", size: 180, maxSize: 220, exportValue: (e) => e.chain_hash, cell: (e) => e.chain_hash, className: "truncate font-mono text-xs" },
+  { id: "chain", header: "Chain hash", kind: "id", size: 180, maxSize: 220, exportValue: (e) => e.chain_hash, cell: (e) => e.chain_hash, className: "truncate font-mono text-xs" },
 ];
 
 export function AuditPage({ scope = "cluster" }: { scope?: "cluster" | "organization" }) {
@@ -107,8 +106,8 @@ export function AuditPage({ scope = "cluster" }: { scope?: "cluster" | "organiza
       />
       <VerdictBanner status={!scopeReady || q.isError ? "degraded" : "info"}
         title={invalidCohort ? "Invalid activity selection" : invalidFilters ? "Invalid audit filters" : !scopeReady ? "Audit scope unavailable" : q.isError ? "Audit evidence unavailable" : !ready ? "Loading audit evidence" : `${events.length} audit events on this page`}
-        detail={cohortSet ? `Showing ${ready ? events.length : "—"} of ${cohort.length} selected organization records. Missing or inaccessible records are not replaced by newer activity. Displayed hashes do not establish chain integrity.` : orgFilter ? "This view covers organization-scoped audit records. Displayed hashes do not establish chain integrity." : "Events are resolved to this cluster by their recorded target. Displayed hashes do not establish chain integrity."} />
-      <StatGrid><StatCard label="Events (page)" value={ready ? events.length : "—"} /><StatCard label="Page" value={pageIndex + 1} /><StatCard label="More pages" valueKind="text" value={ready ? q.data.has_more ? "Available" : "None reported" : "—"} /></StatGrid>
+        detail={cohortSet ? `Showing ${ready ? events.length : "—"} of ${cohort.length} selected organization records. Missing or inaccessible records are not replaced by newer activity. Displayed hashes do not establish chain integrity.` : orgFilter ? "This view covers organization-scoped audit records. Displayed hashes do not establish chain integrity." : "Events are resolved to this cluster by their recorded target. Displayed hashes do not establish chain integrity."} numbers={[{ label: "Events (page)", value: ready ? events.length : "—" }, { label: "Page", value: pageIndex + 1 }, { label: "More pages", value: ready ? q.data.has_more ? "Available" : "None reported" : "—" }]} />
+      
       {!cohortSet && <form key={JSON.stringify([scope, clusterId, action, framework, control])} className="flex flex-wrap items-end gap-3" onSubmit={event => { event.preventDefault(); const data = new FormData(event.currentTarget); setFilters(Object.fromEntries(["action", "framework", "control"].map(key => [key, String(data.get(key) ?? "").trim()]))); }}>
         {[["action", "Exact action", action], ["framework", "Framework", framework], ["control", "Control", control]].map(([name, label, value]) => <label key={name} className="space-y-1 text-xs"><span className="block">{label}</span><input name={name} defaultValue={value} className="rounded border border-border bg-background px-3 py-2 text-sm" /></label>)}
         <Button type="submit" variant="outline">Apply filters</Button><Button type="button" variant="ghost" onClick={() => setFilters({ action: "", framework: "", control: "" })}>Reset filters</Button>

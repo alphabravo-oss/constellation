@@ -9,7 +9,7 @@ import { PageHeader } from "@/components/ui/page";
 import { Collapse } from "@/components/ui/collapse";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Field, TextInput, Select } from "@/components/ui/form";
+import { Field, TextInput, Select, Checkbox } from "@/components/ui/form";
 
 /**
  * RegisterClusterPage — /settings/clusters/new. A dedicated form page (the
@@ -177,7 +177,7 @@ kubectl -n constellation-system create secret generic constellation-init-bundle 
           </Card>
 
           <div className="flex items-center gap-3">
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={saved} onChange={(e) => setSaved(e.target.checked)} />I saved the registration bundle or installation command.</label>
+            <label className="flex items-center gap-2 text-sm"><Checkbox  checked={saved} onChange={(e) => setSaved(e.target.checked)} />I saved the registration bundle or installation command.</label>
             <Button variant="ghost" size="lg" onClick={() => navigate({ href: back })}>Done</Button>
           </div>
         </div>

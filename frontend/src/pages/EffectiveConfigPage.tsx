@@ -1,13 +1,12 @@
 import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import { Activity, ArrowRight, Clock3, Copy, Database, Download, Earth, Mail, ScanSearch, SlidersHorizontal } from "lucide-react";
+import { Activity, ArrowRight, Copy, Database, Download, Earth, Mail, ScanSearch, SlidersHorizontal } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { systemConfigApi, type ConfigProvenance } from "@/api/client";
 import { PageContainer, PageHeader, PageSection } from "@/components/ui/page";
 import { DataTable } from "@/components/ui/data-table";
 import { Card } from "@/components/ui/card";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Button } from "@/components/ui/button";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
@@ -45,11 +44,10 @@ export function EffectiveConfigPage() {
     queryFn: () => systemConfigApi.get(),
   });
 
-
   if (q.isPending) {
     return (
       <PageContainer>
-        <PageHeader title="Effective Config" description="System configuration and backend-reported provenance." />
+        <PageHeader title="Effective configuration" description="System configuration and backend-reported provenance." />
         <LoadingState label="Loading system config..." />
       </PageContainer>
     );
@@ -58,7 +56,7 @@ export function EffectiveConfigPage() {
   if (q.isError) {
     return (
       <PageContainer>
-        <PageHeader title="Effective Config" description="System configuration and backend-reported provenance." />
+        <PageHeader title="Effective configuration" description="System configuration and backend-reported provenance." />
         <ErrorState title="Failed to load system config" error={q.error} action={<Button onClick={() => void q.refetch()}>Retry</Button>} />
       </PageContainer>
     );
@@ -77,7 +75,7 @@ export function EffectiveConfigPage() {
   return (
     <PageContainer data-testid="effective-config-page">
       <PageHeader
-        title="Effective Config"
+        title="Effective configuration"
         description="Redacted system configuration, per-key sources, and the serving replica's provider state."
         actions={
           <div className="flex flex-wrap gap-2">
@@ -100,13 +98,8 @@ export function EffectiveConfigPage() {
         }
       />
 
-      <VerdictBanner status={provider?.status === "behind" ? "degraded" : "info"} title={`System configuration revision ${q.data.revision}`} detail="Inspect redacted values and their reported sources. Component heartbeat reports establish reported adoption, not current health or fleet-wide enforcement." />
-      <StatGrid>
-        <StatCard label="Config revision" value={q.data.revision} hint="Revision returned by the API" icon={<SlidersHorizontal className="h-3.5 w-3.5" />} />
-        <StatCard label="Persistence" valueKind="text" value={source} hint="Per-key sources are listed below" icon={<Database className="h-3.5 w-3.5" />} />
-        <StatCard label="Last changed" valueKind="text" value={formatDateTime(q.data.updated_at)} hint={q.data.updated_by_email || q.data.updated_by || "Not recorded"} icon={<Clock3 className="h-3.5 w-3.5" />} />
-        <StatCard label="Database values" value={items.filter((item) => item.source === "database").length} hint="Keys attributed to the database" icon={<Database className="h-3.5 w-3.5" />} />
-      </StatGrid>
+      <VerdictBanner status={provider?.status === "behind" ? "degraded" : "info"} title={`System configuration revision ${q.data.revision}`} detail="Inspect redacted values and their reported sources. Component heartbeat reports establish reported adoption, not current health or fleet-wide enforcement." numbers={[{ label: "Config revision", value: q.data.revision, title: "Revision returned by the API" }, { label: "Persistence", value: source, title: "Per-key sources are listed below" }, { label: "Last changed", value: formatDateTime(q.data.updated_at), title: q.data.updated_by_email || q.data.updated_by || "Not recorded" }, { label: "Database values", value: items.filter((item) => item.source === "database").length, title: "Keys attributed to the database" }]} />
+      
 
       <Tabs value={tab} onValueChange={setTab} items={[
         { value: "values", label: "Values", count: items.length, content: (<Card title="Configuration values" description="All returned keys, with backend-reported source and redaction. Edit links open the owning settings page.">
@@ -117,7 +110,7 @@ export function EffectiveConfigPage() {
           { id: "edit", header: "Settings", kind: "actions", exportable: false, cell: item => { const group = groups.find(group => group.items.includes(item)); return group?.editTo ? <a href={group.editTo} className="text-primary hover:underline">Edit<ArrowRight className="inline h-3.5 w-3.5" /></a> : "—"; } },
         ]} />
       </Card>) },
-        { value: "sources", label: "Provenance", content: (<PageSection title="Configuration Sources" description="Sources and redaction are reported independently by the backend for each configuration key.">
+        { value: "sources", label: "Provenance", content: (<PageSection title="Configuration sources" description="Sources and redaction are reported independently by the backend for each configuration key.">
         <div className="space-y-4">
           <section className="rounded-md border border-border bg-card p-3" data-testid="effective-config-source-summary">
             <h2 className="text-sm font-semibold">Source distribution</h2>
@@ -174,7 +167,7 @@ export function EffectiveConfigPage() {
         <p className="mt-3 text-xs text-muted-foreground">
           This reports the system config provider on the replica serving this response. It does not confirm scanner or other component adoption, or a reload by every network client.
         </p>
-      </section><PageSection title="Component Revision Reports" description="Only an explicit system_config_revision in component heartbeat metadata is used here.">
+      </section><PageSection title="Component revision reports" description="Only an explicit system_config_revision in component heartbeat metadata is used here.">
         <ComponentRevisionInventory targetRevision={q.data.revision} sourceQueryKey={configKey} sourceRefreshing={q.isFetching} />
       </PageSection></div>) },
         { value: "json", label: "JSON", content: (<Card title="Redacted JSON" description="The config object returned by /system/config after backend redaction.">
@@ -215,9 +208,9 @@ function buildGroups(items: ConfigItem[]): ConfigGroup[] {
   const definitions = [
     { title: "Network & TLS", icon: <Earth />, editTo: "/settings/network", matches: (key: string) => key.startsWith("egress_proxy.") || key === "tls_verify" || key === "ca_bundle_pem" },
     { title: "Syslog / SIEM", icon: <Activity />, editTo: "/settings/network", matches: (key: string) => key.startsWith("syslog_siem_target.") },
-    { title: "Scanner & CVE Sources", icon: <ScanSearch />, editTo: "/settings/scanner", matches: (key: string) => key.startsWith("scanner_") || key.startsWith("nvd_") },
+    { title: "Scanner & CVE sources", icon: <ScanSearch />, editTo: "/settings/scanner", matches: (key: string) => key.startsWith("scanner_") || key.startsWith("nvd_") },
     { title: "SMTP", icon: <Mail />, editTo: "/settings/integrations/smtp/edit", matches: (key: string) => key.startsWith("smtp.") },
-    { title: "Workload Image Scanning", icon: <ScanSearch />, editTo: "/registries", matches: (key: string) => key.startsWith("auto_scan_") },
+    { title: "Workload image scanning", icon: <ScanSearch />, editTo: "/registries", matches: (key: string) => key.startsWith("auto_scan_") },
     { title: "Retention", icon: <Database />, editTo: "/settings/retention", matches: (key: string) => key.endsWith("_retention_days") },
   ];
   const groups: ConfigGroup[] = definitions.map((definition) => ({
@@ -225,7 +218,7 @@ function buildGroups(items: ConfigItem[]): ConfigGroup[] {
     items: items.filter((item) => definition.matches(item.key)),
   }));
   const other = items.filter((item) => !definitions.some((definition) => definition.matches(item.key)));
-  if (other.length > 0) groups.push({ title: "Other Configuration", icon: <SlidersHorizontal />, items: other });
+  if (other.length > 0) groups.push({ title: "Other configuration", icon: <SlidersHorizontal />, items: other });
   return groups.filter((group) => group.items.length > 0);
 }
 

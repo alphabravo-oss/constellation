@@ -38,7 +38,7 @@ function RoutingRuleScope({ index, requiredRevision }: { index?: number; require
   const conflict = q.data?.revision !== snapshot.saved.revision;
   const canSave = q.isSuccess && !q.isFetching && !conflict;
   return <>
-    {q.isError && <ErrorState title="Could not refresh saved routing. Your draft is preserved. Refresh before saving." action={<Button onClick={() => void q.refetch()}>Retry</Button>} />}
+    {q.isError && <ErrorState title="Could not refresh saved routing. your draft is preserved. refresh before saving." action={<Button onClick={() => void q.refetch()}>Retry</Button>} />}
     {conflict && <p role="alert" className="text-sm text-status-error">Routing changed elsewhere. Your draft is preserved. Return to the saved list and reopen the latest revision before saving.</p>}
     <RoutingRuleEditor index={index} snapshot={snapshot.saved} model={snapshot.model} canSave={canSave} />
   </>;
@@ -61,8 +61,8 @@ function RoutingRuleEditor({ index, snapshot, model, canSave }: { index?: number
   }, onSuccess: () => { void qc.invalidateQueries({ queryKey: ["routing-yaml"] }); void qc.invalidateQueries({ queryKey: ["integration-delivery-overview"] }); void navigate({ href: backTo }); }, onError: (error) => { if (isRevisionConflict(error)) void qc.invalidateQueries({ queryKey: ["routing-yaml"] }); } });
   return <>
     <VerdictBanner status="info" title="Notification routing is shared across the organization" detail={`Saving replaces routing revision ${snapshot.revision} with this route change. Other rules, matchers and advanced settings are preserved.`} />
-    <Card title="Route details" description="Conditions all match. A route with no conditions matches every alert."><form className="space-y-6" onSubmit={(event) => { event.preventDefault(); if (canSave && valid && recQ.isSuccess && !recQ.isFetching && !isRevisionConflict(save.error) && !save.isPending) save.mutate(); }}>
-      {recQ.isError && <ErrorState title="Could not load receiver choices. Your draft is preserved." action={<Button onClick={() => void recQ.refetch()}>Retry</Button>} />}
+    <Card title="Route details" description="Conditions all match. a route with no conditions matches every alert."><form className="space-y-6" onSubmit={(event) => { event.preventDefault(); if (canSave && valid && recQ.isSuccess && !recQ.isFetching && !isRevisionConflict(save.error) && !save.isPending) save.mutate(); }}>
+      {recQ.isError && <ErrorState title="Could not load receiver choices. your draft is preserved." action={<Button onClick={() => void recQ.refetch()}>Retry</Button>} />}
       <fieldset disabled={save.isPending} className="space-y-5"><div className="space-y-3"><div className="flex justify-between gap-3"><h2 className="text-sm font-medium">Match conditions</h2><Button type="button" onClick={() => setPairs([...pairs, { key: "", value: "" }])}><Plus className="h-4 w-4" /> Add condition</Button></div>
         {pairs.map((pair, i) => <div key={i} className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]"><Field label={`Condition ${i + 1} label`} htmlFor={`route-label-${i}`}><TextInput id={`route-label-${i}`} value={pair.key} onChange={(e) => setPairs(pairs.map((p, j) => j === i ? { ...p, key: e.target.value } : p))} /></Field><Field label={`Condition ${i + 1} value`} htmlFor={`route-value-${i}`}><TextInput id={`route-value-${i}`} value={pair.value} onChange={(e) => setPairs(pairs.map((p, j) => j === i ? { ...p, value: e.target.value } : p))} /></Field><Button type="button" className="self-end" aria-label={`Remove condition ${i + 1}`} onClick={() => setPairs(pairs.filter((_, j) => j !== i))}><X className="h-4 w-4" /></Button></div>)}
         {!valid && <p role="alert" className="text-sm text-status-error">Use a nonblank, unique label for every condition.</p>}

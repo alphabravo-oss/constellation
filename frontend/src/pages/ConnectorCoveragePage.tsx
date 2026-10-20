@@ -8,7 +8,6 @@ import { toast } from "sonner";
 import { connectorCoverage } from "@/api/client";
 import type { ConnectorCoverageOverview } from "@/api/client";
 import { PageHeader, PageContainer } from "@/components/ui/page";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { VerdictBanner, type VerdictStatus } from "@/components/ui/verdict-banner";
@@ -18,6 +17,7 @@ import { ErrorState, LoadingState } from "@/components/ui/states";
 import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
 import { useRouteSearchParams } from "@/lib/route-search";
 import { ScanJobsInventory } from "./ScanJobsInventory";
+import { StatusPill } from "@/components/ui/status-pill";
 
 type CloudConnector = ConnectorCoverageOverview["cloud_connectors"][number];
 
@@ -74,7 +74,7 @@ export function ConnectorCoveragePage() {
     onError: () => toast.error("Unable to test connector"),
   });
 
-  if (q.isPending || q.isError || q.isFetching || !q.data) return <PageContainer><PageHeader title="Registry & Cloud Connectors" description="Organization-wide connector coverage and scan evidence." />{q.isError ? <ErrorState title="Connector coverage is unavailable or could not be refreshed." action={<Button onClick={() => void q.refetch()}>Retry coverage</Button>} /> : <LoadingState label="Loading connector coverage…" />}</PageContainer>;
+  if (q.isPending || q.isError || q.isFetching || !q.data) return <PageContainer><PageHeader title="Connectors" description="Organization-wide connector coverage and scan evidence." />{q.isError ? <ErrorState title="Connector coverage is unavailable or could not be refreshed." action={<Button onClick={() => void q.refetch()}>Retry coverage</Button>} /> : <LoadingState label="Loading connector coverage…" />}</PageContainer>;
 
   const data = q.data;
   const summary = data?.summary;
@@ -426,21 +426,16 @@ export function ConnectorCoveragePage() {
   return (
     <PageContainer>
       <PageHeader
-        title="Registry & Cloud Connectors"
+        title="Connectors"
         description="Connect Constellation to your container registries and cloud accounts so it can discover and scan the images and resources running there."
       />
 
       <p className="text-xs text-muted-foreground">Organization-wide connector coverage. Registry and cloud evidence is shared across cluster navigation.</p>
-      {preview.isError && <ErrorState title="The connector preview failed. Try Test connection again." />}
-      {testConfig.isError && <ErrorState title="The saved connector test failed. Retry after reviewing the configuration." />}
-      <VerdictBanner status={verdictStatus} title={verdictTitle} detail={verdictDetail} />
+      {preview.isError && <ErrorState title="The connector preview failed. try test connection again." />}
+      {testConfig.isError && <ErrorState title="The saved connector test failed. retry after reviewing the configuration." />}
+      <VerdictBanner status={verdictStatus} title={verdictTitle} detail={verdictDetail} numbers={[{ label: "Registries ready", value: `${summary?.registry_connectors_ready ?? 0}/${summary?.registry_connectors_total ?? 0}` }, { label: "Clouds ready", value: `${summary?.cloud_connectors_ready ?? 0}/${summary?.cloud_connectors_total ?? 0}` }, { label: "Unscanned images", value: unscanned, tone: (unscanned > 0 ? "warning" : "default") }, { label: "Queued scans", value: summary?.queued_scans ?? 0 }]} />
 
-      <StatGrid>
-        <StatCard label="Registries ready" value={`${summary?.registry_connectors_ready ?? 0}/${summary?.registry_connectors_total ?? 0}`} />
-        <StatCard label="Clouds ready" value={`${summary?.cloud_connectors_ready ?? 0}/${summary?.cloud_connectors_total ?? 0}`} />
-        <StatCard label="Unscanned images" value={unscanned} tone={unscanned > 0 ? "medium" : "neutral"} />
-        <StatCard label="Queued scans" value={summary?.queued_scans ?? 0} />
-      </StatGrid>
+      
 
       {cacheScannerID && !scannerKnown && <ErrorState title="The selected scanner is unavailable in the loaded organization inventory." action={<Button onClick={() => setCacheScannerID("")}>Clear scanner selection</Button>} />}
       <Tabs value={tab} onValueChange={setTab} items={tabs} />
@@ -508,12 +503,12 @@ function scannerCacheSummary(cacheHealth?: Record<string, { configured?: boolean
 }
 
 function Status({ value }: { value: string }) {
-  const cls = value === "ready" || value === "healthy" || value === "completed" || value === "active" || value === "enforced"
-    ? "bg-[color:var(--color-status-success)]/15 text-[color:var(--color-status-success)]"
+  const tone: "success" | "warning" | "error" | "info" | "pending" | "neutral" = value === "ready" || value === "healthy" || value === "completed" || value === "active" || value === "enforced"
+    ? "success"
     : value === "degraded" || value === "queued" || value === "needs-setup" || value === "unhealthy"
-      ? "bg-[color:var(--color-status-warning)]/15 text-[color:var(--color-status-warning)]"
+      ? "warning"
       : value === "failed"
-        ? "bg-[color:var(--color-status-error)]/15 text-[color:var(--color-status-error)]"
-        : "bg-muted text-muted-foreground";
-  return <span className={`rounded-md px-2 py-1 text-xs ${cls}`}>{value}</span>;
+        ? "error"
+        : "neutral";
+  return <StatusPill label={value} tone={tone} />;
 }

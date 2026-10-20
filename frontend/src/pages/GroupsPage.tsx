@@ -12,7 +12,6 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { DataTable } from "@/components/ui/data-table";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { TextInput, Select } from "@/components/ui/form";
@@ -44,24 +43,19 @@ export function GroupsPage() {
   const protectedCount = groups.filter((group) => group.policy_mode === "protect" && group.profile_mode === "protect").length;
   const conflict = (del.error as { response?: { status?: number } } | null)?.response?.status === 409;
   return <div className="space-y-6" data-testid="groups-page" data-cluster-id={clusterId ?? ""}>
-    <PageHeader title="Groups" description="Organize matching workloads and choose how their network, process, and file policies are enforced."
+    <PageHeader title="Groups and enforcement modes" description="Organize matching workloads and choose how their network, process, and file policies are enforced."
       actions={<div className="flex items-center gap-2"><Button variant="outline" disabled={q.isFetching || !clusterId} onClick={() => void q.refetch()}><RefreshCw className="h-4 w-4" /> Refresh</Button>
         {clusterId && <Button asChild variant="outline"><Link to="." href={`${listPath}/settings`}><Settings className="h-4 w-4" /> Settings</Link></Button>}
         {clusterId && <Button asChild variant="primary"><Link to="." href={`${listPath}/new`}><Plus className="h-4 w-4" /> Add group</Link></Button>}</div>} />
     {isLoading ? <LoadingState label="Loading cluster…" />
       : !clusterId || (error && !cluster) ? <ErrorState title="Select an available cluster to manage groups." />
       : q.isPending ? <LoadingState label="Loading groups…" />
-      : q.isError ? <ErrorState title="Groups could not be loaded. Existing configuration has not changed." action={<Button onClick={() => void q.refetch()}>Retry</Button>} />
+      : q.isError ? <ErrorState title="Groups could not be loaded. existing configuration has not changed." action={<Button onClick={() => void q.refetch()}>Retry</Button>} />
       : <>
         <VerdictBanner status={discovery ? "degraded" : groups.length ? "ok" : "info"}
           title={discovery ? `${discovery} group${discovery === 1 ? " is" : "s are"} still learning` : groups.length ? "All groups have moved beyond discovery" : "No workload groups yet"}
-          detail="Discover learns behavior, Monitor reports violations, and Protect enforces policy. These configured modes do not confirm deployment. Open a group to review its members and dependencies." />
-        <StatGrid>
-          <StatCard label="Groups" value={groups.length} />
-          <StatCard label="Learning" value={discovery} />
-          <StatCard label="Protect configured" value={protectedCount} />
-          <StatCard label="Member assignments" value={groups.reduce((count, group) => count + (group.members?.length ?? 0), 0)} />
-        </StatGrid>
+          detail="Discover learns behavior, Monitor reports violations, and Protect enforces policy. These configured modes do not confirm deployment. Open a group to review its members and dependencies." numbers={[{ label: "Groups", value: groups.length }, { label: "Learning", value: discovery }, { label: "Protect configured", value: protectedCount }, { label: "Member assignments", value: groups.reduce((count, group) => count + (group.members?.length ?? 0), 0) }]} />
+        
         <Tabs value={tab === "operations" ? "operations" : "groups"} onValueChange={setTab} items={[
           { value: "groups", label: "Workload groups", count: groups.length, content: <Card title="Workload groups" description="Search selectors, member names, and modes; open a group to inspect its workload coverage.">
             <div className="mb-4"><TextInput aria-label="Search groups" placeholder="Search groups, selectors, or members…" value={search} onChange={(event) => setParams((current) => { if (event.target.value) current.set("q", event.target.value); else current.delete("q"); return current; }, { replace: true })} /></div>

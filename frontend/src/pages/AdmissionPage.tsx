@@ -1,25 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import {
-  FileCheck2,
-  ListChecks,
-  Plus,
-  Pencil,
-  Power,
-  PowerOff,
-  ShieldAlert,
-  ShieldCheck,
-  Trash2,
-} from "lucide-react";
+import { FileCheck2, Plus, Pencil, Power, PowerOff, ShieldCheck, Trash2 } from "lucide-react";
 
-import {
-  componentsInventory,
-  policies as policiesApi,
-  type AdmissionCriterionOption,
-  type AdmissionRuleRow,
-  type AdmissionState,
-} from "@/api/client";
+import { componentsInventory, policies as policiesApi, type AdmissionCriterionOption, type AdmissionRuleRow, type AdmissionState } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { PageHeader } from "@/components/ui/page";
 import { Card, DetailRow } from "@/components/ui/card";
@@ -31,18 +15,7 @@ import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 import { StatusPill } from "@/components/ui/status-pill";
-import {
-  admissionDryRunHistoryKey,
-  admissionDryRunHistoryEntryFromRow,
-  admissionWebhookHealth,
-  appendAdmissionDryRunHistory,
-  makeAdmissionDryRunHistoryEntry,
-  mergeAdmissionDryRunHistory,
-  readAdmissionDryRunHistory,
-  writeAdmissionDryRunHistory,
-  type AdmissionDryRunHistoryEntry as DryRunHistoryEntry,
-} from "@/lib/admission-ops";
-
+import { admissionDryRunHistoryKey, admissionDryRunHistoryEntryFromRow, admissionWebhookHealth, appendAdmissionDryRunHistory, makeAdmissionDryRunHistoryEntry, mergeAdmissionDryRunHistory, readAdmissionDryRunHistory, writeAdmissionDryRunHistory, type AdmissionDryRunHistoryEntry as DryRunHistoryEntry } from "@/lib/admission-ops";
 
 export function AdmissionPage() {
   const { clusterId } = useCluster();
@@ -337,8 +310,7 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
 
   const rulesView = (
       <Card
-        title="Admission Rules"
-        description="Admission policies compiled for the webhook."
+        title="Compiled for the webhook"
         padded={false}
         action={
           <Button size="sm" variant="primary" onClick={() => navigate({ href: `${clusterId ? `/clusters/${clusterId}` : ""}/admission/new` })}>
@@ -346,7 +318,7 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
           </Button>
         }
       >
-        {(toggleRule.isError || deleteRule.isError) && <ErrorState title="Could not update this admission rule. Try again." />}
+        {(toggleRule.isError || deleteRule.isError) && <ErrorState title="Could not update this admission rule. try again." />}
         {rulesQ.isError ? <ErrorState title="Could not load admission rules." action={<Button onClick={() => void rulesQ.refetch()}>Retry</Button>} /> : rulesQ.isPending ? <LoadingState label="Loading admission rules…" /> : <DataTable<AdmissionRuleRow>
           rows={rules}
           columns={ruleColumns}
@@ -364,7 +336,7 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
 
   );
   const catalogView = (
-        <Card title="Criteria Catalog" description="Supported rule-builder criteria." padded={false}>
+        <Card title="Criteria catalog" description="Supported rule-builder criteria." padded={false}>
           {optionsQ.isError && <ErrorState title="Could not load criteria." action={<Button onClick={() => void optionsQ.refetch()}>Retry</Button>} />}
           <div className="border-b border-border p-4" data-testid="admission-options-catalog">
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
@@ -388,7 +360,7 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
 
   );
   const webhookView = (
-        <Card title="Webhook Details" description="Current admission-control fields." bodyClassName="p-5">
+        <Card title="Webhook details" description="Current admission-control fields." bodyClassName="p-5">
           {stateQ.isError ? <ErrorState title="Could not load admission state." action={<Button onClick={() => void stateQ.refetch()}>Retry</Button>} /> : state ? (
             <dl className="divide-y divide-border">
               <DetailRow label="Cluster" mono>{state.cluster_id}</DetailRow>
@@ -412,7 +384,7 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
         </Card>
   );
   const assessmentView = (
-      <Card title="Dry-run Assessment" description="Evaluate an image against the current admission ruleset.">
+      <Card title="Dry-run assessment" description="Evaluate an image against the current admission ruleset.">
         <form
           className="flex flex-wrap items-end gap-2"
           onSubmit={(event) => {
@@ -528,50 +500,14 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Admission Control"
+        title="Admission rules"
         description="Review admission rules and assess which deployments they would block."
         actions={<div className="flex gap-2"><Button onClick={() => navigate({ href: `/clusters/${clusterId}/admission/settings` })}>Edit admission settings</Button><Button onClick={() => navigate({ href: `/clusters/${clusterId}/admission/import` })}>Import profile</Button></div>}
       />
 
-      <VerdictBanner status={verdict.status} title={verdict.title} detail={verdict.detail} />
+      <VerdictBanner status={verdict.status} title={verdict.title}  numbers={[{ label: "Webhook", value: !admissionComponentsQ.data ? "—" : webhookHealth.label, tone: (state?.enabled === false ? "warning" : webhookHealth.statTone === "critical" ? "error" : "default"), title: admissionComponentsQ.isError ? "Component health unavailable" : state ? `${state.enabled ? "enabled" : "disabled"} · ${webhookHealth.detail}` : "State unavailable" }, { label: "Mode", value: state?.mode ? labelCase(state.mode) : "—", tone: (state?.mode === "protect" ? "default" : "default"), title: state?.default_action ? `default ${state.default_action}` : "cluster posture" }, { label: "Rules", value: !rulesQ.data ? "—" : ruleStats.total.toLocaleString(), title: rulesQ.data ? `${ruleStats.enabled} enabled / ${ruleStats.disabled} disabled` : "Rules unavailable" }, { label: "Enforce configured", value: !rulesQ.data ? "—" : ruleStats.enforce.toLocaleString(), tone: (ruleStats.enforce > 0 ? "default" : "default"), title: rulesQ.data ? `${ruleStats.monitor} monitor` : "Rules unavailable" }]} detail={<><p>{verdict.detail}</p><p>{"Criteria"}: {!optionsQ.data ? "—" : criteria.length.toLocaleString()}</p></>} />
 
-      <StatGrid data-testid="admission-summary">
-        <StatCard
-          label="Webhook"
-          value={!admissionComponentsQ.data ? "—" : webhookHealth.label}
-          tone={state?.enabled === false ? "medium" : webhookHealth.statTone}
-          icon={<ShieldCheck className="h-3.5 w-3.5" />}
-          hint={admissionComponentsQ.isError ? "Component health unavailable" : state ? `${state.enabled ? "enabled" : "disabled"} · ${webhookHealth.detail}` : "State unavailable"}
-        />
-        <StatCard
-          label="Mode"
-          value={state?.mode ? labelCase(state.mode) : "—"}
-          tone={state?.mode === "protect" ? "low" : "accent"}
-          icon={<ShieldAlert className="h-3.5 w-3.5" />}
-          hint={state?.default_action ? `default ${state.default_action}` : "cluster posture"}
-        />
-        <StatCard
-          label="Rules"
-          value={!rulesQ.data ? "—" : ruleStats.total.toLocaleString()}
-          icon={<ListChecks className="h-3.5 w-3.5" />}
-          hint={rulesQ.data ? `${ruleStats.enabled} enabled / ${ruleStats.disabled} disabled` : "Rules unavailable"}
-        />
-        <StatCard
-          label="Enforce configured"
-          value={!rulesQ.data ? "—" : ruleStats.enforce.toLocaleString()}
-          tone={ruleStats.enforce > 0 ? "low" : "neutral"}
-          icon={<Power className="h-3.5 w-3.5" />}
-          hint={rulesQ.data ? `${ruleStats.monitor} monitor` : "Rules unavailable"}
-        />
-        <StatCard
-          label="Criteria"
-          value={!optionsQ.data ? "—" : criteria.length.toLocaleString()}
-          icon={<FileCheck2 className="h-3.5 w-3.5" />}
-          hint={`${groupedCriteria.length} families`}
-        />
-
-      </StatGrid>
-
+      
 
       <Tabs value={tab} onValueChange={setTab} items={[
         { value: "rules", label: "Rules", content: rulesView },

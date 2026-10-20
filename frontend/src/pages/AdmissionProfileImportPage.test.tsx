@@ -7,6 +7,15 @@ import { policies, type AdmissionProfile, type AdmissionProfileBundle, type Admi
 import { AdmissionProfileImportPage } from "./AdmissionProfileImportPage";
 import { TestRouter } from "@/test/router";
 
+/** Kit Select keeps a hidden native mirror right before its trigger. */
+function nativeSelect(root: ParentNode, selector: string): HTMLSelectElement | null {
+  const element = root.querySelector(selector);
+  if (!element) return null;
+  if (element.tagName === "SELECT") return element as HTMLSelectElement;
+  const previous = element.previousElementSibling;
+  return previous?.tagName === "SELECT" ? previous as HTMLSelectElement : null;
+}
+
 const cluster = vi.hoisted(() => ({ clusterId: "cluster" as string | undefined, cluster: { id: "cluster" } as { id: string } | undefined, isLoading: false }));
 vi.mock("@/hooks/useCluster", () => ({ useCluster: () => cluster }));
 vi.mock("@/api/client", () => ({ policies: { list: vi.fn(), admissionProfiles: vi.fn(), importAdmissionProfile: vi.fn(), exportAdmissionProfile: vi.fn() } }));
@@ -25,7 +34,7 @@ async function renderPage(search = "") {
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
 function button(label: string) { return [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === label || b.getAttribute("aria-label") === label)!; }
 async function click(label: string) { await act(async () => button(label).click()); }
-async function change(selector: string, value: string) { await act(async () => { const input = host.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(selector)!; const proto = input instanceof HTMLSelectElement ? HTMLSelectElement.prototype : input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(input, value); input.dispatchEvent(new Event(input instanceof HTMLSelectElement ? "change" : "input", { bubbles: true })); }); }
+async function change(selector: string, value: string) { await act(async () => { const input = (nativeSelect(host, selector) ?? host.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(selector))!; const proto = input instanceof HTMLSelectElement ? HTMLSelectElement.prototype : input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(input, value); input.dispatchEvent(new Event(input instanceof HTMLSelectElement ? "change" : "input", { bubbles: true })); }); }
 async function ready() { await settled(() => expect(button("Preview")?.disabled).toBe(false)); }
 async function runPreview() { await click("Preview"); await settled(() => expect(button("Import profile").disabled).toBe(false)); }
 
@@ -59,7 +68,7 @@ it("invalidates preview when a catalog refresh changes the profile", async () =>
 });
 it("preserves form options after a failed import", async () => {
   await renderPage(); await ready(); await change("#admission-profile-mode", "enforce"); await runPreview(); vi.mocked(policies.importAdmissionProfile).mockRejectedValue(new Error("private")); await click("Import profile");
-  await settled(() => expect(host.textContent).toContain("Could not import this profile. Your draft is preserved")); expect(host.querySelector<HTMLSelectElement>("#admission-profile-mode")?.value).toBe("enforce"); expect(history.location.pathname).toContain("/admission/import"); expect(host.textContent).not.toContain("private");
+  await settled(() => expect(host.textContent).toContain("Could not import this profile. Your draft is preserved")); expect(nativeSelect(host, "#admission-profile-mode")?.value).toBe("enforce"); expect(history.location.pathname).toContain("/admission/import"); expect(host.textContent).not.toContain("private");
 });
 it("imports the previewed options and returns to admission", async () => {
   await renderPage(); await ready(); await change("#admission-profile-mode", "monitor"); await change("#admission-profile-enabled", "disabled"); await runPreview(); vi.mocked(policies.importAdmissionProfile).mockResolvedValue({ ...preview, dry_run: false, imported: 1 }); await click("Import profile");

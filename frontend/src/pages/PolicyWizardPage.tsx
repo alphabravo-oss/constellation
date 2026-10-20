@@ -20,7 +20,7 @@ import { ChevronLeft, ChevronRight, Plus, Trash2 } from "lucide-react";
 
 import { api, policies } from "@/api/client";
 import { PageHeader } from "@/components/ui/page";
-import { Select } from "@/components/ui/form";
+import { Select, Checkbox } from "@/components/ui/form";
 
 // --- DSL types (mirror pkg/policy/dsl) ---
 type LifecycleStage = "BUILD" | "DEPLOY" | "RUNTIME";
@@ -142,7 +142,7 @@ export function PolicyWizardPage() {
   return (
     <div className="space-y-6" data-testid="policy-wizard">
       <PageHeader
-        title="Create Policy"
+        title="Create policy"
         description="Build a Constellation boolean policy. Coexists with Kyverno / Rego / CEL — pick the engine that best matches your team's authoring style."
       />
 
@@ -250,8 +250,7 @@ function IdentityStep({ draft, setDraft }: { draft: PolicyDraft; setDraft: (d: P
             const on = draft.lifecycle_stages.includes(stage);
             return (
               <label key={stage} className={`rounded-md border px-2 py-1 ${on ? "border-foreground bg-foreground text-background" : "border-border bg-background"}`}>
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={on}
                   onChange={(e) =>
                     setDraft({
@@ -261,7 +260,6 @@ function IdentityStep({ draft, setDraft }: { draft: PolicyDraft; setDraft: (d: P
                         : draft.lifecycle_stages.filter((s) => s !== stage),
                     })
                   }
-                  className="mr-1"
                 />
                 {stage}
               </label>
@@ -615,8 +613,7 @@ function ActionsStep({ draft, setDraft }: { draft: PolicyDraft; setDraft: (d: Po
             const on = draft.actions.includes(a);
             return (
               <label key={a} className={`rounded-md border px-2 py-1 ${on ? "border-foreground bg-foreground text-background" : "border-border bg-background"}`}>
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={on}
                   onChange={(e) =>
                     setDraft({
@@ -624,7 +621,6 @@ function ActionsStep({ draft, setDraft }: { draft: PolicyDraft; setDraft: (d: Po
                       actions: e.target.checked ? [...draft.actions, a] : draft.actions.filter((x) => x !== a),
                     })
                   }
-                  className="mr-1"
                 />
                 {a}
               </label>

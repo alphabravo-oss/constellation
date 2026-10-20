@@ -38,7 +38,7 @@ function AdmissionSettingsEditor({ editorContext, clusterId, initial, backTo }: 
     mutationFn: () => policies.updateAdmissionState(draft, { cluster_id: clusterId }),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ["admission-state", clusterId] }); if (isCurrent()) void navigate({ href: backTo }); },
   });
-  return <Card title="Admission settings" description="Protect can block deployments. Monitor records decisions without blocking them.">
+  return <Card title="Admission settings" description="Protect can block deployments. monitor records decisions without blocking them.">
     <form onSubmit={(event) => { event.preventDefault(); if (!save.isPending) save.mutate(); }}>
       <fieldset disabled={save.isPending} className="space-y-5">
         <Switch label="Enable admission control" description="When disabled, admission rules do not block workloads." checked={draft.enabled} onCheckedChange={(enabled) => setDraft({ ...draft, enabled })} />

@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { Download, CirclePlay, Plus, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
+import { Download, CirclePlay, Plus, ShieldAlert, Trash2 } from "lucide-react";
 import { compliance, type ComplianceCheck, type ComplianceChecksParams, type ComplianceChecksResponse, type ComplianceExemption, type ComplianceScheduleDB } from "@/api/client";
 import { BenchmarksWorkspace } from "./BenchmarksWorkspace";
 import { ComplianceEvidenceInventory } from "./ComplianceEvidenceInventory";
@@ -13,11 +13,10 @@ import { Pager } from "@/components/ui/pager";
 import { useRouteSearchParams } from "@/lib/route-search";
 import { LoadingState, ErrorState, EmptyState } from "@/components/ui/states";
 import { PageHeader } from "@/components/ui/page";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { Collapse } from "@/components/ui/collapse";
 import { Button } from "@/components/ui/button";
-import { Field, Select } from "@/components/ui/form";
+import { Field, Select, TextInput } from "@/components/ui/form";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { exportQueryReady, useExportGuard } from "@/hooks/useExportGuard";
@@ -188,34 +187,30 @@ export function CompliancePage() {
 
   return <div className="space-y-6" data-testid="compliance-page" data-cluster-id={clusterId ?? ""}>
     <PageHeader title="Compliance" description="Review persisted control evidence across frameworks, inspect supporting sources and configure recurring reports for this cluster." />
-    {!scopeReady ? scope.loading ? <LoadingState label="Loading cluster…" /> : <ErrorState title="The selected cluster could not be resolved. Review its registration and retry." action={<Button onClick={scope.retry}>Retry cluster</Button>} /> : <>
+    {!scopeReady ? scope.loading ? <LoadingState label="Loading cluster…" /> : <ErrorState title="The selected cluster could not be resolved. review its registration and retry." action={<Button onClick={scope.retry}>Retry cluster</Button>} /> : <>
       {tab === "controls" && <>
+      <div data-testid="compliance-summary">
       <VerdictBanner status={!validFilters || checks.isError || invalid ? "degraded" : !available || percentage === undefined ? "info" : totals!.fail > 0 ? "degraded" : "ok"}
         title={!validFilters ? "The requested compliance filter or sort is invalid" : checks.isError || invalid ? "Compliance evidence is unavailable" : !available ? "Loading compliance evidence" : !totals!.total ? "No evidence rows match these filters" : totals!.fail > 0 ? `${totals!.fail} failing evidence rows need review` : graded > 0 ? "Graded evidence has no active failures" : "No graded controls in this cohort"}
-        detail="Graded pass percentage is passing / (passing + failing). Active exemptions, manual review, not applicable and unrecognized statuses are excluded. Evidence rows and framework mappings are counted separately; these counts do not deduplicate controls." />
-      <StatGrid data-testid="compliance-summary">
-        <StatCard label="Graded pass" value={!totals ? "—" : percentage === undefined ? "—" : `${percentage}%`} icon={<ShieldCheck className="h-3.5 w-3.5" />} />
-        <StatCard label="Passing" value={totals?.pass ?? "—"} />
-        <StatCard label="Failing" value={totals?.fail ?? "—"} tone={totals && totals.fail > 0 ? "high" : "neutral"} />
-        <StatCard label="Matching evidence rows" value={totals?.total ?? "—"} />
-        <StatCard label="Ungraded" value={totals?.ungraded ?? "—"} hint="outside pass / fail denominator" />
-      </StatGrid>
+         numbers={[{ label: "Graded pass", value: !totals ? "—" : percentage === undefined ? "—" : `${percentage}%` }, { label: "Passing", value: totals?.pass ?? "—" }, { label: "Failing", value: totals?.fail ?? "—", tone: (totals && totals.fail > 0 ? "warning" : "default") }, { label: "Matching evidence rows", value: totals?.total ?? "—" }]} detail={<><p>Graded pass percentage is passing / (passing + failing). Active exemptions, manual review, not applicable and unrecognized statuses are excluded. Evidence rows and framework mappings are counted separately; these counts do not deduplicate controls.</p><p>{"Ungraded"}: {totals?.ungraded ?? "—"}</p></>} />
+      </div>
+      
       </>}
       <Tabs value={tab} onValueChange={setTab} items={[
         { value: "controls", label: "Controls", content: <div className="space-y-5">
           <div className="flex flex-wrap items-end gap-3">
             <Field label="Framework" htmlFor="compliance-framework" className="min-w-56 flex-1"><Select id="compliance-framework" value={active} onChange={event => selectFramework(event.target.value)}><option value="all">All frameworks</option>{!validFramework && <option value={active}>Reported framework: {active}</option>}{Object.entries(groupBy(frameworks, framework => framework.category)).map(([category, items]) => <optgroup key={category} label={category}>{items!.map(framework => <option key={framework.id} value={framework.id}>{framework.name}</option>)}</optgroup>)}</Select></Field>
             <Field label="Status cohort" htmlFor="compliance-status"><Select id="compliance-status" value={status} onChange={event => route.update({ status: event.target.value === "all" ? null : event.target.value })}>{["all", "graded", "ungraded", "pass", "fail", "manual", "not_applicable", "exempted"].map(value => <option key={value} value={value}>{value === "all" ? "All evidence statuses" : value === "graded" ? "Graded: pass or fail" : value.replaceAll("_", " ")}</option>)}</Select></Field>
-            <Field label="Search control evidence" htmlFor="compliance-search" className="min-w-64 flex-1"><input id="compliance-search" className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={route.query} onChange={event => route.setQuery(event.target.value)} placeholder="Framework, control, title or evidence" /></Field>
-            <Button disabled={checks.isFetching || !validFilters || route.debouncing} onClick={refreshControls}>Refresh controls</Button>
+            <Field label="Search control evidence" htmlFor="compliance-search" className="min-w-64 flex-1"><TextInput id="compliance-search" value={route.query} onChange={event => route.setQuery(event.target.value)} placeholder="Framework, control, title or evidence" /></Field>
+            <Button disabled={checks.isFetching || !validFilters || route.debouncing} onClick={refreshControls}>Refresh</Button>
           </div>
           {search.get("profile") && <p className="text-sm text-muted-foreground">Profile mapping filter: {search.get("profile")} <Button size="sm" onClick={() => route.update({ profile: null })}>Clear profile</Button></p>}
           {search.get("control_id") && <p className="text-sm text-muted-foreground">Exact control filter: {search.get("control_id")} <Button size="sm" onClick={() => route.update({ control_id: null })}>Clear control</Button></p>}
           {(fws.isError || summary.isError) && <ErrorState title="Framework labels or the source summary could not be refreshed. The control table uses its own scoped source." action={<Button onClick={() => { void fws.refetch(); void summary.refetch(); }}>Retry framework sources</Button>} />}
-          {!validFilters ? <ErrorState title="Choose a supported status or sort before loading controls." action={<Button onClick={() => route.update({ status: null, sort: null, order: null })}>Reset filters and sort</Button>} /> : checks.isError || invalid ? <ErrorState title="Controls could not be loaded or refreshed. Evidence and export are unavailable." action={<Button onClick={() => void checks.refetch()}>Retry controls</Button>} /> : !available ? <LoadingState label="Loading controls…" /> : <>
+          {!validFilters ? <ErrorState title="Choose a supported status or sort before loading controls." action={<Button onClick={() => route.update({ status: null, sort: null, order: null })}>Reset filters and sort</Button>} /> : checks.isError || invalid ? <ErrorState title="Controls could not be loaded or refreshed. evidence and export are unavailable." action={<Button onClick={() => void checks.refetch()}>Retry controls</Button>} /> : !available ? <LoadingState label="Loading controls…" /> : <>
             {checks.isFetching && <p role="status" className="text-sm text-muted-foreground">Refreshing control evidence…</p>}
             <section className="space-y-4" data-testid="framework-detail">
-              <p className="text-sm text-muted-foreground">{totals!.total.toLocaleString()} evidence rows match the server filters across {active === "all" ? "all reported frameworks" : active}. Metrics cover all matches. Matching CSV covers up to 100,000 rows across pages, independent of visible columns.</p>
+              <p className="sr-only">{totals!.total.toLocaleString()} evidence rows match the server filters across {active === "all" ? "all reported frameworks" : active}. Metrics cover all matches. Matching CSV covers up to 100,000 rows across pages, independent of visible columns.</p>
               <ScanInventoryExport context={context} disabled={checks.isFetching} download={shouldDownload => compliance.exportChecksCSV(request, shouldDownload)} />
               {revokeExemption.isError && <p role="alert" className="text-sm text-status-error">Could not revoke this exemption. Refresh the controls and try again.</p>}
               <DataTable rows={checkRows} columns={checkColumns} rowKey={item => item.id!} preferencesKey="compliance-controls" testId="compliance-controls-table" pagination={false} manualSorting sort={{ id: sort, dir: order as "asc" | "desc" }} onSortChange={next => route.update({ sort: next?.id ?? null, order: next?.dir ?? null })} emptyState={<EmptyState title="No evaluated controls match these filters" hint="This is a filtered evidence cohort, not a claim that the cluster has no compliance checks." />} />
@@ -287,7 +282,6 @@ function ComplianceExemptionsList({
     </section>
   );
 }
-
 
 function SchedulesManager({ clusterId, listPath, scopeReady, recheckScope }: { clusterId: string; listPath: string; scopeReady: boolean; recheckScope: () => boolean }) {
   const qc = useQueryClient();
@@ -470,7 +464,7 @@ function ScheduleRow({
               columns={[
                 { id: "started", exportValue: run => run.started_at, header: "Started", kind: "date", size: 192, minSize: 176, cell: (run) => new Date(run.started_at).toLocaleString() },
                 { id: "status", exportValue: run => run.status, header: "Status", kind: "status", size: 144, minSize: 128, cell: (run) => <span className={`rounded-md px-1.5 py-0.5 text-micro ${run.status === "succeeded" ? "bg-[color:var(--color-status-success)]/15 text-[color:var(--color-status-success)]" : run.status === "failed" ? "bg-[color:var(--color-status-error)]/15 text-[color:var(--color-status-error)]" : "bg-muted text-muted-foreground"}`}>{run.status}</span> },
-                { id: "summary", exportValue: run => `${run.summary.pass ?? 0} / ${run.summary.fail ?? 0} / ${run.summary.manual ?? 0}`, header: "Pass / Fail / Manual", kind: "count", numeric: true, size: 184, minSize: 176, cell: (run) => `${run.summary.pass ?? 0} / ${run.summary.fail ?? 0} / ${run.summary.manual ?? 0}` },
+                { id: "summary", exportValue: run => `${run.summary.pass ?? 0} / ${run.summary.fail ?? 0} / ${run.summary.manual ?? 0}`, header: "Pass / fail / manual", kind: "count", numeric: true, size: 184, minSize: 176, cell: (run) => `${run.summary.pass ?? 0} / ${run.summary.fail ?? 0} / ${run.summary.manual ?? 0}` },
                 { id: "signature", exportValue: run => run.artifact_signature || "Not recorded", header: "Signature", kind: "status", size: 176, minSize: 160, cell: (run) => run.artifact_signature ? <span title={run.artifact_signature} className="rounded bg-[color:var(--color-status-success)]/15 px-1.5 py-0.5 text-[color:var(--color-status-success)]">Signature recorded</span> : <span className="text-muted-foreground">—</span> },
                 { id: "format", header: "Artifact format", kind: "status", cell: run => run.artifact_metadata_known && run.artifact_format ? run.artifact_format.toUpperCase() : "Not recorded", exportValue: run => run.artifact_metadata_known ? run.artifact_format ?? "" : "Not recorded" },
                 { id: "artifact", exportable: false, header: "Artifact", kind: "actions", size: 160, minSize: 144, cell: (run) => run.artifact_uri ? <button type="button" disabled={!current()} title={run.artifact_filename || undefined} onClick={() => compliance.downloadRunArtifact(run.id, captureDownload()).catch(() => toast.error("Artifact download failed or its reviewed scope changed. Refresh before retrying."))} className="inline-flex items-center gap-1 text-foreground hover:underline" data-testid={`run-download-${run.id}`}><Download className="h-3 w-3" aria-hidden /> {run.artifact_uri.startsWith("s3://") ? "Download metadata" : "Download"}</button> : <span className="text-muted-foreground">—</span> },
@@ -505,7 +499,6 @@ function statusClass(status: string) {
     default: return "bg-muted text-muted-foreground";
   }
 }
-
 
 function groupBy<T>(items: T[], key: (item: T) => string): Record<string, T[]> {
   const out: Record<string, T[]> = {};

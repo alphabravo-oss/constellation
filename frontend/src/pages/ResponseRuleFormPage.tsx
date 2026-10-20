@@ -26,7 +26,7 @@ import { Collapse } from "@/components/ui/collapse";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 import { Button } from "@/components/ui/button";
 import { GroupPicker } from "@/components/GroupPicker";
-import { Select } from "@/components/ui/form";
+import { Select, Checkbox } from "@/components/ui/form";
 
 const FALLBACK_COND_TYPES: Array<RRV2CatalogItem & { id: RRV2CondType }> = [
   { id: "name", label: "Event name", help: "Regex against event name or title" },
@@ -42,7 +42,7 @@ const FALLBACK_COND_TYPES: Array<RRV2CatalogItem & { id: RRV2CondType }> = [
 
 const FALLBACK_ACTION_KINDS: Array<RRV2CatalogItem & { id: RRV2ActionKind }> = [
   { id: "notify", label: "Notify receiver", help: "Send via pkg/notify (slack/jira/pagerduty/etc)" },
-  { id: "webhook", label: "Webhook receiver", help: "NeuVector-compatible receiver action" },
+  { id: "webhook", label: "Webhook receiver", help: "Generic webhook receiver action" },
   { id: "ticket", label: "Open ticket", help: "Notify via ITSM destination (Jira/SNOW)" },
   { id: "suppress-log", label: "Suppress log", help: "Suppress matching runtime security-event logs" },
   { id: "quarantine", label: "Quarantine workload", help: "Runtime action (requires data plane)" },
@@ -203,7 +203,7 @@ function ResponseRuleEditor({ clusterId, initial, backTo }: { clusterId: string;
               if (valid && !saveMut.isPending && !optionsQ.isError && !optionsQ.isPending) saveMut.mutate();
             }}
           >
-            {optionsQ.isError && <ErrorState title="Could not load response options. Your draft is preserved." action={<Button onClick={() => void optionsQ.refetch()}>Retry</Button>} />}
+            {optionsQ.isError && <ErrorState title="Could not load response options. your draft is preserved." action={<Button onClick={() => void optionsQ.refetch()}>Retry</Button>} />}
             <fieldset disabled={saveMut.isPending} className="space-y-4">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className="text-xs">
@@ -237,9 +237,7 @@ function ResponseRuleEditor({ clusterId, initial, backTo }: { clusterId: string;
               </label>
               <label className="text-xs">
                 <div className="mb-1 text-muted-foreground">Enabled</div>
-                <input
-                  type="checkbox"
-                  className="h-4 w-4"
+                <Checkbox
                   checked={rule.enabled}
                   onChange={(e) => onChange({ ...rule, enabled: e.target.checked })}
                 />
@@ -399,7 +397,7 @@ function ResponseRuleEditor({ clusterId, initial, backTo }: { clusterId: string;
               <button
                 type="submit"
                 disabled={saveMut.isPending || !valid || optionsQ.isError || optionsQ.isPending}
-                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                className="inline-flex h-8 items-center gap-1.5 rounded-md bg-brand px-3 text-meta font-medium text-brand-foreground transition-colors hover:bg-brand/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:opacity-50"
               >
                 <Save className="h-3.5 w-3.5" /> {saveMut.isPending ? "Saving…" : "Save"}
               </button>

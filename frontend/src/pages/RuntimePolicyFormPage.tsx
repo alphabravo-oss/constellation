@@ -169,7 +169,7 @@ function RuntimePolicyEditor({ clusterID, policyID, initial, latest, unavailable
 
       {unavailable && <ErrorState title="Current policy or cluster evidence is unavailable or refreshing. Your draft is preserved; actions are paused." action={<Button disabled={review.isPending || busy} onClick={() => { if (scope.ready) review.mutate(); else scope.retry(); }}>{scope.ready ? "Refresh policy" : "Retry cluster"}</Button>} />}
       {(changed || conflict) && !unavailable && <ErrorState title="The saved policy changed. Review its current mode and revision before applying your retained draft." action={<Button disabled={review.isPending || busy} onClick={() => review.mutate()}>Review latest policy</Button>} />}
-      {review.isError && <ErrorState title="Current policy could not be reviewed. Your draft is preserved." />}
+      {review.isError && <ErrorState title="Current policy could not be reviewed. your draft is preserved." />}
       {uncertain && <ErrorState title="The saved policy could not be confirmed in this workspace. Reload before another write." />}
       <Card title="Policy" description="Review rules for this workload before saving. New policies observe traffic until promoted.">
         <form className="space-y-4" data-testid="runtime-policies-editor" onSubmit={(event) => { event.preventDefault(); if (!blocked && !busy && rulesValid && name.trim() && workload.trim() && namespace.trim()) save.mutate(); }}>

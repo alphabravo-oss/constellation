@@ -362,7 +362,7 @@ export function ScannerSourcesPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Scanner & CVE Sources"
+        title="Scanner & CVE sources"
         description="Vulnerability data health — the Trivy/Grype databases and CVE feeds that power image and host scanning."
         actions={
           <Button type="button" variant="outline" size="sm" onClick={refreshOperatorState}>
@@ -382,7 +382,7 @@ export function ScannerSourcesPage() {
         ].filter(Boolean).join(" · ")}
       />
 
-      {unavailable && <ErrorState title="Some scanner evidence is unavailable. Failed sources are hidden." action={<Button onClick={refreshOperatorState}>Retry scanner evidence</Button>} />}
+      {unavailable && <ErrorState title="Some scanner evidence is unavailable. failed sources are hidden." action={<Button onClick={refreshOperatorState}>Retry scanner evidence</Button>} />}
       {[systemConfig, scanStatus, scanJobList, scannerWorkers, scannerHealth].some(query => query.isFetching && query.isSuccess) && <p role="status" className="text-sm text-muted-foreground">Refreshing scanner evidence…</p>}
       {refreshNow.isError && <p role="alert" className="text-sm text-destructive">Could not request a database refresh. Try again after refreshing scanner configuration.</p>}
       {jobAction.isError && jobAction.variables?.context === jobContext && <p role="alert" className="text-sm text-destructive">Could not update scan job {jobAction.variables?.reviewed.id}. Refresh the job and try again.</p>}
@@ -1021,7 +1021,7 @@ function ScannerDatabaseSettingsScope({ owner }: { owner: string }) {
     <PageHeader title="Edit scanner database refresh" description="Set the organization-wide interval used by connected scanners to refresh vulnerability databases. Saving the interval does not request an immediate refresh."
       backLink={<a href={backTo} className="inline-flex items-center gap-2 hover:text-foreground"><ArrowLeft className="h-4 w-4" /> Scanner database settings</a>} />
     {!owner ? <ErrorState title="An available organization and user session are required to edit scanner settings." /> : !initial ? q.isPending || q.isFetching ? <LoadingState label="Loading scanner database settings…" /> : <ErrorState title="Scanner database settings are unavailable." action={<Button onClick={() => void q.refetch()}>Retry settings</Button>} /> : <>
-      {q.isError && <ErrorState title="Could not refresh scanner settings. Your draft is preserved." action={<Button onClick={() => void q.refetch()}>Retry settings</Button>} />}
+      {q.isError && <ErrorState title="Could not refresh scanner settings. your draft is preserved." action={<Button onClick={() => void q.refetch()}>Retry settings</Button>} />}
       {q.isFetching && <p role="status" className="text-sm text-muted-foreground">Refreshing scanner settings. Your draft is preserved; saving is paused.</p>}
       {conflict && <p role="alert" className="text-sm text-destructive">System configuration changed elsewhere. Your draft is preserved. Cancel and reopen the latest settings before saving.</p>}
       <ScannerIntervalEditor initial={initial} backTo={backTo} canSave={q.isSuccess && !q.isFetching && !conflict} />

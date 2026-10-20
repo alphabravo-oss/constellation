@@ -1,30 +1,15 @@
 // Route: /settings/attestation-trust.
 import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
-import {
-  ArrowLeft,
-  BadgeCheck,
-  CircleCheck,
-  Pen,
-  Fingerprint,
-  Plus,
-  RefreshCw,
-  ShieldCheck,
-  Trash2,
-} from "lucide-react";
+import { BadgeCheck, CircleCheck, Pen, Plus, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 
-import {
-  repositoryScanAttestationTrustPolicies,
-  type RepositoryAttestationTrustPolicy,
-  type RepositoryAttestationTrustPolicyInput,
-} from "@/api/client";
+import { repositoryScanAttestationTrustPolicies, type RepositoryAttestationTrustPolicy, type RepositoryAttestationTrustPolicyInput } from "@/api/client";
 import { PageHeader } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 
 export function AttestationTrustPage() {
@@ -146,11 +131,6 @@ export function AttestationTrustPage() {
   return (
     <div className="space-y-6" data-testid="attestation-trust-page">
       <PageHeader
-        eyebrow={
-          <Link to="/settings" className="inline-flex items-center gap-1 hover:text-foreground">
-            <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Back to Settings
-          </Link>
-        }
         title={
           <span className="flex items-center gap-2">
             <ShieldCheck className="h-5 w-5" aria-hidden />
@@ -169,14 +149,9 @@ export function AttestationTrustPage() {
       <VerdictBanner
         status={policiesQ.isError ? "degraded" : "info"}
         title={policiesQ.isError ? "Trust policy inventory unavailable" : policiesQ.isPending ? "Loading trust policies" : stats.total === 0 ? "No attestation trust policies reported" : `${stats.enabled} enabled trust policies reported`}
-        detail="Trust policies configure attestation verification. Admission enforcement depends on the admission profiles that require this evidence."
-      />
+        detail="Trust policies configure attestation verification. Admission enforcement depends on the admission profiles that require this evidence." numbers={[{ label: "Policies", value: policiesQ.isSuccess ? stats.total : "—" }, { label: "Enabled", value: policiesQ.isSuccess ? stats.enabled : "—" }, { label: "Auto verify", value: policiesQ.isSuccess ? stats.autoVerify : "—" }]} />
 
-      <StatGrid>
-        <StatCard label="Policies" value={policiesQ.isSuccess ? stats.total : "—"} icon={<Fingerprint className="h-3.5 w-3.5" aria-hidden />} />
-        <StatCard label="Enabled" value={policiesQ.isSuccess ? stats.enabled : "—"} tone="accent" icon={<CircleCheck className="h-3.5 w-3.5" aria-hidden />} />
-        <StatCard label="Auto verify" value={policiesQ.isSuccess ? stats.autoVerify : "—"} icon={<BadgeCheck className="h-3.5 w-3.5" aria-hidden />} />
-      </StatGrid>
+      
 
       <section data-testid="attestation-trust-table">
         <Card

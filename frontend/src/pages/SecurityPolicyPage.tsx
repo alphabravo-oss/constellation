@@ -46,7 +46,7 @@ export function SecurityPolicyPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Security Policy"
+        title="Security policy"
         description="Password strength requirements and session lifetimes applied to every user in your organization."
       />
 

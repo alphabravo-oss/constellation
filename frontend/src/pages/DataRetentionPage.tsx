@@ -29,7 +29,7 @@ function valuesFrom(data: SystemConfigResponse) {
 export function DataRetentionPage() {
   const query = useQuery({ queryKey: ["system-config"], queryFn: () => systemConfigApi.get() });
   return <div className="space-y-6">
-    <PageHeader title="Data Retention" description="Control how long raw network flows, runtime events, and finished scan jobs are kept." />
+    <PageHeader title="Data retention" description="Control how long raw network flows, runtime events, and finished scan jobs are kept." />
     {query.isPending ? <p role="status">Loading retention settings…</p> : query.isError && !query.data ?
       <div role="alert">Could not load retention settings. <Button onClick={() => void query.refetch()}>Retry</Button></div> :
       <RetentionForm data={query.data!} />}
@@ -94,7 +94,7 @@ function RetentionForm({ data }: { data: SystemConfigResponse }) {
       <Card title="Runtime events" description="Process, network, and file events emitted by runtime agents.">
         <form.AppField name="events_retention_days">{(field) => <field.NumberField label="Keep events for (days)" min={0} max={3650} hint="0 keeps events indefinitely. New organizations default to 30 days." />}</form.AppField>
       </Card>
-      <Card title="Scan-job history" description="Finished scan jobs. Live jobs and scan results are kept.">
+      <Card title="Scan-job history" description="Finished scan jobs. live jobs and scan results are kept.">
         <form.AppField name="scan_job_retention_days">{(field) => <field.NumberField label="Keep finished scan jobs for (days)" min={0} max={3650} hint="0 keeps finished jobs indefinitely. New organizations default to 7 days." />}</form.AppField>
       </Card>
       <form.AppForm><form.SubmitButton>Save retention settings</form.SubmitButton></form.AppForm>

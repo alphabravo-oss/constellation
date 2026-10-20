@@ -19,7 +19,7 @@ import {
 import { PageHeader } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Field, TextInput } from "@/components/ui/form";
+import { Field, TextInput, Checkbox } from "@/components/ui/form";
 
 const EXPIRY_PRESETS: Array<{ id: string; label: string; durationHours: number | null; warn?: boolean }> = [
   { id: "24h", label: "24 hours", durationHours: 24 },
@@ -139,8 +139,7 @@ export function ApiTokenCreatePage() {
                     <div className="space-y-2">
                       {items.map((v) => (
                         <label key={v.name} className="flex items-start gap-2 text-sm">
-                          <input
-                            type="checkbox"
+                          <Checkbox
                             checked={scopes.has(v.name)}
                             onChange={(e) => {
                               const next = new Set(scopes);
@@ -148,7 +147,6 @@ export function ApiTokenCreatePage() {
                               else next.delete(v.name);
                               setScopes(next);
                             }}
-                            className="mt-1"
                             data-testid={`wizard-scope-${v.name}`}
                           />
                           <span>
@@ -368,8 +366,7 @@ function RevealSection({
         {response.hint && <p className="text-xs text-muted-foreground">{response.hint}</p>}
 
         <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={acknowledged}
             onChange={(e) => setAcknowledged(e.target.checked)}
             data-testid="reveal-ack"

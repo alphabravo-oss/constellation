@@ -187,7 +187,7 @@ function AdmissionRuleEditor({ clusterId }: { clusterId?: string }) {
                 </div>
               );
             })}
-            <button type="button" onClick={addRow} className="inline-flex items-center gap-1 text-xs text-[color:var(--color-primary)] hover:underline"><Plus className="h-3.5 w-3.5" /> Add criterion</button>
+            <button type="button" onClick={addRow} className="inline-flex items-center gap-1 text-xs text-link"><Plus className="h-3.5 w-3.5" /> Add criterion</button>
           </div>
 
           {save.isError && <p role="alert" className="text-sm text-status-error">Could not create this admission rule. Your draft is preserved. Check the criteria and try again.</p>}

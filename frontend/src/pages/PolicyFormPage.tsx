@@ -12,7 +12,7 @@ import { useRouteSearchParams } from "@/lib/route-search";
 import { PageHeader } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Field, Select } from "@/components/ui/form";
+import { Field, Select, Checkbox } from "@/components/ui/form";
 import { Collapse } from "@/components/ui/collapse";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 
@@ -26,7 +26,7 @@ export function PolicyFormPage() {
   const q = useQuery({ queryKey: ["policy-editor", clusterId, policyId], queryFn: () => policies.list({ cluster_id: clusterId }), enabled: !!clusterId && !!policyId, gcTime: 0 });
   const active = q.data?.policies.find((policy) => policy.id === policyId);
   return <div className="space-y-6" data-testid="policies-page" data-cluster-id={clusterId ?? ""}>
-    <PageHeader title={active?.name ?? "Edit policy"} description="Review the policy mode and YAML. Both changes apply when you save."
+    <PageHeader title={active?.name ?? "Edit policy"} description="Review the policy mode and YAML. both changes apply when you save."
       backLink={<Link to="." href={backTo}>Back to {fromAdmission ? "Admission Control" : "Policies"}</Link>} />
     {!clusterId || !policyId ? <ErrorState title="Select a policy in its cluster." />
       : q.isPending ? <LoadingState label="Loading policy…" />
@@ -49,7 +49,7 @@ function PolicyEditor({ editorContext, initial, backTo }: { editorContext: strin
     mutationFn: () => policies.update(initial.id, { spec_yaml: yaml, mode }),
     onSuccess: () => { void qc.invalidateQueries({ queryKey: ["policies"] }); void qc.invalidateQueries({ queryKey: ["admission-rules"] }); if (isCurrent()) void navigate({ href: backTo }); },
   });
-  return <Card title="Policy" description="Monitor records policy decisions. Enforce can block matching workloads.">
+  return <Card title="Policy" description="Monitor records policy decisions. enforce can block matching workloads.">
     <form data-testid="policy-editor" onSubmit={(event) => { event.preventDefault(); if (changed && yaml.trim() && !save.isPending) save.mutate(); }}>
       <fieldset disabled={save.isPending} className="space-y-5">
         <Field label="Mode" htmlFor="policy-mode"><Select id="policy-mode" data-testid="policy-mode-select" value={mode} onChange={(e) => setMode(e.target.value as Policy["mode"])}><option value="monitor">Monitor</option><option value="enforce">Enforce</option></Select></Field>
@@ -187,7 +187,7 @@ function AdmissionRuleBuilder({
         </label>
         <Toggle checked={requireDigestMatch} onChange={setRequireDigestMatch} label="Require digest match" testId="admission-rule-builder-digest-match" />
         <Toggle checked={requireKnown} onChange={setRequireKnown} label="Require known scan result" testId="admission-rule-builder-known" />
-        <Toggle checked={requireBundle} onChange={setRequireBundle} label="Require VulnDB bundle" testId="admission-rule-builder-bundle" />
+        <Toggle checked={requireBundle} onChange={setRequireBundle} label="Require vulnDB bundle" testId="admission-rule-builder-bundle" />
         <Toggle checked={requireFix} onChange={setRequireFix} label="Require fix available" testId="admission-rule-builder-fix" />
         <Toggle checked={requireTrustedAttestation} onChange={setRequireTrustedAttestation} label="Require trusted attestation" testId="admission-rule-builder-attestation" />
         <label className="space-y-1">
@@ -252,8 +252,7 @@ function Toggle({
 }) {
   return (
     <label className="flex min-h-8 items-center gap-2 rounded-md border border-border bg-card px-2">
-      <input
-        type="checkbox"
+      <Checkbox
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
         data-testid={testId}

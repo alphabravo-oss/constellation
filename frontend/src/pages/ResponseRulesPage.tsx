@@ -108,7 +108,7 @@ function ResponseRulesWorkspace({ clusterId }: { clusterId: string }) {
   return (
     <div className="space-y-4" data-testid="response-rules-page" data-cluster-id={clusterId ?? ""}>
       <PageHeader
-        title="Response Rules"
+        title="Response rules"
         description="Author response rules for this cluster or review applicable organization rules. Match incoming events to automatic actions — notify a channel, open a ticket, or quarantine/isolate a workload — when the conditions you define all hold. Rules evaluate top-to-bottom; use the order arrows to set precedence."
         actions={
           <div className="flex items-center gap-2">
@@ -123,7 +123,7 @@ function ResponseRulesWorkspace({ clusterId }: { clusterId: string }) {
               type="button"
               disabled={busy || q.isPending}
               onClick={() => navigate({ href: `${rulesBase}/new` })}
-              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-brand px-3 text-meta font-medium text-brand-foreground transition-colors hover:bg-brand/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
             >
               <Plus className="h-3.5 w-3.5" /> New rule
             </button>
