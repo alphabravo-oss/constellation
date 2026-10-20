@@ -1,220 +1,87 @@
-import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
-import { findingHref, findingRowKey } from "@/lib/finding-instance";
-// AppShell — scope navigation and cluster-scoped navigation.
+// AppShell — Constellation on the shared kit shell (C1 "Triage Desk").
 //
-// Layout (sidebar w-60/w-16, topbar h-14, content p-6 max-w-[1600px] fade-in,
-// collapsible nav groups, user menu, offline banner) mirrors /root/astronomer.
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
+// Sidebar: the kit's rail (organization scope) + panel (organization pages, or
+// the cluster's six groups). Header: cluster scope chip + "System workloads"
+// scope switch + breadcrumbs (names, never ids) · one search · theme,
+// notifications, account. Content: contained, or full-bleed for dense tables,
+// logs and the network map.
+import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
+import { Outlet, useLocation, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
-  LayoutDashboard,
-  TriangleAlert,
-  Boxes,
-  ShieldCheck,
-  Activity,
-  Network,
-  Database,
-  ScrollText,
-  Settings,
-  Moon,
-  Sun,
-  LogOut,
-  ChevronLeft,
-  ChevronRight,
-  ChevronDown,
-  ChevronUp,
-  ClipboardCheck,
-  HeartPulse,
-  UsersRound,
-  FileText,
-  FileWarning,
   Bell,
-  Command as CmdIcon,
-  Layers,
+  ChevronDown,
   Compass,
-  Earth,
-  BellRing,
-  Server,
-  ServerCog,
-  GitMerge,
-  PackageSearch,
-  CloudCog,
-  GitBranch,
-  RadioTower,
+  Keyboard,
+  LogOut,
+  Settings,
   User,
-  Search,
-  WifiOff,
-  Waypoints,
-  Plug,
+  type LucideProps,
 } from "lucide-react";
+
 import { useAuth } from "@/contexts/AuthContext";
-import { useTheme } from "@/contexts/ThemeContext";
-import { cn } from "@/lib/cn";
-import { CommandPaletteProvider, HotkeysHelp } from "@/components/CommandPalette";
-import { Kbd } from "@/components/ui/kbd";
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
 import { findings as findingsApi, clusters as clustersApi, runtimeThreats as runtimeThreatsApi } from "@/api/client";
+import { findingHref, findingRowKey } from "@/lib/finding-instance";
 import { fmtRelative } from "@/lib/format";
+import { sortClustersByActivity } from "@/lib/clusters";
+import { useCrumbLabels } from "@/lib/page-title";
+import { useIncludeSystemPreference } from "@/lib/system-scope";
+import { useRouteSearchParams } from "@/lib/route-search";
+import { cn } from "@/lib/cn";
+import { CommandPaletteProvider, HotkeysHelp, openCommandPalette } from "@/components/CommandPalette";
+import { ClusterSwitcher, clusterStateTone } from "@/components/ClusterSwitcher";
 import { SeverityBadge } from "@/components/ui/severity-badge";
-import { ClusterSwitcher } from "@/components/ClusterSwitcher";
-
-type NavItem = {
-  /** Path fragment appended to /clusters/:id/ in cluster mode, or absolute in org mode. */
-  path: string;
-  icon: typeof LayoutDashboard;
-  label: string;
-  exact?: boolean;
-};
-type NavGroup = { id: string; label: string; items: NavItem[] };
-
-// Cluster-scoped sidebar groups — every link is resolved against the active :id.
-// eslint-disable-next-line react-refresh/only-export-components
-export const CLUSTER_NAV: NavGroup[] = [
-  {
-    id: "dashboard",
-    label: "Dashboard",
-    items: [
-      { path: "dashboard",     icon: LayoutDashboard, label: "Dashboard", exact: true },
-      { path: "neuvector",     icon: Compass,         label: "NeuVector Switchboard" },
-    ],
-  },
-  {
-    id: "network",
-    label: "Network Activity",
-    items: [
-      { path: "network",         icon: Network,    label: "Network Map" },
-      { path: "network-rules",   icon: Waypoints,  label: "Network Rules" },
-      { path: "timeline",        icon: Activity,   label: "Incident Timeline" },
-    ],
-  },
-  {
-    id: "assets",
-    label: "Assets",
-    items: [
-      { path: "nodes",         icon: Server,          label: "Nodes" },
-      { path: "containers",    icon: Boxes,           label: "Containers" },
-      { path: "images",        icon: PackageSearch,   label: "Images" },
-      { path: "deployments",   icon: Layers,          label: "Workloads" },
-      { path: "assets",        icon: Boxes,           label: "Assets" },
-      { path: "serverless",    icon: CloudCog,        label: "Serverless" },
-      { path: "repositories",  icon: GitBranch,       label: "Repositories" },
-      { path: "registries",    icon: Database,        label: "Registries" },
-    ],
-  },
-  {
-    id: "risks",
-    label: "Security Risks",
-    items: [
-      { path: "findings",      icon: TriangleAlert,   label: "Findings" },
-      { path: "vuln-profiles", icon: FileWarning,     label: "Vuln Profiles" },
-      { path: "exceptions",    icon: FileWarning,     label: "Exceptions" },
-      { path: "compliance",    icon: ShieldCheck,     label: "Compliance" },
-    ],
-  },
-  {
-    id: "runtime",
-    label: "Runtime",
-    items: [
-      { path: "runtime",         icon: Activity,      label: "Runtime" },
-      { path: "runtime/baselines", icon: GitMerge,    label: "Process Baselines" },
-      { path: "runtime-signatures", icon: ShieldCheck, label: "WAF / DPI Signatures" },
-      { path: "runtime-dlp",   icon: ShieldCheck,     label: "DLP Rules" },
-      { path: "file-monitor",  icon: FileWarning,     label: "File Monitor" },
-    ],
-  },
-  {
-    id: "policy",
-    label: "Policy",
-    items: [
-      { path: "policy",        icon: FileText,        label: "Policy Center" },
-      { path: "admission",     icon: ShieldCheck,     label: "Admission Control" },
-      { path: "policies",      icon: FileText,        label: "Policies" },
-      { path: "runtime-policies", icon: ScrollText,   label: "Runtime Policies" },
-      { path: "groups",        icon: UsersRound,      label: "Groups" },
-    ],
-  },
-  {
-    id: "response",
-    label: "Response",
-    items: [
-      { path: "response-rules", icon: BellRing,       label: "Response Rules" },
-      { path: "response",      icon: RadioTower,      label: "Response Catalog" },
-    ],
-  },
-  {
-    id: "activity",
-    label: "Settings & Activity",
-    items: [
-      { path: "audit",         icon: ScrollText,      label: "Audit Log" },
-      { path: "components",    icon: ServerCog,       label: "Components" },
-      { path: "health",        icon: HeartPulse,      label: "Sensor Health" },
-    ],
-  },
-];
-
-const SCOPE_NAV: NavGroup[] = [
-  {
-    id: "cluster",
-    label: "Clusters",
-    items: [
-      { path: "/clusters", icon: ServerCog, label: "Clusters", exact: true },
-    ],
-  },
-  {
-    id: "organization",
-    label: "Organization",
-    items: [
-      { path: "/cve",          icon: Database,        label: "CVE Database" },
-      { path: "/posture",      icon: ClipboardCheck,  label: "Posture" },
-      { path: "/organization/audit", icon: ScrollText, label: "Audit Log" },
-      { path: "/federation",   icon: Earth,          label: "Federation" },
-      { path: "/settings/access", icon: UsersRound, label: "Access Control" },
-      { path: "/settings/api-tokens", icon: FileText, label: "API Tokens" },
-      { path: "/settings/security-policy", icon: ShieldCheck, label: "Security Policy" },
-    ],
-  },
-  {
-    id: "platform",
-    label: "Platform",
-    items: [
-      { path: "/settings",     icon: Settings,        label: "Settings", exact: true },
-    ],
-  },
-  {
-    id: "integrations",
-    label: "Integrations",
-    items: [
-      { path: "/settings/integrations", icon: Bell, label: "Integrations & Routing" },
-      { path: "/settings/connectors", icon: Plug, label: "Connectors" },
-    ],
-  },
-];
+import {
+  activeClusterItem,
+  activeOrgItem,
+  CLUSTER_NAV,
+  clusterHref,
+  clusterIdFromPath,
+  ORG_NAV,
+  segmentLabel,
+} from "@/components/shell/nav-model";
+import {
+  AppShell as KitAppShell,
+  Breadcrumbs,
+  Header,
+  HeaderIconButton,
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuLabel,
+  MenuSeparator,
+  MenuTrigger,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  Rail,
+  RailItem,
+  SearchTrigger,
+  SidebarBrand,
+  SidebarFrame,
+  SidebarGroup,
+  SidebarItem,
+  StatusDot,
+  ThemeToggle,
+  Tooltip,
+  type BreadcrumbItem,
+  type ContentLayout,
+  Form,
+} from "@/ui";
 
 const COLLAPSE_KEY = "constellation.sidebar.collapsed";
-const APP_VERSION = "0.2.0";
 
-function clusterIDFromPath(pathname: string): string | null {
-  const m = pathname.match(/^\/clusters\/([^/]+)(\/|$)/);
-  return m ? m[1] : null;
-}
+/** Dense tables, logs and graphs use the full content width. */
+const FULL_BLEED = [
+  /^\/clusters\/[^/]+\/(findings|nodes|containers|deployments|images|network|network-rules|runtime|timeline|assets|registries|audit)\/?$/,
+  /^\/cve\/?$/,
+  /^\/organization\/audit\/?$/,
+];
 
-function resolveTo(item: NavItem, clusterId: string | null): string {
-  return item.path.startsWith("/") ? item.path : `/clusters/${clusterId}/${item.path}`;
-}
-
-function isItemActive(item: NavItem, pathname: string, clusterId: string | null): boolean {
-  const to = resolveTo(item, clusterId);
-  return item.exact ? pathname === to : pathname === to || pathname.startsWith(to + "/");
-}
-
-function scopeFromPath(pathname: string, clusterId: string | null): string {
-  if (clusterId || pathname === "/clusters" || pathname.startsWith("/settings/clusters/")) return "cluster";
-  if (pathname.startsWith("/settings/integrations") || pathname.startsWith("/settings/connectors")) return "integrations";
-  if (["/settings/access", "/settings/api-tokens", "/settings/security-policy"].some((path) => pathname === path || pathname.startsWith(`${path}/`))) return "organization";
-  if (pathname.startsWith("/settings")) return "platform";
-  return "organization";
+function contentLayoutFor(pathname: string): ContentLayout {
+  return FULL_BLEED.some((pattern) => pattern.test(pathname)) ? "full-bleed" : "contained";
 }
 
 /** navigator.onLine with live online/offline listeners. */
@@ -234,593 +101,492 @@ function useOnline(): boolean {
   return online;
 }
 
-export function AppShell() {
-  const { me, logout } = useAuth();
-  const { theme, toggle } = useTheme();
+export function AppShell({ children }: { children?: ReactNode } = {}) {
   const { pathname } = useLocation();
-  const navigate = useNavigate();
   const online = useOnline();
-
-  // Auto-collapse on narrow viewports if the user hasn't expressed a preference.
+  const mainRef = useRef<HTMLElement>(null);
   const [collapsed, setCollapsed] = useState<boolean>(() => {
-    const stored = localStorage.getItem(COLLAPSE_KEY);
-    if (stored === "1") return true;
-    if (stored === "0") return false;
-    if (typeof window !== "undefined" && window.innerWidth < 1024) return true;
-    return false;
+    try {
+      const stored = localStorage.getItem(COLLAPSE_KEY);
+      if (stored === "1") return true;
+      if (stored === "0") return false;
+    } catch {
+      // Storage unavailable: fall through to the viewport default.
+    }
+    return typeof window !== "undefined" && window.innerWidth < 1024;
   });
-  useEffect(() => { localStorage.setItem(COLLAPSE_KEY, collapsed ? "1" : "0"); }, [collapsed]);
-
-  const [hkOpen, setHkOpen] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   useEffect(() => {
-    const handler = () => setHkOpen(true);
+    try {
+      localStorage.setItem(COLLAPSE_KEY, collapsed ? "1" : "0");
+    } catch {
+      // Best effort.
+    }
+  }, [collapsed]);
+  useEffect(() => {
+    setMobileOpen(false);
+    // Move focus to the page on navigation so keyboard users land in content.
+    mainRef.current?.focus({ preventScroll: true });
+  }, [pathname]);
+
+  const [hotkeysOpen, setHotkeysOpen] = useState(false);
+  useEffect(() => {
+    const handler = () => setHotkeysOpen(true);
     window.addEventListener("constellation:show-hotkeys", handler);
     return () => window.removeEventListener("constellation:show-hotkeys", handler);
   }, []);
 
-  const clusterId = clusterIDFromPath(pathname);
-  const inClusterMode = clusterId !== null;
-  const activeScope = scopeFromPath(pathname, clusterId);
-  const [openScope, setOpenScope] = useState(activeScope);
-  const [openClusterGroup, setOpenClusterGroup] = useState(() => CLUSTER_NAV.find((group) =>
-    group.items.some((item) => isItemActive(item, pathname, clusterId)))?.id ?? CLUSTER_NAV[0].id);
-  useEffect(() => {
-    setOpenScope(activeScope);
-    if (clusterId) {
-      const activeGroup = CLUSTER_NAV.find((group) => group.items.some((item) => isItemActive(item, pathname, clusterId)));
-      if (activeGroup) setOpenClusterGroup(activeGroup.id);
-    }
-  }, [activeScope, clusterId, pathname]);
-
   return (
-    <div className="flex h-full overflow-hidden bg-background">
-      <aside
-        className={cn(
-          "flex flex-col h-full bg-sidebar border-r border-sidebar-border overflow-hidden transition-all duration-200 ease-in-out",
-          collapsed ? "w-16" : "w-60",
-        )}
-        aria-label="Primary"
-      >
-        {/* Brand + collapse toggle (h-14) */}
-        <div className="flex items-center h-14 px-4 border-b border-sidebar-border">
-          {!collapsed && (
-            <Link to="/clusters" className="flex items-center gap-2.5 min-w-0">
-              <BrandMark />
-              <div className="flex flex-col min-w-0 leading-tight">
-                <span className="text-sm font-semibold text-foreground tracking-tight truncate">Constellation</span>
-                <span className="text-[10px] text-muted-foreground truncate">by Alphabravo</span>
-              </div>
-            </Link>
-          )}
-          <button
-            type="button"
-            onClick={() => setCollapsed((c) => !c)}
-            className={cn("nav-item", collapsed ? "w-full justify-center px-0" : "ml-auto")}
-            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
-          </button>
-        </div>
-
-        <nav className="flex-1 overflow-y-auto py-2 px-1 no-scrollbar" aria-label="Scopes">
-          {SCOPE_NAV.map((group) => (
-            <SidebarGroup
-              key={group.id}
-              group={group}
-              pathname={pathname}
-              clusterId={clusterId}
-              collapsed={collapsed}
-              open={openScope === group.id}
-              onToggle={() => setOpenScope((current) => current === group.id ? "" : group.id)}
-            >
-              {group.id === "cluster" && inClusterMode && (
-                <>
-                  {!collapsed && <div className="px-3 py-2"><ClusterSwitcher /></div>}
-                  {CLUSTER_NAV.map((clusterGroup) => (
-                    <SidebarGroup
-                      key={clusterGroup.id}
-                      group={clusterGroup}
-                      pathname={pathname}
-                      clusterId={clusterId}
-                      collapsed={collapsed}
-                      open={openClusterGroup === clusterGroup.id}
-                      onToggle={() => setOpenClusterGroup((current) => current === clusterGroup.id ? "" : clusterGroup.id)}
-                      nested
-                    />
-                  ))}
-                </>
-              )}
-            </SidebarGroup>
-          ))}
-        </nav>
-
-        {/* Footer — version + attribution (Astronomer parity). */}
-        <div className="mt-auto px-2 py-2 border-t border-sidebar-border">
-          {!collapsed && (
-            <div className="px-3 py-1 space-y-0.5">
-              <p className="text-[10px] text-muted-foreground">Constellation {APP_VERSION}</p>
-              <p className="text-[10px] text-muted-foreground">
-                Built by{" "}
-                <a
-                  href="https://alphabravo.io"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="hover:text-foreground underline-offset-2 hover:underline"
-                >
-                  AlphaBravo
-                </a>
-              </p>
-            </div>
-          )}
-        </div>
-      </aside>
-
-      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-        <TopHeader
+    <KitAppShell
+      sidebar={
+        <ConstellationSidebar
           pathname={pathname}
-          clusterId={clusterId}
-          theme={theme}
-          onToggleTheme={toggle}
-          onLogout={() => { void logout().catch(() => toast.error("Sign out could not be confirmed. Please try again.")); }}
-          userEmail={me?.email}
-          userRole={me?.roles?.[0]}
-          onLaunchPalette={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))}
-          onOpenHotkeys={() => setHkOpen(true)}
-          onNavigate={(href) => { void navigate({ href }); }}
+          collapsed={collapsed && !mobileOpen}
+          mobileOpen={mobileOpen}
+          onToggleCollapsed={() => setCollapsed((value) => !value)}
+          onCloseMobile={() => setMobileOpen(false)}
         />
-        {!online && (
-          <div
-            role="status"
-            className="flex items-center gap-2 bg-status-warning/15 text-status-warning border-b border-status-warning/30 px-4 py-2 text-sm"
-          >
-            <WifiOff className="h-4 w-4 shrink-0" />
-            You are offline. Live updates and mutations will fail until connectivity returns.
-          </div>
-        )}
-        <main className="flex-1 min-h-0 overflow-y-auto">
-          {/* Every page renders here → inherits padding, max-width, fade-in. */}
-          <div className="p-6 max-w-[1600px] mx-auto animate-fade-in">
-            <Outlet />
-          </div>
-        </main>
-      </div>
-
-      <CommandPaletteProvider />
-      <HotkeysHelp open={hkOpen} onOpenChange={setHkOpen} />
-    </div>
-  );
-}
-
-function BrandMark() {
-  // Official Constellation mark (public/constellation-mark.svg).
-  return <img src="/constellation-mark.svg?v=4" alt="Constellation" className="w-7 h-7 flex-shrink-0" />;
-}
-
-function SidebarGroup({
-  group,
-  pathname,
-  clusterId,
-  collapsed,
-  open,
-  onToggle,
-  nested = false,
-  children,
-}: {
-  group: NavGroup;
-  pathname: string;
-  clusterId: string | null;
-  collapsed: boolean;
-  open: boolean;
-  onToggle: () => void;
-  nested?: boolean;
-  children?: ReactNode;
-}) {
-  // The primary workspace entry stays visible on every route, including settings.
-  if (group.id === "cluster" && !nested) {
-    return (
-      <div role="group" aria-label="Clusters" className="mb-2 border-b border-sidebar-border pb-2">
-        {group.items.map((item) => <SidebarRow key={item.path} item={item} pathname={pathname} clusterId={clusterId} collapsed={collapsed} />)}
-        {children}
-      </div>
-    );
-  }
-  if (collapsed) {
-    return (
-      <div role="group" aria-label={group.label} className="space-y-px">
-        {group.items.map((item) => (
-          <SidebarRow key={item.path} item={item} pathname={pathname} clusterId={clusterId} collapsed />
-        ))}
-        {children}
-      </div>
-    );
-  }
-
-  return (
-    <div role="group" aria-label={group.label} className={cn("mb-1", nested && "ml-2 border-l border-sidebar-border pl-1")}>
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={open}
-        aria-controls={`nav-group-${nested ? "cluster-" : ""}${group.id}`}
-        className={cn("w-full flex items-center justify-between px-3 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors", nested && "text-xs")}
-      >
-        <span className="truncate">{group.label}</span>
-        {open ? <ChevronUp className="h-3.5 w-3.5 flex-shrink-0" /> : <ChevronDown className="h-3.5 w-3.5 flex-shrink-0" />}
-      </button>
-      <div id={`nav-group-${nested ? "cluster-" : ""}${group.id}`} hidden={!open} className="space-y-px">
-        {open && (
-          <>
-            {group.items.map((item) => (
-              <SidebarRow key={item.path} item={item} pathname={pathname} clusterId={clusterId} collapsed={false} />
-            ))}
-            {children}
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function SidebarRow({
-  item,
-  pathname,
-  clusterId,
-  collapsed,
-}: {
-  item: NavItem;
-  pathname: string;
-  clusterId: string | null;
-  collapsed: boolean;
-}) {
-  const Icon = item.icon;
-  const to = resolveTo(item, clusterId);
-  const active = isItemActive(item, pathname, clusterId);
-
-  if (collapsed) {
-    return (
-      <Link
-        to="." href={to}
-        data-testid={item.path === "/clusters" && clusterId ? "back-to-clusters" : undefined}
-        className={cn("nav-item group justify-center px-0", active && "active")}
-        title={item.label}
-        aria-label={item.label}
-        aria-current={active ? "page" : undefined}
-      >
-        <Icon className={cn("h-4 w-4 flex-shrink-0", active ? "text-foreground" : "text-muted-foreground group-hover:text-foreground")} />
-      </Link>
-    );
-  }
-
-  return (
-    <Link
-      to="." href={to}
-      data-testid={item.path === "/clusters" && clusterId ? "back-to-clusters" : `nav-${item.path.replace(/\//g, "-")}`}
-      aria-current={active ? "page" : undefined}
-      className={cn(
-        "group flex items-center gap-2 px-3 py-1.5 mx-1 rounded-md text-sm transition-colors",
-        active
-          ? "bg-accent text-foreground font-medium"
-          : "text-muted-foreground hover:text-foreground hover:bg-accent/50",
-      )}
+      }
+      header={<TopHeader pathname={pathname} onOpenMobileNav={() => setMobileOpen(true)} onOpenHotkeys={() => setHotkeysOpen(true)} />}
+      offline={!online}
+      contentLayout={contentLayoutFor(pathname)}
+      mainRef={mainRef}
+      overlays={
+        <>
+          <CommandPaletteProvider />
+          <HotkeysHelp open={hotkeysOpen} onOpenChange={setHotkeysOpen} />
+        </>
+      }
     >
-      <Icon className={cn("h-4 w-4 flex-shrink-0", active ? "text-foreground" : "text-muted-foreground group-hover:text-foreground")} />
-      <span className="truncate flex-1">{item.label}</span>
-    </Link>
+      {children ?? <Outlet />}
+    </KitAppShell>
   );
 }
+
+// ─────────────────────────── Sidebar ───────────────────────────
+
+function ConstellationSidebar({
+  pathname,
+  collapsed,
+  mobileOpen,
+  onToggleCollapsed,
+  onCloseMobile,
+}: {
+  pathname: string;
+  collapsed: boolean;
+  mobileOpen: boolean;
+  onToggleCollapsed: () => void;
+  onCloseMobile: () => void;
+}) {
+  const clusterId = clusterIdFromPath(pathname);
+  const orgActive = activeOrgItem(pathname);
+  const clusterActive = clusterId ? activeClusterItem(pathname, clusterId) : undefined;
+
+  const rail = (
+    <Rail className="w-(--rail-w) shrink-0">
+      {ORG_NAV.map((item) => (
+        <RailItem
+          key={item.path}
+          to={item.path}
+          icon={item.icon}
+          label={item.label}
+          active={orgActive?.path === item.path}
+        />
+      ))}
+    </Rail>
+  );
+
+  const panel = clusterId ? (
+    <ClusterPanel clusterId={clusterId} activePath={clusterActive?.path} />
+  ) : (
+    <OrgPanel pathname={pathname} activePath={orgActive?.path} />
+  );
+
+  return (
+    <>
+      {mobileOpen && (
+        <button
+          type="button"
+          aria-label="Close navigation"
+          className="fixed inset-0 z-overlay bg-black/40 lg:hidden"
+          onClick={onCloseMobile}
+        />
+      )}
+      <SidebarFrame
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onToggleCollapsed={onToggleCollapsed}
+        navLabel={clusterId ? "Cluster" : "Primary"}
+        brand={<SidebarBrand to="/clusters" subtitle="by AlphaBravo" />}
+        className={cn(!collapsed && "w-[calc(var(--rail-w)+var(--sidebar-w))] lg:w-[calc(var(--rail-w)+var(--sidebar-w))]")}
+        context={clusterId && !collapsed ? <ClusterPanelHeader clusterId={clusterId} /> : null}
+      >
+        {collapsed ? (
+          rail
+        ) : (
+          <div className="flex h-full items-stretch">
+            <div className="-mb-2 -ml-2 -mt-2 flex shrink-0 flex-col border-r border-sidebar-border pt-2">{rail}</div>
+            <div className="min-w-0 flex-1 pl-2">{panel}</div>
+          </div>
+        )}
+      </SidebarFrame>
+    </>
+  );
+}
+
+function ClusterPanelHeader({ clusterId }: { clusterId: string }) {
+  const list = useQuery({ queryKey: ["clusters"], queryFn: () => clustersApi.list(), staleTime: 30_000 });
+  const cluster = list.data?.clusters.find((c) => c.id === clusterId);
+  const version = cluster?.platform?.kubernetes_git_version;
+  return (
+    <div className="flex items-start">
+      <div className="w-(--rail-w) shrink-0" />
+      <div className="min-w-0 flex-1 border-b border-l border-sidebar-border px-4 py-2.5" data-testid="cluster-panel-header">
+        <p className="truncate text-sm font-semibold text-foreground">{cluster?.name ?? "Cluster"}</p>
+        <div className="mt-0.5 flex items-center gap-2 text-micro text-muted-foreground">
+          <StatusDot tone={clusterStateTone(cluster?.state)} label={cluster?.state ? sentence(cluster.state) : "Unknown"} className="text-micro" />
+          {version ? <span className="font-mono">{version}</span> : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ClusterPanel({ clusterId, activePath }: { clusterId: string; activePath?: string }) {
+  return (
+    <div data-testid="cluster-panel">
+      {CLUSTER_NAV.map((group) => (
+        <SidebarGroup key={group.id} label={group.label}>
+          {group.items.map((item) => (
+            <SidebarItem
+              key={item.path}
+              to={clusterHref(clusterId, item)}
+              icon={item.icon}
+              label={<span data-testid={item.testId ?? `nav-${item.path.replace(/\//g, "-")}`}>{item.label}</span>}
+              active={activePath === item.path}
+            />
+          ))}
+        </SidebarGroup>
+      ))}
+    </div>
+  );
+}
+
+function OrgPanel({ pathname, activePath }: { pathname: string; activePath?: string }) {
+  const list = useQuery({ queryKey: ["clusters"], queryFn: () => clustersApi.list(), staleTime: 30_000 });
+  const clusters = useMemo(() => sortClustersByActivity(list.data?.clusters ?? []).slice(0, 12), [list.data]);
+  return (
+    <div data-testid="org-panel">
+      <SidebarGroup label="Organization">
+        {ORG_NAV.map((item) => (
+          <SidebarItem
+            key={item.path}
+            to={item.path}
+            icon={item.icon}
+            label={<span data-testid={item.testId ?? `nav-${item.path.replace(/\//g, "-").replace(/^-/, "")}`}>{item.label}</span>}
+            active={activePath === item.path}
+          />
+        ))}
+      </SidebarGroup>
+      {clusters.length > 0 && (
+        <SidebarGroup label="Clusters">
+          {clusters.map((cluster) => (
+            <SidebarItem
+              key={cluster.id}
+              to={`/clusters/${cluster.id}/dashboard`}
+              icon={dotIcon(clusterStateTone(cluster.state))}
+              label={<span data-testid={`org-panel-cluster-${cluster.id}`}>{cluster.name}</span>}
+              active={pathname.startsWith(`/clusters/${cluster.id}/`)}
+            />
+          ))}
+        </SidebarGroup>
+      )}
+    </div>
+  );
+}
+
+const dotIcons = new Map<string, ComponentType<LucideProps>>();
+/** A status dot in the icon slot: cluster rows are instances, not destinations. */
+function dotIcon(tone: string): ComponentType<LucideProps> {
+  const cached = dotIcons.get(tone);
+  if (cached) return cached;
+  const Icon = ({ className }: LucideProps) => (
+    <span aria-hidden className={cn("flex items-center justify-center", className)}>
+      <span className={cn("h-2 w-2 rounded-full", `bg-status-${tone}`)} />
+    </span>
+  );
+  dotIcons.set(tone, Icon);
+  return Icon;
+}
+
+// ─────────────────────────── Header ───────────────────────────
 
 function TopHeader({
   pathname,
-  clusterId,
-  theme,
-  onToggleTheme,
-  onLogout,
-  userEmail,
-  userRole,
-  onLaunchPalette,
+  onOpenMobileNav,
   onOpenHotkeys,
-  onNavigate,
 }: {
   pathname: string;
-  clusterId: string | null;
-  theme: string;
-  onToggleTheme: () => void;
-  onLogout: () => void;
-  userEmail?: string;
-  userRole?: string;
-  onLaunchPalette: () => void;
+  onOpenMobileNav: () => void;
   onOpenHotkeys: () => void;
-  onNavigate: (to: string) => void;
 }) {
-  const crumbs = useCrumbs(pathname, clusterId);
+  const clusterId = clusterIdFromPath(pathname);
+  const crumbs = useBreadcrumbs(pathname, clusterId);
   return (
-    <header
-      className="sticky top-0 z-30 flex items-center justify-between h-14 px-6 border-b border-border bg-background/80 backdrop-blur-lg"
-      role="banner"
-    >
-      {/* Left — breadcrumbs */}
-      <nav aria-label="Breadcrumb" className="flex items-center gap-1.5 text-sm min-w-0" data-testid="breadcrumbs">
-        {crumbs.map((c, i) => (
-          <div key={i} className="flex items-center gap-1.5 min-w-0">
-            {i > 0 && <ChevronRight className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />}
-            {i === crumbs.length - 1 ? (
-              <span className="text-foreground font-medium truncate">{c.label}</span>
-            ) : c.to ? (
-              <Link to="." href={c.to} className="text-muted-foreground hover:text-foreground transition-colors truncate">{c.label}</Link>
-            ) : (
-              <span className="text-muted-foreground truncate">{c.label}</span>
-            )}
-          </div>
-        ))}
-      </nav>
-
-      {/* Center — search (opens command palette) */}
-      <div className="hidden md:flex flex-1 justify-center px-6">
-        <button
-          type="button"
-          onClick={onLaunchPalette}
-          className="relative flex w-full max-w-xs items-center h-8 pl-8 pr-12 rounded-md border border-border bg-background text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-          aria-label="Search resources"
-        >
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          <span className="truncate">Search resources…</span>
-          <kbd className="absolute right-2 top-1/2 -translate-y-1/2 hidden md:inline-flex items-center px-1.5 py-0.5 rounded border border-border text-[10px] text-muted-foreground font-mono">/</kbd>
-        </button>
-      </div>
-
-      {/* Right cluster */}
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={onLaunchPalette}
-          className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-border text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-          aria-label="Open command palette"
-        >
-          <CmdIcon className="h-3.5 w-3.5" />
-          <Kbd combo="Mod+k" />
-        </button>
-
-        <button
-          type="button"
-          onClick={onToggleTheme}
-          className="inline-flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-          aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
-          title="Toggle theme"
-        >
-          {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-        </button>
-
-        <NotificationBell onNavigate={onNavigate} />
-
-        <DropdownMenu.Root>
-          <DropdownMenu.Trigger asChild>
-            <button
-              type="button"
-              aria-label={userEmail ? `User menu ${userEmail}` : "User menu"}
-              data-testid="user-menu-trigger"
-              className="flex items-center gap-2 h-8 pl-1 pr-2 rounded-md hover:bg-accent transition-colors"
-            >
-              <span className="grid h-6 w-6 place-items-center rounded-full bg-gradient-to-br from-zinc-600 to-zinc-800">
-                <User className="h-3 w-3 text-muted-foreground" />
-              </span>
-              <ChevronDown className="h-3 w-3 text-muted-foreground" />
-            </button>
-          </DropdownMenu.Trigger>
-          <DropdownMenu.Portal>
-            <DropdownMenu.Content
-              sideOffset={6}
-              align="end"
-              className="z-50 w-56 rounded-lg border border-border bg-popover shadow-xl overflow-hidden"
-            >
-              <div className="px-3 py-2.5 border-b border-border">
-                <p className="text-sm font-medium text-foreground truncate" data-testid="identity-email">{userEmail ?? "Anonymous"}</p>
-                <p className="text-xs text-muted-foreground truncate" data-testid="identity-roles">{userRole ?? "unauthenticated"}</p>
-              </div>
-              <div className="p-1">
-                <MenuItem onSelect={() => onNavigate("/settings")} icon={<Settings className="h-4 w-4" />}>Settings</MenuItem>
-                <MenuItem onSelect={onOpenHotkeys} icon={<CmdIcon className="h-4 w-4" />} shortcut="?">Keyboard shortcuts</MenuItem>
-                <MenuItem onSelect={() => onNavigate("/posture")} icon={<Compass className="h-4 w-4" />}>Feature coverage</MenuItem>
-                <DropdownMenu.Separator className="my-1 h-px bg-border" />
-                <MenuItem onSelect={onLogout} icon={<LogOut className="h-4 w-4" />} destructive>Sign out</MenuItem>
-              </div>
-            </DropdownMenu.Content>
-          </DropdownMenu.Portal>
-        </DropdownMenu.Root>
-      </div>
-    </header>
+    <Header
+      onOpenMobileNav={onOpenMobileNav}
+      scope={
+        <>
+          {clusterId ? <ClusterSwitcher /> : null}
+          <SystemScopeSwitch />
+          {crumbs.length >= 2 ? <span aria-hidden className="mx-1 hidden h-5 w-px bg-border sm:block" /> : null}
+        </>
+      }
+      breadcrumbs={<Breadcrumbs items={crumbs} />}
+      search={
+        <SearchTrigger
+          onOpen={openCommandPalette}
+          placeholder="Search pages, findings, assets…"
+        />
+      }
+      actions={
+        <>
+          <ThemeToggle />
+          <NotificationBell />
+          <AccountMenu onOpenHotkeys={onOpenHotkeys} />
+        </>
+      }
+    />
   );
 }
 
-function MenuItem({
-  icon,
-  children,
-  onSelect,
-  destructive,
-  shortcut,
-}: {
-  icon: React.ReactNode;
-  children: React.ReactNode;
-  onSelect: () => void;
-  destructive?: boolean;
-  shortcut?: string;
-}) {
+/** Header scope switch: include Constellation/Kubernetes system workloads. */
+function SystemScopeSwitch() {
+  const [preference, setPreference] = useIncludeSystemPreference();
+  const [params, setParams] = useRouteSearchParams();
+  const explicit = params.get("include_system");
+  const value = explicit === "true" ? true : explicit === "false" ? false : preference;
+  const id = "header-system-scope";
   return (
-    <DropdownMenu.Item
-      onSelect={onSelect}
-      className={cn(
-        "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm cursor-pointer outline-none",
-        "text-muted-foreground data-[highlighted]:text-foreground data-[highlighted]:bg-accent",
-        destructive && "text-[color:var(--color-destructive)] data-[highlighted]:text-[color:var(--color-destructive)]",
-      )}
-    >
-      <span className={cn(destructive ? "" : "text-muted-foreground")}>{icon}</span>
-      <span className="flex-1">{children}</span>
-      {shortcut && <Kbd combo={shortcut} />}
-    </DropdownMenu.Item>
+    <Tooltip content="Include Constellation and Kubernetes system workloads in findings, inventories and the network map">
+      <div className="flex h-8 shrink-0 items-center gap-2 rounded-md border border-border px-2" data-testid="system-scope">
+        <Form.Switch
+          id={id}
+          size="sm"
+          checked={value}
+          aria-label="Include system workloads"
+          data-testid="system-scope-switch"
+          onCheckedChange={(next) => {
+            setPreference(next);
+            if (params.has("include_system") || params.has("hide_platform")) {
+              setParams((current) => {
+                current.delete("include_system");
+                current.delete("hide_platform");
+                return current;
+              });
+            }
+          }}
+        />
+        <label htmlFor={id} className="hidden cursor-pointer whitespace-nowrap text-meta text-muted-foreground xl:block">
+          System workloads
+        </label>
+      </div>
+    </Tooltip>
   );
 }
 
-function NotificationBell({ onNavigate }: { onNavigate: (to: string) => void }) {
+function useBreadcrumbs(pathname: string, clusterId: string | null): BreadcrumbItem[] {
+  const labels = useCrumbLabels();
+  return useMemo(() => {
+    const trail: BreadcrumbItem[] = [];
+    if (clusterId) {
+      const base = `/clusters/${clusterId}`;
+      trail.push({ label: "All clusters", to: "/clusters" });
+      const rest = pathname.slice(base.length).split("/").filter(Boolean);
+      const owner = activeClusterItem(pathname, clusterId);
+      if (rest.length === 0) {
+        trail.push({ label: "Overview" });
+        return trail;
+      }
+      let path = base;
+      rest.forEach((segment, index) => {
+        path += `/${segment}`;
+        const parent = rest[index - 1];
+        // The first segment is the section: label it from the nav registry.
+        const label =
+          labels.get(path) ??
+          (index === 0 && owner ? owner.label : segmentLabel(segment, parent));
+        // Skip intermediate verbs ("rules", "actions") that are not pages.
+        trail.push(index === rest.length - 1 ? { label } : { label, to: path });
+      });
+      return dedupe(trail);
+    }
+    const parts = pathname.split("/").filter(Boolean);
+    if (parts.length === 0) return [{ label: "Clusters" }];
+    let path = "";
+    parts.forEach((segment, index) => {
+      path += `/${segment}`;
+      const parent = parts[index - 1];
+      const label = labels.get(path) ?? segmentLabel(segment, parent);
+      const linkable = !(segment === "organization");
+      trail.push(index === parts.length - 1 ? { label } : linkable ? { label, to: path } : { label });
+    });
+    return dedupe(trail);
+  }, [clusterId, labels, pathname]);
+}
+
+/** Collapse consecutive duplicates ("Policies › Policies"). */
+function dedupe(trail: BreadcrumbItem[]): BreadcrumbItem[] {
+  return trail.filter((crumb, index) => index === 0 || crumb.label !== trail[index - 1].label);
+}
+
+function sentence(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1).replace(/_/g, " ");
+}
+
+// ─────────────────────────── Account + notifications ───────────────────────────
+
+function AccountMenu({ onOpenHotkeys }: { onOpenHotkeys: () => void }) {
+  const { me, logout } = useAuth();
+  const navigate = useNavigate();
+  return (
+    <Menu modal={false}>
+      <MenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={me?.email ? `User menu ${me.email}` : "User menu"}
+          data-testid="user-menu-trigger"
+          className="flex h-8 items-center gap-1.5 rounded-md pl-1 pr-1.5 transition-colors hover:bg-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <span className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-muted-foreground">
+            <User className="h-3.5 w-3.5" />
+          </span>
+          <ChevronDown className="h-3 w-3 text-muted-foreground" />
+        </button>
+      </MenuTrigger>
+      <MenuContent className="w-60">
+        <MenuLabel className="space-y-0.5">
+          <span className="block truncate text-sm font-medium text-foreground" data-testid="identity-email">
+            {me?.email ?? "Signed out"}
+          </span>
+          <span className="block truncate text-meta font-normal" data-testid="identity-roles">
+            {me?.roles?.[0] ? sentence(me.roles[0]) : "No role"}
+          </span>
+        </MenuLabel>
+        <MenuSeparator />
+        <MenuItem onSelect={() => void navigate({ href: "/settings" })}>
+          <Settings className="h-4 w-4" />
+          Settings
+        </MenuItem>
+        <MenuItem onSelect={onOpenHotkeys}>
+          <Keyboard className="h-4 w-4" />
+          <span className="flex-1">Keyboard shortcuts</span>
+          <kbd className="font-mono text-micro text-muted-foreground">?</kbd>
+        </MenuItem>
+        <MenuItem onSelect={() => void navigate({ href: "/coverage" })}>
+          <Compass className="h-4 w-4" />
+          Feature coverage
+        </MenuItem>
+        <MenuSeparator />
+        <MenuItem
+          data-testid="sign-out"
+          onSelect={() => {
+            void logout().catch(() => toast.error("Sign out could not be confirmed. Try again."));
+          }}
+        >
+          <LogOut className="h-4 w-4" />
+          Sign out
+        </MenuItem>
+      </MenuContent>
+    </Menu>
+  );
+}
+
+function NotificationBell() {
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
   const operator = useTablePreferencesIdentity();
   const owner = `${operator?.org_id}:${operator?.user_id}`;
-  const q = useQuery({
+  const findingsQuery = useQuery({
     queryKey: ["bell-feed", owner],
     enabled: !!operator?.org_id && !!operator?.user_id,
     queryFn: () => findingsApi.list({ lifecycle: "open", limit: 50 }),
     staleTime: 30_000,
     refetchInterval: 60_000,
   });
-  // Runtime threats (DLP/WAF/IPS) so the bell isn't findings-only — surface recent
-  // high-severity runtime detections alongside vuln findings.
-  const rtQ = useQuery({
+  const runtimeQuery = useQuery({
     queryKey: ["bell-runtime", owner],
     queryFn: () => runtimeThreatsApi.list({ hours: 24, severity_min: 4 }),
     staleTime: 30_000,
     refetchInterval: 60_000,
   });
-  const items = useMemo(() => {
-    const all = q.data?.findings ?? [];
-    return all
-      .filter((f) => f.severity === "critical" || f.severity === "high")
-      .sort((a, b) => +new Date(b.last_seen_at) - +new Date(a.last_seen_at))
-      .slice(0, 10);
-  }, [q.data]);
-  const rtItems = useMemo(() => {
-    return (rtQ.data ?? [])
-      .slice()
-      .sort((a, b) => +new Date(b.reported_at) - +new Date(a.reported_at))
-      .slice(0, 6);
-  }, [rtQ.data]);
-  const count = items.length + rtItems.length;
-
-  return (
-    <DropdownMenu.Root>
-      <DropdownMenu.Trigger asChild>
-        <button
-          type="button"
-          className="relative inline-flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-          aria-label={`Notifications · ${count}`}
-        >
-          <Bell className="h-4 w-4" />
-          {count > 0 && (
-            <span className="absolute top-0.5 right-0.5 grid place-items-center min-w-[16px] h-4 px-1 rounded-full bg-status-error text-[10px] font-bold text-white">
-              {count > 99 ? "99+" : count}
-            </span>
-          )}
-        </button>
-      </DropdownMenu.Trigger>
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content
-          sideOffset={8}
-          align="end"
-          className="z-50 w-80 rounded-lg border border-border bg-popover shadow-xl overflow-hidden"
-        >
-          <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-            <h4 className="text-sm font-medium text-foreground">Attention needed</h4>
-            <button
-              type="button"
-              onClick={() => onNavigate("/clusters")}
-              className="text-xs text-muted-foreground hover:text-foreground"
-            >
-              view all
-            </button>
-          </div>
-          {items.length === 0 && rtItems.length === 0 && (
-            <div className="px-4 py-6 text-center text-xs text-muted-foreground">All clear. No high-severity findings or runtime threats.</div>
-          )}
-          {rtItems.length > 0 && (
-            <ul className="max-h-40 overflow-auto border-b border-border">
-              {rtItems.map((t) => (
-                <li key={t.id}>
-                  <button
-                    type="button"
-                    onClick={() => onNavigate(t.cluster_id ? `/clusters/${t.cluster_id}/runtime` : "/clusters")}
-                    className="w-full text-left flex items-start gap-3 px-4 py-3 border-b border-border last:border-0 hover:bg-accent/50 transition-colors"
-                  >
-                    <span className="mt-0.5 rounded bg-[color-mix(in_oklab,var(--color-severity-high)_18%,transparent)] px-1 text-[9px] uppercase text-[color:var(--color-severity-high)]">runtime</span>
-                    <div className="min-w-0 flex-1">
-                      <div className="text-sm truncate text-foreground">{t.threat_name || `Threat ${t.threat_id}`}</div>
-                      <div className="text-xs text-muted-foreground font-mono">
-                        {(t.workload_id || t.pod_name || t.namespace || "").toString().slice(0, 28)} · {fmtRelative(t.reported_at)}
-                      </div>
-                    </div>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-          <ul className="max-h-80 overflow-auto">
-            {items.map((f) => (
-              <li key={findingRowKey(f)}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (f.cluster_id || f.source_cluster_id || f.target_cluster_id) onNavigate(findingHref(f));
-                    else onNavigate("/clusters");
-                  }}
-                  className="w-full text-left flex items-start gap-3 px-4 py-3 border-b border-border last:border-0 hover:bg-accent/50 transition-colors"
-                >
-                  <SeverityBadge severity={f.severity} size="xs" />
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm truncate text-foreground">{f.title}</div>
-                    <div className="text-xs text-muted-foreground font-mono">
-                      {f.external_id ?? f.id.slice(0, 8)} · {fmtRelative(f.last_seen_at)}
-                    </div>
-                  </div>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </DropdownMenu.Content>
-      </DropdownMenu.Portal>
-    </DropdownMenu.Root>
+  const items = useMemo(
+    () =>
+      (findingsQuery.data?.findings ?? [])
+        .filter((f) => f.severity === "critical" || f.severity === "high")
+        .sort((a, b) => +new Date(b.last_seen_at) - +new Date(a.last_seen_at))
+        .slice(0, 10),
+    [findingsQuery.data],
   );
-}
-
-// ─────────────────────────── Crumbs ───────────────────────────
-
-function useCrumbs(pathname: string, clusterId: string | null): Array<{ label: string; to?: string }> {
-  // Cached cluster list — populated by ClustersLandingPage + ClusterSwitcher.
-  const list = useQuery({
-    queryKey: ["clusters"],
-    queryFn: () => clustersApi.list(),
-    staleTime: 30_000,
-    enabled: clusterId !== null,
-  });
-
-  if (clusterId) {
-    const cluster = list.data?.clusters.find((c) => c.id === clusterId);
-    const out: Array<{ label: string; to?: string }> = [
-      { label: "Clusters", to: "/clusters" },
-      { label: cluster?.name ?? clusterId.slice(0, 8), to: `/clusters/${clusterId}/dashboard` },
-    ];
-    const m = pathname.match(/^\/clusters\/[^/]+\/(.+)$/);
-    if (m) {
-      const segs = m[1].split("/");
-      out.push({ label: toTitle(segs[0]) });
-      for (let i = 1; i < segs.length; i++) {
-        const seg = segs[i];
-        const isId = seg.includes("-") || seg.length >= 8;
-        out.push({ label: isId ? seg.slice(0, 10) + (seg.length > 10 ? "…" : "") : toTitle(seg) });
-      }
-    }
-    return out;
-  }
-
-  // Org mode
-  const parts = pathname.split("/").filter(Boolean);
-  if (parts.length === 0) return [{ label: "Clusters" }];
-  const out: Array<{ label: string; to?: string }> = [];
-  out.push({ label: toTitle(parts[0]), to: parts[0] === "organization" ? undefined : `/${parts[0]}` });
-  for (let i = 1; i < parts.length; i++) {
-    const seg = parts[i];
-    const isId = seg.includes("-") || seg.length >= 8;
-    out.push({ label: isId ? seg.slice(0, 10) + (seg.length > 10 ? "…" : "") : toTitle(seg) });
-  }
-  return out;
-}
-
-function toTitle(s: string): string {
-  return s.replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  const runtimeItems = useMemo(
+    () => (runtimeQuery.data ?? []).slice().sort((a, b) => +new Date(b.reported_at) - +new Date(a.reported_at)).slice(0, 6),
+    [runtimeQuery.data],
+  );
+  const count = items.length + runtimeItems.length;
+  const go = (href: string) => {
+    setOpen(false);
+    void navigate({ href });
+  };
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <HeaderIconButton aria-label={count > 0 ? `Notifications, ${count} need attention` : "Notifications"} badge={count}>
+          <Bell className="h-4 w-4" />
+        </HeaderIconButton>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-80 max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-lg p-0">
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+          <h2 className="text-sm font-medium text-foreground">Needs attention</h2>
+          <span className="text-meta text-muted-foreground">{count > 0 ? `${count} items` : "All clear"}</span>
+        </div>
+        <div className="max-h-96 overflow-y-auto">
+          {count === 0 && (
+            <p className="px-4 py-8 text-center text-sm text-muted-foreground">No high-severity findings or runtime threats.</p>
+          )}
+          {runtimeItems.map((threat) => (
+            <button
+              key={threat.id}
+              type="button"
+              onClick={() => go(threat.cluster_id ? `/clusters/${threat.cluster_id}/runtime` : "/clusters")}
+              className="flex w-full items-start gap-3 border-b border-border px-4 py-3 text-left transition-colors last:border-0 hover:bg-accent/50"
+            >
+              <span className="mt-0.5 inline-flex h-5 shrink-0 items-center rounded-full bg-muted px-2 text-micro font-semibold text-foreground">Runtime</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm text-foreground">{threat.threat_name || `Threat ${threat.threat_id}`}</span>
+                <span className="block truncate text-meta text-muted-foreground">
+                  {(threat.workload_id || threat.pod_name || threat.namespace || "").toString()} · {fmtRelative(threat.reported_at)}
+                </span>
+              </span>
+            </button>
+          ))}
+          {items.map((finding) => (
+            <button
+              key={findingRowKey(finding)}
+              type="button"
+              onClick={() => go(finding.cluster_id || finding.source_cluster_id || finding.target_cluster_id ? findingHref(finding) : "/clusters")}
+              className="flex w-full items-start gap-3 border-b border-border px-4 py-3 text-left transition-colors last:border-0 hover:bg-accent/50"
+            >
+              <SeverityBadge severity={finding.severity} className="mt-0.5 shrink-0" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm text-foreground">{finding.title}</span>
+                <span className="block truncate font-mono text-meta text-muted-foreground">
+                  {finding.external_id ?? "Finding"} · {fmtRelative(finding.last_seen_at)}
+                </span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
 }

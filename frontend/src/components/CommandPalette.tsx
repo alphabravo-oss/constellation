@@ -1,53 +1,53 @@
-import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
-import { findingHref, findingRowKey } from "@/lib/finding-instance";
-import { useEffect, useMemo, useState, useCallback, useRef } from "react";
+// Command palette — the kit's single palette style (sentence-case groups,
+// description lines, hotkey hints). `/` and ⌘K open it from anywhere; the
+// header SearchTrigger opens the same dialog.
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import * as Dialog from "@radix-ui/react-dialog";
-import { Command } from "cmdk";
+import { Dialog as DialogPrimitive } from "radix-ui";
 import {
-  Search,
-  LayoutDashboard,
-  TriangleAlert,
-  Boxes,
-  Network,
-  Database,
-  FileText,
-  ShieldCheck,
-  Activity,
-  Sparkles,
-  ArrowRight,
-  Sun,
-  Moon,
-  CircleHelp,
-  Compass,
-  Bug,
-  Server,
-  ServerCog,
-  Settings,
-  Clock,
-  PackageSearch,
-  Layers,
-  CloudCog,
-  GitBranch,
-  ScanSearch,
-  ClipboardCheck,
-  RadioTower,
-  ScrollText,
-  KeyRound,
-  BadgeCheck,
-  HeartPulse,
-  Plug,
   ArrowLeftRight,
+  Boxes,
+  Bug,
+  CircleHelp,
+  Clock,
+  CloudCog,
+  Crosshair,
+  Earth,
+  FileClock,
+  GitBranch,
+  KeyRound,
+  Layers,
+  Moon,
+  PackageSearch,
+  Plug,
+  Plus,
+  ScrollText,
+  Server,
+  ShieldEllipsis,
   SlidersHorizontal,
+  Sun,
+  ToggleLeft,
+  type LucideIcon,
 } from "lucide-react";
 
-import { useHotkey, HOTKEY_CATALOG } from "@/lib/hotkeys";
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
 import { useTheme } from "@/contexts/ThemeContext";
+import { findingHref, findingRowKey } from "@/lib/finding-instance";
+import { useHotkey, HOTKEY_CATALOG } from "@/lib/hotkeys";
+import { tokenize } from "@/lib/kbd";
+import { setIncludeSystemPreference, useIncludeSystemPreference } from "@/lib/system-scope";
 import { findings, assets, imageScanResults, nodes as nodesApi, policies, deployments as deploymentsApi, serverlessFunctions, repositoryScans } from "@/api/client";
-import { Kbd } from "@/components/ui/kbd";
+import { CLUSTER_NAV_ITEMS, clusterIdFromPath, ORG_NAV } from "@/components/shell/nav-model";
+import { CommandGroup, CommandItem, CommandPalette as KitCommandPalette, Kbd } from "@/ui";
 
 const RECENT_KEY = "constellation.cmdk.recent.v1";
+const OPEN_EVENT = "constellation:open-palette";
+
+/** Open the palette from anywhere (header search, buttons). */
+export function openCommandPalette() {
+  window.dispatchEvent(new CustomEvent(OPEN_EVENT));
+}
 
 interface RecentItem { id: string; label: string; href: string; ts: number }
 
@@ -57,478 +57,287 @@ function loadRecent(key: string): RecentItem[] {
     const raw = localStorage.getItem(key);
     if (!raw) return [];
     const rows: unknown = JSON.parse(raw);
-    return Array.isArray(rows) ? rows.filter((row): row is RecentItem => !!row && typeof row === "object" && typeof row.id === "string" && typeof row.label === "string" && typeof row.href === "string" && row.href.startsWith("/") && !row.href.startsWith("//") && typeof row.ts === "number") : [];
-  } catch { return []; }
-}
-function pushRecent(key: string, item: Omit<RecentItem, "ts">) {
-  const cur = loadRecent(key).filter((i) => i.id !== item.id);
-  cur.unshift({ ...item, ts: Date.now() });
-  const trimmed = cur.slice(0, 8);
-  try { localStorage.setItem(key, JSON.stringify(trimmed)); } catch { /* noop */ }
+    return Array.isArray(rows)
+      ? rows.filter((row): row is RecentItem => !!row && typeof row === "object" && typeof row.id === "string" && typeof row.label === "string" && typeof row.href === "string" && row.href.startsWith("/") && !row.href.startsWith("//"))
+      : [];
+  } catch {
+    return [];
+  }
 }
 
-/**
- * CommandPalette — Cmd+K typeahead jumping to pages and entities.
- *
- * Sources:
- *   - Static navigation
- *   - Recent items (localStorage)
- *   - Findings list (id substring or title)
- *   - Assets list (name or id)
- *   - Policies list
- *   - Quick actions (toggle theme, density, CVE lookup, etc.)
- */
-export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+function pushRecent(key: string, item: Omit<RecentItem, "ts">) {
+  const current = loadRecent(key).filter((i) => i.id !== item.id);
+  current.unshift({ ...item, ts: Date.now() });
+  try {
+    localStorage.setItem(key, JSON.stringify(current.slice(0, 8)));
+  } catch {
+    // Recent items are a convenience.
+  }
+}
+
+interface PageEntry { label: string; href: string; icon: LucideIcon | React.ComponentType<{ className?: string }>; description?: string; keywords?: string[]; hotkey?: string }
+
+/** Pages that are not in the sidebar but remain one search away. */
+const MORE_CLUSTER_PAGES: Array<Omit<PageEntry, "href"> & { path: string }> = [
+  { path: "assets", label: "Assets", icon: Boxes, description: "Risk-ranked inventory across images, workloads and cloud resources", hotkey: "G A" },
+  { path: "repositories", label: "Repositories", icon: GitBranch, description: "Source repository scans" },
+  { path: "audit", label: "Cluster audit log", icon: FileClock, description: "Changes made in this cluster" },
+  { path: "policy", label: "Policy transfer", icon: ShieldEllipsis, description: "Import and export policy families as YAML" },
+  { path: "neuvector", label: "NeuVector switchboard", icon: ArrowLeftRight, description: "NeuVector concepts mapped to Constellation", keywords: ["nv", "migration"] },
+];
+
+const SETTINGS_PAGES: PageEntry[] = [
+  { label: "Access control", href: "/settings/access", icon: KeyRound, keywords: ["users", "roles", "sso", "service accounts"] },
+  { label: "API tokens", href: "/settings/api-tokens", icon: KeyRound, keywords: ["tokens", "automation"] },
+  { label: "Integrations", href: "/settings/integrations", icon: Plug, keywords: ["alerts", "receivers", "routing", "webhooks"] },
+  { label: "Connectors", href: "/settings/connectors", icon: Plug, keywords: ["registry", "cloud account"] },
+  { label: "Scanner and CVE sources", href: "/settings/scanner", icon: Bug, keywords: ["vulndb", "nvd", "feeds"] },
+  { label: "System health", href: "/settings/health", icon: Server, keywords: ["controllers", "heartbeat"] },
+  { label: "Effective configuration", href: "/settings/effective-config", icon: SlidersHorizontal, keywords: ["sysconfig"] },
+  { label: "Federation", href: "/federation", icon: Earth, keywords: ["multi cluster", "peers"] },
+  { label: "Migration", href: "/settings/migration", icon: ArrowLeftRight, keywords: ["neuvector", "imports"] },
+];
+
+const NAV_HOTKEYS: Record<string, string> = {
+  dashboard: "G D",
+  findings: "G F",
+  nodes: "G H",
+  images: "G I",
+  compliance: "G C",
+  network: "G N",
+  admission: "G P",
+  runtime: "G R",
+  "/cve": "G V",
+};
+
+export function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const operator = useTablePreferencesIdentity();
   const owner = `${operator?.org_id}:${operator?.user_id}`;
   const recentKey = `${RECENT_KEY}:${owner}`;
   const navigate = useNavigate();
   const location = useLocation();
   const { theme, toggle: toggleTheme } = useTheme();
+  const [includeSystem] = useIncludeSystemPreference();
   const [query, setQuery] = useState("");
-  const inputRef = useRef<HTMLInputElement>(null);
-  const clusterId = clusterIDFromPath(location.pathname);
+  const clusterId = clusterIdFromPath(location.pathname);
 
-  // Reset query when reopened, focus input on open
   useEffect(() => {
-    if (open) {
-      setQuery("");
-      setTimeout(() => inputRef.current?.focus(), 30);
-    }
+    if (open) setQuery("");
   }, [open]);
 
-  // Load entity data lazily — only when palette is open
   const findingsQ = useQuery({
     queryKey: ["cmdk-findings", owner, clusterId],
     queryFn: () => findings.list({ limit: 100, cluster_id: clusterId ?? undefined }),
     enabled: open && !!operator?.org_id && !!operator?.user_id,
     staleTime: 60_000,
   });
-  const assetsQ = useQuery({
-    queryKey: ["cmdk-assets", clusterId],
-    queryFn: () => assets.list({ limit: 100, cluster_id: clusterId ?? undefined }),
-    enabled: open,
-    staleTime: 60_000,
-  });
-  const imageScansQ = useQuery({
-    queryKey: ["cmdk-image-scans", clusterId],
-    queryFn: () => imageScanResults.list({ cluster_id: clusterId ?? undefined, limit: 100 }),
-    enabled: open && !!clusterId,
-    staleTime: 60_000,
-  });
-  const nodesQ = useQuery({
-    queryKey: ["cmdk-nodes", clusterId],
-    queryFn: () => nodesApi.list(clusterId!),
-    enabled: open && !!clusterId,
-    staleTime: 60_000,
-  });
-  const policiesQ = useQuery({
-    queryKey: ["cmdk-policies"],
-    queryFn: () => policies.list(),
-    enabled: open,
-    staleTime: 60_000,
-  });
-  // M6: live-search workloads / serverless / repositories from the palette.
-  const workloadsQ = useQuery({
-    queryKey: ["cmdk-workloads", clusterId],
-    queryFn: () => deploymentsApi.list({ limit: 100, cluster_id: clusterId ?? undefined }),
-    enabled: open && !!clusterId,
-    staleTime: 60_000,
-  });
-  const serverlessQ = useQuery({
-    queryKey: ["cmdk-serverless"],
-    queryFn: () => serverlessFunctions.list({ limit: 100 }),
-    enabled: open,
-    staleTime: 60_000,
-  });
-  const reposQ = useQuery({
-    queryKey: ["cmdk-repos"],
-    queryFn: () => repositoryScans.list({ limit: 100 }),
-    enabled: open,
-    staleTime: 60_000,
-  });
+  const assetsQ = useQuery({ queryKey: ["cmdk-assets", clusterId], queryFn: () => assets.list({ limit: 100, cluster_id: clusterId ?? undefined }), enabled: open, staleTime: 60_000 });
+  const imageScansQ = useQuery({ queryKey: ["cmdk-image-scans", clusterId], queryFn: () => imageScanResults.list({ cluster_id: clusterId ?? undefined, limit: 100 }), enabled: open && !!clusterId, staleTime: 60_000 });
+  const nodesQ = useQuery({ queryKey: ["cmdk-nodes", clusterId], queryFn: () => nodesApi.list(clusterId!), enabled: open && !!clusterId, staleTime: 60_000 });
+  const policiesQ = useQuery({ queryKey: ["cmdk-policies"], queryFn: () => policies.list(), enabled: open, staleTime: 60_000 });
+  const workloadsQ = useQuery({ queryKey: ["cmdk-workloads", clusterId], queryFn: () => deploymentsApi.list({ limit: 100, cluster_id: clusterId ?? undefined }), enabled: open && !!clusterId, staleTime: 60_000 });
+  const serverlessQ = useQuery({ queryKey: ["cmdk-serverless"], queryFn: () => serverlessFunctions.list({ limit: 100 }), enabled: open, staleTime: 60_000 });
+  const reposQ = useQuery({ queryKey: ["cmdk-repos"], queryFn: () => repositoryScans.list({ limit: 100 }), enabled: open, staleTime: 60_000 });
 
-  const recent = useMemo(() => open ? loadRecent(recentKey) : [], [open, recentKey]);
+  const recent = useMemo(() => (open ? loadRecent(recentKey) : []), [open, recentKey]);
 
   const go = useCallback((href: string, label: string, id?: string) => {
-    if (id) pushRecent(recentKey, { id: id ?? href, label, href });
+    if (id) pushRecent(recentKey, { id, label, href });
     onOpenChange(false);
-    navigate({ href: href });
+    void navigate({ href });
   }, [navigate, onOpenChange, recentKey]);
-  const resolveHref = useCallback((href: string) => {
-    if (clusterId && isClusterHref(href)) return `/clusters/${clusterId}${href}`;
-    return href;
-  }, [clusterId]);
 
-  const isCVE = /^cve-\d{4}-\d+$/i.test(query.trim());
+  const trimmed = query.trim();
+  const isCVE = /^cve-\d{4}-\d+$/i.test(trimmed);
+  const clusterPages: PageEntry[] = clusterId
+    ? [
+        ...CLUSTER_NAV_ITEMS.map((item) => ({ label: item.label, href: `/clusters/${clusterId}/${item.path}`, icon: item.icon, keywords: item.keywords, hotkey: NAV_HOTKEYS[item.path] })),
+        ...MORE_CLUSTER_PAGES.map((page) => ({ ...page, href: `/clusters/${clusterId}/${page.path}` })),
+      ]
+    : [];
+  const orgPages: PageEntry[] = ORG_NAV.map((item) => ({ label: item.label, href: item.path, icon: item.icon, keywords: item.keywords, hotkey: NAV_HOTKEYS[item.path] }));
 
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-background/60 backdrop-blur-sm" />
-        <Dialog.Content
-          className="fixed left-1/2 top-[16%] z-50 w-[min(640px,92vw)] -translate-x-1/2 rounded-lg border border-border bg-popover shadow-[var(--elev-popover)] overflow-hidden"
-          aria-label="Command palette"
-          onOpenAutoFocus={(e) => e.preventDefault()}
-        >
-          <Dialog.Title className="sr-only">Command palette</Dialog.Title>
-          <Dialog.Description className="sr-only">
-            Type to search pages, findings, assets, workloads, serverless, repos, or run a quick action.
-          </Dialog.Description>
-          <Command shouldFilter loop className="flex flex-col">
-            <div className="flex items-center gap-2 border-b border-border px-3 py-2.5">
-              <Search className="h-4 w-4 text-muted-foreground" />
-              <Command.Input
-                ref={inputRef}
-                value={query}
-                onValueChange={setQuery}
-                placeholder="Search pages, findings, CVEs, nodes, assets, workloads..."
-                className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/70"
-              />
-              <Kbd combo="Escape" />
-            </div>
-            <Command.List className="max-h-[420px] overflow-y-auto p-2">
-              <Command.Empty>
-                <div className="px-3 py-8 text-center text-xs text-muted-foreground">
-                  No matches. Try a CVE ID, finding ID prefix, or page name.
-                </div>
-              </Command.Empty>
-
-              {isCVE && (
-                <Group heading="CVE Database">
-                  <Item icon={<Bug />} onSelect={() => go(`/cve/${query.trim().toUpperCase()}`, query.trim().toUpperCase(), query.trim())}>
-                    Open <span className="text-mono ml-1">{query.trim().toUpperCase()}</span>
-                  </Item>
-                </Group>
-              )}
-
-              {!query && recent.length > 0 && (
-                <Group heading="Recent">
-                  {recent.map((r) => (
-                    <Item key={r.id} icon={<Clock />} onSelect={() => go(r.href, r.label, r.id)}>
-                      <span className="flex-1 truncate">{r.label}</span>
-                    </Item>
-                  ))}
-                </Group>
-              )}
-
-              {NAV_SCOPES.map((scope) => (
-                <Group key={scope} heading={scope}>
-                  {NAV_ITEMS.filter((item) => navScope(item.href) === scope && (item.href !== "/health" || clusterId)).map((item) => (
-                    <Item key={`${item.href}:${item.label}`} icon={item.icon} onSelect={() => go(resolveHref(item.href), item.label)} shortcut={item.shortcut} value={navItemSearchValue(item)}>
-                      <span>{item.label}</span>
-                    </Item>
-                  ))}
-                </Group>
-              ))}
-
-              <Group heading="Quick Actions">
-                <Item icon={theme === "dark" ? <Sun /> : <Moon />} onSelect={() => { toggleTheme(); onOpenChange(false); }}>
-                  Toggle theme · currently <span className="text-mono ml-1">{theme}</span>
-                </Item>
-                <Item icon={<CircleHelp />} onSelect={() => { onOpenChange(false); window.dispatchEvent(new CustomEvent("constellation:show-hotkeys")); }} shortcut="?">
-                  Show keyboard shortcuts
-                </Item>
-                <Item icon={<Compass />} onSelect={() => go("/posture", "Posture")}>
-                  View posture
-                </Item>
-              </Group>
-
-              {findingsQ.data?.findings && findingsQ.data.findings.length > 0 && (
-                <Group heading="Findings">
-                  {findingsQ.data.findings.slice(0, 8).map((f) => (
-                    <Item key={findingRowKey(f)} value={`${f.title} ${f.external_id ?? ""} ${findingRowKey(f)}`} icon={<TriangleAlert />} onSelect={() => go(findingHref(f, f.cluster_id || clusterId || undefined), f.title, findingRowKey(f))}>
-                      <span className="flex-1 truncate">{f.title}</span>
-                      <span className="ml-2 text-[10px] text-mono text-muted-foreground">{f.external_id ?? f.id.slice(0, 6)}</span>
-                    </Item>
-                  ))}
-                </Group>
-              )}
-
-              {imageScansQ.data?.image_scan_results && imageScansQ.data.image_scan_results.length > 0 && clusterId && (
-                <Group heading="Images">
-                  {imageScansQ.data.image_scan_results.slice(0, 6).map((image) => (
-                    <Item key={image.id} icon={<PackageSearch />} onSelect={() => go(`/clusters/${clusterId}/images/${image.id}`, image.image_repository || image.image_digest, image.id)}>
-                      <span className="flex-1 truncate">{image.image_repository || image.image_ref || image.image_digest}</span>
-                      <span className="ml-2 text-[10px] text-mono text-muted-foreground">{image.critical_count + image.high_count} high+</span>
-                    </Item>
-                  ))}
-                </Group>
-              )}
-
-              {nodesQ.data?.items && nodesQ.data.items.length > 0 && clusterId && (
-                <Group heading="Nodes">
-                  {nodesQ.data.items.slice(0, 6).map((node) => (
-                    <Item key={node.node} icon={<Server />} onSelect={() => go(`/clusters/${clusterId}/nodes/${encodeURIComponent(node.node)}`, node.node, `node:${node.node}`)}>
-                      <span className="flex-1 truncate">{node.node}</span>
-                      <span className="ml-2 text-[10px] text-mono text-muted-foreground">{node.critical_vulns + node.high_vulns} high+</span>
-                    </Item>
-                  ))}
-                </Group>
-              )}
-
-              {assetsQ.data?.assets && assetsQ.data.assets.length > 0 && (
-                <Group heading="Assets">
-                  {assetsQ.data.assets.slice(0, 6).map((a) => (
-                    <Item key={a.id} icon={<Boxes />} onSelect={() => go(resolveHref(`/assets/${a.id}`), a.name, a.id)}>
-                      <span className="flex-1 truncate">{a.name}</span>
-                      <span className="ml-2 text-[10px] text-mono text-muted-foreground">{a.kind}</span>
-                    </Item>
-                  ))}
-                </Group>
-              )}
-
-              {policiesQ.data?.policies && policiesQ.data.policies.length > 0 && (
-                <Group heading="Policies">
-                  {policiesQ.data.policies.slice(0, 6).map((p) => (
-                    <Item key={p.id} icon={<FileText />} onSelect={() => go(resolveHref("/policies"), p.name, p.id)}>
-                      <span className="flex-1 truncate">{p.name}</span>
-                      <span className="ml-2 text-[10px] text-mono text-muted-foreground">{p.mode}</span>
-                    </Item>
-                  ))}
-                </Group>
-              )}
-
-              {workloadsQ.data?.deployments && workloadsQ.data.deployments.length > 0 && clusterId && (
-                <Group heading="Workloads">
-                  {workloadsQ.data.deployments.slice(0, 6).map((d) => (
-                    <Item
-                      key={d.id}
-                      icon={<Layers />}
-                      onSelect={() => go(`/clusters/${clusterId}/deployments/${d.id}`, d.name, d.id)}
-                      value={`workload service deployment pod application ${d.name} ${d.namespace}`}
-                    >
-                      <span className="flex-1 truncate">{d.name}</span>
-                      <span className="ml-2 text-[10px] text-mono text-muted-foreground">{d.namespace}</span>
-                    </Item>
-                  ))}
-                </Group>
-              )}
-
-              {serverlessQ.data?.serverless_functions && serverlessQ.data.serverless_functions.length > 0 && clusterId && (
-                <Group heading="Serverless">
-                  {serverlessQ.data.serverless_functions.slice(0, 6).map((fn) => (
-                    <Item key={fn.id} icon={<CloudCog />} onSelect={() => go(`/clusters/${clusterId}/serverless/${fn.id}`, fn.function_name || fn.id, fn.id)}>
-                      <span className="flex-1 truncate">{fn.function_name || fn.id}</span>
-                      {fn.provider && <span className="ml-2 text-[10px] text-mono text-muted-foreground">{fn.provider}</span>}
-                    </Item>
-                  ))}
-                </Group>
-              )}
-
-              {reposQ.data?.repository_scans && reposQ.data.repository_scans.length > 0 && clusterId && (
-                <Group heading="Repositories">
-                  {reposQ.data.repository_scans.slice(0, 6).map((rp) => (
-                    <Item key={rp.id} icon={<GitBranch />} onSelect={() => go(`/clusters/${clusterId}/repositories`, rp.repository_ref, rp.id)}>
-                      <span className="flex-1 truncate">{rp.repository_ref}</span>
-                    </Item>
-                  ))}
-                </Group>
-              )}
-            </Command.List>
-            <div className="flex items-center justify-between gap-2 border-t border-border px-3 py-2 text-[10px] text-muted-foreground">
-              <div className="flex items-center gap-3">
-                <span className="flex items-center gap-1"><Kbd combo="ArrowUp" /><Kbd combo="ArrowDown" /> navigate</span>
-                <span className="flex items-center gap-1"><Kbd combo="Enter" /> open</span>
-              </div>
-              <span>Press <Kbd combo="?" /> for all shortcuts</span>
-            </div>
-          </Command>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
-  );
-}
-
-function Group({ heading, children }: { heading: string; children: React.ReactNode }) {
-  return (
-    <Command.Group
-      heading={heading}
-      className="
-        text-muted-foreground
-        [&_[cmdk-group-heading]]:px-2
-        [&_[cmdk-group-heading]]:py-1.5
-        [&_[cmdk-group-heading]]:text-[10px]
-        [&_[cmdk-group-heading]]:uppercase
-        [&_[cmdk-group-heading]]:tracking-wider
-      "
+    <KitCommandPalette
+      open={open}
+      onOpenChange={onOpenChange}
+      value={query}
+      onValueChange={setQuery}
+      placeholder="Search pages, findings, CVEs, nodes, workloads…"
+      footer={<span className="flex items-center gap-1.5"><Kbd>?</Kbd> all shortcuts</span>}
     >
-      {children}
-    </Command.Group>
+      {isCVE && (
+        <CommandGroup heading="CVE database">
+          <CommandItem value={`open ${trimmed}`} icon={Bug} title={`Open ${trimmed.toUpperCase()}`} onSelect={() => go(`/cve/${trimmed.toUpperCase()}`, trimmed.toUpperCase(), trimmed)} />
+        </CommandGroup>
+      )}
+      {!trimmed && recent.length > 0 && (
+        <CommandGroup heading="Recent">
+          {recent.map((item) => (
+            <CommandItem key={item.id} value={`recent ${item.label} ${item.id}`} icon={Clock} title={item.label} onSelect={() => go(item.href, item.label, item.id)} />
+          ))}
+        </CommandGroup>
+      )}
+      {clusterPages.length > 0 && (
+        <CommandGroup heading="This cluster">
+          {clusterPages.map((page) => (
+            <CommandItem key={page.href} value={[page.label, page.href, ...(page.keywords ?? [])].join(" ")} icon={page.icon} title={page.label} description={page.description} hotkey={page.hotkey} onSelect={() => go(page.href, page.label)} />
+          ))}
+        </CommandGroup>
+      )}
+      <CommandGroup heading="Organization">
+        {orgPages.map((page) => (
+          <CommandItem key={page.href} value={[page.label, page.href, ...(page.keywords ?? [])].join(" ")} icon={page.icon} title={page.label} hotkey={page.hotkey} onSelect={() => go(page.href, page.label)} />
+        ))}
+      </CommandGroup>
+      <CommandGroup heading="Actions">
+        <CommandItem value="register cluster connect add" icon={Plus} title="Register cluster" onSelect={() => go("/settings/clusters/new", "Register cluster")} />
+        <CommandItem
+          value="include system workloads scope platform"
+          icon={ToggleLeft}
+          title={includeSystem ? "Hide system workloads" : "Include system workloads"}
+          description="Header scope for findings, inventories and the network map"
+          onSelect={() => { setIncludeSystemPreference(!includeSystem); onOpenChange(false); }}
+        />
+        <CommandItem value="toggle theme dark light system" icon={theme === "dark" ? Sun : Moon} title="Switch theme" description={`Current: ${theme}`} onSelect={() => { toggleTheme(); }} />
+        <CommandItem value="keyboard shortcuts help" icon={CircleHelp} title="Keyboard shortcuts" hotkey="?" onSelect={() => { onOpenChange(false); window.dispatchEvent(new CustomEvent("constellation:show-hotkeys")); }} />
+      </CommandGroup>
+      <CommandGroup heading="Settings">
+        {SETTINGS_PAGES.map((page) => (
+          <CommandItem key={page.href} value={[page.label, page.href, ...(page.keywords ?? [])].join(" ")} icon={page.icon} title={page.label} onSelect={() => go(page.href, page.label)} />
+        ))}
+      </CommandGroup>
+      {(findingsQ.data?.findings?.length ?? 0) > 0 && (
+        <CommandGroup heading="Findings">
+          {findingsQ.data!.findings.slice(0, 8).map((f) => (
+            <CommandItem
+              key={findingRowKey(f)}
+              value={`${f.title} ${f.external_id ?? ""} ${findingRowKey(f)}`}
+              icon={Crosshair}
+              title={f.title}
+              description={[f.external_id, f.severity ? f.severity.charAt(0).toUpperCase() + f.severity.slice(1) : undefined].filter(Boolean).join(" · ")}
+              onSelect={() => go(findingHref(f, f.cluster_id || clusterId || undefined), f.external_id || f.title, findingRowKey(f))}
+            />
+          ))}
+        </CommandGroup>
+      )}
+      {clusterId && (imageScansQ.data?.image_scan_results?.length ?? 0) > 0 && (
+        <CommandGroup heading="Images">
+          {imageScansQ.data!.image_scan_results.slice(0, 6).map((image) => (
+            <CommandItem key={image.id} value={`image ${image.image_repository ?? ""} ${image.image_ref ?? ""} ${image.id}`} icon={PackageSearch} title={image.image_repository || image.image_ref || image.image_digest} description={`${image.critical_count + image.high_count} critical or high`} onSelect={() => go(`/clusters/${clusterId}/images/${image.id}`, image.image_repository || image.image_digest, image.id)} />
+          ))}
+        </CommandGroup>
+      )}
+      {clusterId && (nodesQ.data?.items?.length ?? 0) > 0 && (
+        <CommandGroup heading="Nodes">
+          {nodesQ.data!.items.slice(0, 6).map((node) => (
+            <CommandItem key={node.node} value={`node host ${node.node}`} icon={Server} title={node.node} description={`${node.critical_vulns + node.high_vulns} critical or high`} onSelect={() => go(`/clusters/${clusterId}/nodes/${encodeURIComponent(node.node)}`, node.node, `node:${node.node}`)} />
+          ))}
+        </CommandGroup>
+      )}
+      {(assetsQ.data?.assets?.length ?? 0) > 0 && (
+        <CommandGroup heading="Assets">
+          {assetsQ.data!.assets.slice(0, 6).map((asset) => (
+            <CommandItem key={asset.id} value={`asset ${asset.name} ${asset.id}`} icon={Boxes} title={asset.name} description={asset.kind} onSelect={() => go(clusterId ? `/clusters/${clusterId}/assets/${asset.id}` : "/clusters", asset.name, asset.id)} />
+          ))}
+        </CommandGroup>
+      )}
+      {clusterId && (workloadsQ.data?.deployments?.length ?? 0) > 0 && (
+        <CommandGroup heading="Workloads">
+          {workloadsQ.data!.deployments.slice(0, 6).map((d) => (
+            <CommandItem key={d.id} value={`workload service deployment ${d.name} ${d.namespace}`} icon={Layers} title={d.name} description={d.namespace} onSelect={() => go(`/clusters/${clusterId}/deployments/${d.id}`, d.name, d.id)} />
+          ))}
+        </CommandGroup>
+      )}
+      {(policiesQ.data?.policies?.length ?? 0) > 0 && clusterId && (
+        <CommandGroup heading="Policies">
+          {policiesQ.data!.policies.slice(0, 6).map((p) => (
+            <CommandItem key={p.id} value={`policy ${p.name}`} icon={ScrollText} title={p.name} description={p.mode} onSelect={() => go(`/clusters/${clusterId}/policies/${encodeURIComponent(p.id)}`, p.name, p.id)} />
+          ))}
+        </CommandGroup>
+      )}
+      {clusterId && (serverlessQ.data?.serverless_functions?.length ?? 0) > 0 && (
+        <CommandGroup heading="Serverless">
+          {serverlessQ.data!.serverless_functions.slice(0, 6).map((fn) => (
+            <CommandItem key={fn.id} value={`function ${fn.function_name ?? ""} ${fn.id}`} icon={CloudCog} title={fn.function_name || "Function"} description={fn.provider} onSelect={() => go(`/clusters/${clusterId}/serverless/${fn.id}`, fn.function_name || "Function", fn.id)} />
+          ))}
+        </CommandGroup>
+      )}
+      {clusterId && (reposQ.data?.repository_scans?.length ?? 0) > 0 && (
+        <CommandGroup heading="Repositories">
+          {reposQ.data!.repository_scans.slice(0, 6).map((repo) => (
+            <CommandItem key={repo.id} value={`repository ${repo.repository_ref}`} icon={GitBranch} title={repo.repository_ref} onSelect={() => go(`/clusters/${clusterId}/repositories`, repo.repository_ref, repo.id)} />
+          ))}
+        </CommandGroup>
+      )}
+    </KitCommandPalette>
   );
 }
 
-function Item({
-  icon,
-  children,
-  onSelect,
-  shortcut,
-  value,
-}: {
-  icon: React.ReactNode;
-  children: React.ReactNode;
-  onSelect: () => void;
-  shortcut?: string;
-  value?: string;
-}) {
-  return (
-    <Command.Item
-      value={value}
-      onSelect={onSelect}
-      className="
-        flex items-center gap-2 px-2 py-1.5 rounded text-sm text-foreground cursor-pointer
-        data-[selected=true]:bg-accent
-      "
-    >
-      <span className="flex h-5 w-5 items-center justify-center text-muted-foreground [&_svg]:h-3.5 [&_svg]:w-3.5">{icon}</span>
-      <span className="flex-1 flex items-center min-w-0">{children}</span>
-      {shortcut && <Kbd combo={shortcut} />}
-      <ArrowRight className="h-3 w-3 text-muted-foreground/40" />
-    </Command.Item>
-  );
-}
-
-interface NavSearchItem {
-  icon: React.ReactNode;
-  label: string;
-  href: string;
-  shortcut?: string;
-  keywords?: string[];
-}
-
-const NAV_ITEMS: NavSearchItem[] = [
-  { icon: <ServerCog />, label: "Clusters", href: "/clusters", keywords: ["cluster", "fleet", "scope"] },
-  { icon: <LayoutDashboard />, label: "Dashboard",   href: "/dashboard",  shortcut: "g d", keywords: ["home", "overview", "risk"] },
-  { icon: <ArrowLeftRight />,  label: "NeuVector Switchboard", href: "/neuvector", keywords: ["nv", "migration", "switch", "map", "compatibility"] },
-  { icon: <TriangleAlert />,   label: "Findings",    href: "/findings",   shortcut: "g f", keywords: ["security risks", "vulnerabilities", "violations", "cve", "risk"] },
-  { icon: <Server />,          label: "Nodes",       href: "/nodes",      shortcut: "g h", keywords: ["hosts", "host", "node", "agent", "enforcer"] },
-  { icon: <PackageSearch />,   label: "Images",      href: "/images",     shortcut: "g i", keywords: ["registry images", "containers", "image scan", "vulnerability"] },
-  { icon: <Boxes />,           label: "Assets",      href: "/assets",     shortcut: "g a", keywords: ["inventory", "services", "workloads", "containers"] },
-  { icon: <Layers />,          label: "Services / Workloads", href: "/deployments", keywords: ["deployment", "deployments", "pod", "pods", "application", "containers"] },
-  { icon: <ShieldCheck />,     label: "Compliance",  href: "/compliance", shortcut: "g c", keywords: ["cis", "benchmark", "compliance profile", "audit"] },
-  { icon: <Network />,         label: "Network Map", href: "/network",    shortcut: "g n", keywords: ["network activity", "conversations", "sessions", "pcap", "sniffer", "connections"] },
-  { icon: <Activity />,        label: "Security Events", href: "/timeline", keywords: ["events", "activity", "audit", "incidents", "threats", "violations", "logs"] },
-  { icon: <FileText />,        label: "Policy Center", href: "/policy", keywords: ["rules", "groups", "discover", "monitor", "protect", "learn", "enforce"] },
-  { icon: <FileText />,        label: "Policies",    href: "/policies",   shortcut: "g p", keywords: ["network policy", "rules", "discover", "monitor", "protect"] },
-  { icon: <ScrollText />,      label: "Runtime Policies", href: "/runtime-policies", keywords: ["process rules", "runtime rules", "process profile", "behavior"] },
-  { icon: <RadioTower />,      label: "Response Catalog", href: "/response", keywords: ["response rules", "notifications", "webhook", "quarantine", "isolate"] },
-  { icon: <Activity />,        label: "Runtime",     href: "/runtime",    shortcut: "g r", keywords: ["process", "behavior", "threat", "waf", "dlp", "agent", "enforcer"] },
-  { icon: <ServerCog />,       label: "Controllers / Enforcers / Scanners", href: "/components", keywords: ["components", "controller", "enforcer", "agent", "sensor", "scanner"] },
-  { icon: <ServerCog />,       label: "Controllers (NeuVector)", href: "/components?role=controller", keywords: ["api", "control plane", "manager"] },
-  { icon: <ShieldCheck />,     label: "Enforcers (NeuVector)", href: "/components?role=enforcer", keywords: ["agent", "runtime agent", "sensor", "node agent", "daemonset"] },
-  { icon: <ScanSearch />,      label: "Scanners (NeuVector)", href: "/components?role=scanner", keywords: ["scan worker", "vulnerability scanner", "cve scanner"] },
-  { icon: <Database />,        label: "CVE Database", href: "/cve",       shortcut: "g v", keywords: ["vulnerability database", "vulndb", "nvd", "kev"] },
-  { icon: <ScanSearch />,      label: "Scanner & CVE Sources", href: "/settings/scanner", keywords: ["vulndb", "vulnerability database", "nvd", "feed", "scanner pool", "cache"] },
-  { icon: <SlidersHorizontal />, label: "Effective Config", href: "/settings/effective-config", keywords: ["system config", "sysconfig", "configuration", "applied revision", "settings"] },
-  { icon: <KeyRound />,        label: "Access Control", href: "/settings/access", keywords: ["users", "roles", "sso", "service accounts"] },
-  { icon: <KeyRound />,        label: "API Tokens",  href: "/settings/api-tokens", keywords: ["tokens", "service account", "automation", "keys"] },
-  { icon: <ShieldCheck />,     label: "Security Policy", href: "/settings/security-policy", keywords: ["password", "session", "idle timeout"] },
-  { icon: <BadgeCheck />,      label: "Attestation Trust", href: "/settings/attestation-trust", keywords: ["admission trust", "signatures", "cosign", "provenance"] },
-  { icon: <Plug />,            label: "Connectors",  href: "/settings/connectors", keywords: ["registry", "cloud account", "scanner pool", "integrations"] },
-  { icon: <Plug />,            label: "Integrations & Routing", href: "/settings/integrations", keywords: ["alerts", "receivers", "routing", "webhooks"] },
-  { icon: <Server />,          label: "System Health", href: "/settings/health", keywords: ["controllers", "enforcers", "scanners", "components", "license", "heartbeat"] },
-  { icon: <HeartPulse />,      label: "Sensor Health", href: "/health", keywords: ["cluster", "sensor", "registration", "health gates"] },
-  { icon: <ClipboardCheck />,  label: "Organization Audit Log", href: "/organization/audit", keywords: ["activity", "audit", "organization history"] },
-  { icon: <ClipboardCheck />,  label: "Posture",     href: "/posture", keywords: ["coverage", "configuration posture", "security posture"] },
-  { icon: <Sparkles />,        label: "Federation",  href: "/federation", keywords: ["multi cluster", "fed", "remote cluster"] },
-  { icon: <Settings />,        label: "Settings",    href: "/settings", keywords: ["system", "configuration", "admin"] },
-];
-
-const NAV_SCOPES = ["Clusters", "Organization", "Platform", "Integrations"] as const;
-
-function navScope(href: string): typeof NAV_SCOPES[number] {
-  if (href === "/cve" || href === "/posture" || href === "/federation" || href === "/organization/audit") return "Organization";
-  if (href.startsWith("/settings/integrations") || href.startsWith("/settings/connectors")) return "Integrations";
-  if (["/settings/access", "/settings/api-tokens", "/settings/security-policy"].includes(href)) return "Organization";
-  if (href.startsWith("/settings")) return "Platform";
-  return "Clusters";
-}
-
-function navItemSearchValue(item: NavSearchItem) {
-  return [item.label, item.href, ...(item.keywords ?? [])].join(" ");
-}
-
-const CLUSTER_HREFS = new Set([
-  "/dashboard", "/neuvector", "/findings", "/nodes", "/images", "/assets",
-  "/deployments", "/compliance", "/network", "/network-rules", "/timeline",
-  "/policy", "/policies", "/runtime", "/runtime-policies", "/response", "/components", "/health",
-]);
-const CLUSTER_HREF_PREFIXES = ["/findings/", "/nodes/", "/images/", "/assets/", "/deployments/", "/risk/"];
-
-function isClusterHref(href: string): boolean {
-  const path = href.split(/[?#]/, 1)[0];
-  return CLUSTER_HREFS.has(path) || CLUSTER_HREF_PREFIXES.some((prefix) => path.startsWith(prefix));
-}
-
-function clusterIDFromPath(pathname: string): string | null {
-  const m = pathname.match(/^\/clusters\/([^/]+)(\/|$)/);
-  return m ? m[1] : null;
-}
-
-/**
- * Provider — install the global Cmd+K hotkey and render the palette.
- * Mount once near the top of AppShell.
- */
+/** Mount once in the shell: global hotkeys + the palette. */
 export function CommandPaletteProvider() {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const clusterId = clusterIDFromPath(location.pathname);
-  const clusterHref = useCallback((href: string) => (clusterId && isClusterHref(href) ? `/clusters/${clusterId}${href}` : href), [clusterId]);
+  const clusterId = clusterIdFromPath(location.pathname);
+  const clusterHref = useCallback((path: string) => (clusterId ? `/clusters/${clusterId}/${path}` : "/clusters"), [clusterId]);
 
-  useHotkey("Mod+k", () => setOpen((o) => !o), { description: "Open command palette", allowInEditable: true });
+  useEffect(() => {
+    const onOpen = () => setOpen(true);
+    window.addEventListener(OPEN_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_EVENT, onOpen);
+  }, []);
 
-  // Global hotkey: hotkey nav
-  useHotkey("g d", () => navigate({ href: clusterHref("/dashboard") }));
-  useHotkey("g f", () => navigate({ href: clusterHref("/findings") }));
-  useHotkey("g h", () => navigate({ href: clusterHref("/nodes") }));
-  useHotkey("g i", () => navigate({ href: clusterHref("/images") }));
-  useHotkey("g a", () => navigate({ href: clusterHref("/assets") }));
-  useHotkey("g c", () => navigate({ href: clusterHref("/compliance") }));
-  useHotkey("g n", () => navigate({ href: clusterHref("/network") }));
-  useHotkey("g p", () => navigate({ href: clusterHref("/policies") }));
-  useHotkey("g r", () => navigate({ href: clusterHref("/runtime") }));
+  const toggle = useCallback(() => setOpen((value) => !value), []);
+  const openPalette = useCallback((event: KeyboardEvent) => { event.preventDefault(); setOpen(true); }, []);
+  useHotkey("Mod+k", toggle, { description: "Open command palette", allowInEditable: true });
+  useHotkey("/", openPalette, { description: "Search" });
+  useHotkey("g d", () => navigate({ href: clusterHref("dashboard") }));
+  useHotkey("g f", () => navigate({ href: clusterHref("findings") }));
+  useHotkey("g h", () => navigate({ href: clusterHref("nodes") }));
+  useHotkey("g i", () => navigate({ href: clusterHref("images") }));
+  useHotkey("g a", () => navigate({ href: clusterHref("assets") }));
+  useHotkey("g c", () => navigate({ href: clusterHref("compliance") }));
+  useHotkey("g n", () => navigate({ href: clusterHref("network") }));
+  useHotkey("g p", () => navigate({ href: clusterHref("admission") }));
+  useHotkey("g r", () => navigate({ href: clusterHref("runtime") }));
   useHotkey("g v", () => navigate({ href: "/cve" }));
-
-  // ? — show hotkey help (broadcast event AppShell listens to)
   useHotkey("?", () => window.dispatchEvent(new CustomEvent("constellation:show-hotkeys")));
 
   return <CommandPalette open={open} onOpenChange={setOpen} />;
 }
 
-/**
- * HotkeysHelp — modal listing all global shortcuts.
- */
-export function HotkeysHelp({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+/** Modal listing all global shortcuts. */
+export function HotkeysHelp({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const groups = useMemo(() => {
-    const g: Record<string, typeof HOTKEY_CATALOG> = {};
-    for (const h of HOTKEY_CATALOG) { (g[h.group] ??= []).push(h); }
-    return g;
+    const grouped: Record<string, typeof HOTKEY_CATALOG> = {};
+    for (const hotkey of HOTKEY_CATALOG) (grouped[hotkey.group] ??= []).push(hotkey);
+    return grouped;
   }, []);
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-background/60 backdrop-blur-sm" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(480px,92vw)] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-popover p-5 shadow-[var(--elev-popover)]">
-          <Dialog.Title className="text-display text-base font-semibold tracking-tight">Keyboard shortcuts</Dialog.Title>
-          <Dialog.Description className="text-xs text-muted-foreground mt-0.5">All global shortcuts in Constellation.</Dialog.Description>
+    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="fixed inset-0 z-overlay bg-black/50 backdrop-blur-xs" />
+        <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-overlay w-[min(28rem,92vw)] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-card p-5 shadow-elev-popover outline-none">
+          <DialogPrimitive.Title className="text-base font-semibold text-foreground">Keyboard shortcuts</DialogPrimitive.Title>
+          <DialogPrimitive.Description className="mt-0.5 text-meta text-muted-foreground">Global shortcuts in Constellation.</DialogPrimitive.Description>
           <div className="mt-4 space-y-4">
-            {Object.entries(groups).map(([g, items]) => (
-              <div key={g}>
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">{g}</div>
+            {Object.entries(groups).map(([group, items]) => (
+              <div key={group}>
+                <p className="mb-1.5 text-meta font-semibold text-muted-foreground">{group}</p>
                 <ul className="space-y-1">
-                  {items.map((it) => (
-                    <li key={it.combo} className="flex items-center justify-between gap-3 text-sm">
-                      <span>{it.label}</span>
-                      <Kbd combo={it.combo} />
+                  {items.map((item) => (
+                    <li key={item.combo} className="flex items-center justify-between gap-3 text-sm">
+                      <span>{item.label}</span>
+                      <span className="flex items-center gap-1">{tokenize(item.combo).map((key, index) => <Kbd key={`${key}-${index}`}>{key}</Kbd>)}</span>
                     </li>
                   ))}
                 </ul>
               </div>
             ))}
           </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   );
 }

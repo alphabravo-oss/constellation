@@ -13,11 +13,13 @@
 //   Org-level surfaces: /cve, /federation, /posture, and /settings/*.
 import { lazy } from "react";
 import { parseURLSearch, stringifyURLSearch } from "@/lib/route-search";
-import { createRootRoute, createRoute, createRouter, Link, Navigate, Outlet, redirect, type ParsedLocation, type RouterHistory } from "@tanstack/react-router";
+import { createRootRoute, createRoute, createRouter, Navigate, Outlet, redirect, type ParsedLocation, type RouterHistory } from "@tanstack/react-router";
 import { SuspenseRoute, LegacyClusterRedirect } from "./components/RouteLayouts";
 import { RouteErrorPage } from "./components/RouteErrorPage";
 
 import { AppShell } from "./components/AppShell";
+import { PoliciesHub, AgentsHub, SignaturesHub } from "./components/shell/hubs";
+import { NotFoundState } from "./ui";
 import { RequireAuth } from "./components/RequireAuth";
 import { LoginPage } from "./pages/LoginPage";
 import { ClustersLandingPage } from "./pages/ClustersLandingPage";
@@ -28,7 +30,6 @@ import { ClusterRouter } from "./pages/ClusterRouter";
 const CVEPage             = lazy(() => import("./pages/CVEPage").then((m) => ({ default: m.CVEPage })));
 const CVEDetailPage       = lazy(() => import("./pages/CVEDetailPage").then((m) => ({ default: m.CVEDetailPage })));
 const SettingsShell       = lazy(() => import("./components/SettingsShell").then((m) => ({ default: m.SettingsShell })));
-const SettingsLanding     = lazy(() => import("./pages/SettingsLanding").then((m) => ({ default: m.SettingsLanding })));
 const IntegrationsPage    = lazy(() => import("./pages/IntegrationsPage").then((m) => ({ default: m.IntegrationsPage })));
 const ConnectorCoveragePage = lazy(() => import("./pages/ConnectorCoveragePage").then((m) => ({ default: m.ConnectorCoveragePage })));
 const CoveragePage        = lazy(() => import("./pages/CoveragePage").then((m) => ({ default: m.CoveragePage })));
@@ -162,10 +163,14 @@ function aliasRedirect({ to, cluster = false, from }: { to: string; cluster?: bo
   };
 }
 
-const rootRoute = createRootRoute({ component: Outlet, validateSearch: (search: Record<string, unknown>) => search, notFoundComponent: () => <div className="p-8"><h1>Page not found</h1><Link to="/clusters">Go to clusters</Link></div> });
+const rootRoute = createRootRoute({ component: Outlet, validateSearch: (search: Record<string, unknown>) => search, notFoundComponent: () => <RequireAuth><AppShell><ShellNotFound /></AppShell></RequireAuth> });
 const public__loginRoute = createRoute({ getParentRoute: () => rootRoute, path: "/login", beforeLoad: aliasRedirect({ to: "/auth/login" }) });
 const public__auth_loginRoute = createRoute({ getParentRoute: () => rootRoute, path: "/auth/login", component: () => (<LoginPage />) });
-const authenticatedRoute = createRoute({ getParentRoute: () => rootRoute, id: "_authenticated", component: () => (<RequireAuth>
+function ShellNotFound() {
+  return <NotFoundState homeTo="/clusters" homeLabel="Back to clusters" />;
+}
+
+const authenticatedRoute = createRoute({ getParentRoute: () => rootRoute, id: "_authenticated", notFoundComponent: ShellNotFound, component: () => (<RequireAuth>
             <AppShell />
           </RequireAuth>) });
 const app_indexRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: "/", component: () => (<Navigate to="/clusters" replace />) });
@@ -221,7 +226,7 @@ const app_scannersRoute = createRoute({ getParentRoute: () => authenticatedRoute
 const app_risk_splatRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: "risk/$", component: () => (<LegacyClusterRedirect />) });
 const app_healthRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: "health", beforeLoad: aliasRedirect({ to: "/settings/health" }) });
 const app_clustersRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: "clusters", component: () => (<ClustersLandingPage />) });
-const app_clusters_idRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: "clusters/$id", component: () => (<ClusterRouter />) });
+const app_clusters_idRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: "clusters/$id", notFoundComponent: ShellNotFound, component: () => (<ClusterRouter />) });
 const cluster_indexRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "/", component: () => (<Navigate to="/clusters/$id/dashboard" params={(prev) => ({ id: prev.id! })} replace />) });
 const cluster_dashboardRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "dashboard", component: () => (<SuspenseRoute><DashboardPage /></SuspenseRoute>) });
 const cluster_neuvectorRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "neuvector", component: () => (<SuspenseRoute><NeuVectorSwitchboardPage /></SuspenseRoute>) });
@@ -272,8 +277,8 @@ const cluster_runtime_baselines_baselineIdRoute = createRoute({ getParentRoute: 
 const cluster_runtime_baseline_rule_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "runtime/baselines/$baselineId/rules/new", component: () => (<SuspenseRoute><BaselineRuleFormPage /></SuspenseRoute>) });
 const cluster_runtime_baseline_rule_editRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "runtime/baselines/$baselineId/rules/$ruleId/edit", component: () => (<SuspenseRoute><BaselineRuleFormPage /></SuspenseRoute>) });
 const cluster_runtime_baseline_actionRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "runtime/baselines/$baselineId/actions/$action", component: () => (<SuspenseRoute><BaselineActionFormPage /></SuspenseRoute>) });
-const cluster_responseRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "response", component: () => (<SuspenseRoute><ResponsePage /></SuspenseRoute>) });
-const cluster_response_rulesRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "response-rules", component: () => (<SuspenseRoute><ResponseRulesPage /></SuspenseRoute>) });
+const cluster_responseRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "response", component: () => (<SuspenseRoute><PoliciesHub tab="response"><ResponsePage /></PoliciesHub></SuspenseRoute>) });
+const cluster_response_rulesRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "response-rules", component: () => (<SuspenseRoute><PoliciesHub tab="response"><ResponseRulesPage /></PoliciesHub></SuspenseRoute>) });
 const cluster_response_rules_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "response-rules/new", component: () => (<SuspenseRoute><ResponseRuleFormPage /></SuspenseRoute>) });
 const cluster_response_rules_ruleIdRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "response-rules/$ruleId", component: () => (<SuspenseRoute><ResponseRuleFormPage /></SuspenseRoute>) });
 const cluster_vuln_profilesRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "vuln-profiles", component: () => (<SuspenseRoute><VulnProfilePage /></SuspenseRoute>) });
@@ -286,7 +291,7 @@ const cluster_compliance_benchmark_retryRoute = createRoute({ getParentRoute: ()
 const cluster_compliance_exemption_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "compliance/exemptions/new", component: () => (<SuspenseRoute><ComplianceExemptionFormPage /></SuspenseRoute>) });
 const cluster_compliance_schedule_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "compliance/schedules/new", component: () => (<SuspenseRoute><ComplianceScheduleFormPage /></SuspenseRoute>) });
 const cluster_compliance_schedule_editRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "compliance/schedules/$scheduleId/edit", component: () => (<SuspenseRoute><ComplianceScheduleFormPage /></SuspenseRoute>) });
-const cluster_groupsRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "groups", component: () => (<SuspenseRoute><GroupsPage /></SuspenseRoute>) });
+const cluster_groupsRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "groups", component: () => (<SuspenseRoute><PoliciesHub tab="network"><GroupsPage /></PoliciesHub></SuspenseRoute>) });
 const cluster_groups_settingsRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "groups/settings", component: () => (<SuspenseRoute><GroupSettingsPage /></SuspenseRoute>) });
 const cluster_groups_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "groups/new", component: () => (<SuspenseRoute><GroupFormPage /></SuspenseRoute>) });
 const cluster_groups_editRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "groups/$groupId/edit", component: () => (<SuspenseRoute><GroupFormPage /></SuspenseRoute>) });
@@ -308,30 +313,30 @@ const cluster_network_rules_newRoute = createRoute({ getParentRoute: () => app_c
 const cluster_network_rules_editRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "network-rules/$ruleId/edit", component: () => (<SuspenseRoute><NetworkRuleFormPage /></SuspenseRoute>) });
 const cluster_waf_splatRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "waf/$", beforeLoad: aliasRedirect({ to: "runtime-signatures", cluster: true, from: "waf" }) });
 const cluster_dlp_splatRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "dlp/$", beforeLoad: aliasRedirect({ to: "runtime-dlp", cluster: true, from: "dlp" }) });
-const cluster_runtime_policiesRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "runtime-policies", component: () => (<SuspenseRoute><RuntimePoliciesPage /></SuspenseRoute>) });
+const cluster_runtime_policiesRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "runtime-policies", component: () => (<SuspenseRoute><PoliciesHub tab="runtime"><RuntimePoliciesPage /></PoliciesHub></SuspenseRoute>) });
 const cluster_runtime_policies_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "runtime-policies/new", component: () => (<SuspenseRoute><RuntimePolicyFormPage /></SuspenseRoute>) });
 const cluster_runtime_policies_policyIdRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "runtime-policies/$policyId", component: () => (<SuspenseRoute><RuntimePolicyFormPage /></SuspenseRoute>) });
-const cluster_runtime_dlpRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "runtime-dlp", component: () => (<SuspenseRoute><RuntimeDLPPage /></SuspenseRoute>) });
+const cluster_runtime_dlpRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "runtime-dlp", component: () => (<SuspenseRoute><SignaturesHub tab="dlp"><RuntimeDLPPage /></SignaturesHub></SuspenseRoute>) });
 const cluster_runtime_dlp_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "runtime-dlp/new", component: () => (<SuspenseRoute><RuntimeDLPFormPage /></SuspenseRoute>) });
 const cluster_runtime_dlp_ruleIdRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "runtime-dlp/$ruleId", component: () => (<SuspenseRoute><RuntimeDLPFormPage /></SuspenseRoute>) });
-const cluster_runtime_signaturesRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "runtime-signatures", component: () => (<SuspenseRoute><RuntimeSignaturesPage /></SuspenseRoute>) });
+const cluster_runtime_signaturesRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "runtime-signatures", component: () => (<SuspenseRoute><SignaturesHub tab="dpi"><RuntimeSignaturesPage /></SignaturesHub></SuspenseRoute>) });
 const cluster_runtime_signatures_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "runtime-signatures/new", component: () => (<SuspenseRoute><RuntimeSignatureFormPage /></SuspenseRoute>) });
 const cluster_runtime_signatures_sigIdRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "runtime-signatures/$sigId", component: () => (<SuspenseRoute><RuntimeSignatureFormPage /></SuspenseRoute>) });
-const cluster_admissionRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "admission", component: () => (<SuspenseRoute><AdmissionPage /></SuspenseRoute>) });
+const cluster_admissionRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "admission", component: () => (<SuspenseRoute><PoliciesHub tab="admission"><AdmissionPage /></PoliciesHub></SuspenseRoute>) });
 const cluster_admission_control_splatRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "admission-control/$", beforeLoad: aliasRedirect({ to: "admission", cluster: true, from: "admission-control" }) });
 const cluster_admission_settingsRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "admission/settings", component: () => (<SuspenseRoute><AdmissionSettingsPage /></SuspenseRoute>) });
 const cluster_admission_importRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "admission/import", component: () => (<SuspenseRoute><AdmissionProfileImportPage /></SuspenseRoute>) });
 const cluster_admission_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "admission/new", component: () => (<SuspenseRoute><AdmissionRuleFormPage /></SuspenseRoute>) });
 const cluster_policyRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "policy", component: () => (<SuspenseRoute><PolicyCenterPage /></SuspenseRoute>) });
-const cluster_policiesRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "policies", component: () => (<SuspenseRoute><PoliciesPage /></SuspenseRoute>) });
+const cluster_policiesRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "policies", component: () => (<SuspenseRoute><PoliciesHub tab="admission"><PoliciesPage /></PoliciesHub></SuspenseRoute>) });
 const cluster_policies_newRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "policies/new", component: () => (<SuspenseRoute><PolicyWizardPage /></SuspenseRoute>) });
 const cluster_policies_policyIdRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "policies/$policyId", component: () => (<SuspenseRoute><PolicyFormPage /></SuspenseRoute>) });
 const cluster_auditRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "audit", component: () => (<SuspenseRoute><AuditPage /></SuspenseRoute>) });
 const cluster_audit_logRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "audit-log", beforeLoad: aliasRedirect({ to: "audit", cluster: true }) });
-const cluster_componentsRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "components", component: () => (<SuspenseRoute><ComponentsPage /></SuspenseRoute>) });
+const cluster_componentsRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "components", component: () => (<SuspenseRoute><AgentsHub tab="components"><ComponentsPage /></AgentsHub></SuspenseRoute>) });
 const cluster_controllersRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "controllers", beforeLoad: aliasRedirect({ to: "components?role=controller", cluster: true }) });
 const cluster_enforcersRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "enforcers", beforeLoad: aliasRedirect({ to: "components?role=enforcer", cluster: true }) });
-const cluster_agentsRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "agents", beforeLoad: aliasRedirect({ to: "components?role=enforcer", cluster: true }) });
+const cluster_agentsRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "agents", beforeLoad: aliasRedirect({ to: "components", cluster: true }) });
 const cluster_scannersRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "scanners", beforeLoad: aliasRedirect({ to: "components?role=scanner", cluster: true }) });
 const cluster_vulndbRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "vulndb", beforeLoad: aliasRedirect({ to: "/settings/scanner" }) });
 const cluster_cve_sourcesRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "cve-sources", beforeLoad: aliasRedirect({ to: "/settings/scanner" }) });
@@ -339,7 +344,7 @@ const cluster_notificationsRoute = createRoute({ getParentRoute: () => app_clust
 const cluster_system_configRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "system-config", beforeLoad: aliasRedirect({ to: "/settings/effective-config" }) });
 const cluster_sysconfigRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "sysconfig", beforeLoad: aliasRedirect({ to: "/settings/effective-config" }) });
 const cluster_risk_entityType_entityIdRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "risk/$entityType/$entityId", component: () => (<SuspenseRoute><RiskDetailPage /></SuspenseRoute>) });
-const cluster_healthRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "health", component: () => (<SuspenseRoute><ClusterHealthPage /></SuspenseRoute>) });
+const cluster_healthRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "health", component: () => (<SuspenseRoute><AgentsHub tab="health"><ClusterHealthPage /></AgentsHub></SuspenseRoute>) });
 const cluster_system_healthRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "system-health", beforeLoad: aliasRedirect({ to: "/settings/health" }) });
 const cluster_settingsRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "settings", beforeLoad: aliasRedirect({ to: "/settings" }) });
 const cluster_tokens_splatRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "tokens/$", beforeLoad: aliasRedirect({ to: "/settings/api-tokens", cluster: true, from: "tokens" }) });
@@ -362,7 +367,7 @@ const app_tokens_splatRoute = createRoute({ getParentRoute: () => authenticatedR
 const app_attestation_trust_splatRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: "attestation-trust/$", beforeLoad: aliasRedirect({ to: "/settings/attestation-trust", from: "attestation-trust" }) });
 const app_attestation_splatRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: "attestation/$", beforeLoad: aliasRedirect({ to: "/settings/attestation-trust", from: "attestation" }) });
 const app_settingsRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: "settings", component: () => (<SuspenseRoute><SettingsShell /></SuspenseRoute>) });
-const settings_indexRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "/", component: () => (<SuspenseRoute><SettingsLanding /></SuspenseRoute>) });
+const settings_indexRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "/", beforeLoad: () => { throw redirect({ href: "/settings/access", replace: true }); } });
 const settings_system_healthRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "system-health", beforeLoad: aliasRedirect({ to: "/settings/health" }) });
 const settings_tokens_splatRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "tokens/$", beforeLoad: aliasRedirect({ to: "/settings/api-tokens", from: "settings/tokens" }) });
 const settings_attestation_splatRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "attestation/$", beforeLoad: aliasRedirect({ to: "/settings/attestation-trust", from: "settings/attestation" }) });
