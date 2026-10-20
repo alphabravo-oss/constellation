@@ -623,6 +623,10 @@ scanner:
   # Set 0 to let a scanner auto-size from runtime.NumCPU().
   maxConcurrent: 1
   targetCapacity: "" # e.g. "image=2,host=8,platform=4"; empty uses global concurrency for all target types.
+  # Optional kubernetes.io/dockerconfigjson Secret for discovered private images
+  # without a registry connector binding. Grants this worker pull access to its
+  # entries; explicit per-job connector credentials still take precedence.
+  registryConfigSecret: ""
   leaseRenewInterval: 5m
   cache:
     # Persist the vuln-DB caches (grype/trivy/syft, ~3.3GB) on a PVC so redeploys don't
@@ -675,8 +679,10 @@ scanner:
     enabled: true
     maxFindings: 500
   resources:
-    limits:   { cpu: 2,    memory: 2Gi }
-    requests: { cpu: 250m, memory: 256Mi }
+    # One image scan runs Syft, Trivy and Grype concurrently. Reserve memory for
+    # the worker plus those child processes, not just the Go worker heap.
+    limits:   { cpu: 2,    memory: 6Gi }
+    requests: { cpu: 250m, memory: 2Gi }
   # SCANNER_TOKEN env wiring. The bootstrap Job creates this Secret unless an
   # existing one is referenced here.
   tokenSecret: ""        # defaults to <release>-scanner-token
@@ -899,7 +905,7 @@ postgres:
     # `embedding vector(1536)` in the findings table. The default CNPG image
     # (ghcr.io/cloudnative-pg/postgresql) does NOT include pgvector.
     #
-    # Empty -> <image.registry>/postgres:16.14-v<Chart.appVersion>, the chart's
+    # Empty -> <image.registry>/postgres:16.15-v<Chart.appVersion>, the chart's
     # own CNPG-compatible pgvector build (deploy/docker/Dockerfile.postgres).
     # Independent of image.tag; use a version-bearing tag@digest override to pin.
     # NOTES.txt warns when a CUSTOM imageName does not contain "pgvector".

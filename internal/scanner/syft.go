@@ -30,7 +30,9 @@ func (s *SyftEngine) Scan(ctx context.Context, ref string, opts ScanOptions) (*E
 	}
 
 	start := time.Now()
-	args := []string{"scan", ref, "-o", "json", "-q"}
+	// Quiet mode suppresses errors as well as progress, leaving failed pulls with
+	// an empty stderr. Keep diagnostics on stderr while stdout remains JSON.
+	args := []string{"scan", ref, "-o", "json"}
 	if opts.Platform != "" {
 		args = append(args, "--platform", opts.Platform)
 	}

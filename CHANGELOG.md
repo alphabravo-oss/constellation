@@ -5,6 +5,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- Scanner Syft failures retain stderr diagnostics. Discovered private images can
+  use an explicitly configured `scanner.registryConfigSecret`; per-job connector
+  credentials keep precedence. Default scanner memory is 2 GiB requested / 6 GiB
+  limited for the concurrent image scan tools.
+- PostgreSQL release tags and chart defaults use 16.15. Server and client packages
+  are pinned and held at `16.15-1.pgdg12+2` during OS security upgrades.
+
 ## 0.3.0 - 2026-10-20
 
 Re-alignment with the AlphaBravo Technology Selection Guide (Phase 0 mechanical clean-up,
