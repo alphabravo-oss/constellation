@@ -83,7 +83,7 @@ func NewEncryptor(secretKeys string) (*Encryptor, error) {
 
 // NewEncryptorFromFile reads the key set from an age identity file.
 func NewEncryptorFromFile(path string) (*Encryptor, error) {
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) //nolint:gosec // G703: the key path is operator configuration (CONSTELLATION_AGE_KEY_FILE), not request input
 	if err != nil {
 		return nil, fmt.Errorf("crypto: read key file: %w", err)
 	}

@@ -3,7 +3,6 @@
 package plugin
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -28,51 +27,51 @@ func (s *Server) Mux() http.Handler {
 	})
 	mux.HandleFunc("/v1/plugin/scan", func(w http.ResponseWriter, r *http.Request) {
 		if s.Scanner == nil {
-			apiutil.WriteStatus(context.Background(), w, http.StatusNotImplemented, "scan capability not declared")
+			apiutil.WriteStatus(r.Context(), w, http.StatusNotImplemented, "scan capability not declared")
 			return
 		}
 		var req ScanRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			apiutil.WriteStatus(context.Background(), w, http.StatusBadRequest, err.Error())
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 			return
 		}
 		res, err := s.Scanner.Scan(r.Context(), req)
 		if err != nil {
-			apiutil.WriteStatus(context.Background(), w, http.StatusInternalServerError, err.Error())
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		writeJSON(w, http.StatusOK, res)
 	})
 	mux.HandleFunc("/v1/plugin/enrich", func(w http.ResponseWriter, r *http.Request) {
 		if s.Enricher == nil {
-			apiutil.WriteStatus(context.Background(), w, http.StatusNotImplemented, "enrich capability not declared")
+			apiutil.WriteStatus(r.Context(), w, http.StatusNotImplemented, "enrich capability not declared")
 			return
 		}
 		var in []Finding
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-			apiutil.WriteStatus(context.Background(), w, http.StatusBadRequest, err.Error())
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 			return
 		}
 		out, err := s.Enricher.Enrich(r.Context(), in)
 		if err != nil {
-			apiutil.WriteStatus(context.Background(), w, http.StatusInternalServerError, err.Error())
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		writeJSON(w, http.StatusOK, out)
 	})
 	mux.HandleFunc("/v1/plugin/export", func(w http.ResponseWriter, r *http.Request) {
 		if s.Exporter == nil {
-			apiutil.WriteStatus(context.Background(), w, http.StatusNotImplemented, "export capability not declared")
+			apiutil.WriteStatus(r.Context(), w, http.StatusNotImplemented, "export capability not declared")
 			return
 		}
 		var in []Finding
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-			apiutil.WriteStatus(context.Background(), w, http.StatusBadRequest, err.Error())
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 			return
 		}
 		rec, err := s.Exporter.Export(r.Context(), in)
 		if err != nil {
-			apiutil.WriteStatus(context.Background(), w, http.StatusInternalServerError, err.Error())
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		writeJSON(w, http.StatusOK, rec)

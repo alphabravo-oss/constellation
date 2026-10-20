@@ -48,34 +48,16 @@ func Rotate(ctx context.Context, pool *pgxpool.Pool, enc *Encryptor, dryRun bool
 	return rep, nil
 }
 
+type sealedRow struct {
+	pk        string
+	ct        []byte
+	keyID     string
+	algorithm string
+}
+
 func rotateColumn(ctx context.Context, pool *pgxpool.Pool, enc *Encryptor, c Column, dryRun bool, logger *slog.Logger, rep *RotateReport) error {
-	q := fmt.Sprintf(`SELECT %s::text, %s, COALESCE(%s, ''), COALESCE(%s, '') FROM %s WHERE %s IS NOT NULL`,
-		c.PK, c.Ciphertext, c.KeyID, c.Algorithm, c.Table, c.Ciphertext)
-	rows, err := pool.Query(ctx, q)
+	pending, err := pendingRows(ctx, pool, enc, c, rep)
 	if err != nil {
-		return err
-	}
-	type row struct {
-		pk        string
-		ct        []byte
-		keyID     string
-		algorithm string
-	}
-	var pending []row
-	for rows.Next() {
-		var r row
-		if err := rows.Scan(&r.pk, &r.ct, &r.keyID, &r.algorithm); err != nil {
-			rows.Close()
-			return err
-		}
-		if r.keyID == enc.KeyID() {
-			rep.Skipped[c.Table]++
-			continue
-		}
-		pending = append(pending, r)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
 		return err
 	}
 	for _, r := range pending {
@@ -90,27 +72,56 @@ func rotateColumn(ctx context.Context, pool *pgxpool.Pool, enc *Encryptor, c Col
 			rep.Rotated[c.Table]++
 			continue
 		}
-		sealed, err := enc.Encrypt(pt)
-		if err != nil {
-			return err
-		}
-		upd := fmt.Sprintf(`UPDATE %s SET %s = $1, %s = $2, %s = $3 WHERE %s::text = $4 AND %s IS NOT DISTINCT FROM NULLIF($5, '')`,
-			c.Table, c.Ciphertext, c.KeyID, c.Algorithm, c.PK, c.KeyID)
-		err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
-			tag, err := tx.Exec(ctx, upd, sealed.Ciphertext, sealed.KeyID, sealed.Algorithm, r.pk, r.keyID)
-			if err != nil {
-				return err
-			}
-			if tag.RowsAffected() == 1 {
-				rep.Rotated[c.Table]++
-			}
-			return nil
-		})
-		if err != nil {
+		if err := resealRow(ctx, pool, enc, c, r, pt, rep); err != nil {
 			return err
 		}
 	}
 	logger.Info("rotate-keys", slog.String("table", c.Table), slog.Int("rotated", rep.Rotated[c.Table]),
 		slog.Int("skipped", rep.Skipped[c.Table]), slog.Int("failed", rep.Failed[c.Table]), slog.Bool("dry_run", dryRun))
 	return nil
+}
+
+// pendingRows lists the rows of c not yet under the current key.
+func pendingRows(ctx context.Context, pool *pgxpool.Pool, enc *Encryptor, c Column, rep *RotateReport) ([]sealedRow, error) {
+	q := fmt.Sprintf(`SELECT %s::text, %s, COALESCE(%s, ''), COALESCE(%s, '') FROM %s WHERE %s IS NOT NULL`,
+		c.PK, c.Ciphertext, c.KeyID, c.Algorithm, c.Table, c.Ciphertext)
+	rows, err := pool.Query(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var pending []sealedRow
+	for rows.Next() {
+		var r sealedRow
+		if err := rows.Scan(&r.pk, &r.ct, &r.keyID, &r.algorithm); err != nil {
+			return nil, err
+		}
+		if r.keyID == enc.KeyID() {
+			rep.Skipped[c.Table]++
+			continue
+		}
+		pending = append(pending, r)
+	}
+	return pending, rows.Err()
+}
+
+// resealRow re-encrypts one row under the current key in its own transaction,
+// guarded by the key_id it was read with so a concurrent writer is never clobbered.
+func resealRow(ctx context.Context, pool *pgxpool.Pool, enc *Encryptor, c Column, r sealedRow, pt []byte, rep *RotateReport) error {
+	sealed, err := enc.Encrypt(pt)
+	if err != nil {
+		return err
+	}
+	upd := fmt.Sprintf(`UPDATE %s SET %s = $1, %s = $2, %s = $3 WHERE %s::text = $4 AND %s IS NOT DISTINCT FROM NULLIF($5, '')`,
+		c.Table, c.Ciphertext, c.KeyID, c.Algorithm, c.PK, c.KeyID)
+	return pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, upd, sealed.Ciphertext, sealed.KeyID, sealed.Algorithm, r.pk, r.keyID)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 1 {
+			rep.Rotated[c.Table]++
+		}
+		return nil
+	})
 }

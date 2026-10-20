@@ -62,6 +62,7 @@ func TestRotationKeepsOldRowsReadable(t *testing.T) {
 }
 
 func TestDefaultRequiresEnvOrFile(t *testing.T) {
+	t.Parallel()
 	// Default is process-wide; this test runs without the env set.
 	if _, err := Default(); err == nil && (strings.TrimSpace(envOr(EnvKey)) == "" && strings.TrimSpace(envOr(EnvKeyFile)) == "") {
 		t.Fatal("Default must fail closed without a key")
