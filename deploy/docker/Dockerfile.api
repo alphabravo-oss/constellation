@@ -24,7 +24,7 @@ COPY . .
 ARG VERSION=dev
 ARG COMMIT=dev
 ARG BUILD_TIME=
-ENV CGO_ENABLED=0 GOOS=linux
+ENV CGO_ENABLED=0 GOOS=linux GOWORK=off
 RUN go build -tags timetzdata -trimpath -ldflags="-s -w -X github.com/alphabravocompany/constellation/pkg/version.Version=${VERSION} -X github.com/alphabravocompany/constellation/pkg/version.Commit=${COMMIT} -X github.com/alphabravocompany/constellation/pkg/version.BuildTime=${BUILD_TIME}" \
       -o /out/constellation-api ./cmd/constellation-api \
  && go build -tags timetzdata -trimpath -ldflags="-s -w -X main.version=${VERSION}" -o /out/constellationctl ./cmd/constellationctl

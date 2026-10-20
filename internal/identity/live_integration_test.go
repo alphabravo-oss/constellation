@@ -16,6 +16,7 @@ import (
 // This tier deliberately uses a deployed OIDC provider. The regular integration
 // target skips it; the live proof runner supplies its temporary credentials.
 func TestLiveOIDCVerification(t *testing.T) {
+	t.Parallel()
 	issuer := os.Getenv("IDENTITY_PROOF_ISSUER")
 	if issuer == "" {
 		t.Skip("live OIDC issuer not configured")
