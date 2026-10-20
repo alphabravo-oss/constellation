@@ -214,7 +214,13 @@ type Detail struct {
 	Code    Code   `json:"code"`
 	Message string `json:"message"`
 	Details any    `json:"details,omitempty"`
+	// RequestID is the X-Request-ID of the failed request (also a response
+	// header) so error states can show a reference operators can grep for.
+	RequestID string `json:"request_id,omitempty"`
 }
+
+// RequestIDHeader is the request correlation header echoed on every response.
+const RequestIDHeader = "X-Request-ID"
 
 // WriteError maps err to its code and status and writes the error body.
 // CodeInternal messages are scrubbed; the cause is logged with the request's
@@ -275,13 +281,13 @@ func WriteDetailed(ctx context.Context, w http.ResponseWriter, status int, code,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(Body{Error: Detail{Code: Code(code), Message: message, Details: details}})
+	_ = json.NewEncoder(w).Encode(Body{Error: Detail{Code: Code(code), Message: message, Details: details, RequestID: w.Header().Get(RequestIDHeader)}})
 }
 
 func write(w http.ResponseWriter, status int, code Code, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(Body{Error: Detail{Code: code, Message: message}})
+	_ = json.NewEncoder(w).Encode(Body{Error: Detail{Code: code, Message: message, RequestID: w.Header().Get(RequestIDHeader)}})
 }
 
 func clientMessage(err error, code Code) string {

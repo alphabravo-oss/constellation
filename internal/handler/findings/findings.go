@@ -257,6 +257,15 @@ SELECT id, kind, external_id, title, severity, risk_score, lifecycle, asset_id, 
 		"risk_inputs":       d.RiskInputs,
 		"risk":              decomp,
 	}
+	// Display names so breadcrumbs and the affected-asset chip never show a bare UUID.
+	var assetName, assetKind, clusterName string
+	_ = tx.QueryRow(r.Context(), `SELECT COALESCE(a.name,''), COALESCE(a.kind,''), COALESCE(c.name,'')
+  FROM (SELECT $1::uuid AS asset_id, $2::uuid AS cluster_id) k
+  LEFT JOIN assets a ON a.id = k.asset_id AND a.org_id = $3
+  LEFT JOIN clusters c ON c.id = k.cluster_id AND c.org_id = $3`, d.AssetID, d.ClusterID, subj.OrgID).Scan(&assetName, &assetKind, &clusterName)
+	out["asset_name"] = assetName
+	out["asset_kind"] = assetKind
+	out["cluster_name"] = clusterName
 	if d.CanonicalEngine != "" {
 		out["canonical_engine"] = d.CanonicalEngine
 	}

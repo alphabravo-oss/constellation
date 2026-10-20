@@ -60,6 +60,9 @@ func TestErrorContractEveryStatusIsTheStandardShape(t *testing.T) {
 			if err := json.Unmarshal(raw, &b); err != nil || b.Error.Code == "" || b.Error.Message == "" {
 				t.Fatalf("body is not {\"error\":{\"code\",\"message\"}}: %s (%v)", raw, err)
 			}
+			if rid := resp.Header.Get("X-Request-ID"); rid == "" || b.Error.RequestID != rid {
+				t.Fatalf("error body request_id %q does not match X-Request-ID header %q", b.Error.RequestID, rid)
+			}
 			if b.Error.Code != tc.code {
 				t.Fatalf("code %s, want %s: %s", b.Error.Code, tc.code, raw)
 			}

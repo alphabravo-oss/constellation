@@ -572,7 +572,7 @@ func (s *Server) buildRouter() chi.Router {
 		AllowedOrigins:   corsAllowedOrigins(s.cfg.CORSOrigins),
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Authorization", "Content-Type", "If-Match", "X-Request-Id", "Idempotency-Key", auth.BrowserHeader},
-		ExposedHeaders:   []string{"X-Export-Total", "X-Export-Limit", "X-Export-Truncated", "X-Export-Org-ID", "X-Export-Scope", "X-Report-Org-ID", "X-Report-Cluster-ID", "X-Report-Limit", "X-Report-Total", "X-Report-Truncated", "X-Constellation-PDF-Fallback", "Content-Disposition"},
+		ExposedHeaders:   []string{"X-Export-Total", "X-Export-Limit", "X-Export-Truncated", "X-Export-Org-ID", "X-Export-Scope", "X-Report-Org-ID", "X-Report-Cluster-ID", "X-Report-Limit", "X-Report-Total", "X-Report-Truncated", "X-Constellation-PDF-Fallback", "Content-Disposition", apiutil.RequestIDHeader},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}
@@ -1086,6 +1086,8 @@ func (s *Server) buildRouter() chi.Router {
 			r.Patch("/settings/org", s.requireVerb(rbac.VerbManageOrg, settings.PatchOrg))
 			r.Get("/settings/user", s.requireVerb(rbac.VerbReadFindings, settings.GetUser))
 			r.Patch("/settings/user", s.requireVerb(rbac.VerbReadFindings, settings.PatchUser))
+			r.Get("/me/preferences", s.requireVerb(rbac.VerbReadFindings, settings.GetPreferences))
+			r.Put("/me/preferences", s.requireVerb(rbac.VerbReadFindings, settings.PutPreferences))
 
 			receivers := handler.NewReceivers(s.db, s.auditLog, s.dispatcher)
 			r.Get("/integrations/receivers", s.requireVerb(rbac.VerbReadFindings, receivers.List))
@@ -1808,7 +1810,11 @@ func (s *Server) runAuthProviderReloader(ctx context.Context) {
 // and the summary line share correlation_id.
 func correlationID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		next.ServeHTTP(w, r.WithContext(logging.WithCorrelationID(r.Context(), chimw.GetReqID(r.Context()))))
+		id := chimw.GetReqID(r.Context())
+		if id != "" {
+			w.Header().Set(apiutil.RequestIDHeader, id)
+		}
+		next.ServeHTTP(w, r.WithContext(logging.WithCorrelationID(r.Context(), id)))
 	})
 }
 

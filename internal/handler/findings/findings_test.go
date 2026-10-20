@@ -204,9 +204,14 @@ VALUES ($1, $2, $3, 'vulnerability', 'CVE-2099-0001', 'provenance finding',
 		CVSSVector       string                         `json:"cvss_vector"`
 		KEV              bool                           `json:"kev"`
 		EPSS             float64                        `json:"epss"`
+		AssetName        string                         `json:"asset_name"`
+		AssetKind        string                         `json:"asset_kind"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&detailGot); err != nil {
 		t.Fatalf("decode get: %v", err)
+	}
+	if detailGot.AssetName != "ghcr.io/test/provenance" || detailGot.AssetKind != "image" {
+		t.Fatalf("detail asset display name = %q/%q", detailGot.AssetName, detailGot.AssetKind)
 	}
 	if detailGot.CanonicalEngine != "vulndb" ||
 		len(detailGot.Reconciliation) != 1 ||

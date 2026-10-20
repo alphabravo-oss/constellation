@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -73,6 +74,21 @@ func TestWriteStatusKeepsStatusAndScrubs5xx(t *testing.T) {
 	WriteStatus(context.Background(), rec, http.StatusInternalServerError, "db: password=hunter2")
 	if b := decode(t, rec); rec.Code != 500 || b.Error.Code != CodeInternal || b.Error.Message != InternalMessage {
 		t.Fatalf("500: %d %+v", rec.Code, b)
+	}
+}
+
+func TestErrorBodyCarriesRequestID(t *testing.T) {
+	t.Parallel()
+	rec := httptest.NewRecorder()
+	rec.Header().Set(RequestIDHeader, "host/abc-000042")
+	WriteError(context.Background(), rec, NotFound("cluster"))
+	if b := decode(t, rec); b.Error.RequestID != "host/abc-000042" {
+		t.Fatalf("request_id: %+v", b.Error)
+	}
+	rec = httptest.NewRecorder()
+	WriteStatus(context.Background(), rec, 400, "bad")
+	if strings.Contains(rec.Body.String(), "request_id") {
+		t.Fatalf("empty request id must be omitted: %s", rec.Body.String())
 	}
 }
 
