@@ -16,7 +16,7 @@ case "${1:-}" in
       export GOTMPDIR
       trap 'rm -rf -- "$GOTMPDIR"' EXIT
     fi
-    package_dirs="$(go list -f '{{.Dir}}' ./...)"
+    package_dirs="$(go list ./...)"
     if [[ -z "$package_dirs" ]]; then
       echo "gosec: no Go packages discovered; refusing an empty scan" >&2
       exit 1
