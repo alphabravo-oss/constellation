@@ -11,6 +11,7 @@ import { DataTable, type Column } from "@/components/ui/data-table";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { apiErrorText } from "@/lib/api-error";
 
 export function AttestationTrustPage() {
   const qc = useQueryClient();
@@ -235,6 +236,5 @@ function firstOrCount(values: string[]): string {
 }
 
 function errorMessage(err: unknown): string {
-  const typed = err as { response?: { data?: unknown }; message?: string };
-  return String(typed.response?.data ?? typed.message ?? err);
+  return apiErrorText(err, String(err));
 }

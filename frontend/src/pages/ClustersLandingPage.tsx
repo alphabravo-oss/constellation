@@ -44,9 +44,12 @@ export function ClustersLandingPage() {
   const [requestedTab, setTab] = useTabParam("tab", "overview");
   const tab = requestedTab === "bundles" ? "bundles" : "overview";
   const needsAttention = data.filter((c) => !["healthy", "connected", "ready"].includes(c.state)).length;
-  const allFresh = list.data && data.length > 0 && data.every((c) => c.exposure?.inventory_status === "fresh");
-  const critical = allFresh ? data.reduce((total, c) => total + (c.exposure?.current_critical ?? 0), 0) : undefined;
-  const high = allFresh ? data.reduce((total, c) => total + (c.exposure?.current_high ?? 0), 0) : undefined;
+  // Fresh clusters contribute current counts; stale ones their last-known counts
+  // (Phase 1 exposure.last_known). Any cluster with neither makes the total unknown.
+  const countable = list.data && data.length > 0 && data.every((c) => c.exposure?.inventory_status === "fresh" || !!c.exposure?.last_known);
+  const anyLastKnown = data.some((c) => c.exposure?.inventory_status !== "fresh" && !!c.exposure?.last_known);
+  const critical = countable ? data.reduce((total, c) => total + (c.exposure?.inventory_status === "fresh" ? c.exposure.current_critical : c.exposure?.last_known?.critical ?? 0), 0) : undefined;
+  const high = countable ? data.reduce((total, c) => total + (c.exposure?.inventory_status === "fresh" ? c.exposure.current_high : c.exposure?.last_known?.high ?? 0), 0) : undefined;
 
   return (
     <PageContainer>
@@ -70,8 +73,8 @@ export function ClustersLandingPage() {
         numbers={list.data ? [
           { label: "clusters", value: data.length },
           { label: "need attention", value: needsAttention, tone: needsAttention > 0 ? "warning" : "default" },
-          { label: "current critical", value: critical ?? "—", tone: critical ? "critical" : "default" },
-          { label: "current high", value: high ?? "—", tone: high ? "high" : "default" },
+          { label: anyLastKnown ? "critical (last known)" : "current critical", value: critical ?? "—", tone: critical ? "critical" : "default", testId: "clusters-critical" },
+          { label: anyLastKnown ? "high (last known)" : "current high", value: high ?? "—", tone: high ? "high" : "default", testId: "clusters-high" },
         ] : undefined}
         detail="Critical and high count unique vulnerabilities matched to current inventory, across every cluster. Registration credentials live in the Registration bundles tab." />
       <Tabs value={tab} onValueChange={setTab} items={[
@@ -214,6 +217,7 @@ export function ClusterTile({ cluster }: { cluster: ClusterSummary }) {
   const freshExposure = exposure?.inventory_status === "fresh";
   const hasCritical = freshExposure && exposure.current_critical > 0;
   const hasHigh = freshExposure && exposure.current_high > 0;
+  const lastKnown = !freshExposure ? exposure?.last_known : undefined;
   const version = cluster.platform?.kubernetes_git_version;
 
   return (
@@ -237,10 +241,15 @@ export function ClusterTile({ cluster }: { cluster: ClusterSummary }) {
       </header>
 
       <dl className="grid grid-cols-3 gap-3">
-        <TileNumber label="Critical" value={freshExposure ? exposure.current_critical : "—"} tone={hasCritical ? "critical" : undefined} />
-        <TileNumber label="High" value={freshExposure ? exposure.current_high : "—"} tone={hasHigh ? "high" : undefined} />
+        <TileNumber label="Critical" value={freshExposure ? exposure.current_critical : lastKnown ? lastKnown.critical : "—"} tone={(freshExposure ? hasCritical : (lastKnown?.critical ?? 0) > 0) ? "critical" : undefined} testId="cluster-tile-critical" />
+        <TileNumber label="High" value={freshExposure ? exposure.current_high : lastKnown ? lastKnown.high : "—"} tone={(freshExposure ? hasHigh : (lastKnown?.high ?? 0) > 0) ? "high" : undefined} testId="cluster-tile-high" />
         <TileNumber label="Workloads" value={cluster.deployments} />
       </dl>
+      {!freshExposure && lastKnown ? (
+        <p className="-mt-2 text-meta text-muted-foreground" data-testid="cluster-tile-as-of" title={formatAsOf(lastKnown.as_of)}>
+          Last known, as of {fmtRelative(lastKnown.as_of)}
+        </p>
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-meta text-muted-foreground">
         {cluster.top_workload ? (
@@ -284,9 +293,14 @@ export function ClusterTile({ cluster }: { cluster: ClusterSummary }) {
   );
 }
 
-function TileNumber({ label, value, tone }: { label: string; value: number | string; tone?: "critical" | "high" }) {
+function formatAsOf(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
+function TileNumber({ label, value, tone, testId }: { label: string; value: number | string; tone?: "critical" | "high"; testId?: string }) {
   return (
-    <div>
+    <div data-testid={testId}>
       <dt className="text-meta font-medium text-muted-foreground">{label}</dt>
       <dd className={cn("mt-0.5 text-xl font-semibold tabular-nums", tone === "critical" ? "text-severity-critical" : tone === "high" ? "text-severity-high" : "text-foreground")}>{typeof value === "number" ? value.toLocaleString() : value}</dd>
     </div>

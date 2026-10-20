@@ -43,6 +43,7 @@ import { Checkbox, Select } from "@/components/ui/form";
 import { ExportMenu, MoreFilters, type ExportOption } from "@/ui";
 import { sentenceValue } from "@/components/ui/status-pill";
 import { useIncludeSystem } from "@/lib/system-scope";
+import { apiRequestId } from "@/lib/api-error";
 
 const DENSITY_KEY     = "constellation.findings.density";
 const INSTANCE_TABLE_KEY = "findings.instances";
@@ -411,7 +412,7 @@ export function FindingsPage() {
       {bulkAction.isError && <ErrorState title="Some selected findings could not be updated. Refresh and review their current states before retrying." />}
       {activeView === "cve" && q.isError && <ErrorState title="Lifecycle counts could not be loaded." action={<Button onClick={() => void q.refetch()}>Retry counts</Button>} />}
       {!scopeReady ? <><ToolbarRow toolbar={toolbar} exportOptions={exportOptions} /><ErrorState title="The active cluster could not be resolved. Findings are unavailable until its scope recovers." /></>
-        : activeView === "instances" && !validInstances ? <ErrorState title="Finding observations could not be identified safely." action={<Button onClick={() => void q.refetch()}>Retry</Button>} /> : activeQ.isError ? <><ToolbarRow toolbar={toolbar} exportOptions={exportOptions} /><ErrorState title="Could not load findings. Review your query and retry." action={<Button onClick={() => void activeQ.refetch()}>Retry</Button>} /></>
+        : activeView === "instances" && !validInstances ? <ErrorState title="Finding observations could not be identified safely." action={<Button onClick={() => void q.refetch()}>Retry</Button>} /> : activeQ.isError ? <><ToolbarRow toolbar={toolbar} exportOptions={exportOptions} /><ErrorState title="Could not load findings. Review your query and retry." correlationId={apiRequestId(activeQ.error)} action={<Button onClick={() => void activeQ.refetch()}>Retry</Button>} /></>
         : !ready ? <><ToolbarRow toolbar={toolbar} exportOptions={exportOptions} /><LoadingState label={activeQ.isPending ? "Loading findings" : "Updating findings"} /></>
         : outOfRange ? <EmptyState title="This page is outside the current results" hint="The inventory may have changed." action={<Button onClick={() => setPage(0)}>First page</Button>} />
         : <>

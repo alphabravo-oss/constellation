@@ -15,6 +15,7 @@ import { Collapse } from "@/components/ui/collapse";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Field, TextInput, Textarea, Select, Switch } from "@/components/ui/form";
+import { apiErrorText } from "@/lib/api-error";
 
 type PolicyFormState = {
   name: string;
@@ -360,6 +361,5 @@ function uniqueList(values: string[]): string[] {
 }
 
 function errorMessage(err: unknown): string {
-  const typed = err as { response?: { data?: unknown }; message?: string };
-  return String(typed.response?.data ?? typed.message ?? err);
+  return apiErrorText(err, String(err));
 }

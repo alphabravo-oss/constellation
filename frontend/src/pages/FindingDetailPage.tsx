@@ -7,6 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { assets, findings, type AffectedRange, type Finding } from "@/api/client";
 import { assetDisplayName } from "@/lib/asset-identity";
 import { useCrumbLabel } from "@/lib/page-title";
+import { StatusPill } from "@/components/ui/status-pill";
 import { SeverityBadge } from "@/components/ui/severity-badge";
 import { LifecycleBadge } from "@/components/ui/status-pill";
 import { RiskScore } from "@/components/ui/risk-score";
@@ -46,8 +47,9 @@ function FindingDetail({ finding: f, clusterId, unavailable }: { finding: Findin
   }, enabled: !unavailable });
   const assetCluster = f.source_cluster_id ?? f.cluster_id;
   useCrumbLabel(f.external_id || f.title);
-  const asset = useQuery({ queryKey: ["finding-asset-name", assetCluster, f.asset_id], queryFn: () => assets.get(f.asset_id), enabled: !!f.asset_id, staleTime: 60_000, retry: false });
-  const assetName = asset.data ? assetDisplayName(asset.data.asset, asset.data.image) : undefined;
+  // Phase 1 returns asset_name/asset_kind on the finding; older APIs need a lookup.
+  const asset = useQuery({ queryKey: ["finding-asset-name", assetCluster, f.asset_id], queryFn: () => assets.get(f.asset_id), enabled: !!f.asset_id && !f.asset_name, staleTime: 60_000, retry: false });
+  const assetName = f.asset_name || (asset.data ? assetDisplayName(asset.data.asset, asset.data.image) : undefined);
   const score = cvssScore(f);
   const hasVulnerabilityMetadata =
     typeof score === "number" || Boolean(f.cvss_vector) || Boolean(f.kev) || typeof f.epss === "number";
@@ -96,6 +98,8 @@ function FindingDetail({ finding: f, clusterId, unavailable }: { finding: Findin
           <a href={`/clusters/${assetCluster}/assets/${encodeURIComponent(f.asset_id)}`} className="text-link font-medium" data-testid="finding-affected-asset-name" title={f.asset_id}>
             {assetName ?? (asset.isPending ? "Loading asset…" : "Asset")}
           </a>
+          {f.asset_kind ? <StatusPill label={f.asset_kind} dot={false} /> : null}
+          {f.cluster_name ? <span className="text-meta text-muted-foreground" data-testid="finding-cluster-name">in {f.cluster_name}</span> : null}
           <div className="ml-auto flex items-center gap-2">
             <Button asChild size="sm"><a href={`/clusters/${assetCluster}/risk/asset/${encodeURIComponent(f.asset_id)}`} data-testid="finding-affected-asset-risk">Risk workspace</a></Button>
             <Button asChild size="sm"><a href={`/clusters/${assetCluster}/assets/${encodeURIComponent(f.asset_id)}`} data-testid="finding-affected-asset-detail">Asset detail</a></Button>

@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Field, TextInput, Checkbox } from "@/components/ui/form";
+import { apiErrorMessage } from "@/lib/api-error";
 
 const BACK_TO = "/settings/access?tab=roles";
 
@@ -68,7 +69,7 @@ export function CustomRoleFormPage() {
       toast.success("Custom role created");
       navigate({ href: BACK_TO });
     },
-    onError: (e: unknown) => toast.error((e as { response?: { data?: { error?: string } } })?.response?.data?.error || "Failed to create role"),
+    onError: (e: unknown) => toast.error(apiErrorMessage(e) || "Failed to create role"),
   });
 
   return (

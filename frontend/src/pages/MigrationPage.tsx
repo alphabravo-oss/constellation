@@ -18,6 +18,7 @@ import { Field, Select, Textarea } from "@/components/ui/form";
 import { StatusPill } from "@/components/ui/status-pill";
 import { buildMigrationReadiness, buildMigrationReport, countReadiness, MIGRATION_RECOMMENDED_ACTIONS, migrationAppliedSummaryLabel, migrationSourceLabel, migrationSummaryLabel, migrationVulnerabilityScopeLabel, type MigrationReadinessCategory } from "@/lib/migration-readiness";
 import { downloadJson } from "@/lib/download";
+import { apiErrorMessage } from "@/lib/api-error";
 
 type MigrationPolicy = MigrationPreview["policies"][number];
 type MigrationFileProfile = MigrationPreview["file_profiles"][number];
@@ -958,8 +959,7 @@ export function MigrationPage() {
 
 function migrationErrorMessage(error: unknown, fallback: string) {
   if (error && typeof error === "object" && "response" in error) {
-    const response = error.response as { data?: { error?: unknown; message?: unknown } } | undefined;
-    const reason = response?.data?.error ?? response?.data?.message;
+    const reason = apiErrorMessage(error);
     if (typeof reason === "string" && reason.trim()) return `${fallback}: ${reason}`;
   }
   return error instanceof Error && error.message ? `${fallback}: ${error.message}` : fallback;

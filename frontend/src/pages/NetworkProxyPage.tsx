@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Field, TextInput, Textarea, Select, Switch } from "@/components/ui/form";
 import { Collapse } from "@/components/ui/collapse";
+import { apiErrorMessage } from "@/lib/api-error";
 
 /**
  * Network & Proxy — outbound connectivity for the platform: egress proxy, upstream
@@ -72,7 +73,7 @@ export function NetworkProxyPage() {
         toast.error("Config changed elsewhere; reloaded latest — please retry.");
         return;
       }
-      const msg = (error as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      const msg = apiErrorMessage(error);
       toast.error(msg ? `Save failed: ${msg}` : "Failed to save network settings");
     },
   });

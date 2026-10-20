@@ -16,6 +16,7 @@ import { Collapse } from "@/components/ui/collapse";
 import { Field, TextInput, Textarea } from "@/components/ui/form";
 import { PageHeader } from "@/components/ui/page";
 import { ErrorState, LoadingState } from "@/components/ui/states";
+import { apiRequestId } from "@/lib/api-error";
 
 type Action = "accept-risk" | "suppress" | "comment";
 const ACTIONS = {
@@ -88,7 +89,7 @@ export function FindingScope({ clusterId, findingId, resolvedClusterId, clusterL
     if (!validSelector) return <ErrorState title="Select one valid observation timestamp to continue." />;
     if (ambiguousFinding(q.error)) return <ErrorState title="This finding has multiple retained observations." action={<a href={findingChooserHref(clusterId, findingId)}>Choose an observation</a>} />;
     if (clusterLoading || registryFetching || detailFetching || (clusterReady && (q.isPending || q.isFetching))) return <LoadingState label="Loading finding and cluster scope…" />;
-    return <ErrorState title={!clusterReady ? "The selected cluster could not be resolved." : "This finding could not be loaded in the selected cluster."} action={<Button onClick={retry}>Retry</Button>} />;
+    return <ErrorState title={!clusterReady ? "The selected cluster could not be resolved." : "This finding could not be loaded in the selected cluster."} correlationId={apiRequestId(q.error)} action={<Button onClick={retry}>Retry</Button>} />;
   }
   const recheck = () => {
     const current = qc.getQueryState<Finding>(key);

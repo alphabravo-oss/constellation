@@ -125,6 +125,10 @@ export type FindingKind =
   | "secret" | "signature" | "ml-model" | "compliance" | "runtime";
 
 export interface Finding {
+  /** Phase 1 (GET /findings/{id}): display names, so detail views never show ids. */
+  asset_name?: string;
+  asset_kind?: string;
+  cluster_name?: string;
   row_id?: string;
   revision?: string;
   source_cluster_id?: string | null;
@@ -1643,6 +1647,8 @@ export interface ClusterExposure {
   current_occurrences: number;
   historical_occurrences: number;
   unverified_occurrences: number;
+  /** Phase 1: present only when inventory is stale — counts at the last fresh inventory. */
+  last_known?: { critical: number; high: number; as_of: string };
 }
 
 export interface ClusterSummary {
@@ -6032,6 +6038,14 @@ export const auth = {
   me:    () => api.get<{ user_id: string; org_id: string; email: string; roles: string[] }>("/auth/me").then((r) => r.data),
   logout: () => api.post(`/auth/logout`).then((r) => r.data),
   oidcStart: () => api.get<{ authorize_url: string }>(`/auth/oidc/start`).then((r) => r.data),
+};
+
+// --------- Per-user preferences (Phase 1: GET/PUT /api/v1/me/preferences) ---------
+export type ThemePreference = "system" | "light" | "dark";
+export interface UserPreferences { theme: ThemePreference; updated_at?: string }
+export const mePreferences = {
+  get: () => api.get<UserPreferences>("/me/preferences").then((r) => r.data),
+  put: (body: Partial<UserPreferences>) => api.put<UserPreferences>("/me/preferences", body).then((r) => r.data),
 };
 
 // --------- API tokens (Personal Access Tokens) ---------

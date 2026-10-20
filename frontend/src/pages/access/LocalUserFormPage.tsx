@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Field, TextInput, Select } from "@/components/ui/form";
+import { apiErrorMessage } from "@/lib/api-error";
 
 const BACK_TO = "/settings/access?tab=users";
 
@@ -34,7 +35,7 @@ export function LocalUserFormPage() {
       navigate({ href: BACK_TO });
     },
     onError: (e: unknown) => {
-      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      const msg = apiErrorMessage(e);
       toast.error(msg || "Failed to create user");
     },
   });
@@ -65,7 +66,7 @@ export function LocalUserFormPage() {
               </Select>
             </Field>
           </div>
-          {save.isError && <p className="text-sm text-status-error">{(save.error as { response?: { data?: { error?: string } } })?.response?.data?.error ?? "Failed to create user"}</p>}
+          {save.isError && <p className="text-sm text-status-error">{apiErrorMessage(save.error) ?? "Failed to create user"}</p>}
           <div className="flex items-center gap-3">
             <Button type="submit" variant="primary" size="lg" disabled={!email.trim() || !password || save.isPending}>
               {save.isPending ? "Creating…" : "Create user"}
