@@ -240,9 +240,22 @@ func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 		return t, nil
 	}
 
+	if err := t.wireOTLP(ctx, cfg, res, meterOpts); err != nil {
+		return nil, err
+	}
+	logger.Info("telemetry: OTLP/gRPC exporters wired",
+		slog.String("endpoint", cfg.Endpoint), slog.Bool("insecure", cfg.Insecure), slog.Float64("sample_rate", cfg.SampleRate),
+		slog.Bool("metrics_otlp", cfg.MetricsOTLP), slog.Bool("logs_otlp", cfg.LogsOTLP))
+	return t, nil
+}
+
+// wireOTLP installs the OTLP/gRPC trace exporter (always, once an endpoint is
+// configured) and the opt-in metric and log exporters. On failure every
+// provider created so far is shut down so nothing half-initialised leaks.
+func (t *Telemetry) wireOTLP(ctx context.Context, cfg Config, res *resource.Resource, meterOpts []sdkmetric.Option) error {
 	traceExp, err := otlptracegrpc.New(ctx, grpcTraceOpts(cfg)...)
 	if err != nil {
-		return nil, fmt.Errorf("telemetry: trace exporter: %w", err)
+		return fmt.Errorf("telemetry: trace exporter: %w", err)
 	}
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(traceExp, sdktrace.WithBatchTimeout(2*time.Second)),
@@ -257,7 +270,7 @@ func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 		metricExp, err := otlpmetricgrpc.New(ctx, grpcMetricOpts(cfg)...)
 		if err != nil {
 			_ = tp.Shutdown(ctx)
-			return nil, fmt.Errorf("telemetry: metric exporter: %w", err)
+			return fmt.Errorf("telemetry: metric exporter: %w", err)
 		}
 		meterOpts = append(meterOpts, sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExp, sdkmetric.WithInterval(15*time.Second))))
 	}
@@ -271,7 +284,7 @@ func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 		if err != nil {
 			_ = mp.Shutdown(ctx)
 			_ = tp.Shutdown(ctx)
-			return nil, fmt.Errorf("telemetry: log exporter: %w", err)
+			return fmt.Errorf("telemetry: log exporter: %w", err)
 		}
 		lp := sdklog.NewLoggerProvider(sdklog.WithProcessor(sdklog.NewBatchProcessor(logExp)), sdklog.WithResource(res))
 		otel.SetLoggerProvider(lp)
@@ -279,10 +292,7 @@ func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 		t.shutdowns = append(t.shutdowns, lp.Shutdown)
 	}
 
-	logger.Info("telemetry: OTLP/gRPC exporters wired",
-		slog.String("endpoint", cfg.Endpoint), slog.Bool("insecure", cfg.Insecure), slog.Float64("sample_rate", cfg.SampleRate),
-		slog.Bool("metrics_otlp", cfg.MetricsOTLP), slog.Bool("logs_otlp", cfg.LogsOTLP))
-	return t, nil
+	return nil
 }
 
 func (t *Telemetry) instruments(m metric.Meter) {

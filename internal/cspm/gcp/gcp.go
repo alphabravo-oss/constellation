@@ -124,6 +124,40 @@ func (c *Connector) ScanIAM(ctx context.Context) ([]Finding, error) {
 	return out, nil
 }
 
+type gcsPolicy struct {
+	Bindings []struct {
+		Role    string   `json:"role"`
+		Members []string `json:"members"`
+	} `json:"bindings"`
+}
+
+// publicBucketFindings reports every binding that grants a bucket to allUsers
+// or allAuthenticatedUsers.
+func publicBucketFindings(bucket string, pol gcsPolicy, now time.Time) []Finding {
+	var out []Finding
+	for _, binding := range pol.Bindings {
+		for _, member := range binding.Members {
+			if member != "allUsers" && member != "allAuthenticatedUsers" {
+				continue
+			}
+			out = append(out, Finding{
+				ExternalID:  fmt.Sprintf("gcp-gcs-public-%s", bucket),
+				Title:       fmt.Sprintf("GCS bucket %q grants %s to %s", bucket, binding.Role, member),
+				Description: "Bucket-level IAM grants public access.",
+				Severity:    "high",
+				Resource:    "//storage.googleapis.com/" + bucket,
+				Detected:    now,
+				Evidence: map[string]any{
+					"bucket": bucket,
+					"role":   binding.Role,
+					"member": member,
+				},
+			})
+		}
+	}
+	return out
+}
+
 // ScanStorage checks every GCS bucket in the project for public-access bindings.
 func (c *Connector) ScanStorage(ctx context.Context) ([]Finding, error) {
 	now := time.Now().UTC()
@@ -150,34 +184,11 @@ func (c *Connector) ScanStorage(ctx context.Context) ([]Finding, error) {
 			}
 			policyURL := fmt.Sprintf("https://storage.googleapis.com/storage/v1/b/%s/iam",
 				url.PathEscape(bucket.Name))
-			var pol struct {
-				Bindings []struct {
-					Role    string   `json:"role"`
-					Members []string `json:"members"`
-				} `json:"bindings"`
-			}
+			var pol gcsPolicy
 			if err := c.requestJSON(ctx, http.MethodGet, policyURL, nil, &pol); err != nil {
 				return out, fmt.Errorf("gcp: get IAM policy for bucket %q: %w", bucket.Name, err)
 			}
-			for _, binding := range pol.Bindings {
-				for _, member := range binding.Members {
-					if member == "allUsers" || member == "allAuthenticatedUsers" {
-						out = append(out, Finding{
-							ExternalID:  fmt.Sprintf("gcp-gcs-public-%s", bucket.Name),
-							Title:       fmt.Sprintf("GCS bucket %q grants %s to %s", bucket.Name, binding.Role, member),
-							Description: "Bucket-level IAM grants public access.",
-							Severity:    "high",
-							Resource:    "//storage.googleapis.com/" + bucket.Name,
-							Detected:    now,
-							Evidence: map[string]any{
-								"bucket": bucket.Name,
-								"role":   binding.Role,
-								"member": member,
-							},
-						})
-					}
-				}
-			}
+			out = append(out, publicBucketFindings(bucket.Name, pol, now)...)
 		}
 		if list.NextPageToken == "" {
 			break
