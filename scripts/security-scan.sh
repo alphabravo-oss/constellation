@@ -3,12 +3,11 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 export GOWORK=off
-artifacts="${ARTIFACT_DIR:-test-results/security}"
+artifacts="${ARTIFACT_DIR:-artifacts}"
 mkdir -p "$artifacts"
 case "${1:-}" in
   gosec)
-    # Enumerate this module as Go does. gosec's recursive ./... also traverses
-    # unrelated nested reference checkouts (e.g. Rancher) on developer hosts.
+    # Enumerate this module as Go does so gosec never walks node_modules or tmp/.
     export GOMEMLIMIT="${GOSEC_GOMEMLIMIT:-2GiB}" GOMAXPROCS="${GOSEC_GOMAXPROCS:-2}"
     if [[ -z "${GOTMPDIR:-}" ]]; then
       scratch_root="${XDG_CACHE_HOME:-$HOME/.cache}/constellation"
@@ -28,7 +27,7 @@ case "${1:-}" in
     gosec -concurrency "${GOSEC_CONCURRENCY:-2}" -fmt sarif -out "$artifacts/gosec.sarif" \
       -stdout -verbose json "${packages[@]}" > "$artifacts/gosec.json" || scan_status=$?
     if [[ -s "$artifacts/gosec.sarif" && -s "$artifacts/gosec.json" ]]; then
-      python3 scripts/rebase-gosec-sarif.py "$artifacts/gosec.sarif" "$artifacts/gosec.json"
+      go run ./cmd/tools/sarif-tool rebase-gosec "$artifacts/gosec.sarif" "$artifacts/gosec.json"
     elif [[ "$scan_status" == 0 ]]; then
       echo "gosec: successful scan did not produce both reports" >&2
       exit 1
@@ -38,7 +37,7 @@ case "${1:-}" in
   govulncheck)
     govulncheck -json ./... > "$artifacts/govulncheck.json"
     govulncheck -mode convert -format sarif < "$artifacts/govulncheck.json" > "$artifacts/govulncheck.sarif"
-    python3 scripts/normalize-sarif.py "$artifacts/govulncheck.sarif"
+    go run ./cmd/tools/sarif-tool normalize "$artifacts/govulncheck.sarif"
     govulncheck -mode convert -format text < "$artifacts/govulncheck.json" | tee "$artifacts/govulncheck.txt"
     ;;
   gitleaks)

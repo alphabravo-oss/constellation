@@ -78,6 +78,7 @@ jobs:
         id: runtime
         run: |
           echo "node-version=$(cat .node-version)" >> "$GITHUB_OUTPUT"
+          echo "go-version=$(awk '/^go /{print $2}' go.mod)" >> "$GITHUB_OUTPUT"
           echo "build-time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
       - name: Install pinned image scanner
         run: bash scripts/install-ci-tools.sh grype
@@ -90,6 +91,7 @@ jobs:
           push: true
           tags: ghcr.io/alphabravo-oss/constellation/${{ matrix.role }}:candidate-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           build-args: |
+            GO_VERSION=${{ steps.runtime.outputs.go-version }}
             VERSION=${{ github.ref_name }}
             COMMIT=${{ github.sha }}
             BUILD_TIME=${{ steps.runtime.outputs.build-time }}
@@ -102,7 +104,7 @@ jobs:
         env:
           IMAGE: ghcr.io/alphabravo-oss/constellation/${{ matrix.role }}@${{ steps.build.outputs.digest }}
         run: |
-          python3 scripts/gate-image-release.py --image "$IMAGE" \
+          go run ./cmd/tools/release-gate gate --image "$IMAGE" \
             --report test-results/image-scan.json --receipt test-results/image-gate.json
       - name: Retain image scan and gate evidence
         if: always()
@@ -116,7 +118,7 @@ jobs:
           IMAGE: ghcr.io/alphabravo-oss/constellation/${{ matrix.role }}@${{ steps.build.outputs.digest }}
           RELEASE_TAG: ghcr.io/alphabravo-oss/constellation/${{ matrix.role }}:${{ matrix.tag_prefix }}${{ github.ref_name }}
         run: |
-          python3 scripts/promote-gated-image.py --image "$IMAGE" --tag "$RELEASE_TAG" \
+          go run ./cmd/tools/release-gate promote --image "$IMAGE" --tag "$RELEASE_TAG" \
             --report test-results/image-scan.json --receipt test-results/image-gate.json
       - name: Sign immutable image digest
         env:

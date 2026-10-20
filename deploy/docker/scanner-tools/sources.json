@@ -1,5 +1,5 @@
 {
-  "go": "go1.26.9",
+  "go": "go1.27.3",
   "patchRevision": "constellation.1",
   "tools": [
     {
