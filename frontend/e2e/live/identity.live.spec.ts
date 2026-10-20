@@ -78,8 +78,13 @@ test("break-glass signs in with the issuer down and emits an operator alert", as
   const deployment = process.env.IDENTITY_PROOF_KUBE_DEPLOYMENT ?? "issuer";
   const context = await browser.newContext({ baseURL, storageState: { cookies: [], origins: [] } });
   try {
+    const tokenResponse=await request.post(`${process.env.IDENTITY_PROOF_ROOT}/realms/constellation-proof/protocol/openid-connect/token`,{form:{grant_type:"password",client_id:"constellation",client_secret:process.env.IDENTITY_PROOF_CLIENT_SECRET!,username:LIVE_EMAIL,password:LIVE_PASSWORD,scope:"openid email profile"}});
+    expect(tokenResponse.ok()).toBeTruthy();
+    const bearer=(await tokenResponse.json()).access_token;
+    // First sighting after the issuer is down still uses the last-good JWKS.
     execFileSync("kubectl", ["-n", namespace, "scale", `deployment/${deployment}`, "--replicas=0"]);
     await expect.poll(async () => (await request.get(`${process.env.IDENTITY_PROOF_ROOT}/realms/constellation-proof/.well-known/openid-configuration`)).status(), { timeout: 30_000 }).toBe(503);
+    expect((await request.get("/api/v1/auth/me",{headers:{Authorization:`Bearer ${bearer}`}})).status()).toBe(200);
     const page = await context.newPage(); await page.goto("/auth/login");
     await page.getByRole("button", { name: "Emergency access", exact: true }).click();
     await page.locator("#login-password").fill(process.env.BREAK_GLASS_PASSWORD!);

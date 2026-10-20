@@ -73,6 +73,7 @@ func (s *Service) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		s.failedLogin(w, r, "oidc")
 		return
 	}
+	cookie(w, AccessCookie, "", time.Now())
 	if len(p.Roles) == 0 {
 		fail(w, r, 403, "no mapped roles; contact your administrator")
 		return

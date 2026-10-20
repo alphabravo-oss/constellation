@@ -10,6 +10,7 @@ DROP TABLE IF EXISTS astronomer_identity_map;
 DROP TABLE IF EXISTS browser_refresh_tokens;
 DROP TABLE IF EXISTS user_sessions;
 DROP TABLE IF EXISTS session_signing_keys;
+ALTER TABLE orgs DROP COLUMN IF EXISTS jit_provisioning;
 ALTER TABLE users
  DROP COLUMN IF EXISTS password_hash,
  DROP COLUMN IF EXISTS password_changed_at,
