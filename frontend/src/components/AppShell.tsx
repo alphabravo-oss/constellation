@@ -540,8 +540,15 @@ function NotificationBell() {
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <HeaderIconButton aria-label={count > 0 ? `Notifications, ${count} need attention` : "Notifications"} badge={count}>
+        <HeaderIconButton aria-label={count > 0 ? `Notifications, ${count} need attention` : "Notifications"}>
           <Bell className="h-4 w-4" />
+          {count > 0 ? (
+            // Count chip with theme-aware text (white on the light error tone,
+            // near-black on the lighter dark-mode tone) so it clears AA in both.
+            <span aria-hidden className="absolute right-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-status-error px-1 text-micro font-semibold text-background">
+              {count > 99 ? "99+" : count}
+            </span>
+          ) : null}
         </HeaderIconButton>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-80 max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-lg p-0">

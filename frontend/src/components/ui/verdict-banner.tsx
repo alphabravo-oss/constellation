@@ -74,28 +74,21 @@ export function VerdictBanner({
         {numbers && numbers.length > 0 ? (
           <dl className="flex flex-wrap items-baseline gap-x-5 gap-y-1" data-testid="verdict-numbers">
             {numbers.slice(0, 4).map((item) => {
-              const value = (
-                <dd className={cn("text-base font-semibold tabular-nums", NUMBER_TONE[item.tone ?? "default"])}>{item.value}</dd>
-              );
-              const content = (
-                <>
-                  {value}
-                  <dt className="text-meta text-muted-foreground">{item.label}</dt>
-                </>
-              );
-              return item.href ? (
-                <Link
-                  key={item.label}
-                  to={item.href}
-                  title={item.title}
-                  data-testid={item.testId}
-                  className="flex flex-row-reverse items-baseline justify-end gap-1.5 rounded-sm hover:underline hover:decoration-muted-foreground/50 hover:underline-offset-4 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  {content}
-                </Link>
-              ) : (
+              const numeral = <span className={cn("text-base font-semibold tabular-nums", NUMBER_TONE[item.tone ?? "default"])}>{item.value}</span>;
+              return (
                 <div key={item.label} title={item.title} data-testid={item.testId} className="flex flex-row-reverse items-baseline justify-end gap-1.5">
-                  {content}
+                  <dt className="text-meta text-muted-foreground">{item.label}</dt>
+                  <dd>
+                    {item.href ? (
+                      <Link
+                        to={item.href}
+                        aria-label={`${item.value} ${item.label}`}
+                        className="rounded-sm hover:underline hover:decoration-muted-foreground/50 hover:underline-offset-4 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        {numeral}
+                      </Link>
+                    ) : numeral}
+                  </dd>
                 </div>
               );
             })}
