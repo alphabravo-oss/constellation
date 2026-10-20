@@ -19,6 +19,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/telemetry"
 )
 
 const (
@@ -30,7 +32,7 @@ const (
 var ErrGitHubRateLimited = errors.New("gitops: github rate limit reached")
 
 // defaultHTTPClient is shared by the connectors; 30s covers the small Contents API calls.
-var defaultHTTPClient = &http.Client{Timeout: 30 * time.Second}
+var defaultHTTPClient = &http.Client{Timeout: 30 * time.Second, Transport: telemetry.HTTPTransport(nil)}
 
 type githubCommitter struct {
 	Name  string `json:"name"`

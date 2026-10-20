@@ -14,6 +14,8 @@ import (
 	"context"
 	"net/http"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/telemetry"
 )
 
 // Connector is the unified registry adapter.
@@ -116,7 +118,7 @@ func (c Config) httpClient(timeout time.Duration) *http.Client {
 	if timeout <= 0 {
 		timeout = 30 * time.Second
 	}
-	return &http.Client{Timeout: timeout}
+	return &http.Client{Timeout: timeout, Transport: telemetry.HTTPTransport(nil)}
 }
 
 // All returns the v1 connector list given the supplied per-registry configs.

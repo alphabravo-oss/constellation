@@ -33,6 +33,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/alphabravocompany/constellation/internal/telemetry"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -955,7 +957,7 @@ func newGuardedHTTPClient(timeout time.Duration) *http.Client {
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 	}
-	return &http.Client{Timeout: timeout, Transport: tr}
+	return &http.Client{Timeout: timeout, Transport: telemetry.HTTPTransport(tr)}
 }
 
 // ssrfDialControl is the net.Dialer Control hook: address is the post-resolution "ip:port"

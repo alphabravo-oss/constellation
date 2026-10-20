@@ -17,7 +17,7 @@ import (
 
 	"github.com/alphabravocompany/constellation/internal/auth"
 	"github.com/alphabravocompany/constellation/internal/db"
-	"github.com/alphabravocompany/constellation/pkg/observability"
+	"github.com/alphabravocompany/constellation/internal/telemetry"
 )
 
 // mintTestPAT returns (rawToken, sha256hex(rawToken)) using the same shape the production
@@ -43,7 +43,7 @@ func testDBURL() string {
 	if u := os.Getenv("CONSTELLATION_TEST_DATABASE_URL"); u != "" {
 		return u
 	}
-	return "postgres://test:test@localhost:15433/constellation_test?sslmode=disable"
+	return "" // unset: the DB-backed tests below skip (unit runs never need Docker)
 }
 
 // newAuthTestServer boots a Server against the test DB and returns it plus a seeded,
@@ -98,7 +98,7 @@ VALUES ($1, $2, $3, 'Revoke Admin', 0)`, userID, orgID, email); err != nil {
 	}
 	t.Cleanup(dbHandle.Close)
 
-	tel, _ := observability.Init(ctx, "test")
+	tel, _ := telemetry.Init(ctx, telemetry.ConfigFromEnv("test"))
 	cfg := Config{
 		ListenAddr:  ":0",
 		DatabaseURL: url,

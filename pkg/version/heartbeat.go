@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // HeartbeatPayload is the JSON body POSTed to /api/v1/heartbeats every 30s by
@@ -77,7 +79,7 @@ func HeartbeatLoop(ctx context.Context, cfg HeartbeatConfig) {
 	}
 	client := cfg.HTTPClient
 	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Second}
+		client = &http.Client{Timeout: 10 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}
 	}
 	url := strings.TrimRight(cfg.APIBaseURL, "/") + "/api/v1/heartbeats"
 

@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/http/pprof"
 	"os"
 	"strings"
 	"time"
@@ -39,10 +38,10 @@ import (
 	"github.com/alphabravocompany/constellation/internal/handler/scanning"
 	"github.com/alphabravocompany/constellation/internal/lifecycle"
 	"github.com/alphabravocompany/constellation/internal/syscfg"
+	"github.com/alphabravocompany/constellation/internal/telemetry"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/livegraph"
 	"github.com/alphabravocompany/constellation/pkg/notify"
-	"github.com/alphabravocompany/constellation/pkg/observability"
 	"github.com/alphabravocompany/constellation/pkg/rbac"
 	regsecrets "github.com/alphabravocompany/constellation/pkg/registry/secrets"
 	"github.com/alphabravocompany/constellation/pkg/version"
@@ -50,7 +49,16 @@ import (
 
 // Config is the constellation-api configuration.
 type Config struct {
-	ListenAddr  string
+	ListenAddr string
+	// AdminListenAddr serves /healthz, /readyz, /metrics (and pprof when enabled) on a
+	// dedicated listener that is never exposed through the public ingress.
+	AdminListenAddr string
+	// RequestTimeout bounds every non-streaming API request (chi middleware.Timeout).
+	RequestTimeout time.Duration
+	// MaxBodyBytes caps request bodies before any handler runs; handlers may tighten it.
+	MaxBodyBytes int64
+	// EnablePprof mounts net/http/pprof on the admin listener.
+	EnablePprof bool
 	DatabaseURL string
 	JWTKeys     [][]byte // active key in [0]; older keys still accepted
 	JWTIssuer   string
@@ -86,7 +94,7 @@ type Config struct {
 // Server holds the HTTP server + its dependencies.
 type Server struct {
 	cfg      Config
-	tel      *observability.Telemetry
+	tel      *telemetry.Telemetry
 	db       *db.DB
 	auditLog *audit.Logger
 	signer   *auth.Signer
@@ -140,7 +148,7 @@ type Server struct {
 }
 
 // New constructs the server. Caller must Run() and Shutdown().
-func New(ctx context.Context, cfg Config, tel *observability.Telemetry, database *db.DB) (*Server, error) {
+func New(ctx context.Context, cfg Config, tel *telemetry.Telemetry, database *db.DB) (*Server, error) {
 	if err := database.RequireSchema(ctx); err != nil {
 		return nil, err
 	}
@@ -328,7 +336,7 @@ func firstOrgID(ctx context.Context, pool *pgxpool.Pool) (uuid.UUID, bool) {
 // seedAuthServers writes the env/Helm-wired LDAP/SAML/OIDC providers into auth_servers as
 // bootstrap rows for org if no row of that type exists yet (so the DB then owns them). Best-effort:
 // a seed error is logged, not fatal — the static provider set stays in effect until a row exists.
-func seedAuthServers(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, cfg Config, sealer auth.Sealer, tel *observability.Telemetry) {
+func seedAuthServers(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, cfg Config, sealer auth.Sealer, tel *telemetry.Telemetry) {
 	var seeds []auth.AuthServer
 	if cfg.OIDC != nil {
 		seeds = append(seeds, auth.AuthServer{
@@ -383,7 +391,7 @@ func seedAuthServers(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, c
 // seedSystemConfig seeds env-derived bootstrap defaults into every existing org's
 // system_config row if absent, and warms the Provider cache for each. New orgs created
 // later get Default() via the accessor's load-or-default path until their first PATCH.
-func seedSystemConfig(ctx context.Context, pool *pgxpool.Pool, p *syscfg.Provider, tel *observability.Telemetry) error {
+func seedSystemConfig(ctx context.Context, pool *pgxpool.Pool, p *syscfg.Provider, tel *telemetry.Telemetry) error {
 	defaults := syscfg.DefaultsFromEnv()
 	rows, err := pool.Query(ctx, `SELECT id FROM orgs`)
 	if err != nil {
@@ -540,13 +548,19 @@ func corsAllowedOrigins(origins []string) []string {
 
 func (s *Server) buildRouter() chi.Router {
 	r := chi.NewRouter()
+	// Chain order (guide ch.03 §interceptor chain): recovery first so a panic anywhere
+	// below still yields a 500 with a request id, then request id + trace span, then the
+	// access log, then the cross-cutting guards, then authn (authMiddleware) and authz
+	// (requireVerb) at the route groups.
+	r.Use(chimw.Recoverer)
 	r.Use(chimw.RequestID)
 	// Resolve the client only through the trusted suffix of X-Forwarded-For;
 	// client-supplied prefixes and alternative headers cannot mint rate buckets.
 	r.Use(s.trustedProxyRealIP())
-	r.Use(chimw.Recoverer)
-	r.Use(s.slogMiddleware)
 	r.Use(s.tel.HTTPMiddleware)
+	r.Use(s.slogMiddleware)
+	r.Use(s.requestTimeout())
+	r.Use(s.maxBodyBytes())
 	corsOpts := cors.Options{
 		AllowedOrigins:   corsAllowedOrigins(s.cfg.CORSOrigins),
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
@@ -568,17 +582,8 @@ func (s *Server) buildRouter() chi.Router {
 	r.Get("/healthz", s.handleHealth)
 	r.Get("/readyz", s.handleReady)
 	r.Get("/version", s.handleVersion) // root-level convenience mirror of /api/v1/version
-	r.Get("/metrics", s.tel.MetricsHandler().ServeHTTP)
-	// Runtime profiling, mounted on the same listener as /metrics and OFF by
-	// default. net/http/pprof is unauthenticated and exposes heap/goroutine/CPU
-	// profiles, so it must only be enabled in a trusted environment.
-	if os.Getenv("CONSTELLATION_ENABLE_PPROF") == "true" {
-		r.HandleFunc("/debug/pprof/*", pprof.Index)
-		r.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-		r.HandleFunc("/debug/pprof/profile", pprof.Profile)
-		r.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-		r.HandleFunc("/debug/pprof/trace", pprof.Trace)
-	}
+	// /metrics and pprof live on the admin listener (Config.AdminListenAddr), never on
+	// the public API port — see Run.
 	r.Get("/openapi.json", handler.OpenAPISpec)
 
 	r.Route("/api/v1", func(r chi.Router) {
@@ -1657,6 +1662,9 @@ func (s *Server) Run(ctx context.Context) error {
 		s.tel.Logger.Info("listening", slog.String("addr", s.cfg.ListenAddr))
 		errCh <- srv.ListenAndServe()
 	}()
+	if addr := strings.TrimSpace(s.cfg.AdminListenAddr); addr != "" {
+		telemetry.StartAdmin(ctx, addr, s.AdminHandler(), s.tel.Logger)
+	}
 
 	// D5: the HTTP server above runs on every replica (so each pod serves the
 	// API + readiness), but the singleton background loops must run on exactly
@@ -1784,26 +1792,96 @@ func (s *Server) runAuthProviderReloader(ctx context.Context) {
 
 // ---------------- middleware ----------------
 
+// slogMiddleware emits exactly one request-summary line per request: route pattern,
+// method, status, bytes, duration, request id and — when the auth middleware ran — the
+// principal and org (read after the handler so the deferred log sees authctx).
 func (s *Server) slogMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		next.ServeHTTP(w, r)
-		s.tel.Logger.Info("http",
+		ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
+		next.ServeHTTP(ww, r)
+		attrs := []slog.Attr{
 			slog.String("method", r.Method),
 			slog.String("path", r.URL.Path),
+			slog.Int("status", ww.Status()),
+			slog.Int("bytes", ww.BytesWritten()),
 			slog.String("request_id", chimw.GetReqID(r.Context())),
 			slog.Duration("dur", time.Since(start)),
-		)
+		}
+		if rc := chi.RouteContext(r.Context()); rc != nil {
+			attrs = append(attrs, slog.String("route", rc.RoutePattern()))
+		}
+		if subj, ok := authctx.SubjectFrom(r.Context()); ok {
+			attrs = append(attrs, slog.String("principal", subj.UserID.String()), slog.String("org_id", subj.OrgID.String()))
+		}
+		level := slog.LevelInfo
+		if ww.Status() >= http.StatusInternalServerError {
+			level = slog.LevelError
+		}
+		s.tel.Logger.LogAttrs(r.Context(), level, "http", attrs...)
+	})
+}
+
+// requestTimeout bounds every request except the long-lived streaming/export routes,
+// which carry their own cancellation.
+func (s *Server) requestTimeout() func(http.Handler) http.Handler {
+	d := s.cfg.RequestTimeout
+	if d <= 0 {
+		d = 60 * time.Second
+	}
+	timeout := chimw.Timeout(d)
+	return func(next http.Handler) http.Handler {
+		timed := timeout(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if isStreamingPath(r.URL.Path) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			timed.ServeHTTP(w, r)
+		})
+	}
+}
+
+func isStreamingPath(p string) bool {
+	return strings.HasSuffix(p, ":stream") || strings.HasSuffix(p, ".csv") || strings.Contains(p, "/export")
+}
+
+// maxBodyBytes caps request bodies before any handler runs. Handlers that accept large
+// uploads keep their own, tighter MaxBytesReader; this is the global ceiling.
+func (s *Server) maxBodyBytes() func(http.Handler) http.Handler {
+	limit := s.cfg.MaxBodyBytes
+	if limit <= 0 {
+		limit = 64 << 20
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Body != nil && r.Body != http.NoBody {
+				r.Body = http.MaxBytesReader(w, r.Body, limit)
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// AdminHandler serves the operator-only surface: liveness, readiness (DB ping), Prometheus
+// metrics and, when enabled, pprof.
+func (s *Server) AdminHandler() http.Handler {
+	return s.tel.AdminHandler(telemetry.AdminOptions{
+		Ready:       s.db.Health,
+		EnablePprof: s.cfg.EnablePprof,
 	})
 }
 
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		tok := bearerToken(r)
-		if r.Header.Get("Authorization") == "" {
-			if cookie, err := r.Cookie(auth.AccessCookie); err == nil {
-				tok = cookie.Value
-			}
+		// Guide ch.06: when both a session cookie and a bearer header are present the
+		// cookie wins — the browser session is the stronger (CSRF-guarded) credential and
+		// a stale Authorization header must not override it.
+		tok := ""
+		if cookie, err := r.Cookie(auth.AccessCookie); err == nil && cookie.Value != "" {
+			tok = cookie.Value
+		} else {
+			tok = bearerToken(r)
 		}
 		if tok == "" {
 			writeError(w, http.StatusUnauthorized, "missing session")

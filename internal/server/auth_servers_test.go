@@ -14,7 +14,7 @@ import (
 
 	"github.com/alphabravocompany/constellation/internal/auth"
 	"github.com/alphabravocompany/constellation/internal/db"
-	"github.com/alphabravocompany/constellation/pkg/observability"
+	"github.com/alphabravocompany/constellation/internal/telemetry"
 )
 
 // newAuthServersTestServer boots a Server against the test DB with a GlobalAdmin (has
@@ -96,7 +96,7 @@ VALUES ($1, $2, $3, $4, 0)`, u.id, orgID, u.role+"-"+u.id.String()+"@example.tes
 	}
 	t.Cleanup(dbHandle.Close)
 
-	tel, _ := observability.Init(ctx, "test")
+	tel, _ := telemetry.Init(ctx, telemetry.ConfigFromEnv("test"))
 	cfg := Config{
 		ListenAddr:  ":0",
 		DatabaseURL: url,

@@ -17,7 +17,7 @@ import (
 	"github.com/alphabravocompany/constellation/internal/auth"
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/server"
-	"github.com/alphabravocompany/constellation/pkg/observability"
+	"github.com/alphabravocompany/constellation/internal/telemetry"
 	"github.com/alphabravocompany/constellation/pkg/version"
 )
 
@@ -45,7 +45,7 @@ func main() {
 		os.Exit(rotateJWTKey(ctx, databaseURL))
 	}
 
-	tel, err := observability.Init(ctx, "constellation-api")
+	tel, err := telemetry.Init(ctx, telemetry.ConfigFromEnv("constellation-api"))
 	if err != nil {
 		slog.Error("observability init", slog.String("err", err.Error()))
 		os.Exit(1)
@@ -68,6 +68,10 @@ func main() {
 
 	cfg := server.Config{
 		ListenAddr:           *listenAddr,
+		AdminListenAddr:      env("ADMIN_LISTEN_ADDR", ":9090"),
+		RequestTimeout:       envDuration("REQUEST_TIMEOUT", 60*time.Second),
+		MaxBodyBytes:         int64(envInt("MAX_BODY_BYTES", 64<<20)),
+		EnablePprof:          envBool("CONSTELLATION_ENABLE_PPROF", false),
 		DatabaseURL:          databaseURL,
 		JWTKeys:              loadJWTKeys(envBool("CONSTELLATION_REQUIRE_JWT_KEYS", false)),
 		JWTIssuer:            env("JWT_ISSUER", "constellation"),
@@ -132,6 +136,7 @@ func main() {
 		MetadataFn: func() any {
 			return map[string]any{
 				"listen_addr":                       *listenAddr,
+				"admin_listen_addr":                 cfg.AdminListenAddr,
 				"jwt_keys_configured":               len(cfg.JWTKeys) > 0,
 				"oidc_enabled":                      cfg.OIDC != nil,
 				"saml_enabled":                      cfg.SAML != nil,

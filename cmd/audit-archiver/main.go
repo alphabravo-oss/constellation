@@ -33,9 +33,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/alphabravocompany/constellation/internal/securefiles"
+	"github.com/alphabravocompany/constellation/internal/telemetry"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/backup"
-	"github.com/alphabravocompany/constellation/pkg/observability"
 	"github.com/alphabravocompany/constellation/pkg/version"
 )
 
@@ -124,7 +124,7 @@ func main() {
 
 	ctx := context.Background()
 
-	tel, err := observability.Init(ctx, "audit-archiver")
+	tel, err := telemetry.Init(ctx, telemetry.ConfigFromEnv("audit-archiver"))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "observability init:", err)
 		os.Exit(1)

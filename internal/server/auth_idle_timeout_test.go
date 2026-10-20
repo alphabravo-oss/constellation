@@ -12,7 +12,7 @@ import (
 
 	"github.com/alphabravocompany/constellation/internal/auth"
 	"github.com/alphabravocompany/constellation/internal/db"
-	"github.com/alphabravocompany/constellation/pkg/observability"
+	"github.com/alphabravocompany/constellation/internal/telemetry"
 )
 
 // newIdleTimeoutTestServer boots a Server with a configurable A7 SessionIdleTimeout and
@@ -75,7 +75,7 @@ VALUES ($1, $2, $3, 'Idle Admin', 0)`, userID, orgID, email); err != nil {
 	}
 	t.Cleanup(dbHandle.Close)
 
-	tel, _ := observability.Init(ctx, "test")
+	tel, _ := telemetry.Init(ctx, telemetry.ConfigFromEnv("test"))
 	cfg := Config{
 		ListenAddr:         ":0",
 		DatabaseURL:        url,

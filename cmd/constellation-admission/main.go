@@ -29,8 +29,8 @@ import (
 	"github.com/alphabravocompany/constellation/internal/admissionevidence"
 	"github.com/alphabravocompany/constellation/internal/admissiongroups"
 	rtquar "github.com/alphabravocompany/constellation/internal/runtime/quarantine"
+	"github.com/alphabravocompany/constellation/internal/telemetry"
 	"github.com/alphabravocompany/constellation/pkg/admission"
-	"github.com/alphabravocompany/constellation/pkg/observability"
 	"github.com/alphabravocompany/constellation/pkg/quarantine"
 	"github.com/alphabravocompany/constellation/pkg/version"
 )
@@ -69,7 +69,7 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
-	tel, err := observability.Init(ctx, "constellation-admission")
+	tel, err := telemetry.Init(ctx, telemetry.ConfigFromEnv("constellation-admission"))
 	if err != nil {
 		_, _ = os.Stderr.WriteString("observability init: " + err.Error() + "\n")
 		os.Exit(1)
@@ -355,7 +355,7 @@ func main() {
 	}
 }
 
-func validateHandler(engine admission.Engine, tel *observability.Telemetry) http.HandlerFunc {
+func validateHandler(engine admission.Engine, tel *telemetry.Telemetry) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var review admissionv1.AdmissionReview
 		if err := json.NewDecoder(r.Body).Decode(&review); err != nil {

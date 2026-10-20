@@ -11,7 +11,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	admissionv1 "k8s.io/api/admission/v1"
 
-	"github.com/alphabravocompany/constellation/pkg/observability"
+	"github.com/alphabravocompany/constellation/internal/telemetry"
 )
 
 type allowEngine struct{}
@@ -23,7 +23,7 @@ func (allowEngine) Evaluate(_ context.Context, req *admissionv1.AdmissionRequest
 // TestValidateHandlerRecordsAllow asserts validateHandler wires the real decision
 // path into the admission_decisions_total Prometheus counter (allow branch).
 func TestValidateHandlerRecordsAllow(t *testing.T) {
-	tel, err := observability.Init(context.Background(), "test-admission-metric")
+	tel, err := telemetry.Init(context.Background(), telemetry.Config{ServiceName: "test-admission-metric"})
 	if err != nil {
 		t.Fatalf("observability init: %v", err)
 	}

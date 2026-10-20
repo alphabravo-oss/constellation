@@ -53,7 +53,7 @@ import (
 	"github.com/alphabravocompany/constellation/internal/imageid"
 	"github.com/alphabravocompany/constellation/internal/registry"
 	"github.com/alphabravocompany/constellation/internal/scanner"
-	"github.com/alphabravocompany/constellation/pkg/observability"
+	"github.com/alphabravocompany/constellation/internal/telemetry"
 	"github.com/alphabravocompany/constellation/pkg/scanlease"
 	"github.com/alphabravocompany/constellation/pkg/sigverify"
 	"github.com/alphabravocompany/constellation/pkg/version"
@@ -106,7 +106,7 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
-	tel, err := observability.Init(ctx, "constellation-scanner")
+	tel, err := telemetry.Init(ctx, telemetry.ConfigFromEnv("constellation-scanner"))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "observability init:", err)
 		os.Exit(1)
@@ -790,7 +790,7 @@ func newArtifactHTTPClient(tlsSkipVerify bool) *http.Client {
 	if tlsSkipVerify {
 		tr.TLSClientConfig.InsecureSkipVerify = true
 	}
-	return &http.Client{Timeout: 5 * time.Minute, Transport: tr}
+	return &http.Client{Timeout: 5 * time.Minute, Transport: telemetry.HTTPTransport(tr)}
 }
 
 // serverlessArtifactSource returns the location of a serverless function bundle to

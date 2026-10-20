@@ -21,7 +21,7 @@ import (
 
 	"github.com/alphabravocompany/constellation/internal/auth"
 	"github.com/alphabravocompany/constellation/internal/db"
-	"github.com/alphabravocompany/constellation/pkg/observability"
+	"github.com/alphabravocompany/constellation/internal/telemetry"
 )
 
 // TestEndToEndSmoke boots the server against a real Postgres, seeds a user, logs in via
@@ -34,7 +34,7 @@ func TestEndToEndSmoke(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	tel, _ := observability.Init(ctx, "test")
+	tel, _ := telemetry.Init(ctx, telemetry.ConfigFromEnv("test"))
 
 	pool, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
@@ -168,7 +168,7 @@ func TestAstronomerJWKSRouteIntegration(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	tel, _ := observability.Init(ctx, "test")
+	tel, _ := telemetry.Init(ctx, telemetry.ConfigFromEnv("test"))
 
 	pool, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
