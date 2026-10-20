@@ -59,6 +59,13 @@ type Config struct {
 	Endpoint string
 	// Insecure disables TLS on the OTLP connection (dev compose stack).
 	Insecure bool
+	// MetricsOTLP additionally pushes metrics over OTLP (OTEL_METRICS_EXPORTER=otlp). Off by
+	// default: Prometheus scrapes /metrics, and a trace-only collector such as Tempo rejects
+	// the metrics service.
+	MetricsOTLP bool
+	// LogsOTLP mirrors log records over OTLP (OTEL_LOGS_EXPORTER=otlp). Off by default: logs
+	// go to stderr as JSON for the sidecar/collector path.
+	LogsOTLP bool
 	// SampleRate in [0,1]; 1 samples everything. Zero means "use the default of 1".
 	SampleRate float64
 	// LogLevel defaults to Info (Debug when DevMode).
@@ -76,6 +83,8 @@ type Config struct {
 //	OTEL_EXPORTER_OTLP_ENDPOINT     OTLP/gRPC endpoint; empty = no OTLP export
 //	OTEL_EXPORTER_OTLP_INSECURE     "true" disables TLS
 //	OTEL_TRACES_SAMPLER_ARG         sample ratio
+//	OTEL_METRICS_EXPORTER           "otlp" also pushes metrics over OTLP (default: prometheus only)
+//	OTEL_LOGS_EXPORTER              "otlp" mirrors logs over OTLP (default: stderr only)
 //	CONSTELLATION_PROMETHEUS_ONLY   "true" forces Endpoint empty
 //	CONSTELLATION_ENVIRONMENT       deployment environment (default development)
 //	CONSTELLATION_LOG_LEVEL         debug|info|warn|error
@@ -88,6 +97,8 @@ func ConfigFromEnv(serviceName string) Config {
 		Environment:    envOr("CONSTELLATION_ENVIRONMENT", "development"),
 		Endpoint:       strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT")),
 		Insecure:       isTrue(os.Getenv("OTEL_EXPORTER_OTLP_INSECURE")),
+		MetricsOTLP:    strings.EqualFold(strings.TrimSpace(os.Getenv("OTEL_METRICS_EXPORTER")), "otlp"),
+		LogsOTLP:       strings.EqualFold(strings.TrimSpace(os.Getenv("OTEL_LOGS_EXPORTER")), "otlp"),
 		LogFormat:      strings.ToLower(strings.TrimSpace(os.Getenv("CONSTELLATION_LOG_FORMAT"))),
 		DevMode:        isTrue(os.Getenv("CONSTELLATION_DEV_MODE")),
 	}
@@ -234,30 +245,35 @@ func Init(ctx context.Context, cfg Config) (*Telemetry, error) {
 	t.Tracer = tp.Tracer(cfg.ServiceName)
 	t.shutdowns = append(t.shutdowns, tp.Shutdown)
 
-	metricExp, err := otlpmetricgrpc.New(ctx, grpcMetricOpts(cfg)...)
-	if err != nil {
-		_ = tp.Shutdown(ctx)
-		return nil, fmt.Errorf("telemetry: metric exporter: %w", err)
+	if cfg.MetricsOTLP {
+		metricExp, err := otlpmetricgrpc.New(ctx, grpcMetricOpts(cfg)...)
+		if err != nil {
+			_ = tp.Shutdown(ctx)
+			return nil, fmt.Errorf("telemetry: metric exporter: %w", err)
+		}
+		meterOpts = append(meterOpts, sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExp, sdkmetric.WithInterval(15*time.Second))))
 	}
-	meterOpts = append(meterOpts, sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metricExp, sdkmetric.WithInterval(15*time.Second))))
 	mp := sdkmetric.NewMeterProvider(meterOpts...)
 	otel.SetMeterProvider(mp)
 	t.shutdowns = append(t.shutdowns, mp.Shutdown)
 	t.instruments(mp.Meter(cfg.ServiceName))
 
-	logExp, err := otlploggrpc.New(ctx, grpcLogOpts(cfg)...)
-	if err != nil {
-		_ = mp.Shutdown(ctx)
-		_ = tp.Shutdown(ctx)
-		return nil, fmt.Errorf("telemetry: log exporter: %w", err)
+	if cfg.LogsOTLP {
+		logExp, err := otlploggrpc.New(ctx, grpcLogOpts(cfg)...)
+		if err != nil {
+			_ = mp.Shutdown(ctx)
+			_ = tp.Shutdown(ctx)
+			return nil, fmt.Errorf("telemetry: log exporter: %w", err)
+		}
+		lp := sdklog.NewLoggerProvider(sdklog.WithProcessor(sdklog.NewBatchProcessor(logExp)), sdklog.WithResource(res))
+		otel.SetLoggerProvider(lp)
+		t.LoggerOTel = lp.Logger(cfg.ServiceName)
+		t.shutdowns = append(t.shutdowns, lp.Shutdown)
 	}
-	lp := sdklog.NewLoggerProvider(sdklog.WithProcessor(sdklog.NewBatchProcessor(logExp)), sdklog.WithResource(res))
-	otel.SetLoggerProvider(lp)
-	t.LoggerOTel = lp.Logger(cfg.ServiceName)
-	t.shutdowns = append(t.shutdowns, lp.Shutdown)
 
 	logger.Info("telemetry: OTLP/gRPC exporters wired",
-		slog.String("endpoint", cfg.Endpoint), slog.Bool("insecure", cfg.Insecure), slog.Float64("sample_rate", cfg.SampleRate))
+		slog.String("endpoint", cfg.Endpoint), slog.Bool("insecure", cfg.Insecure), slog.Float64("sample_rate", cfg.SampleRate),
+		slog.Bool("metrics_otlp", cfg.MetricsOTLP), slog.Bool("logs_otlp", cfg.LogsOTLP))
 	return t, nil
 }
 

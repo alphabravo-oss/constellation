@@ -134,7 +134,7 @@ func TestInit_OTLPGRPCRoundTrip(t *testing.T) {
 	defer srv.Stop()
 
 	ctx := context.Background()
-	tel, err := Init(ctx, Config{ServiceName: "otlp-test", Endpoint: lis.Addr().String(), Insecure: true})
+	tel, err := Init(ctx, Config{ServiceName: "otlp-test", Endpoint: lis.Addr().String(), Insecure: true, MetricsOTLP: true, LogsOTLP: true})
 	if err != nil {
 		t.Fatal(err)
 	}
