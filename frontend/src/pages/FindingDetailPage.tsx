@@ -4,15 +4,19 @@ import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext"
 import { useParams } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 
-import { findings, type AffectedRange, type Finding } from "@/api/client";
-import { severityBg } from "@/lib/severity";
+import { assets, findings, type AffectedRange, type Finding } from "@/api/client";
+import { assetDisplayName } from "@/lib/asset-identity";
+import { useCrumbLabel } from "@/lib/page-title";
+import { SeverityBadge } from "@/components/ui/severity-badge";
+import { LifecycleBadge } from "@/components/ui/status-pill";
+import { RiskScore } from "@/components/ui/risk-score";
+import { EpssBadge, KevBadge } from "@/components/ui/kev-badge";
 import { useCluster } from "@/hooks/useCluster";
 import { PageHeader, PageContainer } from "@/components/ui/page";
 import { FindingScope } from "./FindingActionFormPage";
 import { Button } from "@/components/ui/button";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Collapse } from "@/components/ui/collapse";
 import { DataTable, type Column } from "@/components/ui/data-table";
 
@@ -25,14 +29,14 @@ export function FindingDetailPage() {
   const identity = useTablePreferencesIdentity();
   const listPath = clusterId ? `/clusters/${clusterId}/findings` : "/findings";
   return <PageContainer>
-    {!clusterId || !fid ? <><PageHeader title="Finding" description="Review this finding and its history." backLink={<a href={listPath}>Findings</a>} /><ErrorState title="Select an available cluster and finding to continue." /></>
+    {!clusterId || !fid ? <><PageHeader title="Finding" /><ErrorState title="Select an available cluster and finding to continue." /></>
       : <FindingScope key={`${identity?.org_id}:${identity?.user_id}:${clusterId}:${fid}:${params.get("first_seen_at")}`} clusterId={clusterId} findingId={fid} resolvedClusterId={cluster?.id} clusterLoading={isLoading} clusterError={Boolean(error)}>
           {(finding, unavailable) => <FindingDetail finding={finding} clusterId={clusterId} listPath={listPath} unavailable={unavailable} />}
         </FindingScope>}
   </PageContainer>;
 }
 
-function FindingDetail({ finding: f, clusterId, listPath, unavailable }: { finding: Finding; clusterId: string; listPath: string; unavailable: boolean }) {
+function FindingDetail({ finding: f, clusterId, unavailable }: { finding: Finding; clusterId: string; listPath: string; unavailable: boolean }) {
   const identity = useTablePreferencesIdentity();
   const comments = useQuery({ queryKey: ["finding-comments", identity?.org_id, identity?.user_id, clusterId, f.id, f.first_seen_at], queryFn: async () => {
     const response = await findings.instanceComments(f.id, { first_seen_at: f.first_seen_at, cluster_id: clusterId });
@@ -41,6 +45,9 @@ function FindingDetail({ finding: f, clusterId, listPath, unavailable }: { findi
     return response;
   }, enabled: !unavailable });
   const assetCluster = f.source_cluster_id ?? f.cluster_id;
+  useCrumbLabel(f.external_id || f.title);
+  const asset = useQuery({ queryKey: ["finding-asset-name", assetCluster, f.asset_id], queryFn: () => assets.get(f.asset_id), enabled: !!f.asset_id, staleTime: 60_000, retry: false });
+  const assetName = asset.data ? assetDisplayName(asset.data.asset, asset.data.image) : undefined;
   const score = cvssScore(f);
   const hasVulnerabilityMetadata =
     typeof score === "number" || Boolean(f.cvss_vector) || Boolean(f.kev) || typeof f.epss === "number";
@@ -55,62 +62,50 @@ function FindingDetail({ finding: f, clusterId, listPath, unavailable }: { findi
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow={<span className="font-mono font-normal normal-case tracking-normal">{f.external_id}</span>}
+        eyebrow={f.external_id ? <span className="font-mono">{f.external_id}</span> : undefined}
         title={f.title}
-        backLink={<a href={listPath}>Findings</a>}
-        description={
-          <span className="flex flex-wrap items-center gap-2 text-xs">
-            <span className={`rounded-md px-2 py-0.5 ${severityBg[f.severity]}`}>{f.severity}</span>
-            <span>risk {f.risk_score}</span>
-            {typeof score === "number" ? <span>· CVSS {score.toFixed(1)}</span> : null}
-            <span>· {f.kind}</span>
-            <span>· {f.lifecycle}</span>
+        badges={
+          <span className="flex flex-wrap items-center gap-2" data-testid="finding-identity">
+            <SeverityBadge severity={f.severity} kev={Boolean(f.kev)} />
             {isExceptionLifecycle(f.lifecycle) ? (
-              <a
-                href={exceptionHref(clusterId, f.lifecycle, f.id, f.first_seen_at)}
-                className="rounded-md border border-border px-2 py-0.5 text-foreground hover:bg-accent"
-                data-testid="finding-exception-link"
-              >
-                {exceptionLabel(f)}
+              <a href={exceptionHref(clusterId, f.lifecycle, f.id, f.first_seen_at)} className="rounded-full focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring" data-testid="finding-exception-link" title={exceptionLabel(f)}>
+                <LifecycleBadge lifecycle={f.lifecycle} />
               </a>
-            ) : null}
+            ) : <LifecycleBadge lifecycle={f.lifecycle} />}
           </span>
         }
-        actions={!unavailable ? <><a href={findingHref(f, clusterId, "suppress")} className="rounded-md border border-border bg-card px-3 py-1.5 text-sm hover:bg-accent">Suppress</a><a href={findingHref(f, clusterId, "accept-risk")} className="rounded-md border border-border bg-card px-3 py-1.5 text-sm hover:bg-accent">Accept risk</a></> : undefined}
+        actions={!unavailable ? <><Button asChild><a href={findingHref(f, clusterId, "suppress")}>Suppress</a></Button><Button asChild variant="primary"><a href={findingHref(f, clusterId, "accept-risk")}>Accept risk</a></Button></> : undefined}
       />
-      <VerdictBanner status={f.lifecycle === "open" ? "degraded" : "info"} title={`This finding is ${f.lifecycle}`} detail={f.accepted_until ? `Risk acceptance expires ${new Date(f.accepted_until).toLocaleString()}.` : "Review the evidence and recorded history before changing its lifecycle."} />
-      <StatGrid><StatCard label="Risk score" value={f.risk_score} /><StatCard label="CVSS base" value={typeof score === "number" ? score.toFixed(1) : "—"} /><StatCard label="Lifecycle" value={f.lifecycle} /></StatGrid>
-
+      <VerdictBanner
+        status={f.lifecycle === "open" ? (f.severity === "critical" || f.severity === "high" ? "critical" : "degraded") : "info"}
+        title={f.lifecycle === "open" ? `${sentence(f.kind)} needs triage` : f.accepted_until ? `Risk accepted until ${new Date(f.accepted_until).toLocaleDateString()}` : `${sentence(f.kind)} · ${exceptionLabel(f).toLowerCase()}`}
+        numbers={[
+          { label: "risk", value: <RiskScore score={f.risk_score} /> },
+          { label: "CVSS", value: typeof score === "number" ? score.toFixed(1) : "—", tone: typeof score === "number" && score >= 9 ? "critical" : typeof score === "number" && score >= 7 ? "high" : "default" },
+          ...(typeof f.epss === "number" ? [{ label: "EPSS", value: formatEPSS(f.epss) }] : []),
+        ]}
+        detail={f.accepted_until ? `Risk acceptance expires ${new Date(f.accepted_until).toLocaleString()}.` : "Review the evidence and history below before changing the lifecycle."}
+      />
       <Collapse label="Observation details"><dl className="space-y-2 text-sm"><div><dt>First observed</dt><dd><time dateTime={f.first_seen_at} className="font-mono">{f.first_seen_at}</time></dd></div><div><dt>Reviewed revision</dt><dd>{f.revision}</dd></div><div><dt>Observation identity</dt><dd className="break-all font-mono">{f.row_id}</dd></div><div><dt>Source cluster</dt><dd>{f.source_cluster_id ?? f.cluster_id ?? "Not reported"}</dd></div><div><dt>Target cluster override</dt><dd>{f.target_cluster_id ?? "None reported"}</dd></div></dl></Collapse>
       {f.asset_id && assetCluster ? (
         <section
-          className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-4 py-2.5 text-xs"
+          className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card px-4 py-3 text-sm"
           data-testid="finding-affected-asset"
         >
-          <span className="text-micro  text-muted-foreground">Affected asset</span>
-          <span className="font-mono">{f.asset_id.slice(0, 24)}</span>
+          <span className="text-meta font-medium text-muted-foreground">Affected asset</span>
+          <a href={`/clusters/${assetCluster}/assets/${encodeURIComponent(f.asset_id)}`} className="text-link font-medium" data-testid="finding-affected-asset-name" title={f.asset_id}>
+            {assetName ?? (asset.isPending ? "Loading asset…" : "Asset")}
+          </a>
           <div className="ml-auto flex items-center gap-2">
-            <a
-              href={`/clusters/${assetCluster}/risk/asset/${encodeURIComponent(f.asset_id)}`}
-              className="rounded-md border border-border px-2 py-1 text-foreground hover:bg-accent"
-              data-testid="finding-affected-asset-risk"
-            >
-              Risk workspace
-            </a>
-            <a
-              href={`/clusters/${assetCluster}/assets/${encodeURIComponent(f.asset_id)}`}
-              className="rounded-md border border-border px-2 py-1 text-foreground hover:bg-accent"
-              data-testid="finding-affected-asset-detail"
-            >
-              Asset detail
-            </a>
+            <Button asChild size="sm"><a href={`/clusters/${assetCluster}/risk/asset/${encodeURIComponent(f.asset_id)}`} data-testid="finding-affected-asset-risk">Risk workspace</a></Button>
+            <Button asChild size="sm"><a href={`/clusters/${assetCluster}/assets/${encodeURIComponent(f.asset_id)}`} data-testid="finding-affected-asset-detail">Asset detail</a></Button>
           </div>
         </section>
       ) : null}
 
       {f.attack_techniques?.length ? (
         <section>
-          <h2 className="mb-2 text-sm font-medium">MITRE ATT&CK Techniques</h2>
+          <h2 className="mb-2 text-section-title font-semibold">MITRE ATT&CK techniques</h2>
           <ul className="flex flex-wrap gap-1.5">
             {f.attack_techniques.map((t) => (
               <li
@@ -126,11 +121,11 @@ function FindingDetail({ finding: f, clusterId, listPath, unavailable }: { findi
 
       {(f.canonical_engine || f.engines?.length || f.vulndb_bundle || f.affected_range || hasVulnerabilityMetadata) ? (
         <section className="rounded-lg border border-border bg-card p-4">
-          <h2 className="mb-3 text-sm font-medium">Source Provenance</h2>
-          <dl className="grid gap-3 text-xs sm:grid-cols-2">
+          <div className="mb-3 flex flex-wrap items-center gap-2"><h2 className="text-section-title font-semibold">Vulnerability evidence</h2>{f.kev ? <KevBadge /> : null}{typeof f.epss === "number" ? <EpssBadge probability={f.epss} /> : null}</div>
+          <dl className="grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
             <DetailField label="CVSS base" value={formatCVSS(f)} mono />
             <DetailField label="CVSS vector" value={f.cvss_vector ?? "—"} mono wide />
-            <DetailField label="KEV" value={f.kev ? "yes" : "no"} />
+            <DetailField label="Known exploited (KEV)" value={f.kev ? "Yes" : "No"} />
             <DetailField label="EPSS" value={formatEPSS(f.epss)} />
             <DetailField label="Canonical engine" value={f.canonical_engine ?? "—"} mono />
             <DetailField label="VulnDB bundle" value={f.vulndb_bundle?.bundle_version ?? "—"} mono />
@@ -166,7 +161,7 @@ function FindingDetail({ finding: f, clusterId, listPath, unavailable }: { findi
 
       {f.reconciliation?.length ? (
         <section className="rounded-lg border border-border bg-card p-4">
-          <h2 className="mb-3 text-sm font-medium">Reconciliation</h2>
+          <h2 className="mb-3 text-section-title font-semibold">Reconciliation</h2>
           <DataTable
             rows={f.reconciliation}
             columns={reconColumns}
@@ -185,9 +180,9 @@ function FindingDetail({ finding: f, clusterId, listPath, unavailable }: { findi
         className="rounded-lg border border-border bg-card p-4"
         data-testid="comments-section"
       >
-        <div className="mb-3 flex items-center justify-between gap-3"><h2 className="text-sm font-medium">Comment history</h2>{!unavailable && <a href={findingHref(f, clusterId, "comments/new")} className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-accent">Add comment</a>}</div>
+        <div className="mb-3 flex items-center justify-between gap-3"><h2 className="text-section-title font-semibold">Comments</h2>{!unavailable && <Button asChild size="sm"><a href={findingHref(f, clusterId, "comments/new")}>Add comment</a></Button>}</div>
         {comments.isError && <ErrorState title="Comment history could not be loaded." action={<Button onClick={() => void comments.refetch()}>Retry comments</Button>} />}
-        {comments.isPending && <LoadingState label="Loading comment history…" />}
+        {comments.isPending && <LoadingState label="Loading comments" variant="panel" />}
         {comments.isFetching && !comments.isPending && <p className="mb-3 text-xs text-muted-foreground">Refreshing comment history…</p>}
         <ul className="mb-3 space-y-2" data-testid="comments-list">
           {!unavailable && comments.isSuccess && !comments.isFetching && (comments.data?.comments ?? []).length === 0 && (
@@ -211,6 +206,11 @@ function FindingDetail({ finding: f, clusterId, listPath, unavailable }: { findi
       </section>
     </div>
   );
+}
+
+function sentence(value: string) {
+  const words = value.replace(/[_-]+/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
 function isExceptionLifecycle(lifecycle: string) {
@@ -281,8 +281,8 @@ function formatRangeNamespace(range: AffectedRange) {
 function DetailField({ label, value, mono, wide }: { label: string; value: string; mono?: boolean; wide?: boolean }) {
   return (
     <div className={wide ? "sm:col-span-2" : undefined}>
-      <dt className="text-micro  text-muted-foreground">{label}</dt>
-      <dd className={mono ? "mt-1 break-all font-mono text-xs" : "mt-1 text-xs"}>{value}</dd>
+      <dt className="text-meta font-medium text-muted-foreground">{label}</dt>
+      <dd className={mono ? "mt-1 break-all font-mono text-13" : "mt-1 text-sm"}>{value}</dd>
     </div>
   );
 }

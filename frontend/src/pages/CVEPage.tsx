@@ -1,8 +1,11 @@
 // Global CVE intelligence catalog: server-filtered lookahead pages and matching CSV.
+import { MoreFilters } from "@/ui";
+import { Checkbox } from "@/components/ui/form";
+import { QueryInput } from "@/components/ui/query-input";
 import { useMemo, useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { Search, Database, Crown, Activity, TriangleAlert } from "lucide-react";
+import { Search } from "lucide-react";
 
 import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
 import { useExportGuard, exportQueryReady } from "@/hooks/useExportGuard";
@@ -12,8 +15,6 @@ import { Pager } from "@/components/ui/pager";
 import { Button } from "@/components/ui/button";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 import { cve, type CVEResult, type CVESearchParams, type Severity } from "@/api/client";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
-import { FilterChip } from "@/components/ui/filter-chip";
 import { SeverityBadge } from "@/components/ui/severity-badge";
 import { KevBadge } from "@/components/ui/kev-badge";
 import { DataTable, type Column } from "@/components/ui/data-table";
@@ -175,174 +176,73 @@ export function CVEPage() {
   const bundleVersion = bundleData?.available ? bundleData.version : "—";
   const importedAt = bundleData?.available && bundleData.imported_at ? new Date(bundleData.imported_at).toLocaleString() : null;
 
+  const filterCount = [kevOnly, epssHigh, cvssHigh].filter(Boolean).length;
+  const toolbar = (
+    <>
+      <QueryInput
+        data-testid="cve-search-input"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        onClear={() => setQ("")}
+        placeholder="Search by CVE ID, alias or keyword"
+        aria-label="Search CVEs"
+        className="w-full max-w-md"
+        suggestions={["Log4Shell", "Heartbleed", "EternalBlue", "Spring4Shell", "CVE-2024-3094"].map((value) => ({ label: value, value }))}
+        onSuggestion={(suggestion) => setQ(suggestion.value)}
+      />
+      <Select aria-label="Severity" value={severity} onChange={(e) => setSeverity(e.target.value as Severity | "")} className="h-9 w-auto min-w-36">
+        <option value="">Any severity</option>
+        {SEVERITIES.map((s) => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+      </Select>
+      <Select aria-label="Source" value={source} onChange={(e) => setSource(e.target.value)} className="h-9 w-auto min-w-32">
+        <option value="">Any source</option>
+        {SOURCES.map((s) => <option key={s} value={s}>{s.toUpperCase()}</option>)}
+      </Select>
+      <label className="flex h-9 items-center gap-2 rounded-md border border-border px-3 text-sm">
+        <Checkbox checked={kevOnly} aria-label="Known exploited only" onChange={() => changeFilters({ kev: kevOnly ? "" : "true" })} />
+        Known exploited
+      </label>
+      <MoreFilters count={filterCount - (kevOnly ? 1 : 0)}>
+        <label className="flex items-center gap-2 text-sm"><Checkbox checked={epssHigh} aria-label="EPSS above 0.5" onChange={() => changeFilters({ epss_gt: epssHigh ? "" : "0.5" })} />EPSS above 0.5</label>
+        <label className="flex items-center gap-2 text-sm"><Checkbox checked={cvssHigh} aria-label="CVSS above 7" onChange={() => changeFilters({ cvss_gt: cvssHigh ? "" : "7" })} />CVSS above 7</label>
+      </MoreFilters>
+      {(kevOnly || epssHigh || cvssHigh || severity || source || q) && (
+        <button type="button" onClick={clearFilters} className="h-9 rounded-md px-2 text-meta text-muted-foreground hover:text-foreground">Clear all</button>
+      )}
+    </>
+  );
   return (
     <PageContainer>
       <PageHeader
-        title="CVE Database"
+        title="CVE database"
         actions={<Button disabled={!scopeReady || search.isFetching || q !== debouncedQ} onClick={() => { void search.refetch(); void stats.refetch(); void bundle.refetch(); }}>Refresh</Button>}
-        description={
-          <>
-            {statsData ? (
-              <>
-                {totalLabel} vulnerabilities aggregated from NVD, KEV, EPSS, OSV, and GHSA.
-              </>
-            ) : (
-              "Aggregated from NVD + OSV + GHSA + distros + KEV + EPSS."
-            )}
-            {importedAt && (
-              <>
-                {" "}
-                Bundle <span className="text-mono">{bundleVersion}</span> imported {importedAt}.
-              </>
-            )}
-          </>
-        }
       />
 
-      {/* Verdict — honest state of the catalog (populated vs not yet synced). */}
-      {stats.isError || stats.isSuccess && !statsValid ? <VerdictBanner status="degraded" title="CVE catalog summary unavailable" detail="Retry before relying on the catalog totals." /> : stats.isPending ? <VerdictBanner status="info" title="Loading CVE catalog" detail="Fetching current catalog totals." /> : statsData && (
-        statsData.total > 0 ? (
-          <VerdictBanner
-            status="ok"
-            title={`${totalLabel} CVEs in the catalog`}
-            detail="Intelligence from NVD, CISA KEV, and EPSS. Manage sources under Settings → Scanner & CVE Sources."
-          />
-        ) : (
-          <VerdictBanner
-            status="info"
-            title="CVE catalog not yet synced"
-            detail="No CVE records loaded yet. Configure sources under Settings → Scanner & CVE Sources."
-          />
-        )
+      {stats.isError || stats.isSuccess && !statsValid ? <VerdictBanner status="degraded" title="CVE catalog summary unavailable" detail="Retry before relying on the catalog totals." /> : stats.isPending ? <VerdictBanner status="info" title="Loading CVE catalog" /> : statsData && (
+        <VerdictBanner
+          status={statsData.total > 0 ? "ok" : "info"}
+          title={statsData.total > 0 ? `${totalLabel} CVEs in the catalog` : "CVE catalog not yet synced"}
+          numbers={statsData.total > 0 ? [
+            { label: "known exploited (KEV)", value: statsData.kev_listed.toLocaleString(), tone: "critical" },
+            { label: "EPSS above 0.5", value: statsData.epss_gt_50.toLocaleString(), tone: "high" },
+            { label: "CVSS 7.0 or higher", value: statsData.cvss_gt_70.toLocaleString(), tone: "high" },
+          ] : undefined}
+          detail={<span>Aggregated from NVD, CISA KEV, EPSS, OSV, GHSA and distribution feeds.{importedAt ? <> Bundle <span className="font-mono">{bundleVersion}</span> imported {importedAt}.</> : null} Manage sources in <a href="/settings/scanner" className="text-link">Settings › Scanner and CVE sources</a>.{bundleData?.available ? <span className="mt-1 block">Bundle <span className="font-mono" data-testid="bundle-version">{bundleVersion}</span> · <span data-testid="bundle-signed">{bundleData.signed ? `signed${bundleData.signer_identity ? ` by ${bundleData.signer_identity}` : ""}` : "unsigned"}</span></span> : null}</span>}
+        />
       )}
-
-      {/* Stat tiles */}
-      <StatGrid>
-        <StatCard
-          label="Total CVEs"
-          value={statsData ? statsData.total.toLocaleString() : "—"}
-          tone="accent"
-          icon={<Database className="h-3 w-3" />}
-          hint="Live row count"
-        />
-        <StatCard
-          label="KEV-listed"
-          value={statsData ? statsData.kev_listed.toLocaleString() : "—"}
-          tone="critical"
-          icon={<Crown className="h-3 w-3" />}
-          hint="CISA Known-Exploited"
-        />
-        <StatCard
-          label="EPSS > 0.5"
-          value={statsData ? statsData.epss_gt_50.toLocaleString() : "—"}
-          tone="high"
-          icon={<Activity className="h-3 w-3" />}
-          hint="High exploit probability"
-        />
-        <StatCard
-          label="CVSS ≥ 7.0"
-          value={statsData ? statsData.cvss_gt_70.toLocaleString() : "—"}
-          tone="high"
-          icon={<TriangleAlert className="h-3 w-3" />}
-          hint="High / critical severity"
-        />
-      </StatGrid>
 
       {(bundle.isError || bundle.isSuccess && !bundleValid) && <ErrorState title="CVE bundle metadata unavailable." />}
-      {bundleData?.available && (
-        <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs">
-          <span className="text-muted-foreground">Bundle</span>
-          <span className="font-mono" data-testid="bundle-version">{bundleVersion}</span>
-          <span className="text-muted-foreground">·</span>
-          <span data-testid="bundle-signed">
-            {bundleData.signed ? `signed${bundleData.signer_identity ? ` by ${bundleData.signer_identity}` : ""}` : "unsigned"}
-          </span>
-        </div>
-      )}
-
-      {/* Search input */}
-      <div className="space-y-2">
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            data-testid="cve-search-input"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search by CVE-ID, alias, or keyword (try: Log4Shell, Heartbleed, CVE-2024)"
-            className="w-full rounded-md border border-input bg-background py-2 pl-9 pr-3 text-sm focus:border-[color:var(--color-primary)] focus:outline-none"
-          />
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5 text-micro text-muted-foreground">
-          <span>Try:</span>
-          {["Log4Shell", "Heartbleed", "EternalBlue", "Spring4Shell", "CVE-2024-3094"].map((ex) => (
-            <button
-              key={ex}
-              type="button"
-              onClick={() => setQ(ex)}
-              className="rounded border border-border bg-card px-1.5 py-0.5 text-mono text-foreground hover:bg-accent"
-            >
-              {ex}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Filter chip bar */}
-      <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-3 py-2">
-        <span className="text-micro  text-muted-foreground">Filters</span>
-        <FilterChip label="KEV-only" active={kevOnly} onClick={() => changeFilters({ kev: kevOnly ? "" : "true" })} />
-        <FilterChip label="EPSS > 0.5" active={epssHigh} onClick={() => changeFilters({ epss_gt: epssHigh ? "" : "0.5" })} />
-        <FilterChip label="CVSS > 7" active={cvssHigh} onClick={() => changeFilters({ cvss_gt: cvssHigh ? "" : "7" })} />
-        <div className="ml-1 flex items-center gap-1">
-          <label className="text-micro  text-muted-foreground">Severity</label>
-          <Select
-            value={severity}
-            onChange={(e) => setSeverity(e.target.value as Severity | "")}
-            className="rounded border border-border bg-background px-1.5 py-0.5 text-micro"
-          >
-            <option value="">any</option>
-            {SEVERITIES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </Select>
-        </div>
-        <div className="flex items-center gap-1">
-          <label className="text-micro  text-muted-foreground">Source</label>
-          <Select
-            value={source}
-            onChange={(e) => setSource(e.target.value)}
-            className="rounded border border-border bg-background px-1.5 py-0.5 text-micro"
-          >
-            <option value="">any</option>
-            {SOURCES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </Select>
-        </div>
-        {(kevOnly || epssHigh || cvssHigh || severity || source || q) && (
-          <button
-            type="button"
-            onClick={clearFilters}
-            className="ml-auto text-micro text-muted-foreground hover:text-foreground"
-          >
-            Clear all
-          </button>
-        )}
-      </div>
-
       {/* Results */}
       <div data-testid="cve-results-table">
-        {!scopeReady ? <LoadingState label="Resolving operator scope…" /> : search.isError || search.isSuccess && !responseValid ? <ErrorState title="Could not load CVE results." action={<Button onClick={() => void search.refetch()}>Retry</Button>} /> : search.isPending || q !== debouncedQ ? <LoadingState label="Loading CVE results…" /> : <DataTable<CVEResult>
+        {(!scopeReady || search.isError || (search.isSuccess && !responseValid) || search.isPending || q !== debouncedQ) && <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2" data-slot="table-toolbar">{toolbar}</div>}
+        {!scopeReady ? <LoadingState label="Resolving operator scope" /> : search.isError || search.isSuccess && !responseValid ? <ErrorState title="Could not load CVE results." action={<Button onClick={() => void search.refetch()}>Retry</Button>} /> : search.isPending || q !== debouncedQ ? <LoadingState label="Loading CVE results" /> : <DataTable<CVEResult>
           rows={rows}
           canExport={() => captureExport()()}
           pagination={false}
           preferencesKey="cve-catalog"
           exportFileName="constellation-cve-page.csv"
           exportLabel="Export this page"
+          toolbar={toolbar}
           columns={columns}
           rowKey={(r) => r.cve_id}
           onRowClick={(r) => navigate({ href: `/cve/${encodeURIComponent(r.cve_id)}` })}

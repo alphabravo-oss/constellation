@@ -231,12 +231,12 @@ async function settled(check: () => void) {
 }
 const button = (text: string) =>
   [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-    (item) => item.textContent?.trim() === text,
+    (item) => item.textContent?.trim() === text || item.getAttribute("aria-label") === text,
   )!;
 const stats = () =>
   [
     ...host.querySelectorAll(
-      '[data-testid="cve-detail-stats"] .app-stat-value',
+      '[data-testid="cve-detail-stats"] [data-testid="verdict-numbers"] dd',
     ),
   ].map((item) => item.textContent);
 async function tab(text: string) {
@@ -610,9 +610,7 @@ it("uses a truthful header fallback when optional intelligence title is absent",
   } as never);
   await render();
   await settled(() => expect(host.querySelector("table")).not.toBeNull());
-  expect(host.textContent).toContain(
-    "Title not reported · Affected evidence for cluster Main.",
-  );
+  expect(host.textContent).toContain("Affected evidence for cluster Main.");
   expect(host.textContent).not.toContain("undefined");
 });
 

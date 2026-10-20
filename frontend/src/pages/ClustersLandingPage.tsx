@@ -5,27 +5,12 @@
 // findings) plus the top-risk workload and last-seen flow timestamp so an operator
 // can triage which cluster needs attention before drilling in.
 //
-// The "Org overview" callout below the grid links to the surfaces that legitimately
-// span clusters (CVE DB, Settings, Federation) so they remain one click away.
+// Org-wide surfaces (CVE database, Posture, Audit log, Settings) live in the rail.
 import { useMemo } from "react";
 import { useRouteSearchParams } from "@/lib/route-search";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  OctagonAlert,
-  TriangleAlert,
-  ArrowRight,
-  Database,
-  Earth,
-  Layers,
-  Plus,
-  RotateCw,
-  Settings as SettingsIcon,
-  ServerCog,
-  Activity,
-  ShieldCheck,
-  Trash2,
-} from "lucide-react";
+import { ArrowRight, Plus, Radar, RotateCw, ShieldCheck, Trash2 } from "lucide-react";
 
 import {
   clusterInitBundles,
@@ -43,11 +28,15 @@ import { cn } from "@/lib/cn";
 import { sortClustersByActivity } from "@/lib/clusters";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
+import { ErrorState, LoadingState } from "@/components/ui/states";
+import { useIncludeSystem } from "@/lib/system-scope";
+import { clusterStateTone } from "@/components/ClusterSwitcher";
+import { sentenceValue, StatusPill } from "@/components/ui/status-pill";
+import { StatusDot } from "@/ui";
 
 export function ClustersLandingPage() {
-  const [scopeParams, setScopeParams] = useRouteSearchParams();
-  const includeSystem = scopeParams.get("include_system") === "true";
+  const [scopeParams] = useRouteSearchParams();
+  const includeSystem = useIncludeSystem(scopeParams);
   const workloadScope = includeSystem ? "all" as const : "application" as const;
   const list = useQuery({ queryKey: ["clusters", { workload_scope: workloadScope }], queryFn: () => clusters.list({ workload_scope: workloadScope }), staleTime: 30_000 });
   const data = useMemo(() => sortClustersByActivity(list.data?.clusters ?? []), [list.data?.clusters]);
@@ -55,67 +44,53 @@ export function ClustersLandingPage() {
   const [requestedTab, setTab] = useTabParam("tab", "overview");
   const tab = requestedTab === "bundles" ? "bundles" : "overview";
   const needsAttention = data.filter((c) => !["healthy", "connected", "ready"].includes(c.state)).length;
+  const allFresh = list.data && data.length > 0 && data.every((c) => c.exposure?.inventory_status === "fresh");
+  const critical = allFresh ? data.reduce((total, c) => total + (c.exposure?.current_critical ?? 0), 0) : undefined;
+  const high = allFresh ? data.reduce((total, c) => total + (c.exposure?.current_high ?? 0), 0) : undefined;
 
   return (
     <PageContainer>
       <PageHeader
         title="Clusters"
-        description="Choose a cluster to triage findings, runtime events, network flows, and policy posture. Org-wide surfaces are linked below."
         actions={
           <Button
             variant="primary"
-            size="md"
+            size="lg"
             onClick={() => void navigate({ href: "/settings/clusters/new" })}
             data-testid="register-cluster-button"
           >
-            <Plus className="h-3.5 w-3.5" />
+            <Plus className="h-4 w-4" />
             Register cluster
           </Button>
         }
       />
 
       <VerdictBanner status={list.isError || needsAttention > 0 ? "degraded" : list.isPending || data.length === 0 ? "info" : "ok"}
-        title={list.isError ? "Cluster inventory could not be loaded" : list.isPending ? "Loading clusters" : data.length === 0 ? "Connect your first cluster" : needsAttention > 0 ? "Some clusters need attention" : "Clusters are reporting healthy states"}
-        detail="Select a cluster to investigate its security posture. Manage registration credentials in the Registration bundles tab." />
-      <label className="flex items-center gap-2 text-sm">
-        <input type="checkbox" aria-label="Include Constellation system workloads" checked={includeSystem} onChange={(event) => {
-          const checked = event.target.checked;
-          setScopeParams((current) => { const next = new URLSearchParams(current); if (checked) next.set("include_system", "true"); else next.delete("include_system"); return next; });
-        }} />
-        Include Constellation system workloads
-      </label>
-      <StatGrid>
-        <StatCard label="Clusters" value={list.data ? data.length : "—"} />
-        <StatCard label="Need attention" value={list.data ? needsAttention : "—"} />
-        <StatCard label="Current critical vulnerabilities" value={list.data && data.every((c) => c.exposure?.inventory_status === "fresh") ? data.reduce((total, c) => total + (c.exposure?.current_critical ?? 0), 0) : "—"} />
-      </StatGrid>
+        title={list.isError ? "Cluster inventory could not be loaded" : list.isPending ? "Loading clusters" : data.length === 0 ? "Connect your first cluster" : needsAttention > 0 ? `${needsAttention} of ${data.length} clusters need attention` : "All clusters are reporting"}
+        numbers={list.data ? [
+          { label: "clusters", value: data.length },
+          { label: "need attention", value: needsAttention, tone: needsAttention > 0 ? "warning" : "default" },
+          { label: "current critical", value: critical ?? "—", tone: critical ? "critical" : "default" },
+          { label: "current high", value: high ?? "—", tone: high ? "high" : "default" },
+        ] : undefined}
+        detail="Critical and high count unique vulnerabilities matched to current inventory, across every cluster. Registration credentials live in the Registration bundles tab." />
       <Tabs value={tab} onValueChange={setTab} items={[
-        { value: "overview", label: "Overview", content: <div className="space-y-4">
-
-      {list.isPending && (
-        <p className="text-sm text-muted-foreground">Loading clusters…</p>
-      )}
-
-      {list.isError && <p role="alert">Cluster inventory is unavailable. Refresh to try again.</p>}
+        { value: "overview", label: "Clusters", count: list.data ? data.length : undefined, content: <div className="space-y-4">
+      {list.isPending && <LoadingState label="Loading clusters" variant="cards" />}
+      {list.isError && <ErrorState title="Cluster inventory is unavailable" error={list.error} onRetry={() => void list.refetch()} />}
       {!list.isPending && !list.isError && data.length === 0 && (
         <EmptyState
           title="No clusters registered"
-          hint="Select Register cluster to generate its installation command."
+          hint="Register a cluster to generate its installation command."
+          icon={<Radar />}
+          action={<Button variant="primary" onClick={() => void navigate({ href: "/settings/clusters/new" })}><Plus className="h-4 w-4" /> Register cluster</Button>}
         />
       )}
-
       {data.length > 0 && (
-        <section
-          data-testid="clusters-landing-grid"
-          className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"
-        >
-          {data.map((c) => (
-            <ClusterTile key={c.id} cluster={c} />
-          ))}
+        <section data-testid="clusters-landing-grid" className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {data.map((c) => <ClusterTile key={c.id} cluster={c} />)}
         </section>
       )}
-
-      <OrgOverviewCallout />
         </div> },
         { value: "bundles", label: "Registration bundles", content: <InitBundlesPanel /> },
       ]} />
@@ -141,18 +116,18 @@ function InitBundlesPanel() {
 
   const bundles = list.data ?? [];
   if (list.isPending) {
-    return <p>Loading registration bundles...</p>;
+    return <LoadingState label="Loading registration bundles" />;
   }
   if (list.isError) return <p role="alert">Registration bundles could not be loaded.</p>;
   if (bundles.length === 0) {
     return <EmptyState title="No registration bundles" hint="Register a cluster to generate its installation credentials." />;
   }
   return (
-    <section className="rounded-md border border-border bg-card p-4" data-testid="init-bundles-panel">
-      <header className="flex items-center gap-2 text-xs  text-muted-foreground">
+    <section className="rounded-lg border border-border bg-card p-4" data-testid="init-bundles-panel">
+      <header className="flex items-center gap-2 text-section-title font-semibold">
         <ShieldCheck className="h-3.5 w-3.5" />
-        Init bundles
-        <span className="ml-auto text-micro normal-case tracking-normal text-muted-foreground">
+        Registration bundles
+        <span className="ml-auto text-meta font-normal text-muted-foreground">
           {bundles.filter((b) => b.status === "active").length} active ·{" "}
           {bundles.filter((b) => b.status === "expired").length} expired ·{" "}
           {bundles.filter((b) => b.status === "revoked").length} revoked
@@ -171,13 +146,6 @@ function InitBundlesPanel() {
     </section>
   );
 
-  function bundleTone(status: ClusterInitBundleSummary["status"]): string {
-    return status === "active"
-      ? "var(--color-status-success)"
-      : status === "expired"
-        ? "var(--color-status-warning)"
-        : "var(--color-status-error)";
-  }
 
   function bundleColumns(): Column<ClusterInitBundleSummary>[] {
     return [
@@ -190,25 +158,14 @@ function InitBundlesPanel() {
       {
         id: "cluster", kind: "id", size: 128, minSize: 112,
         header: "Cluster ID",
-        className: "text-mono text-micro text-muted-foreground",
-        cell: (b) => <>{b.cluster_id.slice(0, 8)}…</>,
+        className: "text-mono text-meta text-muted-foreground",
+        cell: (b) => <span title={b.cluster_id}>{b.cluster_id.slice(0, 8)}</span>,
       },
       {
         id: "status", kind: "status", size: 112, minSize: 96,
         header: "Status",
         cell: (b) => {
-          const tone = bundleTone(b.status);
-          return (
-            <span
-              className="rounded px-1.5 py-0.5 text-micro "
-              style={{
-                backgroundColor: `color-mix(in oklab, ${tone} 18%, transparent)`,
-                color: tone,
-              }}
-            >
-              {b.status}
-            </span>
-          );
+          return <StatusPill label={b.status} tone={b.status === "active" ? "success" : b.status === "expired" ? "warning" : "error"} />;
         },
       },
       {
@@ -224,7 +181,6 @@ function InitBundlesPanel() {
           <div className="flex justify-end gap-1.5">
             <Button
               size="sm"
-              variant="outline"
               disabled={revoke.isPending || b.status === "revoked"}
               onClick={() => void navigate({ href: `/settings/clusters/bundles/${b.id}/rotate` })}
               data-testid="rotate-bundle"
@@ -234,7 +190,6 @@ function InitBundlesPanel() {
             </Button>
             <Button
               size="sm"
-              variant="outline"
               disabled={revoke.isPending || b.status === "revoked"}
               onClick={() => {
                 if (confirm(`Revoke bundle for ${b.name}? Its scanner + runtime-agent tokens will be invalidated.`)) {
@@ -259,208 +214,81 @@ export function ClusterTile({ cluster }: { cluster: ClusterSummary }) {
   const freshExposure = exposure?.inventory_status === "fresh";
   const hasCritical = freshExposure && exposure.current_critical > 0;
   const hasHigh = freshExposure && exposure.current_high > 0;
-  const stateTone =
-    cluster.state === "healthy" || cluster.state === "connected" || cluster.state === "ready"
-      ? "var(--color-status-success)"
-      : cluster.state === "warn" || cluster.state === "degraded"
-        ? "var(--color-status-warning)"
-        : "var(--color-status-error)";
+  const version = cluster.platform?.kubernetes_git_version;
 
   return (
     <article
       data-testid="cluster-card"
       data-cluster-id={cluster.id}
-      className={cn(
-        "group relative flex flex-col gap-3 rounded-md border border-border bg-card p-4 transition-colors",
-        "hover:border-[color-mix(in_oklab,var(--color-primary)_30%,var(--color-border))]",
-      )}
-      style={
-        hasCritical
-          ? { borderColor: "color-mix(in oklab, var(--color-severity-critical) 36%, var(--color-border))" }
-          : undefined
-      }
+      className="group relative flex flex-col gap-4 rounded-lg border border-border bg-card p-5 transition-colors hover:bg-accent/30"
     >
-      <header className="flex items-start justify-between gap-2">
+      <header className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <ServerCog className="h-4 w-4 text-muted-foreground" aria-hidden />
-            <h2 className="truncate text-sm font-semibold" title={cluster.name}>
+          <h2 className="truncate text-section-title-lg font-semibold" title={cluster.name}>
+            <Link to="." href={`/clusters/${cluster.id}/dashboard`} className="focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring rounded-sm after:absolute after:inset-0">
               {cluster.name}
-            </h2>
-          </div>
-          <p className="mt-1 truncate text-micro text-mono text-muted-foreground">
-            {cluster.distro}
-            {cluster.region ? ` · ${cluster.region}` : ""}
-            {cluster.platform?.kubernetes_git_version ? ` · k8s ${cluster.platform.kubernetes_git_version}` : ""}
-            {cluster.agent_version ? ` · agent ${cluster.agent_version}` : ""}
+            </Link>
+          </h2>
+          <p className="mt-1 truncate text-meta text-muted-foreground">
+            {[cluster.distro, cluster.region, version].filter(Boolean).join(" · ")}
           </p>
         </div>
-        <span
-          className="rounded px-2 py-0.5 text-micro "
-          style={{
-            backgroundColor: `color-mix(in oklab, ${stateTone} 18%, transparent)`,
-            color: stateTone,
-          }}
-        >
-          {cluster.state || "unknown"}
-        </span>
+        <StatusDot tone={clusterStateTone(cluster.state)} label={sentenceValue(cluster.state || "unknown")} className="shrink-0 text-meta" />
       </header>
 
-      <div className="grid grid-cols-2 gap-2 text-xs">
-        <Stat
-          icon={<OctagonAlert className="h-3 w-3" aria-hidden />}
-          label="Current critical"
-          value={freshExposure ? exposure.current_critical : "—"}
-          tone={hasCritical ? "critical" : "muted"}
-        />
-        <Stat
-          icon={<TriangleAlert className="h-3 w-3" aria-hidden />}
-          label="Current high"
-          value={freshExposure ? exposure.current_high : "—"}
-          tone={hasHigh ? "high" : "muted"}
-        />
+      <dl className="grid grid-cols-3 gap-3">
+        <TileNumber label="Critical" value={freshExposure ? exposure.current_critical : "—"} tone={hasCritical ? "critical" : undefined} />
+        <TileNumber label="High" value={freshExposure ? exposure.current_high : "—"} tone={hasHigh ? "high" : undefined} />
+        <TileNumber label="Workloads" value={cluster.deployments} />
+      </dl>
+
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-meta text-muted-foreground">
+        {cluster.top_workload ? (
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="shrink-0">Top risk</span>
+            <span className="truncate font-mono text-foreground" title={cluster.top_workload}>{cluster.top_workload}</span>
+            {typeof cluster.top_workload_risk === "number" && cluster.top_workload_risk > 0 && <RiskScore score={cluster.top_workload_risk} size="sm" />}
+          </span>
+        ) : null}
       </div>
 
-      <details className="text-micro text-muted-foreground">
-        <summary className="flex cursor-pointer items-center justify-between gap-2 rounded py-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">
-          <span className={!freshExposure || (exposure?.unverified_occurrences ?? 0) > 0 ? "text-status-warning" : undefined}>
+      <footer className="relative mt-auto flex items-center justify-between gap-2 border-t border-border pt-3 text-meta text-muted-foreground">
+        <details className="group/exposure relative min-w-0">
+          <summary className={cn("cursor-pointer list-none rounded-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden", (!freshExposure || (exposure?.unverified_occurrences ?? 0) > 0) && "text-status-warning")}>
             {!freshExposure
               ? exposure?.inventory_status === "stale" ? "Inventory out of date" : "Inventory unavailable"
               : exposure.unverified_occurrences > 0 ? "Partial coverage" : "About these counts"}
-          </span>
-          <span className="underline underline-offset-2">Details</span>
-        </summary>
-        <div className="mt-2 space-y-2 rounded border border-border bg-muted/20 p-3">
-          <p>Counts show unique critical and high vulnerabilities matched to current inventory.</p>
-          {!freshExposure && <p>Counts are unavailable until fresh inventory arrives.</p>}
-          {freshExposure && exposure.unverified_occurrences > 0 && <p>Some findings have not been matched to current inventory, so the counts may be incomplete.</p>}
-          <dl className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1">
-            <dt>Total occurrences</dt><dd className="text-right tabular-nums">{(stats.critical_open + stats.high_open).toLocaleString()}</dd>
-            {exposure && <><dt>Historical findings</dt><dd className="text-right tabular-nums">{exposure.historical_occurrences.toLocaleString()}</dd>
-              <dt>Unverified findings</dt><dd className="text-right tabular-nums">{exposure.unverified_occurrences.toLocaleString()}</dd></>}
-            {exposure?.observed_at && <><dt>Inventory updated</dt><dd className="text-right">{fmtRelative(exposure.observed_at)}</dd></>}
-          </dl>
-        </div>
-      </details>
-
-      <div className="grid grid-cols-2 gap-2 text-micro">
-        <div className="rounded border border-border bg-muted/30 px-2 py-1.5">
-          <div className="text-micro  text-muted-foreground">
-            Top risk workload
+          </summary>
+          <div className="absolute bottom-full left-0 z-popover mb-2 w-72 space-y-2 rounded-md border border-border bg-popover p-3 text-meta text-popover-foreground shadow-elev-popover">
+            <p>Unique critical and high vulnerabilities matched to current inventory.</p>
+            {!freshExposure && <p>Counts are unavailable until fresh inventory arrives.</p>}
+            {freshExposure && exposure.unverified_occurrences > 0 && <p>Some findings are not yet matched to current inventory, so the counts may be incomplete.</p>}
+            <dl className="grid grid-cols-[1fr_auto] gap-x-3 gap-y-1">
+              <dt>Total occurrences</dt><dd className="text-right tabular-nums">{(stats.critical_open + stats.high_open).toLocaleString()}</dd>
+              {exposure && <><dt>Historical findings</dt><dd className="text-right tabular-nums">{exposure.historical_occurrences.toLocaleString()}</dd>
+                <dt>Unverified findings</dt><dd className="text-right tabular-nums">{exposure.unverified_occurrences.toLocaleString()}</dd></>}
+              {exposure?.observed_at && <><dt>Inventory updated</dt><dd className="text-right">{fmtRelative(exposure.observed_at)}</dd></>}
+            </dl>
           </div>
-          <div className="mt-0.5 flex items-center gap-1.5">
-            {cluster.top_workload ? (
-              <>
-                <span className="truncate font-mono" title={cluster.top_workload}>
-                  {cluster.top_workload}
-                </span>
-                {typeof cluster.top_workload_risk === "number" && cluster.top_workload_risk > 0 && (
-                  <RiskScore score={cluster.top_workload_risk} size="sm" />
-                )}
-              </>
-            ) : (
-              <span className="text-muted-foreground">—</span>
-            )}
-          </div>
-        </div>
-        <div className="rounded border border-border bg-muted/30 px-2 py-1.5">
-          <div className="text-micro  text-muted-foreground">
-            Platform facts
-          </div>
-          <div className="mt-0.5 truncate text-mono">
-            {cluster.platform?.observed_at ? fmtRelative(cluster.platform.observed_at) : "not reported"}
-          </div>
-        </div>
-      </div>
-
-      <footer className="mt-1 flex items-center justify-between gap-2">
-        <span className="text-micro text-muted-foreground">
-          {cluster.deployments} workloads · {stats.open_findings} open findings
-        </span>
+        </details>
         <Link
           to="." href={`/clusters/${cluster.id}/dashboard`}
           data-testid="cluster-enter"
-          className={cn(
-            "inline-flex items-center gap-1.5 rounded-md border border-input bg-card px-2 py-1 text-xs font-medium",
-            "hover:bg-accent transition-colors",
-          )}
+          className="relative inline-flex items-center gap-1 text-meta font-medium text-foreground hover:underline"
         >
-          Enter cluster
-          <ArrowRight className="h-3 w-3" aria-hidden />
+          Open
+          <ArrowRight className="h-3.5 w-3.5" aria-hidden />
         </Link>
       </footer>
     </article>
   );
 }
 
-function Stat({
-  icon,
-  label,
-  value,
-  tone,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: number | string;
-  tone: "critical" | "high" | "muted";
-}) {
-  const color =
-    tone === "critical"
-      ? "var(--color-severity-critical)"
-      : tone === "high"
-        ? "var(--color-severity-high)"
-        : "var(--color-muted-foreground)";
+function TileNumber({ label, value, tone }: { label: string; value: number | string; tone?: "critical" | "high" }) {
   return (
-    <div
-      className="rounded border border-border bg-muted/30 px-2 py-1.5"
-      style={tone !== "muted" ? { borderColor: `color-mix(in oklab, ${color} 30%, var(--color-border))` } : undefined}
-    >
-      <div className="flex items-center gap-1 text-micro  text-muted-foreground">
-        {icon}
-        {label}
-      </div>
-      <div
-        className="mt-0.5 text-display text-xl font-semibold tabular-nums"
-        style={{ color }}
-      >
-        {value}
-      </div>
+    <div>
+      <dt className="text-meta font-medium text-muted-foreground">{label}</dt>
+      <dd className={cn("mt-0.5 text-xl font-semibold tabular-nums", tone === "critical" ? "text-severity-critical" : tone === "high" ? "text-severity-high" : "text-foreground")}>{typeof value === "number" ? value.toLocaleString() : value}</dd>
     </div>
-  );
-}
-
-function OrgOverviewCallout() {
-  const items: Array<{ to: string; label: string; description: string; icon: React.ReactNode }> = [
-    { to: "/cve", label: "CVE DB", description: "Org-wide vulnerability catalog", icon: <Database className="h-4 w-4" /> },
-    { to: "/federation", label: "Federation", description: "Multi-cluster joins", icon: <Earth className="h-4 w-4" /> },
-    { to: "/posture", label: "Posture", description: "Feature & connector matrix", icon: <ShieldCheck className="h-4 w-4" /> },
-    { to: "/settings/health", label: "System Health", description: "Platform components", icon: <Activity className="h-4 w-4" /> },
-    { to: "/settings", label: "Settings", description: "Org configuration", icon: <SettingsIcon className="h-4 w-4" /> },
-  ];
-  return (
-    <section className="rounded-md border border-dashed border-border bg-card/50 p-4">
-      <header className="flex items-center gap-2 text-xs  text-muted-foreground">
-        <Layers className="h-3.5 w-3.5" />
-        Org overview
-      </header>
-      <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-        {items.map((item) => (
-          <li key={item.to}>
-            <Link
-              to="." href={item.to}
-              className="flex items-start gap-2 rounded border border-border bg-card p-2.5 text-xs hover:bg-accent transition-colors"
-            >
-              <span className="text-muted-foreground">{item.icon}</span>
-              <span className="min-w-0">
-                <span className="block font-medium truncate">{item.label}</span>
-                <span className="block text-micro text-muted-foreground truncate">
-                  {item.description}
-                </span>
-              </span>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </section>
   );
 }

@@ -58,10 +58,10 @@ export function RiskScore({
           <Tooltip.Content
             side="top"
             sideOffset={6}
-            className="z-50 rounded-md border border-border bg-popover p-3 text-xs shadow-[var(--elev-3)] min-w-[220px]"
+            className="z-popover min-w-56 rounded-md border border-border bg-popover p-3 text-meta text-popover-foreground shadow-elev-popover"
           >
             <div className="mb-2 flex items-center justify-between gap-3">
-              <span className="font-medium">Risk Score</span>
+              <span className="font-medium">Risk score</span>
               <span className="text-mono text-sm" style={{ color: tier.color }}>{Math.round(score)} · {tier.label}</span>
             </div>
             <ul className="space-y-1.5">
@@ -119,7 +119,7 @@ export function RiskGauge({ score, label, sub, size = 140 }: { score: number; la
       </svg>
       <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center leading-tight">
         <span className="text-mono text-3xl font-semibold tabular-nums" style={{ color: tier.color }}>{Math.round(score)}</span>
-        <span className="mt-0.5 text-micro  tracking-[0.14em] text-muted-foreground">{label ?? "risk"}</span>
+        <span className="mt-0.5 text-micro  text-muted-foreground">{label ?? "risk"}</span>
         {sub && (
           <span
             className="mt-0.5 max-w-[88%] truncate text-micro text-muted-foreground"
@@ -154,7 +154,7 @@ export function ScoreGauge({ score, label = "score", sub, size = 140 }: { score:
       </svg>
       <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center leading-tight">
         <span className="text-mono text-3xl font-semibold tabular-nums" style={{ color: tier.color }}>{Math.round(s)}</span>
-        <span className="mt-0.5 text-micro  tracking-[0.14em] text-muted-foreground">{label}</span>
+        <span className="mt-0.5 text-micro  text-muted-foreground">{label}</span>
         {sub && <span className="mt-0.5 max-w-[88%] truncate text-micro text-muted-foreground" title={sub}>{sub}</span>}
       </div>
     </div>

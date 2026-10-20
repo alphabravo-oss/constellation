@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
+import { useCrumbLabel } from "@/lib/page-title";
 import { useParams } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, Database, KeyRound, Layers, ShieldAlert } from "lucide-react";
 
 import {
   serverlessFunctions,
@@ -13,7 +13,6 @@ import {
 } from "@/api/client";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { SeverityBadge } from "@/components/ui/severity-badge";
 import { cn } from "@/lib/cn";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
@@ -38,8 +37,8 @@ export function ServerlessFunctionDetailPage() {
     },
     enabled: scope.ready && !!functionId,
   });
-  const backPath = clusterId ? `/clusters/${encodeURIComponent(clusterId)}/serverless` : "/clusters";
-  const header = <PageHeader title="Serverless function evidence" description="Inspect organization-wide cloud inventory and scan evidence for an exact function. The selected cluster provides navigation context only." backLink={<a href={backPath}>Serverless</a>} />;
+  useCrumbLabel(q.data ? q.data.serverless_function.function_name || q.data.serverless_function.function_ref : null);
+  const header = <PageHeader title="Function" />;
   if (!scope.ready) return <div className="space-y-4">{header}{scope.loading ? <LoadingState label="Resolving serverless navigation cluster…" /> : <ErrorState title="The requested navigation cluster could not be resolved." error={scope.error} action={<Button onClick={scope.retry}>Retry cluster</Button>} />}</div>;
   if (!functionId) return <div className="space-y-4">{header}<ErrorState title="An exact serverless function ID is required." /></div>;
   if (q.isError) return <div className="space-y-4">{header}<VerdictBanner status="degraded" title="Serverless evidence is unavailable" detail="Previously loaded evidence is hidden after a failed refresh." /><ErrorState title="Serverless function evidence could not be loaded or refreshed." error={entityDetailError(q.error)} action={<Button onClick={() => void q.refetch()}>Retry function</Button>} /></div>;
@@ -51,17 +50,16 @@ export function ServerlessFunctionDetailPage() {
   const packages = evidence?.packages ?? [];
   const exportScope = `organization-function-${encodeURIComponent(fn.id)}`;
   return <div className="space-y-5" data-testid="serverless-function-detail-page" data-cluster-id={clusterId}>
-    <PageHeader title={fn.function_name || fn.function_ref} mono backLink={<a href={backPath} className="inline-flex items-center gap-1"><ChevronLeft className="h-3.5 w-3.5" />Serverless</a>}
-      description="Organization-wide cloud evidence; the selected cluster provides navigation context only. This API does not establish a cluster association for the function."
+    <PageHeader title={fn.function_name || fn.function_ref} mono
       badges={<><Pill tone="neutral">{fn.provider || "serverless"}</Pill>{fn.region && <Pill tone="accent">{fn.region}</Pill>}<PostureBadge level={fn.permission_level} /></>}
-      actions={<Button onClick={() => void q.refetch()} disabled={q.isFetching}>{q.isFetching ? "Refreshing…" : "Refresh evidence"}</Button>} />
-    <VerdictBanner status={fn.open_findings > 0 ? "degraded" : "info"} title={!evidence ? "No collected package evidence returned" : fn.open_findings > 0 ? `${fn.open_findings} open findings reported for this function` : "No open findings reported for this function"} detail="Reported counts are organization-wide. Finding detail is capped at 100 rows and recent jobs at 25; missing evidence does not establish a clean scan or safe execution role." />
-    <StatGrid data-testid="serverless-function-stats">
-      <StatCard label="Open findings reported" value={fn.open_findings} tone={fn.open_findings > 0 ? "high" : "neutral"} icon={<ShieldAlert className="h-3.5 w-3.5" />} />
-      <StatCard label="Packages reported" value={evidence ? evidence.package_count : "Not collected"} valueKind={evidence ? "number" : "text"} icon={<Database className="h-3.5 w-3.5" />} />
-      <StatCard label="Layers reported" value={fn.layers?.length ?? "Not reported"} valueKind={fn.layers ? "number" : "text"} icon={<Layers className="h-3.5 w-3.5" />} />
-      <StatCard label="High / critical findings" value={fn.critical_findings + fn.high_findings} tone={fn.critical_findings + fn.high_findings > 0 ? "high" : "neutral"} icon={<KeyRound className="h-3.5 w-3.5" />} />
-    </StatGrid>
+      actions={<Button onClick={() => void q.refetch()} disabled={q.isFetching}>{q.isFetching ? "Refreshing…" : "Refresh"}</Button>} />
+    <div data-testid="serverless-function-stats"><VerdictBanner status={fn.open_findings > 0 ? "degraded" : "info"} title={!evidence ? "No collected package evidence returned" : fn.open_findings > 0 ? `${fn.open_findings} open findings reported for this function` : "No open findings reported for this function"} numbers={[
+      { label: "open findings", value: fn.open_findings, tone: fn.open_findings > 0 ? "high" : "default" },
+      { label: "high or critical", value: fn.critical_findings + fn.high_findings, tone: fn.critical_findings + fn.high_findings > 0 ? "high" : "default" },
+      { label: "packages", value: evidence ? evidence.package_count : "Not collected" },
+      { label: "layers", value: fn.layers?.length ?? "Not reported" },
+    ]}
+      detail="Organization-wide cloud evidence; the selected cluster provides navigation context only. Finding detail is capped at 100 rows and recent jobs at 25; missing evidence does not establish a clean scan or safe execution role." /></div>
     {q.isFetching && <p role="status" className="text-sm text-muted-foreground">Refreshing serverless evidence; previously loaded evidence remains visible until the request settles.</p>}
     <Tabs value={tab} onValueChange={setTab} items={[
       { value: "findings", label: "Findings", content: <FindingsTable findings={detail.findings} exportScope={exportScope} /> },
@@ -83,11 +81,11 @@ function FunctionIdentity({ fn }: { fn: ServerlessFunction }) {
         <Field label="Runtime" value={fn.runtime || "-"} />
         <Field label="Architecture" value={fn.architecture || "-"} />
         <Field label="Handler" value={fn.handler || "-"} />
-        <Field label="Package Type" value={fn.package_type || "-"} />
+        <Field label="Package type" value={fn.package_type || "-"} />
         <Field label="Source" value={sourceLabel(fn)} />
-        <Field label="Source Ref" value={fn.source_ref || "-"} />
-        <Field label="Inventory Hash" value={fn.inventory_hash || "-"} wide />
-        <Field label="Execution Role" value={fn.role || "-"} wide />
+        <Field label="Source reference" value={fn.source_ref || "-"} />
+        <Field label="Inventory hash" value={fn.inventory_hash || "-"} wide />
+        <Field label="Execution role" value={fn.role || "-"} wide />
       </dl>
       {fn.layers && fn.layers.length > 0 ? (
         <div className="mt-4">
@@ -116,10 +114,10 @@ function PermissionPanel({ fn, exportScope }: { fn: ServerlessFunction; exportSc
         <PostureBadge level={fn.permission_level} />
       </div>
       <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
-        <Field label="Analysis Status" value={fn.permission_status || "-"} />
+        <Field label="Analysis status" value={fn.permission_status || "-"} />
         <Field label="Role" value={String(analysis.role_name || fn.role || "-")} />
-        <Field label="Sensitive Actions" value={Array.isArray(analysis.sensitive_actions) ? String(analysis.sensitive_actions.length) : "Not reported"} />
-        <Field label="Action Count" value={String(analysis.action_count ?? "-")} />
+        <Field label="Sensitive actions" value={Array.isArray(analysis.sensitive_actions) ? String(analysis.sensitive_actions.length) : "Not reported"} />
+        <Field label="Action count" value={String(analysis.action_count ?? "-")} />
       </dl>
       {analysis.error ? <p className="mt-3 rounded-md border border-border bg-muted p-2 text-xs text-muted-foreground">{String(analysis.error)}</p> : null}
 
@@ -253,7 +251,7 @@ function EvidencePanel({ evidence, fn }: { evidence: ServerlessEvidence | null; 
         <Field label="Observed" value={formatDate(evidence?.observed_at || fn.latest_observed_at)} />
         <Field label="Runtime" value={evidence?.runtime || fn.runtime || "-"} />
         <Field label="Version" value={evidence?.version || fn.version || "-"} />
-        <Field label="Inventory Hash" value={evidence?.inventory_hash || fn.inventory_hash || "-"} />
+        <Field label="Inventory hash" value={evidence?.inventory_hash || fn.inventory_hash || "-"} />
       </dl>
     </section>
   );

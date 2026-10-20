@@ -134,7 +134,8 @@ it("keeps detail history read-only and links to dedicated actions in the same cl
   await renderPage("detail"); await settled(() => expect(host.textContent).toContain("Saved history"));
   expect(host.querySelector("form,textarea,input")).toBeNull();
   for (const path of ["accept-risk", "suppress", "comments/new"]) expect(host.querySelector(`a[href="/clusters/cluster/findings/finding/${path}?first_seen_at=2026-01-01T00%3A00%3A00Z"]`)).not.toBeNull();
-  expect(host.querySelector('a[href="/clusters/cluster/findings"]')).not.toBeNull(); noWrites();
+  // The way back to the list is the shell breadcrumb ("All clusters › Findings › CVE"), not a page link.
+  noWrites();
 });
 it("distinguishes failed history from an empty thread and retries it", async () => {
   vi.mocked(findings.instanceComments).mockRejectedValueOnce(new Error("private comments details"));
@@ -194,7 +195,6 @@ it("updates detail action and asset links when the active entity and cluster cha
   vi.mocked(findings.instance).mockResolvedValue({ ...finding, id: "another", row_id: "another:1767225600", cluster_id: "another-cluster", asset_id: "another-asset", lifecycle: "accepted" });
   await rerenderPage("detail"); await settled(() => expect(host.querySelector('a[href="/clusters/another-cluster/findings/another/accept-risk?first_seen_at=2026-01-01T00%3A00%3A00Z"]')).not.toBeNull());
   expect(host.querySelector('a[href="/clusters/cluster/findings/finding/accept-risk?first_seen_at=2026-01-01T00%3A00%3A00Z"]')).toBeNull();
-  expect(host.querySelector('a[href="/clusters/another-cluster/findings"]')).not.toBeNull();
   expect(host.querySelector('[data-testid="finding-affected-asset-detail"]')!.getAttribute("href")).toBe("/clusters/another-cluster/assets/another-asset");
   expect(host.querySelector('[data-testid="finding-exception-link"]')!.getAttribute("href")).toContain("/clusters/another-cluster/exceptions?");
   noWrites();

@@ -62,15 +62,15 @@ it("exports the exact top-workload identity and reported platform role", async (
   route.params = new URLSearchParams("tab=network");
   vi.mocked(dashboard.summary).mockResolvedValue({ findings_by_severity: {}, recent_activity: [], posture: { security_score: 27, top_vulnerable: [{ id:"deployment",cluster_id:"cluster",namespace:"custom-install",name:"controller",platform_role:"core",critical:2,high:3 }] } } as unknown as Awaited<ReturnType<typeof dashboard.summary>>);
   await renderPage(); await settled(() => expect(host.textContent).toContain("controller"));
-  const panel = [...host.querySelectorAll("h2")].find((item) => item.textContent === "Top Vulnerable Assets" || item.getAttribute("aria-label") === "Top Vulnerable Assets")!.closest("section")!;
+  const panel = [...host.querySelectorAll("h2")].find((item) => item.textContent === "Top vulnerable assets" || item.getAttribute("aria-label") === "Top vulnerable assets")!.closest("section")!;
   await act(async () => panel.querySelector("button")!.click());
   expect(downloadCsv).toHaveBeenCalledWith("constellation-vulnerable-workloads", ["Deployment ID", "Cluster ID", "Namespace", "Workload", "Platform Role", "Critical", "High"], [["deployment", "cluster", "custom-install", "controller", "core", 2, 3]]);
 });
 it("shows five authoritative metrics despite an empty loaded finding sample", async () => {
   await renderPage(); await settled(() => expect(host.textContent).toContain("Security risk: 27/100"));
   const summary = host.querySelector('[data-testid="dashboard-summary"]')!;
-  expect(summary.children).toHaveLength(5);
-  for (const count of ["1234", "2345", "6789", "42"]) expect(summary.textContent).toContain(count);
+  expect(summary.querySelector('[data-testid="verdict-numbers"]')!.children).toHaveLength(4);
+  for (const count of ["1,234", "2,345", "6,789", "42"]) expect(summary.textContent).toContain(count);
   expect(summary.querySelector('a[href="/clusters/cluster/findings?severity=critical&lifecycle=open"]')).not.toBeNull();
   expect(host.textContent).toContain("No critical or high findings in the loaded sample");
   expect(host.textContent).not.toContain("Policy Mode Maturity");
@@ -79,12 +79,12 @@ it("does not turn a failed summary into a healthy zero-risk score", async () => 
   route.params = new URLSearchParams("tab=posture"); vi.mocked(dashboard.summary).mockRejectedValue(new Error("private"));
   await renderPage(); await settled(() => expect(host.textContent).toContain("Security summary unavailable"));
   expect(host.textContent).toContain("Risk score unavailable"); expect(host.textContent).not.toContain("Security risk: 0/100"); expect(host.textContent).not.toContain("Good");
-  expect(host.querySelector('[data-testid="dashboard-summary"]')?.textContent?.match(/—/g)).toHaveLength(5);
+  expect(host.querySelector('[data-testid="dashboard-summary"]')?.textContent?.match(/—/g)).toHaveLength(4);
 });
 it("honors the network deep link and exports server platform-role evidence", async () => {
   route.params = new URLSearchParams("tab=network");
   vi.mocked(network.exposure).mockResolvedValue({ ingress: [{ workload: "app", name: "app", protocols: [], ports: [], namespace: "ns", platform_role: "controller", external_peers: 2, sessions: 3, policy_mode: "monitor", critical: 0, high: 0 }], egress: [] } as unknown as Awaited<ReturnType<typeof network.exposure>>);
-  await renderPage(); await settled(() => expect(host.textContent).toContain("Exposed Services"));
+  await renderPage(); await settled(() => expect(host.textContent).toContain("Exposed services"));
   await settled(() => expect([...host.querySelectorAll("button")].find((b) => b.textContent === "Export CSV" || b.getAttribute("aria-label") === "Export CSV")?.disabled).toBe(false));
   await act(async () => { [...host.querySelectorAll("button")].find((b) => b.textContent === "Export CSV" || b.getAttribute("aria-label") === "Export CSV")!.click(); });
   expect(downloadCsv).toHaveBeenCalledWith("constellation-exposure", expect.arrayContaining(["Platform role"]), [["ingress", "app", "ns", "controller", 2, 3, "monitor"]]);
@@ -112,7 +112,7 @@ it.each(["loading", "missing", "wrong", "error", "transition"])("blocks queries 
     queryClient.setQueryData(["cluster-platform", scope.clusterId], platformFacts());
   });
   for (const api of [dashboard.summary, dashboard.eventsTimeline, findings.list, clusters.platformFacts, systemHealth.cluster, systemHealth.overview, compliance.summary, enterprise.runtime, network.exposure, network.conversations]) expect(api).not.toHaveBeenCalled();
-  expect(host.querySelector('[data-testid="dashboard-summary"]')?.textContent?.match(/—/g)).toHaveLength(5);
+  expect(host.querySelector('[data-testid="dashboard-summary"]')?.textContent?.match(/—/g)).toHaveLength(4);
   expect(host.querySelector('[data-testid="dashboard-summary"] a')).toBeNull();
   expect(host.textContent).not.toContain("Security risk: 99"); expect(host.textContent).not.toContain("Foreign");
   expect(host.querySelector('[data-testid="dashboard-platform-workspace"]')).toBeNull();
@@ -123,7 +123,7 @@ it("suppresses cached totals after a failed refresh", async () => {
   vi.mocked(dashboard.summary).mockRejectedValue(new Error("refresh failed"));
   await renderPage((queryClient) => queryClient.setQueryData(["dashboard", "cluster"], { posture: { security_score: 99 }, open_findings: 999 }));
   await settled(() => expect(host.textContent).toContain("Security summary unavailable"));
-  expect(host.querySelector('[data-testid="dashboard-summary"]')?.textContent?.match(/—/g)).toHaveLength(5);
+  expect(host.querySelector('[data-testid="dashboard-summary"]')?.textContent?.match(/—/g)).toHaveLength(4);
   expect(host.textContent).not.toContain("Security risk: 99");
 });
 
@@ -189,7 +189,7 @@ it("shows scan failure and hides old cluster feedback after switching scope", as
   await settled(() => expect(host.textContent).toContain("Platform scan request failed"));
   Object.assign(scope, { clusterId: "other", cluster: { id: "other", name: "Other" } });
   vi.mocked(clusters.platformFacts).mockResolvedValue({ ...platformFacts(), cluster_id: "other" }); await rerender();
-  await settled(() => expect(host.textContent).toContain("Other — Dashboard"));
+  await settled(() => expect(host.textContent).toContain("Overview"));
   expect(host.textContent).not.toContain("Platform scan request failed");
   expect(host.querySelector('a[href="/clusters/other/components?role=controller"]')).not.toBeNull();
   expect(host.querySelector('a[href="/clusters/cluster/components?role=controller"]')).toBeNull();
@@ -312,16 +312,13 @@ it("defaults dashboard findings to application scope and carries the include-sys
  await renderPage();
  await settled(() => expect(dashboard.summary).toHaveBeenCalledWith({cluster_id:"cluster",workload_scope:"application"}));
  expect(findings.list).toHaveBeenCalledWith(expect.objectContaining({cluster_id:"cluster",workload_scope:"application"}));
- const toggle=host.querySelector<HTMLInputElement>('input[aria-label="Include Constellation system workloads"]')!;
- expect(toggle.checked).toBe(false);
- await act(async()=>toggle.click());
- const updater=route.setParams.mock.calls.at(-1)![0] as (p:URLSearchParams)=>URLSearchParams;
- route.params=updater(new URLSearchParams("tab=posture"));
- expect(route.params.get("tab")).toBe("posture");expect(route.params.get("include_system")).toBe("true");
+ // The scope is the header switch now; an explicit include_system URL parameter (saved views, links) wins.
+ expect(host.querySelector('input[aria-label="Include Constellation system workloads"]')).toBeNull();
+ route.params=new URLSearchParams("tab=posture&include_system=true");
  await rerender();
  await settled(()=>expect(dashboard.summary).toHaveBeenCalledWith({cluster_id:"cluster",workload_scope:"all"}));
  expect(findings.list).toHaveBeenCalledWith(expect.objectContaining({workload_scope:"all"}));
  const links=[...host.querySelectorAll<HTMLAnchorElement>('a[href*="/findings?"]')];expect(links.length).toBeGreaterThan(0);
  for(const link of links)expect(new URL(link.href).searchParams.get("include_system")).toBe("true");
- expect(host.textContent).toContain("Inventory, hardening, policy coverage, and operational signals cover the whole cluster");
+ expect(host.textContent).toContain("including system workloads");
 });

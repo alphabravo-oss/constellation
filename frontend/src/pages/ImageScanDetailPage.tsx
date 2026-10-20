@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react";
+import { Checkbox } from "@/components/ui/form";
+import { useCrumbLabel } from "@/lib/page-title";
 import type { ReactNode } from "react";
 import { useParams } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { Boxes, ChevronLeft, Database, Download, FileJson, FileWarning, KeyRound, Layers, ShieldAlert, ShieldCheck } from "lucide-react";
+import { Database, Download, FileJson, FileWarning, KeyRound, Layers, ShieldAlert, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -28,9 +30,8 @@ import { Collapse } from "@/components/ui/collapse";
 import { artifactIssue, scanEngineEvidence } from "@/lib/scan-evidence";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
-import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { VerdictBanner, type VerdictNumber } from "@/components/ui/verdict-banner";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 
 export function ImageScanDetailPage() {
   const { resultId } = useParams({ strict: false });
@@ -52,6 +53,7 @@ export function ImageScanDetailPage() {
 
   const detail = q.data;
   const result = detail?.image_scan_result;
+  useCrumbLabel(result ? imageScanDisplayName(result) : null);
   const clusterWorkloads = useMemo(() => {
     const workloads = detail?.impacted_workloads ?? [];
     return clusterId ? workloads.filter((item) => item.cluster_id === clusterId) : workloads;
@@ -63,12 +65,6 @@ export function ImageScanDetailPage() {
   return (
     <div className="space-y-4" data-testid="image-scan-detail-page" data-cluster-id={clusterId ?? ""}>
       <PageHeader
-        backLink={
-          <a href={`/clusters/${clusterId}/images`} className="inline-flex items-center gap-1 hover:text-foreground">
-            <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
-            Images
-          </a>
-        }
         title={imageScanDisplayName(result)}
         mono
         badges={
@@ -79,19 +75,15 @@ export function ImageScanDetailPage() {
             <SignaturePill item={result} />
           </>
         }
-        description="Scan evidence is shared across the organization. Affected workload links below are filtered to this cluster."
         actions={<Button onClick={() => void q.refetch()} disabled={q.isFetching}>Refresh</Button>}
       />
 
-      <EngineVerdict result={result} />
-
-      <StatGrid data-testid="image-scan-stats">
-        <StatCard label="Findings" value={result.finding_count} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={result.finding_count > 0 ? "high" : "neutral"} />
-        <StatCard label="Packages" value={result.package_count} icon={<Database className="h-3.5 w-3.5" />} />
-        <StatCard label="Secrets" value={result.secret_count} icon={<KeyRound className="h-3.5 w-3.5" />} tone={result.secret_count > 0 ? "critical" : "neutral"} />
-        <StatCard label="Workloads" value={clusterWorkloads.length} icon={<Layers className="h-3.5 w-3.5" />} tone={clusterWorkloads.length > 0 ? "accent" : "neutral"} />
-        <StatCard label="Risk" value={result.max_risk_score} icon={<Boxes className="h-3.5 w-3.5" />} />
-      </StatGrid>
+      <div data-testid="image-scan-stats"><EngineVerdict result={result} numbers={[
+        { label: "findings", value: result.finding_count, tone: result.critical_count > 0 ? "critical" : result.finding_count > 0 ? "high" : "default" },
+        { label: "secrets", value: result.secret_count, tone: result.secret_count > 0 ? "critical" : "default" },
+        { label: "packages", value: result.package_count },
+        { label: "workloads here", value: clusterWorkloads.length },
+      ]} extra={`Highest risk score ${result.max_risk_score}.`} /></div>
 
       <Tabs value={tab} onValueChange={setTab} items={[
         { value: "findings", label: "Vulnerabilities", count: result.finding_count, content: <FindingsTable findings={detail.findings} /> },
@@ -178,13 +170,13 @@ function EvidenceIssue({ title, message }: { title: string; message: string }) {
   </section>;
 }
 
-function EngineVerdict({ result }: { result: ImageScanResult }) {
+function EngineVerdict({ result, numbers, extra }: { result: ImageScanResult; numbers?: VerdictNumber[]; extra?: string }) {
   const evidence = scanEngineEvidence(result.engine_status);
   const incomplete = evidence.engines.some(({ status }) => status !== "succeeded");
   const stale = isStale(result.last_scanned_at);
   const critical = result.critical_count > 0 || result.secret_count > 0;
   const title = critical ? "This image needs urgent review" : incomplete ? "Scanner coverage is incomplete" : stale ? "This scan needs refreshing" : result.finding_count > 0 ? "Vulnerabilities need review" : "No vulnerabilities reported by the completed scanners";
-  return <VerdictBanner status={critical ? "critical" : incomplete || stale || result.finding_count > 0 ? "degraded" : "ok"} title={title} detail={<>{evidence.message}{stale ? " The scan is older than seven days." : ""}</>} />;
+  return <VerdictBanner status={critical ? "critical" : incomplete || stale || result.finding_count > 0 ? "degraded" : "ok"} title={title} numbers={numbers} detail={<>{evidence.message}{stale ? " The scan is older than seven days." : ""}{extra ? ` ${extra}` : ""}</>} />;
 }
 
 function EngineEvidence({ result }: { result: ImageScanResult }) {
@@ -441,9 +433,9 @@ function ScanIdentity({ result }: { result: ImageScanResult }) {
         <Field label="Repository" value={imageReferenceName(result.image_repository) || "-"} />
         <Field label="Tag" value={result.image_tag || "-"} />
         <Field label="Platform" value={result.platform || "-"} />
-        <Field label="Scanner Profile" value={result.scanner_profile} />
+        <Field label="Scanner profile" value={result.scanner_profile} />
         <Field label="Source" value={sourceLabel(result)} />
-        <Field label="Source Ref" value={<Collapse label="Source reference"><code className="break-all text-xs">{result.source_ref || "-"}</code></Collapse>} />
+        <Field label="Source reference" value={<Collapse label="Source reference"><code className="break-all text-xs">{result.source_ref || "-"}</code></Collapse>} />
         <Field label="Digest" value={<DigestDisclosure digest={result.image_digest} />} wide />
         <Field label="Raw reference" value={<Collapse label="Raw image reference"><code className="break-all text-xs">{result.image_ref}</code></Collapse>} wide />
       </dl>
@@ -498,7 +490,7 @@ function FindingsTable({ findings }: { findings: ImageScanFinding[] }) {
           <p className="mt-1 text-xs text-muted-foreground">All returned vulnerability findings for this image. Fixable only filters this table; the Findings CSV under Identity and exports contains the full scan.</p>
         </div>
         <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground" title="Hide vulnerabilities with no available fix (won't-fix / not-fixed)">
-          <input type="checkbox" checked={fixableOnly} onChange={(e) => setFixableOnly(e.target.checked)} className="h-3.5 w-3.5 accent-[color:var(--color-primary)]" data-testid="image-scan-fixable-toggle" />
+          <Checkbox checked={fixableOnly} onChange={(e) => setFixableOnly(e.target.checked)} aria-label="Fixable only" data-testid="image-scan-fixable-toggle" />
           Fixable only{fixableOnly && hiddenCount > 0 ? ` (${hiddenCount} hidden)` : ""}
         </label>
       </header>
@@ -583,7 +575,7 @@ function BundlePanel({ result }: { result: ImageScanResult }) {
         />
         <ArtifactButton
           icon={FileWarning}
-          label="File Risks"
+          label="File risks"
           disabled={downloading !== null || result.file_risk_count === 0}
           onClick={() => void download("file-risks", () => imageScanResults.downloadFileRisks(result.id))}
         />

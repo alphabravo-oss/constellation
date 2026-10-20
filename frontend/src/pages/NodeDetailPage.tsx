@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useRef } from "react";
+import { useCrumbLabel } from "@/lib/page-title";
 import type { ReactNode } from "react";
 import { useParams } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Boxes, ChevronLeft, Database, Layers, Server, ShieldAlert, ShieldCheck, SquareTerminal, RefreshCw } from "lucide-react";
+import { Boxes, Database, Server, ShieldCheck, SquareTerminal, RefreshCw } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import { nodes as nodesApi, type NodeSummary, type NodeDetail } from "@/api/client";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import { fmtBytes } from "@/lib/format";
@@ -38,7 +38,8 @@ export function NodeDetailPage() {
     enabled: scope.ready && !!nodeName && !!owner,
   });
   const backPath = clusterId ? `/clusters/${encodeURIComponent(clusterId)}/nodes` : "/clusters";
-  const header = <PageHeader title="Node evidence" description="Review reported host vulnerabilities, inventory and benchmark results for an exact cluster node." backLink={<a href={backPath}>Nodes</a>} />;
+  useCrumbLabel(nodeName || null);
+  const header = <PageHeader title="Node" />;
   if (!scope.ready) return <div className="space-y-4">{header}{scope.loading ? <LoadingState label="Resolving node cluster…" /> : <ErrorState title="The requested node cluster could not be resolved." error={scope.error} action={<Button onClick={scope.retry}>Retry cluster</Button>} />}</div>;
   if (!owner) return <div className="space-y-4">{header}<LoadingState label="Resolving node organization…" /></div>;
   if (!nodeName) return <div className="space-y-4">{header}<ErrorState title="An exact node name is required." /></div>;
@@ -48,7 +49,7 @@ export function NodeDetailPage() {
   return <NodeEvidence key={`${owner}:${clusterId}:${nodeName}`} owner={owner} detail={q.data} clusterId={clusterId!} backPath={backPath} refreshing={q.isFetching} refresh={() => { void q.refetch(); void qc.invalidateQueries({ queryKey: ["node-vulnerabilities", owner, clusterId, nodeName] }); }} scopeReady={scope.recheck} />;
 }
 
-function NodeEvidence({ owner, detail, clusterId, backPath, refreshing, refresh, scopeReady }: { owner: string; detail: NodeDetail; clusterId: string; backPath: string; refreshing: boolean; refresh: () => void; scopeReady: () => boolean; }) {
+function NodeEvidence({ owner, detail, clusterId, refreshing, refresh, scopeReady }: { owner: string; detail: NodeDetail; clusterId: string; backPath: string; refreshing: boolean; refresh: () => void; scopeReady: () => boolean; }) {
   const node = detail.node;
   const exportScope = `node-${clusterId}-${encodeURIComponent(node.node)}`;
   const qc = useQueryClient();
@@ -77,18 +78,18 @@ function NodeEvidence({ owner, detail, clusterId, backPath, refreshing, refresh,
   const incomplete = !node.last_scanned_at || !!node.coverage_gaps?.length;
   const attention = node.open_vulns > 0 || node.cis_failed > 0;
   return <div className="space-y-5" data-testid="node-detail-page" data-cluster-id={clusterId}>
-    <PageHeader title={node.node} mono backLink={<a href={backPath} className="inline-flex items-center gap-1"><ChevronLeft className="h-3.5 w-3.5" />Nodes</a>}
-      description={`${displayOS(node)} · kernel ${node.kernel_release || "unknown"} · ${node.arch || "arch unknown"} — reported evidence for this exact node and cluster.`}
+    <PageHeader title={node.node} mono
+      description={`${displayOS(node)} · kernel ${node.kernel_release || "unknown"} · ${node.arch || "arch unknown"}`}
       badges={<><NodeBadge item={node} />{node.coverage_gaps?.length ? <Pill tone="warn">{node.coverage_gaps.length} coverage gaps</Pill> : null}</>}
-      actions={<div className="flex flex-wrap gap-2"><Button onClick={refresh} disabled={refreshing}>{refreshing ? "Refreshing…" : "Refresh evidence"}</Button>{node.scan_target_id && <Button variant="outline" disabled={refreshing || scanMut.isPending} onClick={() => { if (!submitting.current) { submitting.current = true; scanMut.mutate(); } }}><RefreshCw className="h-3.5 w-3.5" />{scanMut.isPending ? "Queuing…" : "Scan node"}</Button>}</div>} />
-    <VerdictBanner status={attention ? "degraded" : "info"} title={incomplete ? "Node evidence has collection or scan gaps" : attention ? "Reported node findings need review" : "No open node vulnerabilities or failed CIS checks reported"} detail="Counts reflect the latest reported node evidence, not proof of complete coverage or current enforcement. Host vulnerability inventory counts finding instances, with server filters, continuation and matching CSV." />
-    <StatGrid data-testid="node-stats">
-      <StatCard label="Open host findings" value={node.last_scanned_at ? node.open_vulns : "Not scanned"} valueKind={node.last_scanned_at ? "number" : "text"} tone={node.open_vulns > 0 ? "high" : "neutral"} icon={<ShieldAlert className="h-3.5 w-3.5" />} />
-      <StatCard label="Packages reported" value={node.packages_observed_at ? node.package_count : "Not collected"} valueKind={node.packages_observed_at ? "number" : "text"} icon={<Database className="h-3.5 w-3.5" />} />
-      <StatCard label="Containers reported" value={node.containers_observed_at ? node.container_count : "Not collected"} valueKind={node.containers_observed_at ? "number" : "text"} icon={<Layers className="h-3.5 w-3.5" />} />
-      <StatCard label="Processes reported" value={node.processes_observed_at ? node.process_count : "Not collected"} valueKind={node.processes_observed_at ? "number" : "text"} icon={<SquareTerminal className="h-3.5 w-3.5" />} />
-      <StatCard label="CIS failures reported" value={node.cis_observed_at ? node.cis_failed : "Not collected"} valueKind={node.cis_observed_at ? "number" : "text"} tone={node.cis_failed > 0 ? "critical" : "neutral"} icon={<ShieldCheck className="h-3.5 w-3.5" />} />
-    </StatGrid>
+      actions={<div className="flex flex-wrap gap-2"><Button onClick={refresh} disabled={refreshing}>{refreshing ? "Refreshing…" : "Refresh"}</Button>{node.scan_target_id && <Button disabled={refreshing || scanMut.isPending} onClick={() => { if (!submitting.current) { submitting.current = true; scanMut.mutate(); } }}><RefreshCw className="h-3.5 w-3.5" />{scanMut.isPending ? "Queuing…" : "Scan node"}</Button>}</div>} />
+    <div data-testid="node-stats"><VerdictBanner status={attention ? "degraded" : "info"} title={incomplete ? "Node evidence has collection or scan gaps" : attention ? "Reported node findings need review" : "No open node vulnerabilities or failed CIS checks reported"}
+      numbers={[
+        { label: "open host findings", value: node.last_scanned_at ? node.open_vulns : "Not scanned", tone: node.open_vulns > 0 ? "high" : "default" },
+        { label: "CIS failures", value: node.cis_observed_at ? node.cis_failed : "Not collected", tone: node.cis_failed > 0 ? "critical" : "default" },
+        { label: "packages", value: node.packages_observed_at ? node.package_count : "Not collected" },
+        { label: "containers", value: node.containers_observed_at ? node.container_count : "Not collected" },
+      ]}
+      detail={<div className="space-y-1"><p>Processes reported: {node.processes_observed_at ? node.process_count : "Not collected"}.</p><p>Counts reflect the latest reported node evidence, not proof of complete coverage or current enforcement. Host vulnerability inventory counts finding instances.</p></div>} /></div>
     {refreshing && <p role="status" className="text-sm text-muted-foreground">Refreshing node evidence; previously loaded evidence remains visible until the request settles.</p>}
     {scanMut.isError && <p role="alert" className="text-sm text-status-error">Scan request failed: {entityDetailError(scanMut.error)}</p>}
     {scanMut.isSuccess && <p role="status" className="text-sm">Scan queued. Completion will be reported separately.</p>}
@@ -182,7 +183,7 @@ function NodeContainersTable({ containers, observedAt, clusterId, exportScope }:
     {
       id: "state", header: "State", kind: "status", cell: (c) => {
         const st = String(c.state ?? "").replace("CONTAINER_", "").toLowerCase();
-        return <span className={cn("rounded px-1.5 py-0.5 text-micro font-medium", st === "running" ? "bg-[color-mix(in_oklab,var(--color-severity-low)_16%,transparent)] text-[color:var(--color-severity-low)]" : "bg-muted text-muted-foreground")}>{st || "—"}</span>;
+        return <span className={cn("rounded px-1.5 py-0.5 text-micro font-medium", st === "running" ? "bg-status-success/12 text-status-success" : "bg-muted text-muted-foreground")}>{st || "—"}</span>;
       }, sort: (a, b) => String(a.state ?? "").localeCompare(String(b.state ?? ""))
     },
   ];

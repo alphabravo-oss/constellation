@@ -18,7 +18,7 @@ export default function ProcessTab({ workspace }: RiskTabProps) {
     ];
     return <div className="space-y-3" data-testid="risk-process-tab"><p className="text-sm text-muted-foreground">Host process inventory reported for this exact node. Observed: {entity.data.node.processes_observed_at || "Not collected"}.</p>{entity.data.processes && rows === undefined ? <ErrorState title="Host process inventory has an unsupported response shape." /> : <DataTable rows={(rows ?? []).map((row, index) => ({ ...row, _key: index }))} columns={columns} rowKey={row => row._key} preferencesKey="risk-node-processes" exportFileName="risk-returned-node-processes" emptyState={<p className="p-4 text-sm text-muted-foreground">No process inventory returned. This is not a clean runtime assessment.</p>} />}</div>;
   }
-  if (entity?.type !== "deployment") return <div className="space-y-3" data-testid="risk-process-tab"><EvidenceUnavailable workspace={workspace} evidence="Process" /><a href={`/clusters/${clusterId}/runtime?tab=evidence&hours=24`} className="text-sm text-primary hover:underline">Open cluster runtime evidence · last 24 hours</a></div>;
+  if (entity?.type !== "deployment") return <div className="space-y-3" data-testid="risk-process-tab"><EvidenceUnavailable workspace={workspace} evidence="Process" /><a href={`/clusters/${clusterId}/runtime?tab=evidence&hours=24`} className="text-sm text-link">Open cluster runtime evidence · last 24 hours</a></div>;
   const baseline = entity.data.process_baseline;
   const processes = (baseline?.processes ?? []).map((row, index) => ({ ...row, _key: index }));
   type ProcessRow = typeof processes[number];

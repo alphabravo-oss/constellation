@@ -45,12 +45,12 @@ async function render(url = "/clusters/cluster-a/assets/asset-a", seed?: (client
   await act(async () => root.render(<QueryClientProvider client={client}><TestRouter path="/clusters/$id/assets/$aid" history={history}><AssetDetailPage /></TestRouter></QueryClientProvider>));
 }
 async function tab(label: string) { const trigger = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((item) => item.textContent === label || item.getAttribute("aria-label") === label)!; await act(async () => trigger.focus()); await settled(() => expect(trigger.getAttribute('aria-selected')).toBe("true")); }
-const stats = () => [...host.querySelectorAll('[data-testid="asset-stats"] .app-stat-value')].map((item) => item.textContent);
+const stats = () => [...host.querySelectorAll('[data-testid="asset-stats"] [data-testid="verdict-numbers"] dd')].map((item) => item.textContent);
 const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent === label || item.getAttribute("aria-label") === label)!;
 
 it("shows a complete evidence verdict, four matching KPIs and findings as the sole primary workspace", async () => {
   await render(); await settled(() => expect(host.querySelector('[data-testid="asset-findings-table"]')).not.toBeNull());
-  expect(stats()).toEqual(["1", "1", "1", "1"]); expect(host.querySelector('[data-testid="asset-stats"]')!.children).toHaveLength(4);
+  expect(stats()).toEqual(["1", "1", "1", "1"]); expect(host.querySelector('[data-testid="asset-stats"] [data-testid="verdict-numbers"]')!.children).toHaveLength(4);
   expect(host.textContent).toContain("1 high or critical matching findings"); expect(host.textContent).toContain("1 matching findings");
   expect(host.querySelector('[data-testid="asset-image-card"]')).toBeNull(); expect(host.querySelector('[data-testid="image-acceptance-card"]')).toBeNull(); expect(host.querySelector('[data-testid="asset-sbom-card"]')).toBeNull();
   expect(host.querySelector('textarea')).toBeNull(); expect(host.querySelector<HTMLAnchorElement>('a[href*="/findings/"]')?.getAttribute('href')).toBe('/clusters/cluster-a/findings/asset-a-finding');

@@ -1,4 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { sentenceValue } from "@/components/ui/status-pill";
+import { useCrumbLabel } from "@/lib/page-title";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useIsFetching, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
@@ -104,6 +106,7 @@ export function FindingScope({ clusterId, findingId, resolvedClusterId, clusterL
 }
 
 function FindingActionEditor({ action, finding, detailPath, clusterId, unavailable, recheck, refresh }: { action: Action; finding: Finding; detailPath: string; clusterId: string; unavailable: boolean; recheck: () => boolean; refresh: () => Promise<boolean> }) {
+  useCrumbLabel(finding.external_id || finding.title, `/clusters/${clusterId}/findings/${finding.id}`);
   const navigate = useNavigate();
   const qc = useQueryClient();
   const identity = useTablePreferencesIdentity();
@@ -138,7 +141,7 @@ function FindingActionEditor({ action, finding, detailPath, clusterId, unavailab
     },
     onError: error => { if ((error as { response?: { status?: number } }).response?.status === 409) setReviewRequired(true); },
   });
-  return <Card title={finding.title} description={<span>{finding.external_id || finding.id} · {finding.lifecycle} · cluster {finding.cluster_id}</span>}>
+  return <Card title={finding.title} description={<span>{finding.external_id || "Finding"} · {sentenceValue(finding.lifecycle)}</span>}>
     <form className="space-y-6" onSubmit={(event) => { event.preventDefault(); if (valid && !unavailable && !uncertain && !reviewRequired && !save.isPending) save.mutate(); }}>
       <fieldset disabled={save.isPending} className="space-y-6">
         <Field label={action === "comment" ? "Comment" : "Reason"} htmlFor="finding-action-text" required

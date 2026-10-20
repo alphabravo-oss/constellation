@@ -8,11 +8,11 @@ import { useMemo, isValidElement, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowUpRight,
-  CircleCheck,
+  
   CircleDot,
-  Clock3,
-  CircleMinus,
-  Radio,
+  
+  
+  
 } from "lucide-react";
 
 import {
@@ -31,7 +31,6 @@ import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { StatusPill } from "@/components/ui/status-pill";
 import { Button } from "@/components/ui/button";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { ErrorState } from "@/components/ui/states";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
@@ -856,18 +855,16 @@ export function CoveragePage() {
     <div className="space-y-4" data-testid="coverage-page">
       <PageHeader
         title="Posture"
-        description="Reported evidence per capability, with organization sources and selected-cluster sources shown separately."
-        actions={<Button onClick={() => { for (const source of allSources) void source.refetch(); }} disabled={allSources.some(source => source.isFetching)}>Refresh evidence</Button>}
+        actions={<Button onClick={() => { for (const source of allSources) void source.refetch(); }} disabled={allSources.some(source => source.isFetching)}>Refresh</Button>}
       />
 
-      <VerdictBanner status={rows.some(row => row.status === "unavailable") ? "degraded" : "info"} title={rows.some(row => row.status === "unavailable") ? "Some posture evidence is unavailable" : "Review reported capability evidence"} detail="Records and configured modes do not prove policy delivery, enforcement or protection. Organization-wide sources remain separate from the selected cluster." />
-      <StatGrid data-testid="coverage-stats">
-        <StatCard label="Rows with evidence" value={rows.filter(row => row.status === "active" || row.status === "partial" || row.status === "idle").length} icon={<CircleCheck className="h-3.5 w-3.5" />} />
-        <StatCard label="Unavailable capability rows" value={rows.filter(row => row.status === "unavailable").length} icon={<CircleMinus className="h-3.5 w-3.5" />} />
-        <StatCard label="Loaded audit records · 24h" value={audit24} valueKind={typeof audit24 === "number" ? "number" : "text"} hint="Up to 100 loaded audit records" />
-        <StatCard label="Loaded runtime records · 24h" value={runtime24} valueKind={typeof runtime24 === "number" ? "number" : "text"} hint="Up to 50 loaded runtime records" icon={<Radio className="h-3.5 w-3.5" />} />
-        <StatCard label="Loaded scan jobs · 24h" value={scans24} valueKind={typeof scans24 === "number" ? "number" : "text"} hint="Up to 200 loaded scan jobs" icon={<Clock3 className="h-3.5 w-3.5" />} />
-      </StatGrid>
+      <div data-testid="coverage-stats"><VerdictBanner status={rows.some(row => row.status === "unavailable") ? "degraded" : "info"} title={rows.some(row => row.status === "unavailable") ? "Some posture evidence is unavailable" : "Review reported capability evidence"} numbers={[
+          { label: "with evidence", value: rows.filter(row => row.status === "active" || row.status === "partial" || row.status === "idle").length },
+          { label: "unavailable", value: rows.filter(row => row.status === "unavailable").length, tone: rows.some(row => row.status === "unavailable") ? "warning" : "default" },
+          { label: "audit records, 24 h", value: audit24, title: "Up to 100 loaded audit records" },
+          { label: "runtime records, 24 h", value: runtime24, title: "Up to 50 loaded runtime records" },
+        ]}
+        detail={<div className="space-y-1"><p>Loaded scan jobs in 24 h: {scans24}. Samples: Up to 100 loaded audit records, Up to 50 loaded runtime records, Up to 200 loaded scan jobs.</p><p>Records and configured modes do not prove policy delivery, enforcement or protection. Organization-wide sources remain separate from the selected cluster.</p></div>} /></div>
       {qClusters.isError && <ErrorState title="The cluster inventory is unavailable." action={<Button onClick={() => void qClusters.refetch()}>Retry clusters</Button>} />}
       {selectedCluster && !clusterReady && !qClusters.isFetching && !qClusters.isPending && <ErrorState title="The requested cluster is not available in the current organization." />}
       <div className="flex min-w-0 flex-col gap-3 rounded-md border border-border bg-card p-3 lg:flex-row lg:items-start">

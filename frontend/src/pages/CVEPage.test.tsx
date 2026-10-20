@@ -44,9 +44,9 @@ it("uses server lookahead to navigate beyond the first fifty records", async () 
   expect(cve.search).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 51, offset: 50 }));
   expect(new URLSearchParams(route.latest).get("page")).toBe("2");
   expect([...host.querySelectorAll("button")].find((b) => b.textContent === "Next" || b.getAttribute("aria-label") === "Next")?.disabled).toBe(true);
-  const kevFilter = [...host.querySelectorAll<HTMLElement>("[role=button]")].find((el) => el.textContent === "KEV-only" || el.getAttribute("aria-label") === "KEV-only")!;
-  expect(kevFilter.tabIndex).toBe(0);
-  await act(async () => kevFilter.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+  const kevFilter = host.querySelector<HTMLButtonElement>('button[role="checkbox"][aria-label="Known exploited only"]')!;
+  expect(kevFilter.getAttribute("aria-checked")).toBe("false");
+  await act(async () => kevFilter.click());
   await settled(() => expect(cve.search).toHaveBeenLastCalledWith(expect.objectContaining({ kev: true, offset: 0 })));
   expect(new URLSearchParams(route.latest).has("page")).toBe(false);
 });
