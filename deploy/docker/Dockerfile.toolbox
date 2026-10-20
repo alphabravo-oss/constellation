@@ -5,7 +5,7 @@
 # pinned versions). age and kubectl are rebuilt from source on the go.mod Go
 # toolchain with current golang.org/x modules (deploy/docker/go-tools/go.mod) because
 # the upstream release binaries carry stale stdlib/x CVEs; rclone is the current
-# upstream release. The release gate (cmd/tools/release-gate) scans every bundled
+# upstream release, rebuilt from source rebuilt from source. The release gate (cmd/tools/release-gate) scans every bundled
 # binary, so bump deploy/docker/go-tools/go.mod with the Go toolchain.
 # Refresh digests with: docker buildx imagetools inspect <image:tag>
 ARG GO_VERSION
@@ -16,23 +16,27 @@ FROM golang:${GO_VERSION}-bookworm@${GO_IMAGE_DIGEST} AS tools
 ARG KUBECTL_VERSION=v1.37.1
 WORKDIR /src
 COPY deploy/docker/go-tools/ ./
-ENV CGO_ENABLED=0 GOFLAGS=-trimpath
+ENV CGO_ENABLED=0 GOTOOLCHAIN=local GOFLAGS=-trimpath
 RUN go build -ldflags="-s -w" -o /out/age filippo.io/age/cmd/age \
  && go build -ldflags="-s -w" -o /out/age-keygen filippo.io/age/cmd/age-keygen \
  && go build -ldflags="-s -w -X k8s.io/client-go/pkg/version.gitVersion=${KUBECTL_VERSION} -X k8s.io/component-base/version.gitVersion=${KUBECTL_VERSION}" -o /out/kubectl ./kubectl \
  && /out/kubectl version --client >/dev/null && /out/age --version >/dev/null
 
-FROM alpine:3.24@${ALPINE_DIGEST} AS fetch
+# rclone: the upstream release binary is built with go1.26.9 (< 1.27.3, which is the
+# floor for the eMudhra intermediate-CA distrust); rebuilt from its verified tag commit.
+FROM golang:${GO_VERSION}-bookworm@${GO_IMAGE_DIGEST} AS rclone
 ARG RCLONE_VERSION=v1.75.2
-ARG TARGETARCH=amd64
-RUN apk add --no-cache curl ca-certificates \
- && curl -fsSL "https://downloads.rclone.org/${RCLONE_VERSION}/rclone-${RCLONE_VERSION}-linux-${TARGETARCH}.zip" -o /tmp/rclone.zip \
- && unzip -q /tmp/rclone.zip -d /tmp && install -m 0755 /tmp/rclone-*/rclone /usr/local/bin/rclone
+ARG RCLONE_COMMIT=be8d6044eacb843b74d335db0c5fbe09222031fe
+ENV CGO_ENABLED=0 GOTOOLCHAIN=local GOFLAGS=-trimpath
+RUN git clone -q --depth 1 --branch "${RCLONE_VERSION}" https://github.com/rclone/rclone /src/rclone \
+ && test "$(git -C /src/rclone rev-parse HEAD)" = "${RCLONE_COMMIT}" \
+ && cd /src/rclone && go build -ldflags "-s -w -X github.com/rclone/rclone/fs.Version=${RCLONE_VERSION}" -o /out/rclone . \
+ && /out/rclone version | head -1
 
 FROM alpine:3.24@${ALPINE_DIGEST}
 RUN apk upgrade --no-cache && apk add --no-cache ca-certificates \
  && adduser -D -u 10001 toolbox
-COPY --from=fetch /usr/local/bin/rclone /usr/local/bin/
+COPY --from=rclone /out/rclone /usr/local/bin/
 COPY --from=tools /out/kubectl /out/age /out/age-keygen /usr/local/bin/
 ARG VERSION=dev
 ARG COMMIT=dev

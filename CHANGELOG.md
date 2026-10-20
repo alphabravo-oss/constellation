@@ -69,6 +69,21 @@ Phase 1 backend foundations) and the C1 "Triage Desk" UI on the shared AlphaBrav
 - Skeleton loading, kit error states with the request id, in-shell 404; axe
   WCAG 2.1 AA clean on the audited pages in both themes.
 
+### Security
+- **eMudhra intermediate-CA compromise (2026-10-20):** go1.27.2 accepts the compromised
+  chain, go1.27.3 rejects it regardless of the OS trust store. Every Go binary in every
+  release image is built with go >= 1.27.3 and the release enforces it
+  (`scripts/check-image-go.sh` in release.yml, `verify-release.sh` and the fallback
+  publisher). Upstream release binaries built with older Go are rebuilt from verified tag
+  commits on the go.mod toolchain (`GOTOOLCHAIN=local`): trivy 0.76.0 (was go1.27.2), oras
+  1.3.5 (go1.26.9), rclone 1.75.2 (go1.26.9); syft/grype/cosign (scanner-tools) and
+  age/kubectl/crictl/kube-bench (go-tools) already were. A probe built with the release
+  toolchain inside the API image rejects dv-g3b-emudhra and dv-g3b-aaa-emudhra
+  (`x509: no valid chains built`); the same probe on go1.27.2 accepts both.
+- Base image digests refreshed on 2026-10-20 (distroless static-debian13 and wolfi-base
+  moved; golang 1.27.3-bookworm, debian bookworm/trixie-slim, alpine 3.24, nginx-unprivileged,
+  CNPG postgresql 16.14 and kube-bench were already current).
+
 ### Fixed (release)
 - Release image gate (no fixable critical/high): third-party Go CLIs bundled in role
   images are rebuilt from source on Go 1.27.3 with current golang.org/x modules

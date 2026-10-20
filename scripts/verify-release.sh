@@ -93,5 +93,6 @@ for ref in "${refs[@]}"; do
   fi
   echo "verified $ref"
 done
+scripts/check-image-go.sh "${refs[@]}"
 
 echo "release-check: published chart, images, signatures and source-bound SLSA provenance passed for $release_tag"
