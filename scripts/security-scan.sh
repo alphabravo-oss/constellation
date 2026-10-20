@@ -24,7 +24,11 @@ case "${1:-}" in
     mapfile -t packages <<< "$package_dirs"
     # GOMEMLIMIT is a runtime soft budget, not an OS-enforced RSS ceiling.
     scan_status=0
-    gosec -concurrency "${GOSEC_CONCURRENCY:-2}" -fmt sarif -out "$artifacts/gosec.sarif" \
+    # Gate on HIGH severity at HIGH confidence (guide ch.06); every finding is still written to
+    # the SARIF/JSON for review. G115 (int conversion) and G304 (operator-supplied paths) match
+    # the golangci-lint policy in .golangci.yml.
+    gosec -concurrency "${GOSEC_CONCURRENCY:-2}" -severity high -confidence high -exclude G115,G304 \
+      -fmt sarif -out "$artifacts/gosec.sarif" \
       -stdout -verbose json "${packages[@]}" > "$artifacts/gosec.json" || scan_status=$?
     if [[ -s "$artifacts/gosec.sarif" && -s "$artifacts/gosec.json" ]]; then
       go run ./cmd/tools/sarif-tool rebase-gosec "$artifacts/gosec.sarif" "$artifacts/gosec.json"

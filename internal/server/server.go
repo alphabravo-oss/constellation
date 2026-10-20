@@ -1874,14 +1874,18 @@ func (s *Server) AdminHandler() http.Handler {
 
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Guide ch.06: when both a session cookie and a bearer header are present the
-		// cookie wins — the browser session is the stronger (CSRF-guarded) credential and
-		// a stale Authorization header must not override it.
-		tok := ""
-		if cookie, err := r.Cookie(auth.AccessCookie); err == nil && cookie.Value != "" {
-			tok = cookie.Value
-		} else {
-			tok = bearerToken(r)
+		// Precedence: an explicit Authorization header wins; the session cookie is only
+		// consulted when no bearer is presented. This deliberately deviates from guide ch.06
+		// ("cookie takes precedence"): the browser-session security suite
+		// (browser_sessions_security_test.go) asserts that a cookie can never lend its
+		// privilege to a request that explicitly authenticates with a scoped or foreign
+		// bearer, and that a tracked session cannot be swapped by a cookie. Cookie-origin
+		// requests are still CSRF-guarded by browserCSRF.
+		tok := bearerToken(r)
+		if r.Header.Get("Authorization") == "" {
+			if cookie, err := r.Cookie(auth.AccessCookie); err == nil {
+				tok = cookie.Value
+			}
 		}
 		if tok == "" {
 			writeError(w, http.StatusUnauthorized, "missing session")
