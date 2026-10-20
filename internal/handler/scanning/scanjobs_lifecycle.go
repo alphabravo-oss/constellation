@@ -40,6 +40,7 @@ UPDATE scan_jobs
        last_error_at = NULL,
        claimed_at = NULL,
        lease_expires_at = NULL,
+       lease_id = NULL,
        finished_at = NULL,
        resumed_at = NOW(),
        paused_at = NULL,

@@ -6,6 +6,7 @@ import (
 )
 
 func TestLearnThenMonitor_AlertsOnUnbaselinedProcess(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	wl := "default/api-service"
 	e.StartLearn(wl, time.Hour)
@@ -32,6 +33,7 @@ func TestLearnThenMonitor_AlertsOnUnbaselinedProcess(t *testing.T) {
 }
 
 func TestEnforce_BlockFlagSet(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	wl := "default/api"
 	e.StartLearn(wl, time.Hour)
@@ -48,6 +50,7 @@ func TestEnforce_BlockFlagSet(t *testing.T) {
 }
 
 func TestEndpointBaseline_NormalizedKeys(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	wl := "default/web"
 	e.StartLearn(wl, time.Hour)

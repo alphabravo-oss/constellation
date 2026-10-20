@@ -3,6 +3,7 @@ package admission
 import "testing"
 
 func TestBuiltInAdmissionProfiles(t *testing.T) {
+	t.Parallel()
 	profiles := BuiltInAdmissionProfiles()
 	if len(profiles) != 10 {
 		t.Fatalf("profile count=%d want 10", len(profiles))
@@ -60,6 +61,7 @@ func TestBuiltInAdmissionProfiles(t *testing.T) {
 }
 
 func TestAdmissionProfileBundleFor(t *testing.T) {
+	t.Parallel()
 	profile, ok := BuiltInAdmissionProfile("strict-hardening")
 	if !ok {
 		t.Fatal("strict-hardening profile missing")
@@ -74,6 +76,7 @@ func TestAdmissionProfileBundleFor(t *testing.T) {
 }
 
 func TestBuiltInAdmissionProfileDeprecatedAliases(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"baseline":   "basic-hardening",
 		"restricted": "strict-hardening",
@@ -90,7 +93,42 @@ func TestBuiltInAdmissionProfileDeprecatedAliases(t *testing.T) {
 }
 
 func TestBuiltInAdmissionProfileUnknown(t *testing.T) {
+	t.Parallel()
 	if _, ok := BuiltInAdmissionProfile("does-not-exist"); ok {
 		t.Fatal("unknown profile should not resolve")
+	}
+}
+
+func TestVulnerabilityProfilesRequireSuccessfulActiveEngines(t *testing.T) {
+	for _, id := range []string{"critical-vulnerabilities-blocked", "fixable-vulnerabilities-blocked"} {
+		t.Run(id, func(t *testing.T) { assertActiveVulnerabilityProfile(t, id) })
+	}
+}
+
+func assertActiveVulnerabilityProfile(t *testing.T, id string) {
+	t.Helper()
+	profile, ok := BuiltInAdmissionProfile(id)
+	if !ok {
+		t.Fatal("missing profile")
+	}
+	rule, supported, err := RuleFromYAML(id, profile.Name, profile.Description, "enforce", profile.Rules[0].SpecYAML)
+	if err != nil || !supported {
+		t.Fatalf("profile parse supported=%v err=%v", supported, err)
+	}
+	if len(rule.Conditions.EvidenceGates) != 1 {
+		t.Fatal("expected one vulnerability gate")
+	}
+	gate := rule.Conditions.EvidenceGates[0]
+	if gate.Type != "vulnerability" {
+		t.Fatal("missing vulnerability gate")
+	}
+	if gate.RequireVulnDBBundle || len(gate.AllowedCanonicalEngines) != 0 {
+		t.Fatal("active profile still filters findings to the retired producer")
+	}
+	if len(gate.RequiredSuccessfulEngines) != 2 || gate.RequiredSuccessfulEngines[0] != "trivy" || gate.RequiredSuccessfulEngines[1] != "grype" {
+		t.Fatalf("missing active engine requirements: %#v", gate.RequiredSuccessfulEngines)
+	}
+	if !gate.RequireKnownScanResult || gate.MaxScanAgeSeconds != 86400 {
+		t.Fatal("scan presence/freshness requirement was weakened")
 	}
 }

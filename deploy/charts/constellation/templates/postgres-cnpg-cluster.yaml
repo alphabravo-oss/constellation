@@ -2,8 +2,8 @@
 {{- /*
 CloudNativePG-managed Postgres Cluster. This is a normal chart resource (not a
 hook), so helm creates it AFTER the pre-install credential Secrets
-(postgres-secrets.yaml, weight -8) but BEFORE the post-install migrate (weight
--5) and bootstrap (weight 0/5) hooks. The migrate Job's `until psql select 1`
+(postgres-secrets.yaml, weight -8) but BEFORE the bootstrap (weight 0/5) hooks. The API applies the embedded
+schema migrations on boot (advisory-locked); the bootstrap Job's `until psql select 1`
 wait loop tolerates the longer CNPG bootstrap latency on a fresh cluster.
 
 PREREQUISITE: the CloudNativePG operator must already be installed in the
@@ -13,8 +13,8 @@ CNPG auto-creates the services <fullname>-postgres-rw / -ro / -r — do NOT
 hand-create them. The chart's DATABASE_URL points at <fullname>-postgres-rw.
 
 NOTE: imageName MUST include the pgvector extension (the schema declares
-`embedding vector(1536)`). The default CNPG image does not. Override
-postgres.cloudnativepg.imageName with a pgvector-enabled build.
+`embedding vector(1536)`). The chart selects the release pgvector-enabled build;
+custom postgres.cloudnativepg.imageName values must also include pgvector.
 */ -}}
 {{- $cfg := .Values.postgres.cloudnativepg -}}
 apiVersion: postgresql.cnpg.io/v1
@@ -35,8 +35,10 @@ spec:
       app.kubernetes.io/name: {{ include "constellation.name" . }}
       app.kubernetes.io/component: postgres
   instances: {{ $cfg.instances }}
-  imageName: {{ $cfg.imageName }}
+  imageName: {{ include "constellation.cnpgImage" . }}
+  {{- include "constellation.pullSecrets" . | nindent 2 }}
   primaryUpdateStrategy: {{ $cfg.primaryUpdateStrategy }}
+  enableSuperuserAccess: false
   {{- if $cfg.affinity.enabled }}
   affinity:
     topologyKey: {{ $cfg.affinity.topologyKey | quote }}
@@ -53,7 +55,47 @@ spec:
   backup:
     {{- toYaml . | nindent 4 }}
   {{- end }}
+  {{- if $.Values.metrics.postgresRole.enabled }}
+  # Declarative read-only metrics role (login + password managed here; SELECT
+  # grants on component_heartbeats / cve_feed_checkpoints owned by migration 186).
+  managed:
+    roles:
+      - name: {{ $.Values.metrics.postgresRole.name }}
+        ensure: present
+        login: true
+        passwordSecret:
+          name: {{ include "constellation.fullname" . }}-metrics-role
+  {{- end }}
+  {{- if $cfg.barmanCloud.enabled }}
+  plugins:
+    - name: {{ $cfg.barmanCloud.pluginName | quote }}
+      isWALArchiver: true
+      parameters:
+        # Explicit objectStoreName, else the chart-rendered backup.objectStore.
+        barmanObjectName: {{ include "constellation.barmanObjectStoreName" . | quote }}
+  {{- end }}
+  {{- if $cfg.barmanCloud.recovery.enabled }}
+  externalClusters:
+    - name: {{ $cfg.barmanCloud.recovery.sourceName | quote }}
+      plugin:
+        name: {{ $cfg.barmanCloud.pluginName | quote }}
+        parameters:
+          barmanObjectName: {{ $cfg.barmanCloud.recovery.objectStoreName | quote }}
+          serverName: {{ $cfg.barmanCloud.recovery.serverName | quote }}
+  {{- end }}
   bootstrap:
+    {{- if $cfg.barmanCloud.recovery.enabled }}
+    recovery:
+      source: {{ $cfg.barmanCloud.recovery.sourceName | quote }}
+      database: {{ $cfg.database | quote }}
+      owner: {{ $cfg.username | quote }}
+      secret:
+        name: {{ include "constellation.fullname" . }}-postgres
+      {{- with $cfg.barmanCloud.recovery.targetTime }}
+      recoveryTarget:
+        targetTime: {{ . | quote }}
+      {{- end }}
+    {{- else }}
     initdb:
       database: {{ $cfg.database }}
       owner: {{ $cfg.username }}
@@ -63,4 +105,27 @@ spec:
         - CREATE EXTENSION IF NOT EXISTS pgcrypto
         - CREATE EXTENSION IF NOT EXISTS pg_trgm
         - CREATE EXTENSION IF NOT EXISTS vector
+    {{- end }}
+{{- end }}
+{{- if and (eq (include "constellation.postgresMode" .) "cnpg") .Values.metrics.postgresRole.enabled }}
+---
+{{- $mrName := printf "%s-metrics-role" (include "constellation.fullname" .) }}
+{{- $mrExisting := lookup "v1" "Secret" .Release.Namespace $mrName }}
+{{- $mrPassword := "" }}
+{{- if and $mrExisting $mrExisting.data $mrExisting.data.password }}
+  {{- $mrPassword = $mrExisting.data.password | b64dec }}
+{{- else }}
+  {{- $mrPassword = randAlphaNum 32 }}
+{{- end }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $mrName }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    cnpg.io/reload: "true"
+type: kubernetes.io/basic-auth
+stringData:
+  username: {{ .Values.metrics.postgresRole.name | quote }}
+  password: {{ $mrPassword | quote }}
 {{- end }}

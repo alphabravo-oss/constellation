@@ -11,6 +11,10 @@ metadata:
 spec:
   revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
   replicas: {{ .Values.api.replicas }}
+{{- if or (and .Values.api.pcapStorage.enabled (eq .Values.api.pcapStorage.accessMode "ReadWriteOnce")) (and .Values.complianceScheduler.enabled (eq .Values.complianceScheduler.storage.accessMode "ReadWriteOnce")) }}
+  strategy:
+    type: Recreate
+{{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "constellation.name" . }}
@@ -20,6 +24,14 @@ spec:
       labels:
         app.kubernetes.io/name: {{ include "constellation.name" . }}
         app.kubernetes.io/component: api
+      {{- if .Values.api.metrics.annotations }}
+      # Annotation-based scrape discovery. Metrics live on the admin listener
+      # (:9090), never on the API port.
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: /metrics
+      {{- end }}
     spec:
       {{- include "constellation.pullSecrets" . | nindent 6 }}
       {{- include "constellation.podSecurityContext" . | nindent 6 }}
@@ -30,29 +42,6 @@ spec:
       {{- else }}
       automountServiceAccountToken: false
       {{- end }}
-      initContainers:
-        - name: wait-for-migrations
-          image: {{ .Values.migrate.psqlImage }}
-          {{- include "constellation.helperContainerSecurityContext" . | nindent 10 }}
-          command:
-            - /bin/sh
-            - -ec
-            - |
-              until psql "$DATABASE_URL" -Atc "select 1 from session_signing_keys limit 1" >/dev/null 2>&1; do
-                echo "waiting for database migrations"
-                sleep 2
-              done
-          env:
-            - name: HOME
-              value: /tmp
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "constellation.dsnSecret" . }}
-                  key: {{ include "constellation.dsnSecretKey" . }}
-          volumeMounts:
-            - name: tmp
-              mountPath: /tmp
       containers:
         - name: api
           image: {{ include "constellation.roleImage" (dict "ctx" . "role" "api") }}
@@ -61,10 +50,26 @@ spec:
           {{- with .Values.api.args }}
           args: {{- toYaml . | nindent 12 }}
           {{- end }}
-          ports: [{ containerPort: 8080, name: http }]
+          ports:
+            - { containerPort: 8080, name: http }
+            # Admin listener: /metrics, /healthz, /readyz and pprof (when
+            # enabled). Not exposed through the Ingress/Gateway.
+            - { containerPort: 9090, name: admin }
           env:
+            {{- if .Values.clusterRegistration.clusterId }}
+            # Local cluster UUID binds trusted protection to this installation only.
+            - name: CONSTELLATION_QUARANTINE_PROTECTED_NAMESPACES
+              value: {{ dict .Values.clusterRegistration.clusterId (include "constellation.protectedNamespaces" (dict "ctx" .) | fromJsonArray) | toJson | quote }}
+            {{- end }}
             - name: LISTEN_ADDR
               value: ":8080"
+            - name: ADMIN_LISTEN_ADDR
+              value: ":9090"
+            - name: CONSTELLATION_AGE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "constellation.cryptoSecretName" . }}
+                  key: age-key
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -83,6 +88,12 @@ spec:
 {{- end }}
             - name: CONSTELLATION_REQUIRE_JWT_KEYS
               value: {{ .Values.api.requireJWTKeys | quote }}
+            - name: PARTITION_STATISTICS_MAINTENANCE_ENABLED
+              value: {{ .Values.api.partitionStatisticsMaintenanceEnabled | quote }}
+{{- if .Values.api.supportBundleSigningKeySecret }}
+            - name: CONSTELLATION_SUPPORT_BUNDLE_SIGNING_KEY_FILE
+              value: /var/run/constellation/support-bundle-signing-key/private-key.pem
+{{- end }}
 {{- if .Values.api.leaderElection.enabled }}
             - name: LEADER_ELECTION_ENABLED
               value: "true"
@@ -121,9 +132,21 @@ spec:
                   optional: true
             - name: RUNTIME_AGENT_TOKEN_FILE
               value: /var/run/constellation/runtime-agent-token/token
+{{- if .Values.api.pcapStorage.enabled }}
+            - name: CONSTELLATION_DATA_DIR
+              value: /var/lib/constellation-pcap
+{{- end }}
+{{- if .Values.complianceScheduler.enabled }}
+            - name: REPORT_OUT_DIR
+              value: /var/lib/constellation-reports/reports
+{{- end }}
+            - name: CONSTELLATION_PCAP_RETENTION_ENABLED
+              value: {{ ternary "true" "false" (and .Values.api.pcapStorage.enabled .Values.api.pcapStorage.retentionEnabled) | quote }}
 {{- range $k, $v := .Values.api.env }}
+{{- if and (ne $k "CONSTELLATION_PCAP_RETENTION_ENABLED") (not (and $.Values.complianceScheduler.enabled (eq $k "REPORT_OUT_DIR"))) (not (and $.Values.api.pcapStorage.enabled (eq $k "CONSTELLATION_DATA_DIR"))) }}
             - name: {{ $k }}
               value: "{{ $v }}"
+{{- end }}
 {{- end }}
 {{- if .Values.astronomer.enabled }}
             - name: ASTRONOMER_JWKS_URL
@@ -153,16 +176,49 @@ spec:
             httpGet: { path: /healthz, port: http }
           resources: {{- toYaml .Values.api.resources | nindent 12 }}
           volumeMounts:
+{{- if .Values.complianceScheduler.enabled }}
+            - name: compliance-reports
+              mountPath: /var/lib/constellation-reports
+              readOnly: true
+{{- end }}
+{{- if .Values.api.pcapStorage.enabled }}
+            - name: pcap-evidence
+              mountPath: /var/lib/constellation-pcap
+{{- end }}
             - name: runtime-agent-token
               mountPath: /var/run/constellation/runtime-agent-token
               readOnly: true
+{{- if .Values.api.supportBundleSigningKeySecret }}
+            - name: support-bundle-signing-key
+              mountPath: /var/run/constellation/support-bundle-signing-key
+              readOnly: true
+{{- end }}
             - name: tmp
               mountPath: /tmp
       volumes:
+{{- if .Values.complianceScheduler.enabled }}
+        - name: compliance-reports
+          persistentVolumeClaim:
+            claimName: {{ .Values.complianceScheduler.storage.existingClaim | quote }}
+            readOnly: true
+{{- end }}
+{{- if .Values.api.pcapStorage.enabled }}
+        - name: pcap-evidence
+          persistentVolumeClaim:
+            claimName: {{ .Values.api.pcapStorage.existingClaim | quote }}
+{{- end }}
         - name: runtime-agent-token
           secret:
             secretName: {{ include "constellation.runtimeAgentTokenSecret" . }}
             optional: true
+{{- if .Values.api.supportBundleSigningKeySecret }}
+        - name: support-bundle-signing-key
+          secret:
+            secretName: {{ .Values.api.supportBundleSigningKeySecret | quote }}
+            items:
+              - key: {{ .Values.api.supportBundleSigningKeySecretKey | quote }}
+                path: private-key.pem
+{{- end }}
         - name: tmp
           emptyDir: {}
 ---
@@ -182,6 +238,39 @@ spec:
       targetPort: http
       protocol: TCP
       name: http
+    - port: 9090
+      targetPort: admin
+      protocol: TCP
+      name: admin
+{{- if (or .Values.api.metrics.serviceMonitor.enabled .Values.metrics.serviceMonitor.enabled) }}
+---
+# Prometheus Operator discovery of the admin listener. Requires the
+# monitoring.coreos.com CRDs; gated so clusters without them still install.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "constellation.fullname" . }}-api
+  namespace: {{ .Values.api.metrics.serviceMonitor.namespace | default .Release.Namespace }}
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+    {{- with .Values.api.metrics.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: api
+  endpoints:
+    - port: admin
+      path: /metrics
+      interval: {{ .Values.api.metrics.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.api.metrics.serviceMonitor.scrapeTimeout }}
+{{- end }}
 {{- if .Values.api.leaderElection.enabled }}
 ---
 # D5: leader election RBAC. Only rendered when api.leaderElection.enabled — the

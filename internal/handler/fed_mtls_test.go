@@ -1,3 +1,5 @@
+//go:build integration
+
 package handler
 
 import (
@@ -8,6 +10,7 @@ import (
 	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,18 +18,27 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/alphabravocompany/constellation/internal/auth"
+	colcrypto "github.com/alphabravocompany/constellation/internal/crypto"
 	"github.com/alphabravocompany/constellation/pkg/audit"
-	regsecrets "github.com/alphabravocompany/constellation/pkg/registry/secrets"
 )
 
-// testFedSealer returns a real AES-256-GCM cipher under a fixed key so the fed-CA at-rest
-// encryption round-trips deterministically across the D2 tests (Seal at generate, Open at
-// load must use the same key).
+// fedTestKey is one age identity per test process so the D2 tests seal at
+// generate and open at load under the same key.
+var fedTestKey = sync.OnceValues(func() (string, error) {
+	secret, _, err := colcrypto.GenerateKey()
+	return secret, err
+})
+
+// testFedSealer returns the process-wide test encryptor.
 func testFedSealer(t *testing.T) auth.Sealer {
 	t.Helper()
-	c, err := regsecrets.New(make([]byte, 32))
+	secret, err := fedTestKey()
 	if err != nil {
-		t.Fatalf("build test cipher: %v", err)
+		t.Fatal(err)
+	}
+	c, err := colcrypto.NewEncryptor(secret)
+	if err != nil {
+		t.Fatalf("build test encryptor: %v", err)
 	}
 	return c
 }
@@ -87,7 +99,7 @@ func fedTestClient(srv *httptest.Server, cert *tls.Certificate) *http.Client {
 
 func pollSync(t *testing.T, client *http.Client, srv *httptest.Server, bearer string) int {
 	t.Helper()
-	req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/federation/sync?since=0", nil)
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+"/api/v1/federation/sync?since=0", nil)
 	req.Header.Set("Authorization", "Bearer "+bearer)
 	resp, err := client.Do(req)
 	if err != nil {

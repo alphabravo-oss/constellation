@@ -1,6 +1,7 @@
 {{- if .Values.discoverer.enabled }}
 {{- $clusterName := default (default .Release.Namespace .Values.clusterRegistration.name) .Values.discoverer.clusterName -}}
 {{- $orgID := default .Values.clusterRegistration.orgID .Values.discoverer.orgID -}}
+{{- $tokenSecret := default (include "constellation.runtimeAgentTokenSecret" .) .Values.discoverer.tokenSecret -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -32,7 +33,12 @@ spec:
           {{- with .Values.discoverer.args }}
           args: {{- toYaml . | nindent 12 }}
           {{- end }}
+          ports:
+            - { containerPort: 9090, name: admin }
+          {{- include "constellation.adminProbes" . | nindent 10 }}
           env:
+            - name: ADMIN_LISTEN_ADDR
+              value: ":9090"
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -59,13 +65,13 @@ spec:
             - name: CONSTELLATION_DISCOVERER_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "constellation.runtimeAgentTokenSecret" . }}
+                  name: {{ $tokenSecret }}
                   key: token
                   optional: true
             - name: RUNTIME_AGENT_TOKEN
               valueFrom:
                 secretKeyRef:
-                  name: {{ include "constellation.runtimeAgentTokenSecret" . }}
+                  name: {{ $tokenSecret }}
                   key: token
                   optional: true
             - name: RUNTIME_AGENT_TOKEN_FILE
@@ -82,7 +88,7 @@ spec:
           emptyDir: {}
         - name: runtime-agent-token
           secret:
-            secretName: {{ include "constellation.runtimeAgentTokenSecret" . }}
+            secretName: {{ $tokenSecret }}
             optional: true
 ---
 apiVersion: v1

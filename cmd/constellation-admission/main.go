@@ -15,6 +15,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -29,8 +30,8 @@ import (
 	"github.com/alphabravocompany/constellation/internal/admissionevidence"
 	"github.com/alphabravocompany/constellation/internal/admissiongroups"
 	rtquar "github.com/alphabravocompany/constellation/internal/runtime/quarantine"
+	"github.com/alphabravocompany/constellation/internal/telemetry"
 	"github.com/alphabravocompany/constellation/pkg/admission"
-	"github.com/alphabravocompany/constellation/pkg/observability"
 	"github.com/alphabravocompany/constellation/pkg/quarantine"
 	"github.com/alphabravocompany/constellation/pkg/version"
 )
@@ -62,6 +63,8 @@ func main() {
 	// by default (in-cluster informer/lister); set --nslabels-enabled=false to
 	// disable when the webhook has no namespaces list/watch grant. Unwired, a rule
 	// carrying a namespaceSelector safely never fires (name-based Namespaces work).
+	exemptNamespaces := flag.String("exempt-namespaces", os.Getenv("CONSTELLATION_ADMISSION_EXEMPT_NAMESPACES"), "Comma-separated namespaces the built-in rules skip (system namespaces using hostNetwork/hostPID)")
+	exemptLabel := flag.String("exempt-namespace-label", envOrDefault("CONSTELLATION_ADMISSION_EXEMPT_NAMESPACE_LABEL", "constellation.alphabravo.io/admission"), "Namespace label whose value \"ignore\" exempts the namespace from the built-in rules (empty disables)")
 	nsLabelsEnabled := flag.Bool("nslabels-enabled", true, "Resolve namespace labels for per-rule match.namespaceSelector scoping (A5)")
 	nsLabelsKubeconfig := flag.String("nslabels-kubeconfig", os.Getenv("KUBECONFIG"), "kubeconfig for the namespace label resolver (empty = in-cluster)")
 	flag.Parse()
@@ -69,7 +72,7 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
-	tel, err := observability.Init(ctx, "constellation-admission")
+	tel, err := telemetry.Init(ctx, telemetry.ConfigFromEnv("constellation-admission"))
 	if err != nil {
 		_, _ = os.Stderr.WriteString("observability init: " + err.Error() + "\n")
 		os.Exit(1)
@@ -82,6 +85,10 @@ func main() {
 	}()
 
 	policyEngine := admission.NewEngine()
+	if exempt := splitCSV(*exemptNamespaces); len(exempt) > 0 || *exemptLabel != "" {
+		policyEngine.SetRules(admission.ExemptNamespaces(admission.DefaultRules(), exempt, *exemptLabel))
+		slog.Info("admission: built-in rules exempt namespaces", slog.Any("namespaces", exempt), slog.String("label", *exemptLabel))
+	}
 	// Composite engine: the built-in PolicyEngine plus the (optional) Rego and
 	// CEL engines loaded from engine='opa'/'cel' policy rows. Without the chain
 	// those rows would never be evaluated (silent fail-open). Quarantine,
@@ -274,6 +281,14 @@ func main() {
 	}))
 
 	mux := http.NewServeMux()
+	if qsrc != nil {
+		client, err := newAdmissionKubeClient(os.Getenv("KUBECONFIG"))
+		if err != nil {
+			tel.Logger.Error("quarantine owner resolver unavailable; owned pods in quarantined namespaces will be refused", "err", err)
+		} else {
+			engine.SetWorkloadOwners(&workloadOwnerResolver{client: client})
+		}
+	}
 	mux.HandleFunc("/validate", validateHandler(chain, tel))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, _ *http.Request) {
@@ -347,7 +362,7 @@ func main() {
 	}
 }
 
-func validateHandler(engine admission.Engine, tel *observability.Telemetry) http.HandlerFunc {
+func validateHandler(engine admission.Engine, tel *telemetry.Telemetry) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var review admissionv1.AdmissionReview
 		if err := json.NewDecoder(r.Body).Decode(&review); err != nil {
@@ -372,4 +387,21 @@ func validateHandler(engine admission.Engine, tel *observability.Telemetry) http
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(out)
 	}
+}
+
+func splitCSV(raw string) []string {
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func envOrDefault(key, def string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return def
 }

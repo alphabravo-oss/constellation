@@ -4,13 +4,23 @@
 # Runs every 6h by default (operator-managed CronJob). Walks the audit chain, verifies
 # integrity, freezes the rolling window to S3, and signs the manifest with cosign.
 
-ARG GO_VERSION=1.26
+# GO_VERSION has NO default: the Makefile passes --build-arg GO_VERSION from go.mod
+# (make check-go-version enforces this). The builder is additionally pinned by
+# multi-arch index digest so a Go bump is one value change per file.
+# Refresh with: docker buildx imagetools inspect golang:<ver>-bookworm
+# Pinned to the 1.27.3-bookworm multi-arch index digest of the Go builder (matches go.mod).
+ARG GO_VERSION
+ARG GO_IMAGE_DIGEST=sha256:5c3e9b43cfd3bb95c7937462e29d87ada57b481a96fa23ad0eb61778d7a00110
 ARG COSIGN_VERSION=2.6.1
 ARG COSIGN_SHA256_AMD64=064954c5d8c7e3b28188eee5b1727b31c411550bc5fefd41aa672d3c761d103a
 ARG COSIGN_SHA256_ARM64=56a16480bdd56ec789abaa65924402f6b92c0041f06885995853c05567b76f34
-ARG RUNTIME_IMAGE=debian:bookworm-slim
+# Debian runtime (bundles the cosign tool; see ADR 0005 for why this role is not
+# distroless). Pinned by index digest; refresh with:
+#   docker buildx imagetools inspect debian:bookworm-slim
+ARG DEBIAN_IMAGE=debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
+ARG RUNTIME_IMAGE=debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
 
-FROM golang:${GO_VERSION}-bookworm AS build
+FROM golang:${GO_VERSION}-bookworm@${GO_IMAGE_DIGEST} AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -20,7 +30,7 @@ ENV CGO_ENABLED=0 GOOS=linux
 RUN go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
       -o /out/audit-archiver ./cmd/audit-archiver
 
-FROM debian:bookworm-slim AS cosign
+FROM ${DEBIAN_IMAGE} AS cosign
 ARG TARGETARCH
 ARG COSIGN_VERSION
 ARG COSIGN_SHA256_AMD64

@@ -45,8 +45,8 @@ type SecurityPolicy struct {
 
 	// Brute-force lockout knobs (NV BlockAfterFailedLoginCount / BlockedLoginFailedTime).
 	// Zero means "use the deploy-time default" (maxFailedLogins / loginLockoutWindow consts).
-	LockoutThreshold      int `json:"lockout_threshold"`       // consecutive failures before lockout
-	LockoutWindowMinutes  int `json:"lockout_window_minutes"`  // how long the account stays locked
+	LockoutThreshold     int `json:"lockout_threshold"`      // consecutive failures before lockout
+	LockoutWindowMinutes int `json:"lockout_window_minutes"` // how long the account stays locked
 }
 
 // Policy bounds, mirroring NeuVector's UserIdleTimeoutMin/Max intent. These keep an admin
@@ -62,8 +62,8 @@ const (
 	historyDepthCeil  = 32           // matches NeuVector _maxPwdHistoryCount
 	lockoutThreshMin  = 1
 	lockoutThreshMax  = 100
-	lockoutWindowMin  = 1            // 1 minute
-	lockoutWindowMax  = 24 * 60      // 24 hours
+	lockoutWindowMin  = 1       // 1 minute
+	lockoutWindowMax  = 24 * 60 // 24 hours
 )
 
 // EffectiveLockoutThreshold returns the configured consecutive-failure lockout threshold, or

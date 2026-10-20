@@ -9,6 +9,7 @@ import (
 // runner. We can't pin to specific pids but we CAN assert structural
 // invariants (we see ourselves; pid 1 exists; comm names look sane).
 func TestCollectProcesses_LiveProc(t *testing.T) {
+	t.Parallel()
 	p := CollectProcesses(ProcessOptions{NodeName: "test"})
 	if p.Node != "test" {
 		t.Errorf("Node = %q", p.Node)
@@ -33,6 +34,7 @@ func TestCollectProcesses_LiveProc(t *testing.T) {
 }
 
 func TestCollectProcesses_RespectsMaxItems(t *testing.T) {
+	t.Parallel()
 	p := CollectProcesses(ProcessOptions{MaxItems: 5})
 	if len(p.Items) > 5 {
 		t.Errorf("len(Items) = %d, want ≤ 5", len(p.Items))
@@ -43,6 +45,7 @@ func TestCollectProcesses_RespectsMaxItems(t *testing.T) {
 }
 
 func TestCollectProcesses_CmdlineCap(t *testing.T) {
+	t.Parallel()
 	p := CollectProcesses(ProcessOptions{CmdlineCap: 4, MaxItems: 1000})
 	for _, proc := range p.Items {
 		if len(proc.Cmdline) > 4 {
@@ -52,6 +55,7 @@ func TestCollectProcesses_CmdlineCap(t *testing.T) {
 }
 
 func TestCollectProcesses_ExcludesKernelThreadsByDefault(t *testing.T) {
+	t.Parallel()
 	p := CollectProcesses(ProcessOptions{MaxItems: 100000})
 	// Kernel threads have an empty cmdline; with IncludeKernelThreads
 	// false (default), they shouldn't appear in the snapshot.

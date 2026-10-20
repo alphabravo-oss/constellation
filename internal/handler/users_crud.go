@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
@@ -91,53 +93,53 @@ func callerCanGrantRole(subj Subject, custom map[string][]rbac.Verb, role string
 // Org-scoped, privilege-guarded, audited (user.create). POST /users.
 func (h *Users) Create(w http.ResponseWriter, r *http.Request) {
 	if h.db == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "db unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusServiceUnavailable, "db unavailable")
 		return
 	}
 	subj, ok := SubjectFrom(r.Context())
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "no subject"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "no subject")
 		return
 	}
 	var body createUserBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid body")
 		return
 	}
 	body.Email = strings.ToLower(strings.TrimSpace(body.Email))
 	body.DisplayName = strings.TrimSpace(body.DisplayName)
 	body.Role = strings.TrimSpace(body.Role)
 	if body.Email == "" || !strings.Contains(body.Email, "@") {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "a valid email is required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "a valid email is required")
 		return
 	}
 	if body.DisplayName == "" {
 		body.DisplayName = body.Email
 	}
 	if !rbac.IsRole(body.Role) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid role"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid role")
 		return
 	}
 	custom := orgCustomRoleVerbs(r.Context(), h.db.Pool(), subj.OrgID)
 	if !callerCanGrantRole(subj, custom, body.Role) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "cannot grant a role more privileged than your own"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusForbidden, "cannot grant a role more privileged than your own")
 		return
 	}
 	// Enforce the org's password policy at creation, same profile the change-password path uses.
 	profile := auth.LoadPasswordProfile(r.Context(), h.db.Pool(), subj.OrgID)
 	if err := auth.ValidatePassword(profile, body.Password); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	hash, err := auth.HashPassword(body.Password)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "hash password"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "hash password")
 		return
 	}
 
 	tx, err := h.db.Pool().Begin(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "begin"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "begin")
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
@@ -149,21 +151,21 @@ VALUES ($1, $2, $3, $4, TRUE)
 ON CONFLICT (org_id, email) DO NOTHING
 RETURNING id`, subj.OrgID, body.Email, body.DisplayName, hash).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "a user with that email already exists"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusConflict, "a user with that email already exists")
 		return
 	}
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "create user"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "create user")
 		return
 	}
 	if _, err := tx.Exec(r.Context(), `
 INSERT INTO role_assignments (user_id, role, scope_org_id)
 VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, id, body.Role, subj.OrgID); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "grant role"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "grant role")
 		return
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "commit"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "commit")
 		return
 	}
 	if h.audit != nil {
@@ -185,35 +187,35 @@ VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, id, body.Role, subj.OrgID); err != 
 // PUT /users/{id}.
 func (h *Users) Update(w http.ResponseWriter, r *http.Request) {
 	if h.db == nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "db unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusServiceUnavailable, "db unavailable")
 		return
 	}
 	subj, ok := SubjectFrom(r.Context())
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "no subject"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "no subject")
 		return
 	}
 	targetID, err := targetUserID(r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	var body updateUserBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid body")
 		return
 	}
 	if body.Email == nil && body.Role == nil && body.Active == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "nothing to update"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "nothing to update")
 		return
 	}
 	self := targetID == subj.UserID
 	if self && body.Role != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot change your own role"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "cannot change your own role")
 		return
 	}
 	if self && body.Active != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot change your own active state"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "cannot change your own active state")
 		return
 	}
 
@@ -221,25 +223,25 @@ func (h *Users) Update(w http.ResponseWriter, r *http.Request) {
 	if body.Email != nil {
 		newEmail = strings.ToLower(strings.TrimSpace(*body.Email))
 		if newEmail == "" || !strings.Contains(newEmail, "@") {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "a valid email is required"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "a valid email is required")
 			return
 		}
 	}
 	if body.Role != nil {
 		if !rbac.IsRole(strings.TrimSpace(*body.Role)) {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid role"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid role")
 			return
 		}
 		custom := orgCustomRoleVerbs(r.Context(), h.db.Pool(), subj.OrgID)
 		if !callerCanGrantRole(subj, custom, strings.TrimSpace(*body.Role)) {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "cannot grant a role more privileged than your own"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusForbidden, "cannot grant a role more privileged than your own")
 			return
 		}
 	}
 
 	tx, err := h.db.Pool().Begin(r.Context())
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "begin"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "begin")
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
@@ -249,11 +251,11 @@ func (h *Users) Update(w http.ResponseWriter, r *http.Request) {
 	if err := tx.QueryRow(r.Context(),
 		`SELECT EXISTS (SELECT 1 FROM users WHERE id = $1 AND org_id = $2)`,
 		targetID, subj.OrgID).Scan(&exists); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup user"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "lookup user")
 		return
 	}
 	if !exists {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "not found")
 		return
 	}
 
@@ -270,11 +272,11 @@ UPDATE users
 			targetID, subj.OrgID, body.Email, negBool(body.Active), bumpEpoch)
 		if err != nil {
 			// A duplicate email (org_id, email unique) surfaces here.
-			writeJSON(w, http.StatusConflict, map[string]string{"error": "update user (email may already exist)"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusConflict, "update user (email may already exist)")
 			return
 		}
 		if tag.RowsAffected() == 0 {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "not found")
 			return
 		}
 	} else if bumpEpoch {
@@ -282,7 +284,7 @@ UPDATE users
 		if _, err := tx.Exec(r.Context(),
 			`UPDATE users SET session_epoch = session_epoch + 1, updated_at = now() WHERE id = $1 AND org_id = $2`,
 			targetID, subj.OrgID); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "bump epoch"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "bump epoch")
 			return
 		}
 	}
@@ -295,14 +297,14 @@ UPDATE users
 			  WHERE user_id = $1 AND scope_org_id = $2
 			    AND scope_cluster_id IS NULL AND scope_project_id IS NULL`,
 			targetID, subj.OrgID); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "clear roles"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "clear roles")
 			return
 		}
 		if _, err := tx.Exec(r.Context(),
 			`INSERT INTO role_assignments (user_id, role, scope_org_id)
 			 VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
 			targetID, strings.TrimSpace(*body.Role), subj.OrgID); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "grant role"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "grant role")
 			return
 		}
 	}
@@ -310,13 +312,13 @@ UPDATE users
 	// Deactivating a user tears down its live credentials in the same transaction.
 	if body.Active != nil && !*body.Active {
 		if err := RevokeUserSessions(r.Context(), tx, targetID); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "revoke sessions"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "revoke sessions")
 			return
 		}
 	}
 
 	if err := tx.Commit(r.Context()); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "commit"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "commit")
 		return
 	}
 

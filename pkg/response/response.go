@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/alphabravocompany/constellation/pkg/notify"
 )
@@ -119,6 +120,9 @@ func EventTypeMatches(ruleType, eventType EventType) bool {
 	if isSecurityUmbrella(ruleType) && isSecurityEvent(eventType) {
 		return true
 	}
+	if ruleType == EventThreat && (eventType == EventDLP || eventType == EventWAF) {
+		return true
+	}
 	if isScanEvent(ruleType) && isScanEvent(eventType) {
 		return true
 	}
@@ -132,6 +136,8 @@ func isSecurityEvent(t EventType) bool {
 	switch t {
 	case EventRuntime, EventSecurity, EventThreat, EventIncident, EventViolation, EventDLP, EventWAF:
 		return true
+	case EventAdmission, EventScan, EventCompliance, EventEvent, EventActivity, EventCVEReport, EventAdmissionControl, EventServerless:
+		return false
 	default:
 		return false
 	}
@@ -207,21 +213,35 @@ type Rule struct {
 	Selector   WorkloadSelector `json:"workload_match"`
 }
 
+// ProcessTarget identifies the original kernel-observed process, never an
+// arbitrary process selected later from a workload inventory.
+type ProcessTarget struct {
+	Node        string
+	PID         uint32
+	Comm        string
+	ContainerID string
+	BootID      string
+	StartBootNS string
+	StartTicks  string
+}
+
 // Event is the normalized event that the engine matches against. Constellation's
 // Finding and RuntimeEvent both fold down to this shape at the alert router.
 type Event struct {
-	ID          string
-	Name        string
-	Type        EventType
-	Severity    string
-	Cluster     string
-	Namespace   string
-	Workload    string
-	Labels      map[string]string
-	ProcessName string
-	CVEs        []CVERef
-	Title       string
-	URL         string
+	ProcessTarget *ProcessTarget
+	ObservedAt    time.Time
+	ID            string
+	Name          string
+	Type          EventType
+	Severity      string
+	Cluster       string
+	Namespace     string
+	Workload      string
+	Labels        map[string]string
+	ProcessName   string
+	CVEs          []CVERef
+	Title         string
+	URL           string
 }
 
 // CVERef is a CVE reference attached to an Event.
@@ -628,6 +648,8 @@ func (r *Rule) Validate() error {
 			if err != nil || n < 0 {
 				return fmt.Errorf("response: %s requires a non-negative integer value, got %q", c.Type, c.Value)
 			}
+		case CondName, CondLevel, CondCVECritical, CondProc, CondEventType:
+			// free-form values; regex conditions were compiled above
 		}
 	}
 	for _, a := range r.Actions {

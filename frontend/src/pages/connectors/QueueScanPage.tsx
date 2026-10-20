@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { ArrowLeft, Play } from "lucide-react";
 
@@ -30,7 +30,7 @@ export function QueueScanPage() {
     onSuccess: () => {
       toast.success("Scan job queued");
       void queryClient.invalidateQueries({ queryKey: ["scan-jobs"] });
-      navigate(backTo);
+      navigate({ href: backTo });
     },
     onError: () => toast.error("Unable to queue scan job"),
   });
@@ -41,7 +41,7 @@ export function QueueScanPage() {
       <PageHeader
         title="Queue a scan"
         description="Enqueue an on-demand image scan by reference."
-        backLink={<Link to={backTo} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Connectors</Link>}
+        backLink={<Link to="." href={backTo} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Connectors</Link>}
       />
 
       <Card title="Scan target">
@@ -63,7 +63,7 @@ export function QueueScanPage() {
               <Play className="h-4 w-4" aria-hidden />
               Queue scan
             </Button>
-            <Button type="button" variant="ghost" size="lg" onClick={() => navigate(backTo)}>Cancel</Button>
+            <Button type="button" variant="ghost" size="lg" onClick={() => navigate({ href: backTo })}>Cancel</Button>
           </div>
         </form>
       </Card>

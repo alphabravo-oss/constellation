@@ -3,10 +3,15 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
+	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -47,18 +52,6 @@ type repositoryScanDTO struct {
 	HighFindings      int                        `json:"high_findings"`
 	LastSeenAt        time.Time                  `json:"last_seen_at"`
 	Metadata          json.RawMessage            `json:"metadata,omitempty"`
-}
-
-type repositoryScanMetadata struct {
-	RepositoryRef string `json:"repository_ref"`
-	RepositoryURL string `json:"repository_url"`
-	SourceRef     string `json:"source_ref"`
-	CommitSHA     string `json:"commit_sha"`
-	Branch        string `json:"branch"`
-	Path          string `json:"path"`
-	Workflow      string `json:"workflow"`
-	RunID         string `json:"run_id"`
-	PackageCount  int    `json:"package_count"`
 }
 
 type repositoryEvidenceDTO struct {
@@ -116,25 +109,7 @@ type scanAttestationSummaryDTO struct {
 	ExpiresAt          *time.Time `json:"expires_at,omitempty"`
 }
 
-func (h *RepositoryInventoryHandler) List(w http.ResponseWriter, r *http.Request) {
-	subj, ok := SubjectFrom(r.Context())
-	if !ok {
-		jsonError(w, http.StatusUnauthorized, "subject required")
-		return
-	}
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 500 {
-		limit = 100
-	}
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	if offset < 0 {
-		offset = 0
-	}
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	branch := strings.TrimSpace(r.URL.Query().Get("branch"))
-	workflow := strings.TrimSpace(r.URL.Query().Get("workflow"))
-
-	rows, err := h.db.Pool().Query(r.Context(), `
+const repositoryInventorySQL = `
 WITH finding_rollup AS (
     SELECT scan_target_id,
            COUNT(*) FILTER (WHERE lifecycle = 'open')::int AS open_findings,
@@ -161,7 +136,7 @@ SELECT st.id, st.ref, st.source_type, COALESCE(st.source_ref, ''),
        WHERE org_id = st.org_id
          AND scan_target_id = st.id
          AND evidence_type = 'package-inventory'
-       ORDER BY observed_at DESC
+       ORDER BY observed_at DESC, id DESC
        LIMIT 1
   ) ev ON true
   LEFT JOIN LATERAL (
@@ -169,7 +144,7 @@ SELECT st.id, st.ref, st.source_type, COALESCE(st.source_ref, ''),
         FROM scan_jobs
        WHERE org_id = st.org_id
          AND target_id = st.id
-       ORDER BY requested_at DESC
+       ORDER BY requested_at DESC, id DESC
        LIMIT 1
   ) sj ON true
   LEFT JOIN LATERAL (
@@ -178,41 +153,87 @@ SELECT st.id, st.ref, st.source_type, COALESCE(st.source_ref, ''),
         FROM scan_result_attestations
        WHERE org_id = st.org_id
          AND scan_target_id = st.id
-       ORDER BY trusted DESC, observed_at DESC, created_at DESC
+       ORDER BY trusted DESC, observed_at DESC, created_at DESC, id DESC
        LIMIT 1
   ) att ON true
   LEFT JOIN finding_rollup fr ON fr.scan_target_id = st.id
  WHERE st.org_id = $1
    AND st.type = 'repository'
-   AND ($2 = '' OR st.ref ILIKE '%' || $2 || '%'
-        OR COALESCE(st.source_ref, '') ILIKE '%' || $2 || '%'
-        OR st.metadata->>'repository_ref' ILIKE '%' || $2 || '%'
-        OR st.metadata->>'repository_url' ILIKE '%' || $2 || '%'
-        OR st.metadata->>'commit_sha' ILIKE '%' || $2 || '%')
-   AND ($3 = '' OR st.metadata->>'branch' = $3)
-   AND ($4 = '' OR st.metadata->>'workflow' = $4)
- ORDER BY st.last_seen_at DESC
- LIMIT $5 OFFSET $6`, subj.OrgID, q, branch, workflow, limit, offset)
+   AND ($2 = '' OR strpos(lower(st.ref), lower($2)) > 0
+        OR strpos(lower(COALESCE(st.source_ref, '')), lower($2)) > 0
+        OR strpos(lower(CASE WHEN jsonb_typeof(st.metadata->'repository_ref')='string' THEN st.metadata->>'repository_ref' ELSE '' END), lower($2)) > 0
+        OR strpos(lower(CASE WHEN jsonb_typeof(st.metadata->'repository_url')='string' THEN st.metadata->>'repository_url' ELSE '' END), lower($2)) > 0
+        OR strpos(lower(CASE WHEN jsonb_typeof(st.metadata->'commit_sha')='string' THEN st.metadata->>'commit_sha' ELSE '' END), lower($2)) > 0)
+   AND ($3 = '' OR CASE WHEN jsonb_typeof(st.metadata->'branch')='string' THEN st.metadata->>'branch' ELSE '' END = $3)
+   AND ($4 = '' OR CASE WHEN jsonb_typeof(st.metadata->'workflow')='string' THEN st.metadata->>'workflow' ELSE '' END = $4)`
+
+func repositoryInventoryDefinition(r *http.Request) (inventorylist.Definition, inventorylist.Options, error) {
+	subj, ok := SubjectFrom(r.Context())
+	if !ok {
+		return inventorylist.Definition{}, inventorylist.Options{}, fmt.Errorf("subject required")
+	}
+	values, err := inventorylist.Query(r)
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, "query: "+err.Error())
+		return inventorylist.Definition{}, inventorylist.Options{}, err
+	}
+	o, err := inventorylist.Parse(values, map[string]string{"repository": "lower(COALESCE(NULLIF(CASE WHEN jsonb_typeof(metadata->'repository_ref')='string' THEN metadata->>'repository_ref' ELSE '' END,''),repository_ref))", "source": "lower(COALESCE(CASE WHEN jsonb_typeof(metadata->'branch')='string' THEN metadata->>'branch' ELSE '' END,''))", "packages": "CASE WHEN latest_evidence_id IS NULL AND (metadata->>'package_count') ~ '^[0-9]{1,9}$' THEN (metadata->>'package_count')::bigint ELSE package_count END", "scan": "COALESCE(latest_observed_at,last_seen_at)", "findings": "open_findings"}, "scan")
+	if err != nil {
+		return inventorylist.Definition{}, o, err
+	}
+	status, err := inventorylist.Filter(values, "status", "pending", "running", "completed", "failed", "paused", "canceled", "not-queued")
+	if err != nil {
+		return inventorylist.Definition{}, o, err
+	}
+	args := []any{subj.OrgID, strings.TrimSpace(values.Get("q")), strings.TrimSpace(values.Get("branch")), strings.TrimSpace(values.Get("workflow")), status}
+	where := "$5 = '' OR ($5='not-queued' AND latest_job_status='') OR latest_job_status=$5"
+	return inventorylist.Definition{SQL: repositoryInventorySQL, Columns: "id,repository_ref,source_type,source_ref,inventory_hash,metadata,last_seen_at,latest_evidence_id,package_count,latest_observed_at,latest_job_id,latest_job_status,attestation_id,att_subject_kind,att_subject_digest,att_predicate_type,att_payload_hash,att_status,att_trusted,att_trust_policy_id,att_reason,att_signer_identity,att_signer_issuer,att_observed_at,att_expires_at,open_findings,critical_findings,high_findings", Where: where, Summary: `jsonb_build_object('total',count(*),'packages',COALESCE(sum(CASE WHEN latest_evidence_id IS NULL AND (metadata->>'package_count') ~ '^[0-9]{1,9}$' THEN (metadata->>'package_count')::bigint ELSE package_count END),0),'findings',COALESCE(sum(open_findings),0),'critical_high',COALESCE(sum(critical_findings+high_findings),0),'with_evidence',count(latest_evidence_id),'active_jobs',count(*) FILTER(WHERE latest_job_status IN('pending','running')),'stale_evidence',count(*) FILTER(WHERE COALESCE(latest_observed_at,last_seen_at) < NOW()-INTERVAL '7 days'),'attestations',count(attestation_id),'trusted_attestations',count(*) FILTER(WHERE attestation_id IS NOT NULL AND att_trusted),'unverified_attestations',count(*) FILTER(WHERE attestation_id IS NOT NULL AND att_status='unverified'),'branches',count(DISTINCT NULLIF(CASE WHEN jsonb_typeof(metadata->'branch')='string' THEN metadata->>'branch' ELSE '' END,'')),'workflows',count(DISTINCT NULLIF(CASE WHEN jsonb_typeof(metadata->'workflow')='string' THEN metadata->>'workflow' ELSE '' END,'')))`, Args: args}, o, nil
+}
+
+func (h *RepositoryInventoryHandler) List(w http.ResponseWriter, r *http.Request) {
+	if _, ok := SubjectFrom(r.Context()); !ok {
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
 		return
 	}
-	defer rows.Close()
-
-	out := make([]repositoryScanDTO, 0)
-	for rows.Next() {
-		item, err := scanRepositoryRow(rows)
-		if err != nil {
-			jsonError(w, http.StatusInternalServerError, "scan: "+err.Error())
-			return
-		}
-		out = append(out, item)
+	d, o, err := repositoryInventoryDefinition(r)
+	if err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
+		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"repository_scans": out,
-		"limit":            limit,
-		"offset":           offset,
+	items, meta, err := inventorylist.Read(r.Context(), h.db.Pool(), d, o, func(row inventorylist.Row) (repositoryScanDTO, error) { return scanRepositoryRow(row) })
+	if err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"repository_scans": items, "limit": o.Limit, "offset": o.Offset, "sort": o.Sort, "order": o.Order, "total": meta.Total, "has_more": meta.HasMore, "summary": meta.Summary})
+}
+
+func (h *RepositoryInventoryHandler) ExportCSV(w http.ResponseWriter, r *http.Request) {
+	if _, ok := SubjectFrom(r.Context()); !ok {
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
+		return
+	}
+	d, o, err := repositoryInventoryDefinition(r)
+	if err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
+		return
+	}
+	body, meta, err := inventorylist.CSV(r.Context(), h.db.Pool(), d, o, func(row inventorylist.Row) (repositoryScanDTO, error) { return scanRepositoryRow(row) }, []string{"ID", "Repository", "URL", "Source", "Branch", "Commit", "Workflow", "Packages", "Open findings", "Critical", "High", "Job status", "Evidence observed", "Last seen", "Attestation status", "Attestation trusted"}, func(item repositoryScanDTO) []string {
+		observed := ""
+		if item.LatestObservedAt != nil {
+			observed = item.LatestObservedAt.Format(time.RFC3339)
+		}
+		attStatus, attTrusted := "", ""
+		if item.LatestAttestation != nil {
+			attStatus = item.LatestAttestation.VerificationStatus
+			attTrusted = strconv.FormatBool(item.LatestAttestation.Trusted)
+		}
+		return []string{item.ID.String(), item.RepositoryRef, item.RepositoryURL, item.SourceType, item.Branch, item.CommitSHA, item.Workflow, strconv.Itoa(item.PackageCount), strconv.Itoa(item.OpenFindings), strconv.Itoa(item.CriticalFindings), strconv.Itoa(item.HighFindings), item.LatestJobStatus, observed, item.LastSeenAt.Format(time.RFC3339), attStatus, attTrusted}
 	})
+	if err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	inventorylist.WriteCSV(w, "constellation-repository-scans.csv", body, meta)
 }
 
 func (h *RepositoryInventoryHandler) Get(w http.ResponseWriter, r *http.Request) {
@@ -293,7 +314,7 @@ func scanRepositoryRow(row repositoryRowScanner) (repositoryScanDTO, error) {
 	item.LatestEvidenceID = evidenceID
 	item.LatestObservedAt = evidenceObservedAt
 	item.LatestJobID = jobID
-	if evidencePackageCount != nil {
+	if evidenceID != nil && evidencePackageCount != nil {
 		item.PackageCount = *evidencePackageCount
 	}
 	if attestationID != nil && attestationObservedAt != nil {
@@ -317,27 +338,24 @@ func scanRepositoryRow(row repositoryRowScanner) (repositoryScanDTO, error) {
 }
 
 func applyRepositoryMetadata(item *repositoryScanDTO, metadataRaw json.RawMessage) {
-	if item == nil || len(metadataRaw) == 0 {
+	if item == nil {
 		return
 	}
-	var metadata repositoryScanMetadata
-	if err := json.Unmarshal(metadataRaw, &metadata); err != nil {
-		return
-	}
-	item.RepositoryURL = metadata.RepositoryURL
-	item.CommitSHA = metadata.CommitSHA
-	item.Branch = metadata.Branch
-	item.Path = metadata.Path
-	item.Workflow = metadata.Workflow
-	item.RunID = metadata.RunID
-	if metadata.RepositoryRef != "" {
-		item.RepositoryRef = metadata.RepositoryRef
+	fields := inventorylist.MetadataFields(metadataRaw)
+	item.RepositoryURL = inventorylist.MetadataText(fields, "repository_url")
+	item.CommitSHA = inventorylist.MetadataText(fields, "commit_sha")
+	item.Branch = inventorylist.MetadataText(fields, "branch")
+	item.Path = inventorylist.MetadataText(fields, "path")
+	item.Workflow = inventorylist.MetadataText(fields, "workflow")
+	item.RunID = inventorylist.MetadataText(fields, "run_id")
+	if ref := inventorylist.MetadataText(fields, "repository_ref"); ref != "" {
+		item.RepositoryRef = ref
 	}
 	if item.SourceRef == "" {
-		item.SourceRef = metadata.SourceRef
+		item.SourceRef = inventorylist.MetadataText(fields, "source_ref")
 	}
 	if item.PackageCount == 0 {
-		item.PackageCount = metadata.PackageCount
+		item.PackageCount = inventorylist.MetadataPackageCount(fields)
 	}
 }
 

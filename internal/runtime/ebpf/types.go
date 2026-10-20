@@ -27,6 +27,7 @@ type Event struct {
 
 // ProcessEvent is an exec/execveat observation.
 type ProcessEvent struct {
+	StartBootNS uint64 // kernel task start_boottime; zero with legacy/unsupported objects
 	PID         uint32
 	PPID        uint32
 	UID         uint32

@@ -3,13 +3,17 @@ package policy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"gopkg.in/yaml.v3"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -60,7 +64,7 @@ func (p *Policies) List(w http.ResponseWriter, r *http.Request) {
 	category := r.URL.Query().Get("category")
 	clusterArg, err := sqlx.ParseClusterIDParam(r)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	rows, err := p.db.Pool().Query(r.Context(),
@@ -72,7 +76,7 @@ func (p *Policies) List(w http.ResponseWriter, r *http.Request) {
           ORDER BY category, name`,
 		subj.OrgID, category, clusterArg)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()
@@ -81,7 +85,7 @@ func (p *Policies) List(w http.ResponseWriter, r *http.Request) {
 		var d policyDTO
 		if err := rows.Scan(&d.ID, &d.Name, &d.Description, &d.Engine, &d.Category,
 			&d.Enabled, &d.Mode, &d.Version, &d.SpecYAML); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		out = append(out, d)
@@ -106,10 +110,12 @@ type createPolicyBody struct {
 	Mode        string `json:"mode"`
 }
 
+var errPolicyClusterNotFound = errors.New("policy cluster not found in organization")
+
 func (p *Policies) Create(w http.ResponseWriter, r *http.Request) {
 	var body createPolicyBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad request")
 		return
 	}
 	if body.Mode == "" {
@@ -118,17 +124,22 @@ func (p *Policies) Create(w http.ResponseWriter, r *http.Request) {
 	subj, _ := authctx.SubjectFrom(r.Context())
 	clusterArg, err := sqlx.ParseClusterIDParam(r)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	var id uuid.UUID
-	err = p.db.Pool().QueryRow(r.Context(),
-		`INSERT INTO policies (org_id, cluster_id, name, description, engine, category, spec_yaml, enabled, mode)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-		subj.OrgID, clusterArg, body.Name, body.Description, body.Engine, body.Category,
-		body.SpecYAML, body.Enabled, body.Mode).Scan(&id)
+	selectors := admissionPolicyGroupSelectors(body.Engine, body.SpecYAML)
+	err = p.createGroupPolicy(r.Context(), subj.OrgID, clusterArg, body, selectors, &id)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		if errors.Is(err, errPolicyClusterNotFound) {
+			apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "cluster not found")
+			return
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "group not found")
+			return
+		}
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	uid := subj.UserID
@@ -164,45 +175,61 @@ type updatePolicyBody struct {
 func (p *Policies) Update(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	var body updatePolicyBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad request")
 		return
 	}
 	subj, _ := authctx.SubjectFrom(r.Context())
 	// Fed (master-authored) policies are read-only on a joint: local edits would
 	// drift from the master and be silently reverted on the next sync. Reject them.
 	if isFed, err := handler.PolicyIsFed(r.Context(), p.db.Pool(), id, subj.OrgID); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	} else if isFed {
-		httpx.WriteJSON(w, http.StatusForbidden, map[string]string{"error": handler.ErrFedReadOnly().Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusForbidden, handler.ErrFedReadOnly().Error())
 		return
 	}
-	if body.Enabled != nil {
+	var engine string
+	err = p.db.Pool().QueryRow(r.Context(), `SELECT engine FROM policies WHERE id=$1 AND org_id=$2`, id, subj.OrgID).Scan(&engine)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if engine == "constellation-admission" {
+		err = p.updateAdmissionPolicy(r.Context(), subj.OrgID, id, body)
+		if errors.Is(err, pgx.ErrNoRows) {
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "group not found")
+			return
+		}
+		if err != nil {
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	} else if body.Enabled != nil {
 		if _, err := p.db.Pool().Exec(r.Context(),
 			`UPDATE policies SET enabled = $2, updated_at = NOW() WHERE id = $1 AND org_id = $3`,
 			id, *body.Enabled, subj.OrgID); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	}
-	if body.Mode != nil {
+	if engine != "constellation-admission" && body.Mode != nil {
 		if _, err := p.db.Pool().Exec(r.Context(),
 			`UPDATE policies SET mode = $2, updated_at = NOW() WHERE id = $1 AND org_id = $3`,
 			id, *body.Mode, subj.OrgID); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	}
-	if body.SpecYAML != nil {
+	if engine != "constellation-admission" && body.SpecYAML != nil {
 		if _, err := p.db.Pool().Exec(r.Context(),
 			`UPDATE policies SET spec_yaml = $2, updated_at = NOW() WHERE id = $1 AND org_id = $3`,
 			id, *body.SpecYAML, subj.OrgID); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	}
@@ -234,6 +261,114 @@ func (p *Policies) Update(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func admissionPolicyGroupSelectors(engine, specYAML string) []string {
+	if engine != "constellation-admission" {
+		return nil
+	}
+	var document struct {
+		Spec struct {
+			Match struct {
+				Groups []string `yaml:"groups"`
+			} `yaml:"match"`
+		} `yaml:"spec"`
+	}
+	if yaml.Unmarshal([]byte(specYAML), &document) != nil {
+		return nil
+	}
+	selectors := make([]string, 0, len(document.Spec.Match.Groups))
+	for _, selector := range document.Spec.Match.Groups {
+		if selector = strings.TrimSpace(selector); selector != "" {
+			selectors = append(selectors, selector)
+		}
+	}
+	return selectors
+}
+
+func (p *Policies) lockAdmissionPolicyGroups(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, clusterArg any, selectors []string) error {
+	for _, selector := range selectors {
+		var groupID uuid.UUID
+		if err := tx.QueryRow(ctx, `
+SELECT id FROM groups
+ WHERE org_id=$1 AND (id::text=$2 OR lower(name)=lower($2))
+   AND (cluster_id IS NULL OR ($3::uuid IS NOT NULL AND cluster_id=$3))
+ LIMIT 1 FOR KEY SHARE`, orgID, selector, clusterArg).Scan(&groupID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *Policies) createGroupPolicy(ctx context.Context, orgID uuid.UUID, clusterArg any, body createPolicyBody, selectors []string, id *uuid.UUID) error {
+	tx, err := p.db.Pool().Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var lockedOrgID uuid.UUID
+	if err := tx.QueryRow(ctx, `SELECT id FROM orgs WHERE id=$1 FOR KEY SHARE`, orgID).Scan(&lockedOrgID); err != nil {
+		return err
+	}
+	if clusterID, ok := clusterArg.(uuid.UUID); ok {
+		var lockedClusterID uuid.UUID
+		if err := tx.QueryRow(ctx, `SELECT id FROM clusters WHERE id=$1 AND org_id=$2 FOR KEY SHARE`, clusterID, orgID).Scan(&lockedClusterID); errors.Is(err, pgx.ErrNoRows) {
+			return errPolicyClusterNotFound
+		} else if err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(ctx, `LOCK TABLE policies IN ROW EXCLUSIVE MODE`); err != nil {
+		return err
+	}
+	if err := p.lockAdmissionPolicyGroups(ctx, tx, orgID, clusterArg, selectors); err != nil {
+		return err
+	}
+	if err := tx.QueryRow(ctx, `
+INSERT INTO policies (org_id, cluster_id, name, description, engine, category, spec_yaml, enabled, mode)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`, orgID, clusterArg, body.Name, body.Description,
+		body.Engine, body.Category, body.SpecYAML, body.Enabled, body.Mode).Scan(id); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func (p *Policies) updateAdmissionPolicy(ctx context.Context, orgID, id uuid.UUID, body updatePolicyBody) error {
+	if body.Enabled == nil && body.Mode == nil && body.SpecYAML == nil {
+		return nil
+	}
+	tx, err := p.db.Pool().Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var lockedOrgID uuid.UUID
+	if err := tx.QueryRow(ctx, `SELECT id FROM orgs WHERE id=$1 FOR KEY SHARE`, orgID).Scan(&lockedOrgID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `LOCK TABLE policies IN ROW EXCLUSIVE MODE`); err != nil {
+		return err
+	}
+	var clusterID *uuid.UUID
+	var specYAML string
+	if err := tx.QueryRow(ctx, `SELECT cluster_id, spec_yaml FROM policies WHERE id=$1 AND org_id=$2 FOR UPDATE`, id, orgID).
+		Scan(&clusterID, &specYAML); errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	if body.SpecYAML != nil {
+		specYAML = *body.SpecYAML
+	}
+	if err := p.lockAdmissionPolicyGroups(ctx, tx, orgID, clusterID, admissionPolicyGroupSelectors("constellation-admission", specYAML)); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+UPDATE policies SET enabled=COALESCE($3,enabled), mode=COALESCE($4,mode), spec_yaml=COALESCE($5,spec_yaml), updated_at=NOW()
+ WHERE id=$1 AND org_id=$2`, id, orgID, body.Enabled, body.Mode, body.SpecYAML); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 type simulatePolicyBody struct {
@@ -378,30 +513,30 @@ type clusterResourceSampleDTO struct {
 func (p *Policies) Simulate(w http.ResponseWriter, r *http.Request) {
 	var body simulatePolicyBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad request")
 		return
 	}
 	manifest := strings.TrimSpace(body.Manifest)
 	source := "pasted manifest"
 	if manifest == "" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "manifest or cluster_resource_id required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "manifest or cluster_resource_id required")
 		return
 	}
 
 	workload, err := parseAdmissionWorkload(manifest)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	subj, _ := authctx.SubjectFrom(r.Context())
 	clusterArg, err := sqlx.ParseClusterIDParam(r)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	policies, err := p.simulationPolicies(r.Context(), subj.OrgID, clusterArg)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	var evidence constadmission.EvidenceSource
@@ -410,7 +545,7 @@ func (p *Policies) Simulate(w http.ResponseWriter, r *http.Request) {
 	}
 	groupResolver, err := p.admissionGroupResolver(r.Context(), subj.OrgID, clusterArg)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	matches := evaluateAdmissionPolicies(r.Context(), workload, manifest, policies, evidence, groupResolver, clusterArg)
@@ -692,7 +827,7 @@ func evaluateAdmissionPolicies(ctx context.Context, workload admissionSimulation
 			continue
 		}
 		reason := ""
-		action := "warn"
+		var action string
 		evidenceItems := []string{"engine=constellation-admission"}
 		evidenceDetails := []admissionSimulationEvidenceDetailDTO{}
 		if podErr == nil {

@@ -1,5 +1,5 @@
 // Cross-domain L4 network-flow ingest plumbing: the row wire-shape plus the
-// per-request workload/IP resolvers. This stays in the parent `handler`
+// per-request IP resolver. This stays in the parent `handler`
 // package because it is shared by two domains — the netpolicy ingest handler
 // (handler/netpolicy.NetworkFlowsIngest.Bulk) and the runtime threat-ingest
 // handler (runtime_threats_ingest.go). The netpolicy sub-package consumes it
@@ -23,7 +23,7 @@ import (
 // snake_case and stable — the agent's main.go emits exactly these keys.
 //
 // The agent doesn't know its cluster_id; the server derives it from the
-// runtime-agent token's org plus best-effort lookups against `deployments`.
+// runtime-agent token's resolved cluster binding.
 //
 // Wave 4: dp-sourced rows additionally populate ClientBytes/ServerBytes (the
 // per-direction byte counts from DPMsgConnect), Sessions (count of distinct
@@ -74,70 +74,6 @@ type FlowIngestRow struct {
 // FlowIngestRequest is the wire shape POST'd: a JSON array (envelope-less so
 // the agent can stream-encode in one pass).
 type FlowIngestRequest = []FlowIngestRow
-
-// clusterResolver caches workload -> cluster_id lookups against `deployments`
-// for the duration of one ingest request. Avoids N round-trips when a batch
-// holds many rows for the same pair of workloads.
-type clusterResolver struct {
-	db       *db.DB
-	orgID    uuid.UUID
-	fallback uuid.UUID
-	cache    map[string]uuid.UUID
-}
-
-func newClusterResolver(d *db.DB, orgID, fallback uuid.UUID) *clusterResolver {
-	return &clusterResolver{db: d, orgID: orgID, fallback: fallback, cache: map[string]uuid.UUID{}}
-}
-
-func (c *clusterResolver) lookup(ctx context.Context, src, dst string) uuid.UUID {
-	// Prefer the cluster_id whose `deployments` row matches the src workload
-	// — the source pod's cluster is the authoritative one. Fall back to dst,
-	// then to the org's primary cluster.
-	for _, wl := range []string{src, dst} {
-		if cid, ok := c.resolveOne(ctx, wl); ok {
-			return cid
-		}
-	}
-	return c.fallback
-}
-
-func (c *clusterResolver) resolveOne(ctx context.Context, workload string) (uuid.UUID, bool) {
-	if workload == "" || strings.HasPrefix(workload, "external/") {
-		return uuid.Nil, false
-	}
-	if cid, ok := c.cache[workload]; ok {
-		if cid == uuid.Nil {
-			return uuid.Nil, false
-		}
-		return cid, true
-	}
-	ns, name, ok := splitNamespacedName(workload)
-	if !ok {
-		c.cache[workload] = uuid.Nil
-		return uuid.Nil, false
-	}
-	var cid uuid.UUID
-	err := c.db.Pool().QueryRow(ctx, `
-SELECT cluster_id
-  FROM deployments
- WHERE org_id = $1 AND namespace = $2 AND name = $3
- ORDER BY last_seen_at DESC NULLS LAST
- LIMIT 1`, c.orgID, ns, name).Scan(&cid)
-	if err != nil || cid == uuid.Nil {
-		c.cache[workload] = uuid.Nil
-		return uuid.Nil, false
-	}
-	c.cache[workload] = cid
-	return cid, true
-}
-
-func splitNamespacedName(workload string) (ns, name string, ok bool) {
-	i := strings.IndexByte(workload, '/')
-	if i <= 0 || i == len(workload)-1 {
-		return "", "", false
-	}
-	return workload[:i], workload[i+1:], true
-}
 
 // ---------------------------------------------------------------------------
 // Wave M2: batched IP -> workload resolution
@@ -204,7 +140,7 @@ func pickCandidate(cands []ipCandidate, at time.Time) (string, bool) {
 	return best.label, true
 }
 
-func newIPResolver(ctx context.Context, d *db.DB, orgID uuid.UUID, rows FlowIngestRequest) *ipResolver {
+func newIPResolverForCluster(ctx context.Context, d *db.DB, orgID, clusterID uuid.UUID, rows FlowIngestRequest) *ipResolver {
 	r := &ipResolver{db: d, orgID: orgID, pods: map[string][]ipCandidate{}, svcs: map[string][]ipCandidate{}}
 	seen := map[string]struct{}{}
 	add := func(s string) {
@@ -234,7 +170,8 @@ func newIPResolver(ctx context.Context, d *db.DB, orgID uuid.UUID, rows FlowInge
 	if rs, err := d.Pool().Query(ctx, `
 SELECT host(ip), namespace, COALESCE(deployment, pod_name), first_seen_at, last_seen_at
   FROM pod_ips
- WHERE org_id = $1 AND ip = ANY($2::inet[])`, orgID, ips); err == nil {
+ WHERE org_id = $1 AND ip = ANY($2::inet[])
+   AND cluster_id = $3`, orgID, ips, clusterID); err == nil {
 		defer rs.Close()
 		for rs.Next() {
 			var ip, ns, name string
@@ -253,7 +190,8 @@ SELECT host(ip), namespace, COALESCE(deployment, pod_name), first_seen_at, last_
 	if rs, err := d.Pool().Query(ctx, `
 SELECT host(cluster_ip), namespace, name, first_seen_at, last_seen_at
   FROM cluster_services
- WHERE org_id = $1 AND cluster_ip = ANY($2::inet[])`, orgID, ips); err == nil {
+ WHERE org_id = $1 AND cluster_ip = ANY($2::inet[])
+   AND cluster_id = $3`, orgID, ips, clusterID); err == nil {
 		defer rs.Close()
 		for rs.Next() {
 			var ip, ns, name string
@@ -335,27 +273,13 @@ func normalizeIP(s string) (string, bool) {
 // back. These thin exported wrappers let netpolicy.NetworkFlowsIngest.Bulk
 // drive the same resolver subsystem without duplicating it.
 
-// ClusterResolver is the exported alias of the per-request workload->cluster_id
-// resolver used by the netpolicy ingest handler.
-type ClusterResolver = clusterResolver
-
-// NewClusterResolver builds a ClusterResolver for one ingest request.
-func NewClusterResolver(d *db.DB, orgID, fallback uuid.UUID) *ClusterResolver {
-	return newClusterResolver(d, orgID, fallback)
-}
-
-// Lookup resolves the authoritative cluster_id for a (src,dst) workload pair.
-func (c *clusterResolver) Lookup(ctx context.Context, src, dst string) uuid.UUID {
-	return c.lookup(ctx, src, dst)
-}
-
 // IPResolver is the exported alias of the per-request batched IP->workload
 // resolver used by the netpolicy ingest handler.
 type IPResolver = ipResolver
 
-// NewIPResolver builds an IPResolver for one ingest request body.
-func NewIPResolver(ctx context.Context, d *db.DB, orgID uuid.UUID, rows FlowIngestRequest) *IPResolver {
-	return newIPResolver(ctx, d, orgID, rows)
+// NewIPResolverForCluster resolves IPs only within the reporting cluster.
+func NewIPResolverForCluster(ctx context.Context, d *db.DB, orgID, clusterID uuid.UUID, rows FlowIngestRequest) *IPResolver {
+	return newIPResolverForCluster(ctx, d, orgID, clusterID, rows)
 }
 
 // Resolve maps a (workload, addr) pair to its best-known label as of flow time

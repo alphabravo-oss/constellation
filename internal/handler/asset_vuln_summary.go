@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -40,23 +42,23 @@ func (h *AssetVuln) Get(w http.ResponseWriter, r *http.Request) {
 	subj, _ := SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	var exists bool
 	if err := h.db.Pool().QueryRow(r.Context(),
 		`SELECT EXISTS(SELECT 1 FROM assets WHERE id = $1 AND org_id = $2)`, id, subj.OrgID).Scan(&exists); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if !exists {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "not found")
 		return
 	}
 
 	summary, err := recountAssetVulnFromFindings(r.Context(), h.db.Pool(), subj.OrgID, id, "")
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, summary)

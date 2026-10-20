@@ -27,10 +27,18 @@ The chart deploys:
 - scanner (Deployment)
 - runtime-agent (DaemonSet)
 - frontend nginx (Deployment + Service + optional Ingress)
-- vulndb-importer (optional CronJob)
-- embedded pgvector StatefulSet (optional; off in prod)
+- optional audit-archiver CronJob
+- CloudNativePG `Cluster` running the chart's pgvector operand image (the
+  default `postgres.mode=cnpg`; `external` points at an operator-managed DSN)
+- optional in-cluster backup object store (`backup.objectStore`: RustFS +
+  Barman Cloud `ObjectStore` + bucket Job) for CNPG WAL archiving
 - bootstrap Jobs (TLS certs + service tokens)
 - optional namespace NetworkPolicies with default-deny and explicit flows
+- optional Prometheus Operator `ServiceMonitor` for the API admin listener
+
+Helm is the only supported deployment path (ADR 0007). There is no embedded
+single-replica Postgres any more: in-cluster Postgres is always CloudNativePG,
+so the CNPG operator is a prerequisite for the default install.
 
 ## Three-node HA and shared Gateway
 
@@ -51,14 +59,16 @@ cert-manager Issuer because a public ACME issuer cannot issue Kubernetes
 PostgreSQL uses CloudNativePG. `instances: 1` is supported for small installs;
 HA mode fails Helm rendering unless it has at least three instances. The
 release includes a CNPG-compatible pgvector operand image. Before calling an
-installation production-ready, configure `postgres.cloudnativepg.backup`,
-enable `scheduledBackup`, and prove a point-in-time restore. Longhorn can be
-selected explicitly and remains the cluster-default CSI in the K3s profile.
+installation production-ready, point `postgres.cloudnativepg.barmanCloud` at
+an off-host `ObjectStore` (or enable the in-cluster `backup.objectStore` for
+development), enable `scheduledBackup`, and prove a point-in-time restore
+(see `docs/cnpg-recovery.md`). Longhorn can be selected explicitly and remains
+the cluster-default CSI in the K3s profile.
 When NetworkPolicies are enabled, the chart also permits the documented CNPG
 operator-to-instance traffic on ports 8000 and 5432; change
 `networkPolicies.cnpgOperator` if the operator uses another namespace or label.
 
-Run `make release-check VERSION=v0.2.0` before publishing. After images are
+Run `make release-check VERSION=v0.3.0` before publishing. After images are
 published, run the same command with `VERIFY_PUBLISHED=1`; it fails unless
 every role image has a trusted keyless signature and source-bound SLSA
 provenance.
@@ -67,25 +77,17 @@ provenance.
 
 ## Building Images Locally
 
-Go role images expect the separate `constellation-vulndb` producer checkout as a
-BuildKit named context. From the default `constellation-all` layout this works
-without extra flags:
+The scanner image builds from this repository and includes Syft, Trivy, and
+Grype; it does not require the retired `constellation-vulndb` checkout:
 
 ```bash
 make image-scanner
 make images
 ```
 
-If `constellation-vulndb` lives somewhere else, pass its path explicitly:
-
-```bash
-make image-scanner VULNDB_BUILD_CONTEXT=/path/to/constellation-vulndb
-```
-
-The Dockerfiles create a temporary Go workspace inside the build container and
-replace `github.com/alphabravocompany/constellation-vulndb` with that sibling
-context. This keeps the VulnDB producer separate while avoiding private module
-fetches inside isolated Docker builds.
+The normal scanner image refreshes its Trivy and Grype databases at runtime.
+For a disconnected first boot, build `make image-scanner-airgap` or pre-load
+the scanner caches as described in `docs/offline-scanning.md`.
 
 ---
 
@@ -160,10 +162,17 @@ kubectl -n constellation-system port-forward svc/constellation-frontend 8080:80
 ### Bare-metal k3s
 
 ```bash
+# Once per cluster: the CloudNativePG operator (not bundled by the chart).
+kubectl apply --server-side -f \
+  https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.24/releases/cnpg-1.24.1.yaml
+
 helm upgrade --install constellation deploy/charts/constellation \
   -n constellation-system --create-namespace \
   -f deploy/charts/constellation/examples/values-k3s.yaml
 ```
+
+The k3s profile runs a single CNPG instance on `local-path` storage; raise
+`postgres.cloudnativepg.instances` to 3 for HA.
 
 ### Amazon EKS
 
@@ -260,9 +269,8 @@ The post-install bootstrap Job:
 4. Optionally upserts a `ConstellationCluster` CR named after the namespace.
 
 The scanner Deployment reads `CONSTELLATION_SCANNER_TOKEN` + `SCANNER_TOKEN`
-from the first Secret. It also mounts the configured VulnDB volume read-only and
-sets `CONSTELLATION_VULNDB_PATH` so Syft package inventory can be matched by the
-local `constellation-vulndb` store. The runtime-agent DaemonSet reads
+from the first Secret. It uses Syft, Trivy, and Grype, with scanner database
+caches under `/var/lib/scanner-cache`. The runtime-agent DaemonSet reads
 `RUNTIME_AGENT_TOKEN` from the second Secret.
 
 To override the bootstrap mint with a pre-existing token Secret:
@@ -295,11 +303,19 @@ networkPolicies:
 
 When enabled, the chart renders a namespace default-deny policy and explicit
 allows for frontend-to-API, scanner/runtime-agent-to-API, API/jobs/admission to
-Postgres, hook Jobs to the Kubernetes API, DNS, and HTTPS egress for registry,
-S3, OCI, OIDC, and webhook integrations. Native NetworkPolicy cannot address
-the Kubernetes API server, ingress controllers, or managed databases by Service
-name, so tighten the CIDR defaults to your cluster, VPC, control-plane, ingress,
-and RDS/Cloud SQL ranges.
+Postgres, CNPG instance-to-instance and operator traffic, the Barman sidecar to
+the in-cluster object store (when `backup.objectStore.enabled`), hook Jobs to
+the Kubernetes API, DNS, and HTTPS egress for registry, S3, OCI, OIDC, and
+webhook integrations. Native NetworkPolicy cannot address the Kubernetes API
+server, ingress controllers, or managed databases by Service name, so tighten
+the CIDR defaults to your cluster, VPC, control-plane, ingress, and RDS/Cloud
+SQL ranges.
+
+The API admin listener (port 9090, `/metrics`) is reachable from any pod in the
+release namespace; add a monitoring namespace with
+`api.metrics.allowFrom: { kubernetes.io/metadata.name: monitoring }`. Kubelet
+readiness/liveness probes come from the node, not from a pod, so default-deny
+does not block them on the supported CNIs.
 
 The Network Map policy lifecycle has a separate applier Deployment. It watches
 approved lifecycle rows in Postgres and applies only protect-mode manifest
@@ -368,7 +384,12 @@ inline network enforcement are disabled.
 
 `namespaced=true` is the default. In that mode the operator watches namespaced
 resources only in the Helm release namespace and receives a namespaced Role for
-services, deployments, daemonsets, cronjobs, HPAs, leases, and events.
+services, deployments, daemonsets, cronjobs, HPAs, leases, and events. The
+leases/events grants back `operator.leaderElection.enabled` (default `true`),
+so `operator.replicas` can be raised without a second reconciler running. The
+chart always passes the managed-workload image flags (`--agent-image`,
+`--runtime-agent-image`, `--scanner-image`, `--admission-image`) derived from
+the same role images it deploys; the operator has no `:latest` fallback.
 
 The `ConstellationCluster` CRD is cluster-scoped, so the operator still receives
 a small ClusterRole for `constellationclusters` and `constellationclusters/status`.
@@ -378,61 +399,21 @@ ClusterRole.
 
 ---
 
-## VulnDB Importer
+## Vulnerability Databases
 
-`constellation-vulndb` remains the producer of vulnerability intelligence.
-`vulndbImporter.enabled=true` runs `vulndb-bundle-install` on a schedule to
-consume a delivered artifact and atomically update the shared Constellation
-store. The source can be an OCI ref, mounted files, HTTPS or presigned S3 URLs,
-native `s3://` objects, or a prebuilt bbolt store.
+The active scanner uses Syft for package/SBOM inventory and Trivy plus Grype
+for vulnerability matching. `scanner.engines.*` selects those engines. The
+scanner refreshes its own vulnerability databases according to
+`scanner.vulnDB.refreshInterval`; `scanner.vulnDB.offline=true` disables
+internet refreshes and requires pre-loaded data. With one scanner replica,
+`scanner.cache.persistent=true` mounts a dedicated PVC for the caches. A
+multi-replica scanner uses pod-local caches instead of sharing a RWO claim.
 
-Production installs should disable direct manual API writes and enforce trust
-and freshness:
-
-```yaml
-vulndb:
-  manualUpload:
-    enabled: false
-  readiness:
-    requireBundle: true
-    maxAge: 168h
-  trust:
-    requireSignatures: true
-    publicKeySecret: constellation-vulndb-cosign-public-key
-    publicKeySecretKey: cosign.pub
-  freshness:
-    maxAge: 168h
-vulndbImporter:
-  enabled: true
-  installJob:
-    enabled: true
-  source:
-    kind: oci
-    ref: ghcr.io/alphabravocompany/constellation-vulndb-bundle:latest
-```
-
-The `:latest` ref above is a VulnDB artifact channel, not an application
-container image. Production safety comes from `requireSignatures`, freshness
-limits, and atomic local store replacement. Pin `vulndbImporter.source.ref` to
-an OCI digest when you need exact bundle replay for change-control.
-`vulndbImporter.installJob.enabled=true` runs the same importer once during
-Helm install/upgrade so the API can become ready without waiting for the next
-cron tick.
-
-For large bundles or prebuilt bbolt stores, leave `vulndbImporter.workDir`
-empty unless you have a dedicated larger volume. The empty default stores
-download, extraction, and validation work files under
-`<vulndb.mountPath>/.vulndb-work`, which keeps importer scratch usage on the
-shared VulnDB PVC instead of small pod-local ephemeral storage.
-
-When `requireSignatures=true`, OCI sources are verified with `cosign verify`
-before pull. File, URL, S3, and prebuilt-store sources use detached cosign
-signature bundles beside the artifact (`.sig`) unless explicit signature paths or
-URLs are supplied to the installer image.
-
-When `vulndb.readiness.requireBundle=true`, `/readyz` returns `503` until the
-API can open the local bbolt store. If `vulndb.readiness.maxAge` is set, the
-bundle's `exported_at` metadata must also be within that duration.
+The API's `cve_records` catalog is separate from those scanner caches and is
+updated by the live KEV/EPSS importers; NVD enrichment is opt-in through system
+configuration. The old `constellation-vulndb` bundle importer and its Helm
+values are not part of the active chart. The `scanner.vulnDB` value name refers
+to Trivy/Grype cache refresh settings, not that retired producer.
 
 ---
 
@@ -485,28 +466,173 @@ astronomer:
 
 ---
 
+## Signed support bundles
+
+Support-bundle signing is optional and uses a dedicated Ed25519 PKCS#8 PEM key,
+not the API's JWT or federation keys. Keep the private key in an existing
+Kubernetes Secret; the chart never creates or embeds it in Helm values.
+
+```bash
+openssl genpkey -algorithm Ed25519 -out support-bundle-signing-key.pem
+kubectl -n constellation-system create secret generic constellation-support-bundle-signing \
+  --from-file=private-key.pem=support-bundle-signing-key.pem
+helm upgrade constellation deploy/charts/constellation -n constellation-system \
+  --reuse-values --set api.supportBundleSigningKeySecret=constellation-support-bundle-signing
+```
+
+The API reads the mounted key from
+`CONSTELLATION_SUPPORT_BUNDLE_SIGNING_KEY_FILE` when generating a bundle. A
+configured but missing or invalid key makes the request fail rather than return
+an unsigned bundle. Without the setting, bundles remain explicitly unsigned.
+The optional `api.supportBundleSigningKeySecretKey` value changes the Secret
+data key from its default `private-key.pem`.
+
+For a signed bundle, first recompute `integrity.sha256` from the redacted
+`sections` object using Go `encoding/json` serialization. Then verify the
+base64 Ed25519 `integrity.signature` over the UTF-8 string formed by joining
+these lines with `\n` and **no trailing newline**:
+
+1. `constellation.support_bundle.signature.v1`
+2. `schema_version`
+3. `bundle_id`
+4. `generated_at` normalized to UTC RFC3339Nano
+5. `org_id`
+6. `integrity.sha256`
+
+`integrity.public_key` is the base64 raw Ed25519 public key and
+`integrity.key_id` is its lowercase SHA-256 hex fingerprint. Pin the expected
+public key or fingerprint through a separate trusted channel; a key carried in
+the bundle alone does **not** authenticate who signed it. Retain old public
+keys when rotating the Secret so older bundles remain verifiable.
+
+From the repository root, verify a downloaded bundle with the standalone
+offline command and a fingerprint obtained independently of the bundle:
+
+```bash
+GOWORK=off go run ./cmd/constellation-support-bundle-verify \
+  --file support-bundle.json --key-id "$PINNED_SUPPORT_BUNDLE_KEY_ID"
+```
+
+The verifier checks the redacted sections hash, signing-key fingerprint,
+bundle identity signature, and Ed25519 signature. It rejects unsigned bundles,
+untrusted keys, malformed input, and tampering.
+
+## Asynchronous support-bundle jobs
+
+System Health's **Bundle jobs** tab queues redacted bundles and shows persisted
+job history, expiry, and a link to each job's audit/download history. Component
+diagnostics can queue the same job and link to System Health. The original
+`GET /api/v1/support/bundle` endpoint remains available for synchronous CLI
+downloads.
+
+The job API requires `manage_system_config`:
+
+| Method | Path | Result |
+|---|---|---|
+| `POST` | `/api/v1/support/bundle/jobs` | Persist a queued job; returns `202` with its ID and audit link. |
+| `GET` | `/api/v1/support/bundle/jobs?limit=50` | List newest jobs; follow `next_cursor` for older pages. |
+| `GET` | `/api/v1/support/bundle/jobs/{id}` | Read queued, running, ready, failed, or expired status. |
+| `GET` | `/api/v1/support/bundle/jobs/{id}/download` | Download a ready bundle; returns `409` while pending or `410` after expiry. |
+
+The audit-history link uses
+`GET /api/v1/audit/events?support_bundle_job_id={id}` (requires `read_audit`) to
+show every create, completion and download receipt for that job.
+
+API replicas claim jobs through PostgreSQL, so queued work survives a replica
+restart and stale leases are recovered. Only verified, redacted bundle JSON is
+stored. Ready and failed jobs expire after seven days; expiry clears the stored
+payload. Creation and download fail closed when their audit receipt cannot be
+written. Worker completion waits for a retried audit receipt before advertising
+a bundle as ready for download. The deployment signing key above also signs
+asynchronous bundles.
+
+## Metrics and the admin listener
+
+Every Go role serves `/healthz`, `/readyz` and `/metrics` on an admin listener
+(`ADMIN_LISTEN_ADDR`, `:9090`, container port `admin`); the API additionally
+serves pprof there when enabled. Metrics are never on the API port, so they are
+not reachable through the Ingress/Gateway `/api` route. The chart:
+
+- sets `prometheus.io/scrape|port|path` annotations on API pods
+  (`api.metrics.annotations`, default `true`);
+- exposes `admin` (9090) on the API Service;
+- optionally renders a `monitoring.coreos.com/v1 ServiceMonitor`
+  (`api.metrics.serviceMonitor.enabled`, default `false`; add
+  `serviceMonitor.labels` to match your Prometheus `serviceMonitorSelector`);
+- uses the admin listener for the discoverer, network-policy applier,
+  compliance scheduler and kube-bench worker readiness/liveness probes.
+
+```yaml
+api:
+  metrics:
+    serviceMonitor:
+      enabled: true
+      labels: { release: kube-prometheus-stack }
+    allowFrom: { kubernetes.io/metadata.name: monitoring }
+```
+
+---
+
+## Backups: in-cluster object store
+
+`backup.objectStore.enabled=true` renders a single-replica RustFS StatefulSet
+on one PVC, a Barman Cloud `ObjectStore` pointing at it, random credentials
+(re-used on upgrade), and a revision-scoped Job that creates the bucket with
+the AWS CLI. It requires `postgres.mode=cnpg` and the CNPG Barman Cloud plugin
+installed cluster-wide. With `barmanCloud.objectStoreName` left empty the CNPG
+Cluster archives to the rendered store automatically:
+
+```yaml
+backup:
+  objectStore:
+    enabled: true
+    storage: 8Gi
+    bucket: constellation-recovery
+    retentionPolicy: 7d
+postgres:
+  cloudnativepg:
+    barmanCloud: { enabled: true }
+    scheduledBackup: { enabled: true }
+```
+
+This lives in the same cluster and failure domain as the database: it is a
+development/small-install WAL archive, not off-host disaster recovery. For
+production supply an externally managed `ObjectStore` through
+`postgres.cloudnativepg.barmanCloud.objectStoreName`. See
+`docs/cnpg-recovery.md` for the restore procedure.
+
+---
+
 ## Values reference
 
 | Key                                   | Default                                              | When to change                                                  |
 | ------------------------------------- | ---------------------------------------------------- | --------------------------------------------------------------- |
-| `image.registry`                      | `ghcr.io/alphabravocompany/constellation`            | Mirror to private registry                                      |
-| `image.tag`                           | `""` (uses `.Chart.appVersion`)                      | Pin to a SHA-stable tag                                         |
+| `image.registry`                      | `ghcr.io/alphabravo-oss/constellation`            | Mirror to private registry                                      |
+| `image.tag`                           | `""` (uses `v` + `.Chart.appVersion`)                      | Pin to a SHA-stable tag                                         |
 | `image.pullPolicy`                    | `IfNotPresent`                                       | Set to `Always` for floating tags                               |
 | `image.pullSecrets`                   | `[]`                                                 | Required for private registries                                 |
 | `revisionHistoryLimit`                | `3`                                                  | Raise only if you need more in-cluster rollback history          |
-| `migrate.psqlImage`                   | digest-pinned `postgres:16.10-alpine3.22`            | Mirror/pin the Postgres client helper image                     |
 | `security.podSecurityContext.enabled` | `true`                                               | Apply shared pod hardening to non-privileged app workloads      |
 | `security.containerSecurityContext.enabled` | `true`                                        | Drop caps, disallow escalation, run Go/distroless roles as UID/GID 10001, and keep app root filesystems read-only |
 | app workload service account automount | `false` for API/scanner/admission/frontend/importer/archiver | Keep Kubernetes API tokens off pods that do not need them |
 | `networkPolicies.enabled`              | `false`                                              | Enable namespace default-deny and explicit component flows in production |
 | `networkPolicies.kubeAPI.cidrs`         | `["0.0.0.0/0"]`                                      | CIDRs for the Kubernetes API server used by operator/bootstrap/TLS jobs |
-| `networkPolicies.externalPostgres.cidrs`| `["0.0.0.0/0"]`                                      | CIDRs for external managed Postgres when `postgres.embedded=false` |
+| `networkPolicies.externalPostgres.cidrs`| `["0.0.0.0/0"]`                                      | CIDRs for external managed Postgres when `postgres.mode=external` |
 | `networkPolicies.frontendIngressCIDRs`  | `["0.0.0.0/0"]`                                      | Ingress-controller/client CIDRs allowed to reach frontend pods |
 | `networkPolicies.admissionIngressCIDRs` | `["0.0.0.0/0"]`                                      | Kubernetes API/control-plane CIDRs allowed to call the webhook |
 | `api.replicas`                        | `2`                                                  | Bump for HA                                                     |
 | `api.jwtKeysSecret`                   | `""`                                                 | Existing Secret with JWT signing keys at key `keys`; empty renders a chart-managed Secret |
-| `api.requireJWTKeys`                  | `true`                                               | Refuse API startup when `JWT_KEYS` is absent; keep true outside one-off dev overrides |
-| `operator.replicas`                   | `1`                                                  | Keep at 1; operator uses leader-election leases                 |
+| `api.supportBundleSigningKeySecret`  | `""`                                                 | Existing Secret with an Ed25519 PKCS#8 PEM signing key; empty leaves support bundles unsigned |
+| `api.supportBundleSigningKeySecretKey` | `private-key.pem`                                  | Data key within that Secret |
+| `api.requireJWTKeys`                  | `false`                                              | Set true only with `api.jwtKeysSecret` to hard-fail startup if the Secret goes missing |
+| `api.leaderElection.enabled`          | `true`                                               | Only disable with `api.replicas=1`                              |
+| `api.metrics.annotations`             | `true`                                               | Drop the `prometheus.io/*` pod annotations                      |
+| `api.metrics.serviceMonitor.enabled`  | `false`                                              | Render a Prometheus Operator ServiceMonitor for the `admin` port |
+| `api.metrics.serviceMonitor.labels`   | `{}`                                                 | Match your Prometheus `serviceMonitorSelector`                  |
+| `api.metrics.serviceMonitor.interval` | `30s`                                                | Scrape cadence                                                  |
+| `api.metrics.allowFrom`               | `{}`                                                 | namespaceSelector labels admitted to port 9090 by NetworkPolicy |
+| `operator.replicas`                   | `1`                                                  | Raise with leader election on                                   |
+| `operator.leaderElection.enabled`     | `true`                                               | Only disable for single-replica debugging                       |
 | `discoverer.enabled`                  | `true`                                               | Populate local cluster workloads, pod/service IPs, and workload risk rollups |
 | `discoverer.namespaceFilter`          | `*`                                                  | Comma-separated namespace globs; `kube-system` is always excluded |
 | `discoverer.reconcileInterval`        | `30s`                                                | Poll cadence for Kubernetes inventory refresh                   |
@@ -527,18 +653,33 @@ astronomer:
 | `admission.webhook.failurePolicy`     | `Ignore`                                             | Switch to `Fail` once you have multi-AZ HA                      |
 | `admission.webhook.namespaceSelector` | `{}`                                                 | Scope enforcement to labeled namespaces only                    |
 | `scanner.replicas`                    | `2`                                                  | Scale with job queue depth                                      |
-| `scanner.engines.syft`                | `true`                                               | Keep enabled for package inventory and VulnDB matching          |
-| `scanner.engines.vulndb`              | `true`                                               | Canonical vulnerability matching from the local VulnDB store    |
-| `scanner.engines.trivy`               | `true`                                               | Disable for VulnDB-only canonical scans; re-enable as evidence  |
-| `scanner.engines.grype`               | `true`                                               | Disable for VulnDB-only canonical scans; re-enable as evidence  |
+| `scanner.engines.syft`                | `true`                                               | Package and SBOM inventory                                       |
+| `scanner.engines.trivy`               | `true`                                               | Trivy image and package vulnerability matching                  |
+| `scanner.engines.grype`               | `true`                                               | Grype image and package vulnerability matching                  |
+| `scanner.vulnDB.refreshInterval`      | `6h`                                                 | Trivy/Grype database refresh cadence                            |
+| `scanner.vulnDB.offline`              | `false`                                              | Disable internet database refreshes; pre-load for offline use   |
+| `scanner.cache.persistent`            | `true`                                               | Use a cache PVC with one non-autoscaled scanner replica         |
+| `scanner.cache.size`                  | `8Gi`                                                | Scanner cache PVC size                                           |
 | `frontend.replicas`                   | `2`                                                  | Behind an ingress controller                                    |
 | `runtimeAgent.tolerations`            | tolerate all NoSchedule/NoExecute                    | DaemonSet must land on every node                               |
-| `postgres.embedded`                   | `true`                                               | **Always set to `false` in prod**                               |
-| `postgres.dsn`                        | `""`                                                 | DSN string (alternative to existingSecret)                      |
-| `postgres.existingSecret`             | `""`                                                 | Reference an externally-managed Postgres Secret                 |
-| `postgres.embeddedConfig.image`       | digest-pinned `pgvector/pgvector:pg16`               | Mirror or upgrade the dev/test embedded Postgres image          |
-| `postgres.embeddedConfig.storage`     | `20Gi`                                               | Sizing for the embedded PVC                                     |
-| `postgres.embeddedConfig.storageClass`| `""`                                                 | Override the cluster default StorageClass                       |
+| `postgres.mode`                       | `cnpg`                                               | `external` to use an operator-managed DSN (dev/test or managed Postgres) |
+| `postgres.dsn`                        | `""`                                                 | DSN string for `external` (alternative to existingSecret)       |
+| `postgres.existingSecret`             | `""`                                                 | Reference an externally-managed Postgres Secret (`external`)    |
+| `postgres.cloudnativepg.instances`    | `3`                                                  | `1` for dev; HA rendering requires `>=3`                        |
+| `postgres.cloudnativepg.imageName`    | `""` (chart pgvector build)                          | Pin a `tag@sha256` or supply your own pgvector operand image    |
+| `postgres.cloudnativepg.storage`      | `20Gi`                                               | Per-instance volume size                                        |
+| `postgres.cloudnativepg.storageClass` | `""`                                                 | Override the cluster default StorageClass                       |
+| `postgres.cloudnativepg.barmanCloud.enabled` | `false`                                       | Archive WAL + base backups through the CNPG-I Barman Cloud plugin |
+| `postgres.cloudnativepg.barmanCloud.objectStoreName` | `""`                                  | Externally managed `ObjectStore`; empty uses `backup.objectStore` when enabled |
+| `postgres.cloudnativepg.scheduledBackup.enabled` | `false`                                   | Daily base backup (`schedule`, six-field CNPG cron)             |
+| `backup.objectStore.enabled`          | `false`                                              | Render the in-cluster RustFS store + ObjectStore + bucket Job (cnpg only) |
+| `backup.objectStore.storage`          | `8Gi`                                                | Object store PVC size                                           |
+| `backup.objectStore.storageClass`     | `""`                                                 | Override the cluster default StorageClass                       |
+| `backup.objectStore.credentialsSecret`| `""` (generated)                                     | Existing Secret with `ACCESS_KEY_ID`/`SECRET_ACCESS_KEY`        |
+| `backup.objectStore.bucket`           | `constellation-recovery`                             | Bucket created by the Job and used as `destinationPath`         |
+| `backup.objectStore.retentionPolicy`  | `7d`                                                 | Barman retention                                                |
+| `backup.objectStore.image`            | digest-pinned `rustfs/rustfs:1.0.3`                  | Mirror or upgrade RustFS                                        |
+| `backup.objectStore.bucketJobImage`   | digest-pinned `amazon/aws-cli:2.32.6`                | Mirror the bucket-creation helper                               |
 | `tls.certManager.enabled`             | `false`                                              | Set true when cert-manager is installed                         |
 | `tls.bootstrap.enabled`               | `true`                                               | Set false when using cert-manager                               |
 | `ingress.enabled`                     | `false`                                              | Expose the frontend Service via Ingress                         |
@@ -551,28 +692,20 @@ astronomer:
 | `auditArchiver.bucket`                | `""`                                                 | Required when audit archiver is enabled                          |
 | `auditArchiver.sign.mode`             | `none`                                               | Set `static-key` or `keyless` to emit signed manifests           |
 | `auditArchiver.sign.keySecretName`    | `""`                                                 | Secret containing the static signing key when `mode=static-key`  |
-| `vulndb.storage.type`                 | `pvc`                                                | Use shared PVC for API, scanner, and importer store access      |
-| `vulndb.storage.size`                 | `20Gi`                                              | PVC size for the active store plus importer scratch files and atomic replacement headroom |
-| `vulndb.storage.accessModes`          | `[ReadWriteMany]`                                    | Required for multi-replica API/scanner shared-store access      |
-| `vulndb.statusFile`                   | `vulndb-import-status.json`                          | Importer status JSON read by `/api/v1/vulndb/status`            |
-| `vulndb.manualUpload.enabled`         | `true`                                               | Allow `POST /api/v1/vulndb:import` to write the store directly; set false for importer-only production installs |
-| `vulndb.readiness.requireBundle`      | `false`                                              | Make `/readyz` fail until a valid local VulnDB store is loaded  |
-| `vulndb.readiness.maxAge`             | `""`                                                 | Make `/readyz` fail when the loaded bundle is older than this Go duration |
-| `vulndb.trust.requireSignatures`      | `false`                                              | Require cosign verification before importer installs artifacts  |
-| `vulndb.trust.publicKeySecret`        | `""`                                                 | Secret containing `cosign.pub` for static-key verification      |
-| `vulndb.trust.certificateIdentity`    | `""`                                                 | Keyless certificate identity regexp when not using a public key |
-| `vulndb.trust.certificateOIDCIssuer`  | `""`                                                 | Keyless certificate OIDC issuer regexp                          |
-| `vulndb.freshness.maxAge`             | `""`                                                 | Reject artifacts older than this Go duration, for example `168h` |
-| `vulndbImporter.installJob.enabled`   | `false`                                             | Run a one-shot importer Job on Helm install/upgrade              |
-| `vulndbImporter.workDir`              | `""`                                                | Importer scratch directory; empty defaults to `<vulndb.mountPath>/.vulndb-work` |
-| `vulndbImporter.source.kind`          | `oci`                                                | Source mode: `oci`, `bundleDir`, `files`, `urls`, `s3`, `store`, `storeUrl`, or `storeS3` |
-| `vulndbImporter.source.ref`           | `ghcr.io/alphabravocompany/constellation-vulndb-bundle:latest` | Signed artifact channel when `source.kind=oci`; pin to digest for exact replay |
 | `astronomer.enabled`                  | `false`                                              | Enable `/api/v1/security/*` routes authenticated with Astronomer JWKS |
 | `astronomer.jwksURL`                  | `""`                                                 | Required when `astronomer.enabled=true`                              |
 | `astronomer.jwtIssuer`                | `""`                                                 | Optional required `iss` claim for Astronomer JWTs                    |
 | `astronomer.jwtAudience`              | `""`                                                 | Optional required `aud` claim for Astronomer JWTs                    |
 | `ai.enabled`                          | `false`                                              | Enable Abbot GenAI integration                                  |
 | `fips.enabled`                        | `false`                                              | Switch to FIPS-validated base images for every role             |
+
+Release images use `v`-prefixed application versions, such as `api:v0.3.0`.
+An explicit `image.tag` or per-role tag is used verbatim; per-role digest pins
+still take precedence. The CNPG default is
+`<image.registry>/postgres:16.14-v<Chart.appVersion>` and follows the chart version
+independently of the application `image.tag`. Set `postgres.cloudnativepg.imageName`
+to a version-bearing `tag@sha256:...` reference for a pinned database rollout.
+
 
 ---
 
@@ -647,3 +780,213 @@ helm upgrade constellation deploy/charts/constellation -n constellation-system
 
 Same fix as scanner. The Secret is `optional: true` on the DaemonSet so the
 agent boots in stdout-only mode without a token.
+
+## Federation transport and proxy trust
+
+Federation `join-remote` requires an absolute HTTPS master URL. Join tokens are
+never replayed through redirects. Configure a certificate trusted by the API
+container; use a TLS test server for local federation testing. The joining API
+no longer fabricates `X-Forwarded-Proto` to make an HTTP connection appear secure.
+
+The chart routes `/api` directly from the Ingress/Gateway to the API service.
+This preserves the terminator's TLS/client-IP evidence instead of passing through
+the frontend's plain-HTTP proxy. The frontend still serves `/` and uses `/static/`
+for compiled assets, leaving `/assets` available to the application router.
+With NetworkPolicies enabled, `networkPolicies.frontendIngressCIDRs` also admits
+the Ingress/Gateway peers to this direct API path. Narrow it to the actual proxy
+networks; do not assume a pod source address is the same as a node source address.
+
+Set `api.env.CONSTELLATION_TRUSTED_PROXIES` to the actual trusted proxy IPs/CIDRs
+in the forwarding chain. The middleware records direct-peer trust before
+rewriting the client IP. For a trusted socket peer, it reads `X-Forwarded-For`
+from right to left and stops at the first untrusted IP. The proxy must append
+its actual client address or overwrite the header with a verified chain.
+`True-Client-IP` and `X-Real-IP` are ignored; proxies providing only those headers
+must also supply `X-Forwarded-For`. Missing headers, malformed trusted suffixes
+and chains exceeding 64 hops or 8192 bytes retain the socket address. These
+requests share the proxy's rate-limit bucket. Do not include client networks in
+the trusted proxy list. Federation honors
+forwarded TLS and a configured forwarded client-certificate header only for that
+explicitly configured trusted peer. The terminator must overwrite incoming forwarding/certificate
+headers and perform the client TLS handshake. A forwarded public certificate
+alone does not prove possession of its private key. The compatibility default
+uses private/loopback ranges for client-IP rewriting only; it does not attest
+federation TLS or client certificates. Explicit narrow CIDRs are required for
+forwarded federation transport proof.
+
+Federation admin proxy requests reject redirects, including same-host redirects
+that could escape a reader's path allowlist. Redirect Location/Set-Cookie headers
+are not relayed to the browser. Configure the final member endpoint directly.
+Live ingress/mTLS and multi-cluster acceptance are still required before release.
+
+
+### Minimal API runtime
+
+The API image uses a digest-pinned Distroless static runtime. It retains the API
+and operator CLI, system CA roots, UID/GID 10001 and `/home/constellation`; both Go
+binaries embed timezone data, including legacy schedule aliases. It contains no
+shell, package manager, or native dynamic linker. Kubernetes HTTP probes and the
+`constellation-api -check-schema` init command work directly. Use `kubectl logs`,
+the HTTP health/readiness endpoints, and an approved ephemeral debug container
+when diagnosing it; `kubectl exec ... -- sh` is no longer available.
+
+Run `bash scripts/test-api-runtime.sh IMAGE` after building. Browser CI runs this
+check before its fresh-database API suite. The check verifies application identity,
+home ownership, CA roots, timezone aliases, embedded timezone build tags, static
+ELF executables, writable temporary storage, and API/CLI startup under a read-only
+filesystem with all capabilities dropped. Refresh the runtime digest deliberately,
+verify its upstream signature, and compare exact-image scans using the same dated
+vulnerability database. Scanner and native runtime-agent images have separate
+runtime dependencies and are not converted by this change.
+
+### Shared enforcement protection
+
+Set `systemProtection.protectedNamespaces` (default `[]`) to dedicated dependency
+namespaces, for example `[cnpg-system]`. The chart adds these to admission namespace
+exclusions and runtime/network-policy enforcement protection. The release namespace,
+`kube-system`, `kube-public`, and `kube-node-lease` cannot be removed. Existing
+`runtimeAgent.enforcement.protectedNamespaces` and
+`networkPolicyApplier.protectedNamespaces` remain additive for their components.
+This excludes all workloads in those namespaces from these enforcement paths;
+scanning and finding visibility are independent. It does not prevent an application
+policy from disconnecting that application from a protected service.
+
+## Off-host backups and secrets backup
+
+`backup.objectStore` is a same-cluster WAL archive. `backup.offhost` adds the
+second failure domain the runtime hardening stream ran by hand:
+
+```yaml
+backup:
+  objectStore: { enabled: true, bucket: constellation-recovery }
+  offhost:
+    enabled: true
+    endpointURL: http://backup-host:9000       # any S3 API (RustFS, MinIO, Ceph RGW, AWS)
+    bucket: constellation-recovery-offhost
+    credentialsSecret: offhost-credentials     # keys ACCESS_KEY_ID / SECRET_ACCESS_KEY
+    sync: { schedule: "*/15 * * * *" }
+    recovery: { enabled: true }
+networkPolicies:
+  offhostCIDRs: ["100.86.167.87/32"]
+```
+
+This renders a second Barman `ObjectStore` (`<archive>-offhost`), the
+`archive-offhost-sync` CronJob (rclone from the toolbox image, credentials via
+`RCLONE_CONFIG_*` env — no config file) and a `<archive>-offhost-recovery`
+ObjectStore to point `postgres.cloudnativepg.barmanCloud.recovery.objectStoreName`
+at for a PITR drill. **Switch WAL twice before a drill**
+(`SELECT pg_switch_wal();` ×2 on the primary) so the target time is archived
+on both stores; see `docs/cnpg-recovery.md`.
+
+`backup.secrets` backs up the namespace's Kubernetes Secrets (TLS material,
+tokens, the age key) daily, encrypted to `backup.secrets.ageRecipient`, to the
+same kind of S3 remote. Keep the matching age identity off the cluster;
+restore with `age -d -i identity.txt secrets-<ts>.tar.gz.age | tar xz`.
+
+## Monitoring with the Prometheus Operator
+
+`metrics.serviceMonitor.enabled=true` renders ServiceMonitors for the API
+(admin port), scanner and admission and PodMonitors for the operator, the
+runtime agent and the CNPG instances; `metrics.prometheusRule.enabled=true`
+ships the alert rules (`constellation.components`, CNPG archiving/backup,
+and — `includeClusterRules` — node/pod/PVC capacity). Component heartbeat
+age, scanner engine-DB age (trivy, trivy-java-db, grype) and CVE-feed age are
+served by the API itself (`constellation_component_heartbeat_age_seconds`,
+`constellation_scanner_engine_db_age_seconds`, `constellation_cve_feed_age_seconds`),
+so no postgres-exporter is required. `metrics.postgresRole.enabled` still
+renders a read-only `constellation_metrics` role (CNPG `managed.roles`,
+grants owned by migration 186) for an optional exporter. With
+`networkPolicies.enabled`, `networkPolicies.monitoring.namespace` is admitted
+to every metrics port.
+
+## Changing the bootstrap admin password
+
+`bootstrap.admin` mints `<release>-admin-credentials` once and the
+bootstrap-admin Job is idempotent: editing the Secret later does **not**
+change the password stored in the database. Rotate through the API, which
+also revokes the admin's other sessions:
+
+```sh
+TOKEN=$(curl -sf -X POST https://constellation.example.com/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"admin@constellation.local","password":"<current>"}' | jq -r .token)
+curl -sf -X POST https://constellation.example.com/api/v1/auth/change-password \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"current_password":"<current>","new_password":"<new>"}'
+kubectl -n constellation-system create secret generic constellation-admin-credentials \
+  --from-literal=password='<new>' --dry-run=client -o yaml | kubectl apply -f -   # keep the Secret in step
+```
+
+`bootstrap.admin.forcePasswordChange=true` makes the UI demand this on first
+login.
+
+## Pod Security Admission and the k3s host profile
+
+Every chart pod is `restricted`-clean; the runtime agent is the documented
+exception (hostNetwork/hostPID). `deploy/k3s/psa-admission.yaml` is the
+AdmissionConfiguration that exempts it (through the DaemonSet controller and
+its ServiceAccount) and `deploy/k3s/config.yaml` carries the kubelet
+eviction/image-GC thresholds a single-node k3s host needs. See
+`docs/k3s-profile.md`. The admission webhook's own built-in rules skip
+`admission.exemptNamespaces` and namespaces labelled
+`constellation.alphabravo.io/admission=ignore`.
+
+## API high availability with packet evidence
+
+`api.replicas > 1` with `api.pcapStorage.enabled` requires a ReadWriteMany
+claim; `validate.yaml` rejects RWO because captures are files written by
+every replica. `examples/values-api-ha-rwx.yaml` is the supported profile
+(RWX PVC created first, `accessMode: ReadWriteMany`). Without RWX storage run
+one API replica with packet evidence, or scale the API with packet evidence
+disabled.
+
+## Air-gapped installs
+
+`constellationctl bundle build` packs every image (OCI layout), the chart and
+a cosign-compatible signed BOM; `bundle verify` checks the signature against
+the vendor key compiled into the binary (`--trust-key` to override) before
+any payload is read; `bundle load --registry <host:port> --values-out
+values-bundle.yaml` pushes the images into the cluster-local registry and
+writes a values file that pins every role to the loaded digest with
+`global.imageRegistry`. On k3s without a registry, `bundle load --containerd`
+imports straight into the node image store (`image.pullPolicy: Never`). The
+scanner defaults to `--offline-db` (baked DBs; `CONSTELLATION_SCANNER_OFFLINE_DB=false`
+opts into online refresh) and every binary logs one `egress endpoints` line at
+start-up naming every out-of-cluster endpoint it may contact.
+
+### Bundle-signing key
+
+Bundles are signed with the AlphaBravo **vendor bundle-signing key**: ECDSA P-256,
+PKCS#8 PEM, signatures over SHA-256 of `bom.json` (ASN.1 DER, base64), i.e. the
+`cosign sign-blob --key` format. Only the public half is in the source tree
+(`internal/bundle/trust/bundle-signing.pub`, compiled into `constellationctl`).
+
+| | |
+|---|---|
+| Public key | `internal/bundle/trust/bundle-signing.pub` |
+| Fingerprint | SHA-256 of the DER SubjectPublicKeyInfo: `b7ca3ba6fe84afb131c20440589dc8c2fa5431647e11b550d2d8c880a6adad91` (`openssl pkey -pubin -in bundle-signing.pub -outform DER \| sha256sum`) |
+| Private key | never in git; held by the release owner. On the dev install it is Secret `constellation-system/constellation-bundle-signing` (keys `bundle-signing.key`, `bundle-signing.pub`), which the namespace secrets backup (`backup.secrets`) includes, plus an offline copy (mode 600) |
+| Introduced | 0.3.0 (replaces the session-generated development key used during Phase 1) |
+
+Sign: `constellationctl bundle build --sign-key bundle-signing.key ...`.
+Verify against something other than the embedded key: `bundle verify --trust-key old.pub`.
+
+**Rotation** (scheduled yearly, immediately on suspected compromise):
+
+1. Generate the new pair offline:
+   `openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out bundle-signing.key`
+   and `openssl pkey -in bundle-signing.key -pubout -out bundle-signing.pub`.
+2. Replace `internal/bundle/trust/bundle-signing.pub`, update the fingerprint above and
+   note the rotation in `CHANGELOG.md`; cut a release. Bundles signed with the previous key
+   are then rejected by the new `constellationctl` unless an operator passes
+   `--trust-key <previous>.pub` explicitly (keep the previous public key published next to
+   the release notes for one release cycle).
+3. Replace the private key wherever it is held (`kubectl -n constellation-system create
+   secret generic constellation-bundle-signing --from-file=... --dry-run=client -o yaml |
+   kubectl apply -f -`), let the next secrets backup run (or trigger it), then destroy the
+   old private key.
+4. On compromise: also re-sign and re-publish every supported bundle with the new key, and
+   announce the revoked fingerprint.
+
+Moving the private key into cosign KMS/HSM (`cosign sign-blob --key awskms://...`) keeps the
+same verification format; only step 1 and the custody row change.

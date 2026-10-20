@@ -1,0 +1,75 @@
+name: Static runtime candidates
+
+on:
+  workflow_dispatch:
+    inputs:
+      role:
+        description: Image role to build
+        type: choice
+        default: all
+        options: [all, discoverer, admission, operator]
+  push:
+    branches: [main, 'implement/**']
+    paths:
+      - deploy/docker/Dockerfile.discoverer
+      - deploy/docker/Dockerfile.admission
+      - deploy/docker/Dockerfile.operator
+      - go.mod
+      - go.sum
+
+permissions:
+  contents: read
+
+concurrency:
+  group: static-runtime-candidates-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  images:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        role: ${{ inputs.role == 'operator' && fromJSON('["operator"]') || inputs.role == 'admission' && fromJSON('["admission"]') || inputs.role == 'discoverer' && fromJSON('["discoverer"]') || fromJSON('["discoverer","admission","operator"]') }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Record build time
+        id: time
+        run: echo "value=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+      - name: Build source-stamped OCI candidate
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile.${{ matrix.role }}
+          platforms: linux/amd64
+          outputs: type=oci,dest=${{ runner.temp }}/image.tar
+          tags: constellation/${{ matrix.role }}:candidate-${{ github.sha }}
+          build-args: |
+            VERSION=dev-${{ github.sha }}
+            COMMIT=${{ github.sha }}
+            BUILD_TIME=${{ steps.time.outputs.value }}
+          provenance: mode=max
+          sbom: true
+      - name: Record build identity
+        env:
+          SOURCE_COMMIT: ${{ github.sha }}
+          IMAGE_ROLE: ${{ matrix.role }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          BUILD_METADATA: ${{ steps.build.outputs.metadata }}
+        run: |
+          jq -n --arg c "$SOURCE_COMMIT" --arg r "$IMAGE_ROLE" --arg d "$IMAGE_DIGEST" --argjson m "$BUILD_METADATA" \
+            '{sourceCommit: $c, role: $r, digest: $d, metadata: $m}' > "$RUNNER_TEMP/identity.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: static-runtime-${{ matrix.role }}-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/image.tar
+            ${{ runner.temp }}/identity.json
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7

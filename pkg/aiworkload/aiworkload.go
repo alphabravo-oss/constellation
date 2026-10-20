@@ -22,12 +22,12 @@ import (
 // Workload is the input shape. Fields are populated by the operator from the K8s
 // PodSpec + container runtime info.
 type Workload struct {
-	Namespace string
-	Name      string
-	Images    []string            // container images
-	Processes []string            // observed process names (from agent)
-	Resources map[string]string   // ResourceRequirements aggregated (limits + requests)
-	Labels    map[string]string
+	Namespace   string
+	Name        string
+	Images      []string          // container images
+	Processes   []string          // observed process names (from agent)
+	Resources   map[string]string // ResourceRequirements aggregated (limits + requests)
+	Labels      map[string]string
 	Annotations map[string]string
 }
 

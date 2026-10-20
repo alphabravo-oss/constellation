@@ -26,14 +26,14 @@ package neuvector
 import (
 	"errors"
 	"fmt"
-	"io"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/alphabravocompany/constellation/pkg/admission"
 	"gopkg.in/yaml.v3"
+
+	"github.com/alphabravocompany/constellation/pkg/admission"
 )
 
 // SourceExport is the subset of NeuVector's settings export we read.
@@ -458,32 +458,38 @@ type dpiSensorCandidate struct {
 }
 
 type SourceObjectCounts struct {
-	Policies        int
-	AdmissionRules  int
-	ResponseRules   int
-	FileProfiles    int
-	ProcessProfiles int
-	Groups          int
-	NetworkRules    int
-	DPIRules        int
-	DPIBindings     int
+	Policies              int
+	AdmissionRules        int
+	ResponseRules         int
+	FileProfiles          int
+	ProcessProfiles       int
+	Groups                int
+	NetworkRules          int
+	DPIRules              int
+	DPIBindings           int
+	VulnerabilityProfiles int
+	Registries            int
+	RemainingUnsupported  int
 }
 
 func (c SourceObjectCounts) Total() int {
-	return c.Policies + c.FileProfiles + c.ProcessProfiles + c.Groups + c.NetworkRules + c.DPIRules + c.DPIBindings
+	return c.Policies + c.FileProfiles + c.ProcessProfiles + c.Groups + c.NetworkRules + c.DPIRules + c.DPIBindings + c.VulnerabilityProfiles + c.Registries + c.RemainingUnsupported
 }
 
 func (c SourceObjectCounts) Map() map[string]int {
 	return map[string]int{
-		"policies":         c.Policies,
-		"admission_rules":  c.AdmissionRules,
-		"response_rules":   c.ResponseRules,
-		"file_profiles":    c.FileProfiles,
-		"process_profiles": c.ProcessProfiles,
-		"groups":           c.Groups,
-		"network_rules":    c.NetworkRules,
-		"dpi_rules":        c.DPIRules,
-		"dpi_bindings":     c.DPIBindings,
+		"policies":               c.Policies,
+		"admission_rules":        c.AdmissionRules,
+		"response_rules":         c.ResponseRules,
+		"file_profiles":          c.FileProfiles,
+		"process_profiles":       c.ProcessProfiles,
+		"groups":                 c.Groups,
+		"network_rules":          c.NetworkRules,
+		"dpi_rules":              c.DPIRules,
+		"dpi_bindings":           c.DPIBindings,
+		"vulnerability_profiles": c.VulnerabilityProfiles,
+		"registries":             c.Registries,
+		"remaining_unsupported":  c.RemainingUnsupported,
 	}
 }
 
@@ -525,6 +531,13 @@ func CountSourceObjects(raw []byte) (SourceObjectCounts, error) {
 	for _, doc := range networkDocs {
 		counts.NetworkRules += len(collectNetworkRules(doc))
 	}
+	remaining, err := collectRemainingSource(raw)
+	if err != nil {
+		return SourceObjectCounts{}, err
+	}
+	counts.VulnerabilityProfiles = len(remaining.profiles)
+	counts.Registries = len(remaining.registries)
+	counts.RemainingUnsupported = len(remaining.unsupported)
 	return counts, nil
 }
 
@@ -812,32 +825,28 @@ func ConvertAdmissionProfileBundle(raw []byte) (admission.AdmissionProfileBundle
 }
 
 func parseSourceExport(raw []byte) (SourceExport, error) {
-	if len(raw) == 0 {
-		return SourceExport{}, errors.New("neuvector: empty export")
+	docs, err := parseSourceExports(raw)
+	if err != nil {
+		return SourceExport{}, err
 	}
-	var doc SourceExport
-	if err := yaml.Unmarshal(raw, &doc); err != nil {
-		return SourceExport{}, fmt.Errorf("neuvector: parse: %w", err)
+	doc := docs[0]
+	for _, next := range docs[1:] {
+		doc.Admission.Rules = append(doc.Admission.Rules, collectAdmissionRules(next)...)
+		doc.Response.Rules = append(doc.Response.Rules, next.Response.Rules...)
 	}
 	return doc, nil
 }
 
 func parseSourceExports(raw []byte) ([]SourceExport, error) {
-	if len(raw) == 0 {
-		return nil, errors.New("neuvector: empty export")
+	nodes, err := parseExportDocuments(raw)
+	if err != nil {
+		return nil, err
 	}
-	dec := yaml.NewDecoder(strings.NewReader(string(raw)))
 	out := []SourceExport{}
-	for {
+	for _, node := range nodes {
 		var doc SourceExport
-		if err := dec.Decode(&doc); err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			return nil, fmt.Errorf("neuvector: parse: %w", err)
-		}
-		if sourceExportEmpty(doc) {
-			continue
+		if err := legacyExportNode(node).Decode(&doc); err != nil {
+			return nil, redactedParseError()
 		}
 		out = append(out, doc)
 	}
@@ -848,18 +857,15 @@ func parseSourceExports(raw []byte) ([]SourceExport, error) {
 }
 
 func parseNetworkSourceExports(raw []byte) ([]networkSourceExport, error) {
-	if len(raw) == 0 {
-		return nil, errors.New("neuvector: empty export")
+	nodes, err := parseExportDocuments(raw)
+	if err != nil {
+		return nil, err
 	}
-	dec := yaml.NewDecoder(strings.NewReader(string(raw)))
 	out := []networkSourceExport{}
-	for {
+	for _, node := range nodes {
 		var doc networkSourceExport
-		if err := dec.Decode(&doc); err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			return nil, fmt.Errorf("neuvector: parse: %w", err)
+		if err := legacyExportNode(node).Decode(&doc); err != nil {
+			return nil, redactedParseError()
 		}
 		if networkSourceExportEmpty(doc) {
 			continue
@@ -870,55 +876,6 @@ func parseNetworkSourceExports(raw []byte) ([]networkSourceExport, error) {
 		return []networkSourceExport{}, nil
 	}
 	return out, nil
-}
-
-func sourceExportEmpty(doc SourceExport) bool {
-	return len(doc.Admission.Rules) == 0 &&
-		len(doc.Rules) == 0 &&
-		doc.Rule == nil &&
-		len(doc.Response.Rules) == 0 &&
-		doc.FileMonitor.Profile == nil &&
-		len(doc.FileMonitor.Profiles) == 0 &&
-		len(doc.FileMonitor.Rules) == 0 &&
-		len(doc.FileProfiles) == 0 &&
-		doc.Profile == nil &&
-		len(doc.Profiles) == 0 &&
-		doc.Process.Profile == nil &&
-		len(doc.Process.Profiles) == 0 &&
-		doc.ProcessProfile == nil &&
-		len(doc.ProcessProfiles) == 0 &&
-		doc.Group == nil &&
-		doc.Config == nil &&
-		len(doc.Groups) == 0 &&
-		len(doc.Configs) == 0 &&
-		doc.DLP.Sensor == nil &&
-		len(doc.DLP.Sensors) == 0 &&
-		len(doc.DLP.Rules) == 0 &&
-		doc.WAF.Sensor == nil &&
-		len(doc.WAF.Sensors) == 0 &&
-		len(doc.WAF.Rules) == 0 &&
-		len(doc.DLPSensors) == 0 &&
-		len(doc.WAFSensors) == 0 &&
-		len(doc.DLPGroups) == 0 &&
-		len(doc.WAFGroups) == 0 &&
-		doc.Sensor == nil &&
-		len(doc.Sensors) == 0 &&
-		doc.Policy.Rule == nil &&
-		len(doc.Policy.Rules) == 0 &&
-		doc.Network.Rule == nil &&
-		len(doc.Network.Rules) == 0 &&
-		len(doc.NetworkRules) == 0 &&
-		len(doc.PolicyRules) == 0 &&
-		len(doc.Items) == 0 &&
-		strings.TrimSpace(doc.Kind) == "" &&
-		len(doc.Spec.FileRule) == 0 &&
-		len(doc.Spec.ProcessRule) == 0 &&
-		doc.Spec.ProcessProfile == nil &&
-		len(doc.Spec.IngressRule) == 0 &&
-		len(doc.Spec.EgressRule) == 0 &&
-		doc.Spec.Sensor == nil &&
-		emptyGroupConfig(doc.Spec.Selector) &&
-		emptyGroupConfig(doc.Spec.Target.Selector)
 }
 
 func networkSourceExportEmpty(doc networkSourceExport) bool {
@@ -1938,11 +1895,6 @@ func translateDPISensor(candidate dpiSensorCandidate, category string, names map
 	return out, unsupported
 }
 
-func translateDPIPatterns(patterns []DPICriterion, category string) []DPIPatternSpec {
-	out, _ := translateDPIPatternsDetailed(patterns, category, "", "", "", "", "", false)
-	return out
-}
-
 func translateDPIPatternsDetailed(patterns []DPICriterion, category, sensorName, ruleName, rulePath, sourceCfgType, sourceRuleCfgType string, federated bool) ([]DPIPatternSpec, []UnsupportedObject) {
 	out := make([]DPIPatternSpec, 0, len(patterns))
 	unsupported := []UnsupportedObject{}
@@ -2783,10 +2735,6 @@ func (c *convertedAdmissionCriteria) add(crit AdmissionCriterion) bool {
 		return true
 	}
 	return false
-}
-
-func (c convertedAdmissionCriteria) any() bool {
-	return c.enforceable() || len(c.namespaces) > 0
 }
 
 func (c convertedAdmissionCriteria) enforceable() bool {

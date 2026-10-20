@@ -28,12 +28,18 @@ import (
 // available via AuthToken for the scanner to pull images; it is cached and refreshed
 // before expiry.
 type ECR struct {
-	cfg    Config
-	client *ecr.Client
+	cfg           Config
+	client        *ecr.Client
+	credentialErr error
 }
 
 func NewECR(cfg Config) *ECR {
 	c := &ECR{cfg: cfg}
+	if (cfg.AccessKeyID != "" || cfg.SecretAccessKey != "" || cfg.SessionToken != "") &&
+		(cfg.AccessKeyID == "" || cfg.SecretAccessKey == "") {
+		c.credentialErr = errors.New("ecr: explicit credentials require access key and secret key")
+		return c
+	}
 	if cfg.Region == "" {
 		return c // ListImages will error early
 	}
@@ -62,6 +68,9 @@ func NewECR(cfg Config) *ECR {
 func (e *ECR) Name() string { return "ecr" }
 
 func (e *ECR) ListImages(ctx context.Context) ([]Image, error) {
+	if e.credentialErr != nil {
+		return nil, e.credentialErr
+	}
 	if e.client == nil {
 		return nil, errors.New("ecr: region required + AWS credentials must be available")
 	}
@@ -70,7 +79,7 @@ func (e *ECR) ListImages(ctx context.Context) ([]Image, error) {
 	for {
 		resp, err := e.client.DescribeRepositories(ctx, &ecr.DescribeRepositoriesInput{NextToken: next})
 		if err != nil {
-			return out, fmt.Errorf("ecr: describe-repositories: %w", err)
+			return out, responseFailure("ecr repositories", "SDK request failed", 0, err)
 		}
 		for _, r := range resp.Repositories {
 			pushed := ""
@@ -123,6 +132,9 @@ func (e *ECR) describeTags(ctx context.Context, repoName string) []string {
 // credentials (static keys or the ambient chain). Falls back to the generic anonymous
 // v2 lookup when the native call is unavailable.
 func (e *ECR) ResolveDigest(ctx context.Context, ref string) (string, error) {
+	if e.credentialErr != nil {
+		return "", e.credentialErr
+	}
 	if e.client == nil {
 		return resolveDigestViaV2(ctx, nil, ref, "")
 	}
@@ -141,14 +153,14 @@ func (e *ECR) ResolveDigest(ctx context.Context, ref string) (string, error) {
 		},
 	})
 	if err != nil {
-		return "", fmt.Errorf("ecr: batch-get-image: %w", err)
+		return "", responseFailure("ecr image", "SDK request failed", 0, err)
 	}
 	for _, img := range resp.Images {
 		if img.ImageId != nil && img.ImageId.ImageDigest != nil {
 			return fmt.Sprintf("%s/%s@%s", host, repo, awssdk.ToString(img.ImageId.ImageDigest)), nil
 		}
 	}
-	return "", fmt.Errorf("ecr: no digest for %s", ref)
+	return "", errors.New("ecr: image response missing digest")
 }
 
 // AuthToken returns docker-login credentials for this ECR registry, obtained via
@@ -157,19 +169,22 @@ func (e *ECR) ResolveDigest(ctx context.Context, ref string) (string, error) {
 // the registry URL the credentials authenticate against. Intended for the scanner to
 // pull images without an out-of-band `aws ecr get-login-password`.
 func (e *ECR) AuthToken(ctx context.Context) (username, password, proxyEndpoint string, err error) {
+	if e.credentialErr != nil {
+		return "", "", "", e.credentialErr
+	}
 	if e.client == nil {
 		return "", "", "", errors.New("ecr: region required + AWS credentials must be available")
 	}
-	cacheKey := tokenCacheKey("ecr-auth", e.cfg.Region, e.cfg.AccessKeyID)
+	cacheKey, mintOptions := e.authorizationCacheIdentity(ctx)
 	if cached, ok := tokenCacheGet(cacheKey); ok {
 		user, pass, ep, perr := splitECRAuth(cached)
 		if perr == nil {
 			return user, pass, ep, nil
 		}
 	}
-	resp, err := e.client.GetAuthorizationToken(ctx, &ecr.GetAuthorizationTokenInput{})
+	resp, err := e.client.GetAuthorizationToken(ctx, &ecr.GetAuthorizationTokenInput{}, mintOptions...)
 	if err != nil {
-		return "", "", "", fmt.Errorf("ecr: get-authorization-token: %w", err)
+		return "", "", "", responseFailure("ecr authorization", "SDK request failed", 0, err)
 	}
 	if len(resp.AuthorizationData) == 0 || resp.AuthorizationData[0].AuthorizationToken == nil {
 		return "", "", "", errors.New("ecr: empty authorization data")
@@ -188,6 +203,31 @@ func (e *ECR) AuthToken(ctx context.Context) (username, password, proxyEndpoint 
 	// Cache the raw "endpoint\x00user:pass" so proxy endpoint survives the round-trip.
 	tokenCachePut(cacheKey, proxyEndpoint+"\x00"+user+":"+pass, expiry)
 	return user, pass, proxyEndpoint, nil
+}
+
+// authorizationCacheIdentity binds cached output to the actual credentials used
+// by this SDK call, including ambient/session credential rotation. An unavailable
+// owner or effective identity bypasses caching; the SDK remains authoritative.
+func (e *ECR) authorizationCacheIdentity(ctx context.Context) (string, []func(*ecr.Options)) {
+	if e.cfg.CredentialCacheScope == "" {
+		return "", nil
+	}
+	provider := e.client.Options().Credentials
+	if provider == nil {
+		return "", nil
+	}
+	actual, err := provider.Retrieve(ctx)
+	if err != nil || !actual.HasKeys() || actual.Expired() {
+		return "", nil
+	}
+	key := e.cfg.credentialCacheKey("ecr-auth", e.cfg.Region, e.cfg.Endpoint,
+		actual.AccessKeyID, actual.SecretAccessKey, actual.SessionToken)
+	// Snapshot the same credentials for signing. A provider that rotates between
+	// this lookup and the SDK call must not put a new token under the old identity.
+	options := []func(*ecr.Options){func(opts *ecr.Options) {
+		opts.Credentials = credentials.NewStaticCredentialsProvider(actual.AccessKeyID, actual.SecretAccessKey, actual.SessionToken)
+	}}
+	return key, options
 }
 
 // decodeECRAuthToken decodes the base64 "user:password" authorization token.

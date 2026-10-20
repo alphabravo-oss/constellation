@@ -1,0 +1,2 @@
+export const INVENTORY_MAX_OFFSET = 2_147_483_647;
+export const INVENTORY_MAX_PAGE = Math.floor(INVENTORY_MAX_OFFSET / 100) + 1;

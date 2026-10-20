@@ -7,10 +7,13 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/testutil/socketfixture"
 )
 
 func TestCollectContainerPackagesReadsDpkgViaProcRoot(t *testing.T) {
-	root := t.TempDir()
+	t.Parallel()
+	root := socketfixture.Dir(t)
 	listener := createTestCRISocket(t, root)
 	defer listener.Close()
 
@@ -67,6 +70,7 @@ func TestCollectContainerPackagesReadsDpkgViaProcRoot(t *testing.T) {
 }
 
 func TestContainerPIDParsesNumberAndNestedString(t *testing.T) {
+	t.Parallel()
 	if got := containerPID(map[string]any{"pid": float64(4321)}); got != 4321 {
 		t.Fatalf("numeric pid = %d, want 4321", got)
 	}
@@ -76,7 +80,8 @@ func TestContainerPIDParsesNumberAndNestedString(t *testing.T) {
 }
 
 func TestCollectPackagesAtRootDoesNotFallbackToHost(t *testing.T) {
-	root := t.TempDir()
+	t.Parallel()
+	root := socketfixture.Dir(t)
 	pkgs, err := collectPackagesAtRoot(root, "node-a", "ubuntu", "24.04")
 	if err == nil {
 		t.Fatalf("expected error for empty root, got packages: %+v", pkgs)
@@ -92,7 +97,7 @@ func createTestCRISocket(t *testing.T, root string) net.Listener {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	listener, err := net.Listen("unix", path)
+	listener, err := (&net.ListenConfig{}).Listen(t.Context(), "unix", path)
 	if err != nil {
 		t.Fatal(err)
 	}

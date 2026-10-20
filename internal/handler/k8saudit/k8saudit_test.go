@@ -1,13 +1,83 @@
+//go:build integration
+
 package k8saudit
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
+
 	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/internal/db"
+	"github.com/alphabravocompany/constellation/pkg/audit"
+	"github.com/alphabravocompany/constellation/pkg/response"
+	"github.com/alphabravocompany/constellation/pkg/responserule"
 )
+
+func TestLegacyTagOutcomePreservesSuppressLog(t *testing.T) {
+	database := db.NewFromPool(pgtest.Pool(t))
+	ctx := context.Background()
+	pool := database.Pool()
+	orgID := uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, display_name) VALUES ($1, $2, $2)`, orgID, "legacy-tag-k8saudit-"+orgID.String()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id=$1`, orgID) })
+
+	for _, suppressed := range []bool{false, true} {
+		name := "unsuppressed"
+		if suppressed {
+			name = "suppressed"
+		}
+		t.Run(name, func(t *testing.T) {
+			auditID := uuid.NewString()
+			responded := 0
+			h := NewIngest(database).WithAudit(audit.New(pool)).WithResponseRuleEngine(func(_ context.Context, _ uuid.UUID, ev *responserule.Event) ([]responserule.Action, error) {
+				if ev.Type != responserule.EventAdmission || ev.Fields["kind"] != "k8s_audit" {
+					t.Fatalf("unexpected rule event: %+v", ev)
+				}
+				actions := []responserule.Action{{Type: responserule.ActionTag, Params: map[string]string{"key": "team", "value": "sec"}}}
+				if suppressed {
+					actions = append([]responserule.Action{{Type: responserule.ActionSuppressLog}}, actions...)
+				}
+				return actions, nil
+			})
+			h.WithResponseEngine(func(_ context.Context, _, _ uuid.UUID, _ response.Event) { responded++ })
+			pending := &pendingAlert{ev: &AuditEvent{AuditID: auditID, Verb: "get"}, signal: SignalSecretAccess, severity: "high"}
+			alerted := h.fanOutOne(ctx, orgID, pending)
+			if alerted == suppressed || responded != 1 {
+				t.Fatalf("alerted=%v responded=%d, suppressed=%v", alerted, responded, suppressed)
+			}
+			var enforced, reason, key, value string
+			var order int
+			if err := pool.QueryRow(ctx, `
+SELECT after->>'enforced', after->>'enforce_error', after->>'param_key', after->>'param_value', (after->>'order')::int
+  FROM audit_events WHERE org_id=$1 AND target_id=$2 AND action='response_rule.action.tag'`, orgID, auditID).
+				Scan(&enforced, &reason, &key, &value, &order); err != nil {
+				t.Fatalf("query tag outcome: %v", err)
+			}
+			wantOrder := 0
+			if suppressed {
+				wantOrder = 1
+			}
+			if enforced != "unsupported" || reason == "" || key != "team" || value != "sec" || order != wantOrder {
+				t.Fatalf("tag outcome=(%q,%q,%q,%q,%d), want unsupported with reason, params and order %d", enforced, reason, key, value, order, wantOrder)
+			}
+			var signalRows int
+			if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM audit_events WHERE org_id=$1 AND target_id=$2 AND action=$3`, orgID, auditID, "k8s.audit."+SignalSecretAccess).Scan(&signalRows); err != nil {
+				t.Fatal(err)
+			}
+			if (signalRows == 0) != suppressed {
+				t.Fatalf("signal audit rows=%d, suppressed=%v", signalRows, suppressed)
+			}
+		})
+	}
+}
 
 // mkEvent builds a minimal AuditEvent for classify() tests.
 func mkEvent(verb, group, resource, sub string) *AuditEvent {
@@ -52,6 +122,7 @@ func TestClassify(t *testing.T) {
 }
 
 func TestClassifyPrivilegedCreate(t *testing.T) {
+	t.Parallel()
 	priv := true
 	spec := map[string]any{
 		"spec": map[string]any{
@@ -86,6 +157,7 @@ func TestClassifyPrivilegedCreate(t *testing.T) {
 }
 
 func TestDecisionAndSourceIP(t *testing.T) {
+	t.Parallel()
 	ev := &AuditEvent{
 		Annotations: map[string]string{"authorization.k8s.io/decision": "Forbid"},
 		SourceIPs:   []string{"10.1.2.3", "10.9.9.9"},
@@ -103,6 +175,7 @@ func TestDecisionAndSourceIP(t *testing.T) {
 }
 
 func TestDedupCollapsesRepeats(t *testing.T) {
+	t.Parallel()
 	base := time.Unix(1_700_000_000, 0)
 	d := newAuditDedup(60 * time.Second)
 	d.now = func() time.Time { return base }
@@ -128,6 +201,7 @@ func TestDedupCollapsesRepeats(t *testing.T) {
 }
 
 func TestDecodeAuditItemsEventListAndArray(t *testing.T) {
+	t.Parallel()
 	list := `{"kind":"EventList","apiVersion":"audit.k8s.io/v1","items":[{"verb":"get"},{"verb":"list"}]}`
 	items, err := decodeAuditItems(strings.NewReader(list))
 	if err != nil || len(items) != 2 {

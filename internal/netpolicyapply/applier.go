@@ -84,18 +84,43 @@ type ResourceClient interface {
 type KubernetesResourceClient struct {
 	Client       dynamic.Interface
 	FieldManager string
+	Protection   *Protection
+	Dependencies DependencyReader
 }
 
 func (c KubernetesResourceClient) Apply(ctx context.Context, resource ManifestResource, manifestJSON []byte) error {
 	if c.Client == nil {
 		return errors.New("kubernetes dynamic client is nil")
 	}
+	var err error
+	manifestJSON, err = c.Protection.Guard(resource, manifestJSON)
+	if err != nil {
+		return err
+	}
+	reader := c.Dependencies
+	if reader == nil {
+		reader = dependencyReader(c.Client)
+	}
+	addresses, err := reader(ctx, c.Protection)
+	if err != nil {
+		return err
+	}
+	if resource.Kind == "CiliumNetworkPolicy" {
+		addresses.CiliumPeers, err = c.Protection.ciliumPodPeers(ctx, c.Client, addresses)
+		if err != nil {
+			return err
+		}
+	}
+	manifestJSON, err = c.Protection.preserveCommunication(resource, manifestJSON, addresses)
+	if err != nil {
+		return err
+	}
 	manager := strings.TrimSpace(c.FieldManager)
 	if manager == "" {
 		manager = "constellation-netpolicy-applier"
 	}
 	force := true
-	_, err := resourceInterface(c.Client, resource).Patch(ctx, resource.Name, types.ApplyPatchType, manifestJSON, metav1.PatchOptions{
+	_, err = resourceInterface(c.Client, resource).Patch(ctx, resource.Name, types.ApplyPatchType, manifestJSON, metav1.PatchOptions{
 		FieldManager: manager,
 		Force:        &force,
 	})
@@ -165,6 +190,8 @@ func ReconcileState(ctx context.Context, client ResourceClient, state LifecycleS
 		err = client.Apply(ctx, resource, manifestJSON)
 	case ActionDelete:
 		err = client.Delete(ctx, resource)
+	case ActionSkip:
+		// nothing to send; the result records the skip
 	}
 	if err != nil {
 		result.Status = StatusError

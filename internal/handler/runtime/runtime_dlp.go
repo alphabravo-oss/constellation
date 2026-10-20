@@ -21,8 +21,6 @@ package runtime
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -143,7 +141,7 @@ type RuntimeDLPStore struct {
 	// process, so the lazy seed in AgentBundle runs one INSERT batch per
 	// cluster per lifetime instead of on every 60s agent poll. The DB's
 	// ON CONFLICT DO NOTHING is the durable guarantee; this is just a cache.
-	seeded sync.Map // clusterID(uuid.UUID) → struct{}
+	seeded sync.Map // dlpSeedScope → struct{}
 }
 
 // NewRuntimeDLPStore — auditLog may be nil in tests.
@@ -180,95 +178,11 @@ func (s *RuntimePolicyStore_DLP) Insert(ctx context.Context, r *DLPRule, request
 // explicitly; the handler does that when called from the signatures
 // endpoints.
 func (s *RuntimeDLPStore) Insert(ctx context.Context, r *DLPRule, requestID string) (uuid.UUID, error) {
-	if !r.Mode.Valid() {
-		return uuid.Nil, fmt.Errorf("invalid mode %q", r.Mode)
-	}
-	if r.Name == "" {
-		return uuid.Nil, errors.New("name is required")
-	}
-	if r.Severity < 1 || r.Severity > 9 {
-		return uuid.Nil, errors.New("severity must be 1..9")
-	}
-	if r.Category == "" {
-		r.Category = CategoryDLP
-	}
-	if !r.Category.Valid() {
-		return uuid.Nil, fmt.Errorf("invalid category %q", r.Category)
-	}
-	if r.ApplyDir == 0 {
-		// Default differs per category: DLP is egress-only (catches data
-		// exfil); custom signatures match bidirectionally (could be an
-		// inbound attack or outbound C2).
-		switch r.Category {
-		case CategorySignature:
-			r.ApplyDir = 3 // both
-		case CategoryWAF:
-			r.ApplyDir = 2 // ingress: WAF blocks inbound web attacks
-		default:
-			r.ApplyDir = 1 // egress
-		}
-	}
-	if r.ApplyDir < 1 || r.ApplyDir > 3 {
-		return uuid.Nil, errors.New("apply_dir must be 1 (egress), 2 (ingress), or 3 (both)")
-	}
-	if strings.TrimSpace(r.Source) == "" {
-		r.Source = "user"
-	}
-	if strings.TrimSpace(r.CfgType) == "" {
-		r.CfgType = "user_created"
-	}
-	r.Source = strings.TrimSpace(r.Source)
-	r.CfgType = strings.TrimSpace(r.CfgType)
-	r.SourcePath = strings.TrimSpace(r.SourcePath)
-	if !validDLPRuleSource(r.Source) {
-		return uuid.Nil, fmt.Errorf("invalid source %q", r.Source)
-	}
-	if !validDLPRuleCfgType(r.CfgType) {
-		return uuid.Nil, fmt.Errorf("invalid cfg_type %q", r.CfgType)
-	}
-	if len(r.Patterns) > 0 && !json.Valid(r.Patterns) {
-		return uuid.Nil, errors.New("patterns is not valid JSON")
-	}
-	// Authoring-time validation (P1-03): reject rules dp would silently drop —
-	// >=1 pattern, count/length caps, no wildcard-only, and every pattern must
-	// compile. NET-40 adds per-pattern op/context validation so an unknown
-	// context (which makes dp reject the whole compiled rule) is caught here
-	// rather than failing open. Mirrors NeuVector's validateDlpRuleConfig.
-	specs, err := r.DecodePatternSpecs()
-	if err != nil {
-		return uuid.Nil, errors.New("patterns is not valid JSON")
-	}
-	if err := dlp.ValidateSpecs(specs); err != nil {
-		return uuid.Nil, err
-	}
-	scopeArg := scopeMACsJSON(r.ScopeMACs)
-	var id uuid.UUID
-	var dpRuleID int64
-	err = s.db.Pool().QueryRow(ctx, `
-INSERT INTO runtime_dlp_rules
-  (org_id, cluster_id, name, category, apply_dir, severity, mode, patterns,
-   scope_macs, description, created_by, updated_by, source, cfg_type, source_path)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10,$11,$11,$12,$13,$14)
-RETURNING id, dp_rule_id`,
-		r.OrgID, r.ClusterID, r.Name, string(r.Category), r.ApplyDir, r.Severity,
-		string(r.Mode), string(r.Patterns), scopeArg, r.Description, r.CreatedBy,
-		r.Source, r.CfgType, r.SourcePath).Scan(&id, &dpRuleID)
+	saved, err := s.insertDLPRule(ctx, r, requestID)
 	if err != nil {
 		return uuid.Nil, err
 	}
-	r.ID = id
-	r.DPRuleID = dpRuleID
-	r.Version = 1
-	if s.auditLog != nil {
-		_ = s.auditLog.LogPolicyCreate(ctx, r.OrgID, r.CreatedBy, snapshotDLP(r), requestID)
-	}
-	// NET-45: federate the rule to joints (master-only; LogFedRevision no-ops
-	// otherwise). Record the fully-scanned row so the fed template carries the
-	// same shape the agent bundle serves (e.g. patterns defaulted to '[]').
-	if full, gerr := s.Get(ctx, r.OrgID, id); gerr == nil {
-		recordFedDLPRule(ctx, s.db.Pool(), r.OrgID, full)
-	}
-	return id, nil
+	return saved.ID, nil
 }
 
 func validDLPRuleSource(source string) bool {
@@ -289,30 +203,28 @@ func validDLPRuleCfgType(cfgType string) bool {
 	}
 }
 
-// ensureBuiltinsOnce seeds built-ins for a cluster at most once per process,
-// swallowing errors (logged) so a seed hiccup never blocks the agent bundle.
-func (s *RuntimeDLPStore) ensureBuiltinsOnce(ctx context.Context, orgID, clusterID uuid.UUID) {
-	if _, done := s.seeded.Load(clusterID); done {
-		return
+type dlpSeedScope struct{ org, cluster uuid.UUID }
+
+// Cache only a successfully committed seed for this exact organization/cluster.
+func (s *RuntimeDLPStore) ensureBuiltinsOnce(ctx context.Context, orgID, clusterID uuid.UUID) error {
+	if err := s.requireOwnedCluster(ctx, orgID, clusterID); err != nil {
+		return err
 	}
-	n, err := s.EnsureBuiltins(ctx, orgID, clusterID)
-	if err != nil {
-		// Don't cache a failure — retry on the next poll.
-		slog.Default().Warn("dlp: seed built-ins failed",
-			slog.String("cluster", clusterID.String()), slog.String("err", err.Error()))
-		return
+	key := dlpSeedScope{orgID, clusterID}
+	if _, done := s.seeded.Load(key); done {
+		return nil
 	}
-	s.seeded.Store(clusterID, struct{}{})
-	if n > 0 {
-		slog.Default().Info("dlp: seeded built-in rules",
-			slog.String("cluster", clusterID.String()), slog.Int("inserted", n))
+	if _, err := s.EnsureBuiltins(ctx, orgID, clusterID); err != nil {
+		return err
 	}
+	s.seeded.Store(key, struct{}{})
+	return nil
 }
 
 // Get fetches one rule, scoped to the org.
 func (s *RuntimeDLPStore) Get(ctx context.Context, orgID, id uuid.UUID) (*DLPRule, error) {
 	row := s.db.Pool().QueryRow(ctx, `SELECT `+dlpSelectCols+
-		` FROM runtime_dlp_rules WHERE id = $1 AND org_id = $2`, id, orgID)
+		` FROM runtime_dlp_rules WHERE id = $1 AND org_id = $2 AND EXISTS (SELECT 1 FROM clusters c WHERE c.id=runtime_dlp_rules.cluster_id AND c.org_id=$2)`, id, orgID)
 	return scanDLP(row)
 }
 
@@ -321,9 +233,13 @@ func (s *RuntimeDLPStore) Get(ctx context.Context, orgID, id uuid.UUID) (*DLPRul
 // "all") returns both DLP and signature rules — the agent pushes them as
 // one batch since dp's engine doesn't distinguish.
 func (s *RuntimeDLPStore) ListForCluster(ctx context.Context, orgID, clusterID uuid.UUID, category DLPCategory) ([]*DLPRule, error) {
+	if err := s.requireOwnedCluster(ctx, orgID, clusterID); err != nil {
+		return nil, err
+	}
 	rows, err := s.db.Pool().Query(ctx, `SELECT `+dlpSelectCols+
 		` FROM runtime_dlp_rules
  WHERE org_id = $1 AND cluster_id = $2 AND mode <> 'disabled'
+   AND EXISTS (SELECT 1 FROM clusters c WHERE c.id=runtime_dlp_rules.cluster_id AND c.org_id=$1)
    AND ($3::text = '' OR category = $3)
  ORDER BY name`, orgID, clusterID, string(category))
 	if err != nil {
@@ -390,130 +306,24 @@ func scopeMACsJSON(macs []string) any {
 // confirmation hooks can fire per-route.
 func (s *RuntimeDLPStore) Update(ctx context.Context, orgID, id uuid.UUID,
 	patterns json.RawMessage, severity int16, description string, scope *[]string, by uuid.UUID, requestID string) (*DLPRule, error) {
-	// Empty patterns means "leave unchanged" (the SQL COALESCEs it away). When a
-	// new set IS supplied, validate it the same way Insert does (P1-03) so an
-	// edit can't slip an unparseable / over-cap / wildcard-only rule past the
-	// authoring gate and into a silently-dropped dp sig.
-	if len(patterns) > 0 {
-		if !json.Valid(patterns) {
-			return nil, errors.New("patterns is not valid JSON")
-		}
-		specs, err := dlp.ParsePatternSpecs(patterns)
-		if err != nil {
-			return nil, errors.New("patterns is not valid JSON")
-		}
-		if err := dlp.ValidateSpecs(specs); err != nil {
-			return nil, err
-		}
-	}
-	before, err := s.Get(ctx, orgID, id)
-	if err != nil {
-		return nil, err
-	}
-	// scope is a pointer so callers can distinguish "leave unchanged" (nil)
-	// from "set/clear scope" (non-nil, possibly empty → NULL = all workloads).
-	setScope := scope != nil
-	var scopeArg any
-	if setScope {
-		scopeArg = scopeMACsJSON(*scope)
-	}
-	_, err = s.db.Pool().Exec(ctx, `
-UPDATE runtime_dlp_rules
-   SET patterns = COALESCE(NULLIF($1::text,'')::jsonb, patterns),
-       severity = COALESCE(NULLIF($2,0::smallint), severity),
-       description = COALESCE(NULLIF($3,''), description),
-       scope_macs = CASE WHEN $7 THEN $8::jsonb ELSE scope_macs END,
-       updated_by = $4
- WHERE id = $5 AND org_id = $6`,
-		string(patterns), severity, description, by, id, orgID, setScope, scopeArg)
-	if err != nil {
-		return nil, err
-	}
-	after, err := s.Get(ctx, orgID, id)
-	if err != nil {
-		return nil, err
-	}
-	if s.auditLog != nil {
-		_ = s.auditLog.LogPolicyEvent(ctx, orgID, &by, audit.ActionPolicyUpdate,
-			ptrSnapDLP(before), ptrSnapDLP(after), requestID)
-	}
-	// NET-45: re-federate the updated rule (master-only).
-	recordFedDLPRule(ctx, s.db.Pool(), orgID, after)
-	return after, nil
+	return s.updateDLPRule(ctx, orgID, id, UpdateDLPRequest{Patterns: &patterns, Severity: severity, Description: description, ScopeMACs: scope}, by, requestID, nil)
 }
 
-func ptrSnapDLP(r *DLPRule) *audit.PolicySnapshot {
-	if r == nil {
-		return nil
-	}
-	s := snapshotDLP(r)
-	return &s
+func (s *RuntimeDLPStore) SetMode(ctx context.Context, orgID, id uuid.UUID, mode DLPMode, by uuid.UUID, requestID string) error {
+	_, err := s.setDLPMode(ctx, orgID, id, mode, by, requestID, nil)
+	return err
 }
 
-// SetMode flips a rule's mode. Same {promote, demote, disable, update}
-// audit-action selector as runtime_policies; system=false because DLP
-// rules don't have auto-rollback today (no analogue of the deny-rate
-// signal — DLP fires-on-payload, not fires-on-rate).
-func (s *RuntimeDLPStore) SetMode(ctx context.Context, orgID, id uuid.UUID,
-	mode DLPMode, by uuid.UUID, requestID string) error {
-	if !mode.Valid() {
-		return fmt.Errorf("invalid mode %q", mode)
-	}
-	before, err := s.Get(ctx, orgID, id)
-	if err != nil {
-		return err
-	}
-	tag, err := s.db.Pool().Exec(ctx,
-		`UPDATE runtime_dlp_rules SET mode=$1, updated_by=$2 WHERE id=$3 AND org_id=$4`,
-		string(mode), by, id, orgID)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return errors.New("not found")
-	}
-	after, aerr := s.Get(ctx, orgID, id)
-	if s.auditLog != nil && aerr == nil {
-		_ = s.auditLog.LogPolicyModeChange(ctx, orgID, &by,
-			snapshotDLP(before), snapshotDLP(after), false /*system*/, requestID)
-	}
-	// NET-45: re-federate on mode change (master-only). A demote to 'disabled'
-	// tombstones the fed template so joints stop serving it, mirroring the
-	// enabled-only cluster bundle; promote/monitor re-authors it.
-	if aerr == nil {
-		recordFedDLPRule(ctx, s.db.Pool(), orgID, after)
-	}
-	return nil
-}
-
-// Delete removes a rule.
 func (s *RuntimeDLPStore) Delete(ctx context.Context, orgID, id uuid.UUID, by *uuid.UUID, requestID string) error {
-	before, err := s.Get(ctx, orgID, id)
-	if err != nil {
-		return err
-	}
-	tag, err := s.db.Pool().Exec(ctx,
-		`DELETE FROM runtime_dlp_rules WHERE id=$1 AND org_id=$2`, id, orgID)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return errors.New("not found")
-	}
-	if s.auditLog != nil {
-		_ = s.auditLog.LogPolicyDelete(ctx, orgID, by, snapshotDLP(before), requestID)
-	}
-	// NET-45: tombstone the fed template so joints drop their read-only copy
-	// (master-only via LogFedRevision).
-	recordFedDLPRuleDelete(ctx, s.db.Pool(), orgID, id)
-	return nil
+	return s.deleteDLPRule(ctx, orgID, id, by, requestID, nil)
 }
 
 // ---------------- HTTP handlers ----------------
 
 // RuntimeDLPHTTP wraps the store with HTTP handlers.
 type RuntimeDLPHTTP struct {
-	store *RuntimeDLPStore
+	store      *RuntimeDLPStore
+	categories []DLPCategory
 }
 
 func NewRuntimeDLPHTTP(d *db.DB, auditLog *audit.Logger) *RuntimeDLPHTTP {
@@ -540,7 +350,7 @@ func (h *RuntimeDLPHTTP) List(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.store.ListForCluster(r.Context(), sub.OrgID, clusterID, category)
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		writeDLPError(w, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"rules": rows})
@@ -562,15 +372,21 @@ func (h *RuntimeDLPHTTP) AgentBundle(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "cluster_id is required")
 		return
 	}
-	// P1-4: lazily seed the built-in DLP + WAF packs (MONITOR mode) the first
-	// time an agent syncs a cluster. Idempotent; failure is non-fatal — we
-	// still serve whatever rules exist. This is the "seed on provision"
-	// contract realised at the natural provision signal (first agent sync),
-	// which also covers clusters that predate this code.
-	h.store.ensureBuiltinsOnce(r.Context(), tok.OrgID, clusterID)
+	if len(r.URL.Query()["cluster_id"]) != 1 {
+		jsonError(w, http.StatusBadRequest, "one cluster_id is required")
+		return
+	}
+	if !h.authorizeDLPAgent(w, r, clusterID) {
+		return
+	}
+	// A failed seed must not replace the agent's existing rules with an incomplete bundle.
+	if err := h.store.ensureBuiltinsOnce(r.Context(), tok.OrgID, clusterID); err != nil {
+		writeDLPError(w, err)
+		return
+	}
 	rows, err := h.store.ListForCluster(r.Context(), tok.OrgID, clusterID, "")
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		writeDLPError(w, err)
 		return
 	}
 	// NET-45: merge master-authored (federated) DLP/WAF rules read-only. On a joint
@@ -627,7 +443,7 @@ func (h *RuntimeDLPHTTP) Get(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, http.StatusNotFound, "not found")
 			return
 		}
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		writeDLPError(w, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, got)
@@ -660,15 +476,12 @@ func (h *RuntimeDLPHTTP) Create(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "invalid body: "+err.Error())
 		return
 	}
-	mode := DLPModeMonitor
-	switch req.Mode {
-	case DLPModeMonitor, DLPModeDisabled, "":
-		if req.Mode != "" {
-			mode = req.Mode
-		}
-	default:
-		jsonError(w, http.StatusBadRequest,
-			"new DLP rules must start in monitor or disabled mode; promote separately")
+	mode := req.Mode
+	if mode == "" {
+		mode = DLPModeMonitor
+	}
+	if mode != DLPModeMonitor && mode != DLPModeDisabled {
+		jsonError(w, http.StatusBadRequest, "new DLP rules must start in monitor or disabled mode; promote separately")
 		return
 	}
 	rule := &DLPRule{
@@ -678,16 +491,11 @@ func (h *RuntimeDLPHTTP) Create(w http.ResponseWriter, r *http.Request) {
 		Patterns: req.Patterns, ScopeMACs: req.ScopeMACs, Description: req.Description,
 		CreatedBy: &sub.UserID,
 	}
-	id, err := h.store.Insert(r.Context(), rule, requestIDFrom(r))
+	got, err := h.store.insertDLPRule(r.Context(), rule, requestIDFrom(r))
 	if err != nil {
-		if strings.Contains(err.Error(), "duplicate") {
-			jsonError(w, http.StatusConflict, "DLP rule with this name already exists")
-			return
-		}
-		jsonError(w, http.StatusBadRequest, err.Error())
+		writeDLPError(w, err)
 		return
 	}
-	got, _ := h.store.Get(r.Context(), sub.OrgID, id)
 	httpx.WriteJSON(w, http.StatusCreated, got)
 }
 
@@ -718,17 +526,9 @@ func (h *RuntimeDLPHTTP) Update(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "invalid body: "+err.Error())
 		return
 	}
-	patterns := json.RawMessage("")
-	if req.Patterns != nil {
-		patterns = *req.Patterns
-	}
-	got, err := h.store.Update(r.Context(), sub.OrgID, id, patterns, req.Severity, req.Description, req.ScopeMACs, sub.UserID, requestIDFrom(r))
+	got, err := h.store.updateDLPRule(r.Context(), sub.OrgID, id, req, sub.UserID, requestIDFrom(r), h.categories)
 	if err != nil {
-		if strings.Contains(err.Error(), "no rows") {
-			jsonError(w, http.StatusNotFound, "not found")
-			return
-		}
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		writeDLPError(w, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, got)
@@ -760,15 +560,11 @@ func (h *RuntimeDLPHTTP) modeChange(w http.ResponseWriter, r *http.Request, targ
 		jsonError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	if err := h.store.SetMode(r.Context(), sub.OrgID, id, target, sub.UserID, requestIDFrom(r)); err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			jsonError(w, http.StatusNotFound, "not found")
-			return
-		}
-		jsonError(w, http.StatusInternalServerError, err.Error())
+	got, err := h.store.setDLPMode(r.Context(), sub.OrgID, id, target, sub.UserID, requestIDFrom(r), h.categories)
+	if err != nil {
+		writeDLPError(w, err)
 		return
 	}
-	got, _ := h.store.Get(r.Context(), sub.OrgID, id)
 	httpx.WriteJSON(w, http.StatusOK, got)
 }
 
@@ -783,15 +579,11 @@ func (h *RuntimeDLPHTTP) Delete(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	if err := h.store.Delete(r.Context(), sub.OrgID, id, &sub.UserID, requestIDFrom(r)); err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			jsonError(w, http.StatusNotFound, "not found")
-			return
-		}
-		jsonError(w, http.StatusInternalServerError, err.Error())
+	if err := h.store.deleteDLPRule(r.Context(), sub.OrgID, id, &sub.UserID, requestIDFrom(r), h.categories); err != nil {
+		writeDLPError(w, err)
 		return
 	}
-	_ = slog.Default()
+
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"deleted": id})
 }
 

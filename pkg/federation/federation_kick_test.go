@@ -6,6 +6,7 @@ import (
 )
 
 func TestKick(t *testing.T) {
+	t.Parallel()
 	got, err := Kick(MemberStatusActive)
 	if err != nil {
 		t.Fatalf("kick active: %v", err)

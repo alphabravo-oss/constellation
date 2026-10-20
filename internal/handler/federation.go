@@ -2,10 +2,13 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -45,10 +48,10 @@ func (h *Federation) State(w http.ResponseWriter, r *http.Request) {
 	err := h.db.Pool().QueryRow(r.Context(), `
 SELECT state, master_id, cluster_name, revision, updated_at FROM federation_state WHERE org_id=$1`,
 		subj.OrgID).Scan(&m.State, &m.MasterID, &m.ClusterName, &m.Revision, &m.UpdatedAt)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		m = federation.Membership{State: federation.StateStandalone}
 	} else if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, m)
@@ -63,7 +66,7 @@ type fedActionBody struct {
 func (h *Federation) Transition(w http.ResponseWriter, r *http.Request) {
 	var body fedActionBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad request")
 		return
 	}
 	subj, _ := SubjectFrom(r.Context())
@@ -71,10 +74,10 @@ func (h *Federation) Transition(w http.ResponseWriter, r *http.Request) {
 	var cur federation.Membership
 	if err := h.db.Pool().QueryRow(r.Context(),
 		`SELECT state, master_id, cluster_name, revision FROM federation_state WHERE org_id=$1`,
-		subj.OrgID).Scan(&cur.State, &cur.MasterID, &cur.ClusterName, &cur.Revision); err != nil && err != pgx.ErrNoRows {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		subj.OrgID).Scan(&cur.State, &cur.MasterID, &cur.ClusterName, &cur.Revision); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
-	} else if err == pgx.ErrNoRows {
+	} else if errors.Is(err, pgx.ErrNoRows) {
 		cur.State = federation.StateStandalone
 	}
 
@@ -90,11 +93,11 @@ func (h *Federation) Transition(w http.ResponseWriter, r *http.Request) {
 	case "leave":
 		next, err = federation.Leave(cur)
 	default:
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown action"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "unknown action")
 		return
 	}
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if _, err := h.db.Pool().Exec(r.Context(), `
@@ -103,7 +106,7 @@ VALUES ($1,$2,$3,$4,$5,NOW())
 ON CONFLICT (org_id) DO UPDATE SET state=EXCLUDED.state, master_id=EXCLUDED.master_id,
        cluster_name=EXCLUDED.cluster_name, revision=EXCLUDED.revision, updated_at=NOW()`,
 		subj.OrgID, next.State, next.MasterID, next.ClusterName, next.Revision); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	// Fed-teardown purge: leaving (joint→standalone) or demoting (master→standalone)
@@ -134,7 +137,7 @@ func (h *Federation) ListMembers(w http.ResponseWriter, r *http.Request) {
 SELECT id, cluster_id, name, role, endpoint, status, last_sync_at, revision
   FROM fed_members WHERE org_id=$1 ORDER BY name`, subj.OrgID)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()
@@ -144,7 +147,7 @@ SELECT id, cluster_id, name, role, endpoint, status, last_sync_at, revision
 		var m federation.Member
 		var lastSync *time.Time
 		if err := rows.Scan(&m.ID, &m.ClusterID, &m.Name, &m.Role, &m.Endpoint, &m.Status, &lastSync, &m.Revision); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		// Derive a live status (active/stale/offline) from last_sync_at age, leaving
@@ -163,11 +166,11 @@ SELECT id, cluster_id, name, role, endpoint, status, last_sync_at, revision
 func (h *Federation) AddMember(w http.ResponseWriter, r *http.Request) {
 	var m federation.Member
 	if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad request")
 		return
 	}
 	if err := m.Validate(); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	subj, _ := SubjectFrom(r.Context())
@@ -177,7 +180,7 @@ VALUES ($1,$2,$3,$4,$5,COALESCE(NULLIF($6,''),'pending'),$7)
 ON CONFLICT (org_id, cluster_id) DO UPDATE SET name=EXCLUDED.name, role=EXCLUDED.role,
        endpoint=EXCLUDED.endpoint, status=EXCLUDED.status, revision=EXCLUDED.revision`,
 		subj.OrgID, m.ClusterID, m.Name, m.Role, m.Endpoint, m.Status, m.Revision); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	oid := subj.OrgID
@@ -196,29 +199,29 @@ func (h *Federation) KickMember(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	mid, err := uuid.Parse(id)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid member id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid member id")
 		return
 	}
 	var status, clusterID string
 	if err := h.db.Pool().QueryRow(r.Context(),
 		`SELECT status, cluster_id FROM fed_members WHERE org_id=$1 AND id=$2`,
 		subj.OrgID, mid).Scan(&status, &clusterID); err != nil {
-		if err == pgx.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "member not found"})
+		if errors.Is(err, pgx.ErrNoRows) {
+			apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "member not found")
 			return
 		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	next, err := federation.Kick(status)
 	if err != nil {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusConflict, err.Error())
 		return
 	}
 	if _, err := h.db.Pool().Exec(r.Context(),
 		`UPDATE fed_members SET status=$3, kicked_at=NOW() WHERE org_id=$1 AND id=$2`,
 		subj.OrgID, mid, next); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	// D1: revoke the kicked joint's per-cluster credential (bump epoch + tombstone) so its
@@ -226,7 +229,7 @@ func (h *Federation) KickMember(w http.ResponseWriter, r *http.Request) {
 	// primitive (A1 parity) that complements the status='kicked' /sync guard. Best-effort:
 	// a missing credential row (kicked before it ever joined) is a no-op.
 	if err := RevokeFedCredential(r.Context(), h.db.Pool(), subj.OrgID, clusterID); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	oid := subj.OrgID
@@ -260,7 +263,7 @@ func (h *Federation) Sync(w http.ResponseWriter, r *http.Request) {
 			`SELECT status FROM fed_members WHERE org_id=$1 AND cluster_id=$2`,
 			subj.OrgID, clusterID).Scan(&status)
 		if err == nil && status == federation.MemberStatusKicked {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "federation: member revoked"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusForbidden, "federation: member revoked")
 			return
 		}
 		// Heartbeat: stamp last_sync_at and activate a still-pending member. Scoped
@@ -278,7 +281,7 @@ SELECT rule_kind, rule_id, revision, payload, updated_at
   FROM fed_rule_revisions WHERE org_id=$1 AND revision > $2
   ORDER BY revision ASC LIMIT 500`, subj.OrgID, since)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()
@@ -286,7 +289,7 @@ SELECT rule_kind, rule_id, revision, payload, updated_at
 	for rows.Next() {
 		var rev federation.RuleRevision
 		if err := rows.Scan(&rev.Kind, &rev.RuleID, &rev.Revision, &rev.Payload, &rev.UpdatedAt); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		out = append(out, rev)

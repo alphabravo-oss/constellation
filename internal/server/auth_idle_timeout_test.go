@@ -1,3 +1,5 @@
+//go:build integration
+
 package server
 
 import (
@@ -12,7 +14,7 @@ import (
 
 	"github.com/alphabravocompany/constellation/internal/auth"
 	"github.com/alphabravocompany/constellation/internal/db"
-	"github.com/alphabravocompany/constellation/pkg/observability"
+	"github.com/alphabravocompany/constellation/internal/telemetry"
 )
 
 // newIdleTimeoutTestServer boots a Server with a configurable A7 SessionIdleTimeout and
@@ -22,7 +24,7 @@ func newIdleTimeoutTestServer(t *testing.T, idle time.Duration) (*httptest.Serve
 	t.Helper()
 	t.Setenv("CONSTELLATION_ALLOW_HS256_JWT", "true") // tests sign with a symmetric JWTKeys secret
 	ctx := context.Background()
-	url := testDBURL()
+	url := testDBURL(t)
 
 	pool, err := pgxpool.New(ctx, url)
 	if err != nil {
@@ -75,7 +77,7 @@ VALUES ($1, $2, $3, 'Idle Admin', 0)`, userID, orgID, email); err != nil {
 	}
 	t.Cleanup(dbHandle.Close)
 
-	tel, _ := observability.Init(ctx, "test")
+	tel, _ := telemetry.Init(ctx, telemetry.ConfigFromEnv("test"))
 	cfg := Config{
 		ListenAddr:         ":0",
 		DatabaseURL:        url,

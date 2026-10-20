@@ -57,6 +57,10 @@ spec:
             - containerPort: 8090
               name: http
           env:
+            {{- with .Values.scanner.insecureRegistries }}
+            - name: CONSTELLATION_SCANNER_INSECURE_REGISTRIES
+              value: {{ join "," . | quote }}
+            {{- end }}
             - name: CONSTELLATION_CONTROL_PLANE_URL
               value: {{ include "constellation.apiURL" . | quote }}
             - name: CONSTELLATION_API_URL
@@ -132,6 +136,9 @@ spec:
             # loop keeps them current on its own schedule, decoupled from the image.
             - name: XDG_CACHE_HOME
               value: /var/lib/scanner-cache/.cache
+            # Cosign must refresh trusted metadata without writing to read-only HOME.
+            - name: TUF_ROOT
+              value: /var/lib/scanner-cache/sigstore/root
             - name: SYFT_CACHE_DIR
               value: /var/lib/scanner-cache/syft
             - name: GRYPE_DB_CACHE_DIR

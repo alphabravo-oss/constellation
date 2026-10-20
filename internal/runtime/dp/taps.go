@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -65,19 +66,23 @@ type TapTarget struct {
 	// the agent is the only place that knows a MAC's pod labels. Populated by the
 	// ContainerTapProvider; empty for the env/veth providers (which have no pod
 	// identity), leaving those MACs eligible only for the label opt-in path.
-	Namespace string
-	PodName   string
-	Labels    map[string]string
+	Namespace    string
+	PodName      string
+	PodUID       string
+	Registration uint64
+	Labels       map[string]string
 }
 
 // PodTapMeta is the pod identity of one actively-tapped MAC, exposed so the
 // DLP/WAF sync worker can resolve group→sensor bindings (NET-43) against the
 // pods this agent actually taps. MAC is the tap EPMAC (dp's workload handle).
 type PodTapMeta struct {
-	MAC       string
-	Namespace string
-	PodName   string
-	Labels    map[string]string
+	MAC          string
+	Namespace    string
+	PodName      string
+	PodUID       string
+	Registration uint64
+	Labels       map[string]string
 }
 
 // key returns the dedup key dp uses internally (netns+iface), so the
@@ -107,10 +112,13 @@ type TapProvider interface {
 // and DelTapPort for ones that disappear. Runs on a 10s tick by default;
 // the interval is tunable via Options.TapReconcileInterval.
 type tapManager struct {
-	client   *dpClient
-	provider TapProvider
-	logger   *slog.Logger
-	interval time.Duration
+	client            *dpClient
+	provider          TapProvider
+	logger            *slog.Logger
+	interval          time.Duration
+	ready             func() bool
+	generation        func() uint64
+	currentGeneration uint64
 
 	// isEnforcedMAC, when set, reports whether a MAC is an active inline
 	// (NFQUEUE) enforce target. The reconciler skips such MACs so it can never
@@ -185,6 +193,9 @@ func (m *tapManager) waitForSocket(ctx context.Context, timeout time.Duration) {
 }
 
 func (m *tapManager) reconcileOnce(ctx context.Context) {
+	if ctx.Err() != nil || m.ready != nil && !m.ready() {
+		return
+	}
 	desired, err := m.provider.Desired(ctx)
 	if err != nil {
 		m.errors.Add(1)
@@ -212,75 +223,42 @@ func (m *tapManager) reconcileOnce(ctx context.Context) {
 		want[d.key()] = d
 	}
 
+	m.client.policyMu.Lock()
+	defer m.client.policyMu.Unlock()
+	if ctx.Err() != nil || m.ready != nil && !m.ready() {
+		return
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	if m.generation != nil && m.currentGeneration != m.generation() {
+		for key, target := range m.current {
+			target.PodUID = "\x00retired"
+			m.current[key] = target
+		}
+		m.currentGeneration = m.generation()
+	}
+	m.retireChanged(ctx, want)
+
 	// Add anything new.
 	for k, t := range want {
-		if _, has := m.current[k]; has {
-			continue
-		}
-		if t.EPMAC == "" {
-			if mac, err := resolveMAC(t.Iface); err == nil {
-				t.EPMAC = mac
-			} else {
-				m.logger.Debug("dp tap: epmac auto-resolve failed; sending empty",
-					slog.String("iface", t.Iface), slog.String("err", err.Error()))
+		if current, has := m.current[k]; has {
+			if !sameTapIdentity(current, t) {
+				continue
 			}
-		}
-		// Never tap a MAC the inline enforce path owns. The provider already
-		// skips Enforce targets, but a transient Enforce=false flap could slip
-		// one through — tapping it would issue ConfigMAC(tap=true) and clobber
-		// the ep->tap=false the NFQUEUE verdict requires. Defensive skip.
-		if m.isEnforcedMAC != nil && t.EPMAC != "" && m.isEnforcedMAC(t.EPMAC) {
-			m.logger.Debug("dp tap: skipping MAC owned by inline enforce path",
-				slog.String("iface", t.Iface), slog.String("mac", t.EPMAC))
+			t.EPMAC, t.Registration = current.EPMAC, current.Registration
+			m.current[k] = t
 			continue
 		}
-		if err := m.client.AddTapPort(t.NetNS, t.Iface, t.EPMAC); err != nil {
+		registered, err := m.registerTarget(t)
+		if err != nil {
 			m.errors.Add(1)
-			m.logger.Warn("dp tap: AddTapPort",
-				slog.String("netns", t.NetNS), slog.String("iface", t.Iface),
-				slog.String("err", err.Error()))
+			m.logger.Warn("dp tap: register endpoint", "iface", t.Iface, "err", err)
 			continue
 		}
-		// dp's session machinery only emits DPMsgConnect for MACs registered
-		// via AddMAC. Without this, the tap reads packets but they go into
-		// the void. The (Iface, MAC) pair here must match dp's per-tap
-		// context — using the tap iface name is what NeuVector's engine does.
-		if t.EPMAC != "" {
-			var macErr error
-			if t.PMAC != "" {
-				// Proxymesh lo tap: register the synthetic "lkst" EPMAC with the
-				// real eth0 MAC in PMAC and the pod IPs in PIPS so dp attributes
-				// loopback packets and can xff-match 127.0.0.x traffic.
-				macErr = m.client.AddProxyMeshMAC(t.Iface, t.EPMAC, t.PMAC, t.PIPS)
-			} else {
-				macErr = m.client.AddMAC(t.Iface, t.EPMAC, nil)
-			}
-			if macErr != nil {
-				m.errors.Add(1)
-				m.logger.Warn("dp tap: AddMAC",
-					slog.String("iface", t.Iface), slog.String("mac", t.EPMAC),
-					slog.String("err", macErr.Error()))
-				// Don't unwind the AddTapPort — next reconcile will retry the
-				// AddMAC, and the tap is harmlessly idle until the MAC lands.
-			} else {
-				// Seed dp with this MAC's tap flag + listening-port app hints
-				// (ctrl_cfg_mac). This is what makes dp recruit L7 parsers and
-				// run DLP/WAF on TAP-copied sessions — see ConfigMAC. Must come
-				// after AddMAC (dp skips MACs not yet in its ep map). Best-effort:
-				// tap=true just reasserts the current default, and empty Apps is
-				// harmless, so a failure here only means recruitment stays
-				// heuristic until the next reconcile.
-				tap := true
-				if err := m.client.ConfigMAC([]string{t.EPMAC}, &tap, t.Apps); err != nil {
-					m.logger.Debug("dp tap: ConfigMAC (best-effort)",
-						slog.String("iface", t.Iface), slog.String("mac", t.EPMAC),
-						slog.String("err", err.Error()))
-				}
-			}
-		}
+		t = registered
+
+		t.Registration = endpointRegistration.Add(1)
 		m.added.Add(1)
 		m.current[k] = t
 		m.logger.Info("dp tap: added",
@@ -288,34 +266,74 @@ func (m *tapManager) reconcileOnce(ctx context.Context) {
 			slog.String("epmac", t.EPMAC))
 	}
 
-	// Remove anything that disappeared from the desired set.
-	for k, t := range m.current {
-		if _, still := want[k]; still {
+}
+
+// Caller holds policyMu and current-map mutex in that order.
+func (m *tapManager) registerTarget(target TapTarget) (TapTarget, error) {
+	if target.EPMAC == "" {
+		mac, err := resolveMAC(target.Iface)
+		if err != nil {
+			return target, err
+		}
+		target.EPMAC = mac
+	}
+	if m.isEnforcedMAC != nil && m.isEnforcedMAC(target.EPMAC) {
+		return target, errors.New("endpoint belongs to inline path")
+	}
+	if err := m.client.clearEndpointPolicy(target.EPMAC); err != nil {
+		return target, err
+	}
+	if err := m.client.AddTapPort(target.NetNS, target.Iface, target.EPMAC); err != nil {
+		return target, err
+	}
+	var err error
+	if target.PMAC != "" {
+		err = m.client.AddProxyMeshMAC(target.Iface, target.EPMAC, target.PMAC, target.PIPS)
+	} else {
+		err = m.client.AddMAC(target.Iface, target.EPMAC, nil)
+	}
+	if err != nil {
+		return target, errors.Join(err, m.client.DelTapPort(target.NetNS, target.Iface))
+	}
+	tap := true
+	if err := m.client.ConfigMAC([]string{target.EPMAC}, &tap, target.Apps); err != nil {
+		return target, errors.Join(err, m.client.DelMAC(target.Iface, target.EPMAC), m.client.DelTapPort(target.NetNS, target.Iface))
+	}
+	return target, nil
+}
+
+// Registration identity changes require retirement before re-registration,
+// even when a recycled PID produces the same netns/interface key.
+func sameTapIdentity(current, desired TapTarget) bool {
+	return current.Namespace == desired.Namespace && current.PodName == desired.PodName && current.PodUID == desired.PodUID && slices.Equal(current.PIPS, desired.PIPS) && current.PMAC == desired.PMAC && (desired.EPMAC == "" || current.EPMAC == desired.EPMAC)
+}
+
+func (m *tapManager) retireChanged(_ context.Context, want map[string]TapTarget) {
+	for key, target := range m.current {
+		if desired, exists := want[key]; exists && sameTapIdentity(target, desired) {
 			continue
 		}
-		// Never DelMAC a veth the inline enforce path now owns. dp keys the ep by
-		// MAC and tap+nfq share ONE io_ep: DelMAC removes that ep from g_ep_map,
-		// wiping the enforce path's policy_hdl (→ policy_id=0, default-allow) and,
-		// on the next add_mac, resetting ep->tap=true (→ DENY silently ACCEPTed).
-		// We still tear down our own tap PORT (dp stops mirroring), but the MAC/ep
-		// stays with the enforce reconciler, which re-asserts tap=false each pass.
-		enforced := m.isEnforcedMAC != nil && t.EPMAC != "" && m.isEnforcedMAC(t.EPMAC)
-		if t.EPMAC != "" && !enforced {
-			if err := m.client.DelMAC(t.Iface, t.EPMAC); err != nil {
-				m.logger.Debug("dp tap: DelMAC (best-effort)",
-					slog.String("iface", t.Iface), slog.String("err", err.Error()))
+		enforced := m.isEnforcedMAC != nil && target.EPMAC != "" && m.isEnforcedMAC(target.EPMAC)
+		var err error
+		if !enforced {
+			err = m.client.clearEndpointPolicy(target.EPMAC)
+			if err == nil && target.EPMAC != "" {
+				err = m.client.DelMAC(target.Iface, target.EPMAC)
 			}
 		}
-		if err := m.client.DelTapPort(t.NetNS, t.Iface); err != nil {
+		if err == nil {
+			err = m.client.DelTapPort(target.NetNS, target.Iface)
+		}
+		if err != nil {
 			m.errors.Add(1)
-			m.logger.Warn("dp tap: DelTapPort",
-				slog.String("netns", t.NetNS), slog.String("iface", t.Iface),
-				slog.String("err", err.Error()))
+			m.logger.Warn("dp tap: endpoint retirement failed", "iface", target.Iface, "err", err)
+			target.Namespace, target.PodName, target.PodUID = "", "", ""
+			target.Registration = endpointRegistration.Add(1)
+			m.current[key] = target
+			continue
 		}
 		m.removed.Add(1)
-		delete(m.current, k)
-		m.logger.Info("dp tap: removed",
-			slog.String("netns", t.NetNS), slog.String("iface", t.Iface))
+		delete(m.current, key)
 	}
 }
 
@@ -375,10 +393,12 @@ func (m *tapManager) podMeta() []PodTapMeta {
 			continue
 		}
 		out = append(out, PodTapMeta{
-			MAC:       t.EPMAC,
-			Namespace: t.Namespace,
-			PodName:   t.PodName,
-			Labels:    t.Labels,
+			MAC:          t.EPMAC,
+			Namespace:    t.Namespace,
+			PodName:      t.PodName,
+			PodUID:       t.PodUID,
+			Registration: t.Registration,
+			Labels:       t.Labels,
 		})
 	}
 	return out
@@ -387,6 +407,8 @@ func (m *tapManager) podMeta() []PodTapMeta {
 // teardown removes every current tap. Best-effort, errors swallowed —
 // shutdown is a "do what you can" path.
 func (m *tapManager) teardown() {
+	m.client.policyMu.Lock()
+	defer m.client.policyMu.Unlock()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, t := range m.current {

@@ -1,0 +1,152 @@
+{{- /*
+Off-host backup story (runtime hardening, folded into the chart):
+  1. backup.offhost.objectStore  -> a second Barman ObjectStore pointing at an
+     external S3 endpoint, so an operator can switch the CNPG archive target or
+     run a recovery drill against it (postgres.cloudnativepg.barmanCloud.recovery.*).
+  2. backup.offhost.sync         -> `archive-offhost-sync` CronJob (rclone from the
+     toolbox image) mirroring the in-cluster bucket to the off-host bucket.
+  3. backup.offhost.recovery     -> `<name>-recovery` ObjectStore for PITR drills
+     (docs/cnpg-recovery.md: switch WAL twice before a drill so the target time is
+     archived).
+Credentials come from Secrets (keys ACCESS_KEY_ID / SECRET_ACCESS_KEY); rclone
+reads them through RCLONE_CONFIG_* env, no config file is written.
+*/ -}}
+{{- $off := .Values.backup.offhost -}}
+{{- if $off.enabled -}}
+{{- $local := .Values.backup.objectStore -}}
+{{- $localSecret := include "constellation.objectStoreCredentialsSecret" . -}}
+{{- $localEndpoint := printf "http://%s:9000" (include "constellation.objectStoreName" .) -}}
+{{- $offName := printf "%s-offhost" (include "constellation.objectStoreArchiveName" .) -}}
+{{- $_ := required "backup.offhost.endpointURL is required" $off.endpointURL -}}
+{{- $_ := required "backup.offhost.credentialsSecret is required (keys ACCESS_KEY_ID, SECRET_ACCESS_KEY)" $off.credentialsSecret -}}
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: {{ $offName }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: object-store-offhost
+spec:
+  retentionPolicy: {{ $off.retentionPolicy | quote }}
+  configuration:
+    destinationPath: s3://{{ $off.bucket }}/
+    endpointURL: {{ $off.endpointURL | quote }}
+    s3Credentials:
+      accessKeyId: { name: {{ $off.credentialsSecret }}, key: ACCESS_KEY_ID }
+      secretAccessKey: { name: {{ $off.credentialsSecret }}, key: SECRET_ACCESS_KEY }
+    wal: { compression: gzip, maxParallel: 2 }
+    data: { compression: gzip, jobs: 2 }
+  instanceSidecarConfiguration:
+    env:
+      - name: AWS_DEFAULT_REGION
+        value: {{ $off.region | quote }}
+{{- if $off.recovery.enabled }}
+---
+# Recovery ObjectStore: same bucket, read as a source for a PITR drill cluster
+# (postgres.cloudnativepg.barmanCloud.recovery.objectStoreName: {{ $offName }}-recovery).
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: {{ $offName }}-recovery
+  namespace: {{ $off.recovery.namespace | default .Release.Namespace }}
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: object-store-recovery
+spec:
+  configuration:
+    destinationPath: s3://{{ $off.bucket }}/
+    endpointURL: {{ $off.endpointURL | quote }}
+    s3Credentials:
+      accessKeyId: { name: {{ $off.credentialsSecret }}, key: ACCESS_KEY_ID }
+      secretAccessKey: { name: {{ $off.credentialsSecret }}, key: SECRET_ACCESS_KEY }
+    wal: { compression: gzip, maxParallel: 2 }
+    data: { compression: gzip, jobs: 2 }
+  instanceSidecarConfiguration:
+    env:
+      - name: AWS_DEFAULT_REGION
+        value: {{ $off.region | quote }}
+{{- end }}
+{{- /* Sync source: the chart-rendered store (backup.objectStore), or an object store
+       managed outside this release (backup.offhost.sync.source.*, e.g. an adopted
+       CNPG cluster in postgres.mode=external archiving to a hand-deployed RustFS). */ -}}
+{{- $src := $off.sync.source | default dict -}}
+{{- $srcEndpoint := $src.endpointURL | default $localEndpoint -}}
+{{- $srcSecret := $src.credentialsSecret | default $localSecret -}}
+{{- $srcBucket := $src.bucket | default $local.bucket -}}
+{{- $srcRegion := $src.region | default $local.region -}}
+{{- $serverName := $src.serverName | default (printf "%s-postgres" (include "constellation.fullname" .)) -}}
+{{- if and $off.sync.enabled (or $local.enabled $src.endpointURL) }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "constellation.fullname" . }}-archive-offhost-sync
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: archive-offhost-sync
+spec:
+  schedule: {{ $off.sync.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 600
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: {{ include "constellation.name" . }}
+            app.kubernetes.io/instance: {{ .Release.Name }}
+            app.kubernetes.io/component: archive-offhost-sync
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          {{- include "constellation.pullSecrets" . | nindent 10 }}
+          {{- include "constellation.podSecurityContext" . | nindent 10 }}
+          containers:
+            - name: rclone
+              image: {{ include "constellation.roleImage" (dict "ctx" . "role" "toolbox") }}
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              {{- include "constellation.containerSecurityContext" . | nindent 14 }}
+              command: ["rclone"]
+              args:
+                - sync
+                - local:{{ $srcBucket }}/{{ $serverName }}
+                - offhost:{{ $off.bucket }}/{{ $serverName }}
+                - --transfers={{ $off.sync.transfers }}
+                - --checkers={{ $off.sync.checkers }}
+                - --fast-list
+                - --stats-one-line
+                - --stats=5m
+                - --log-level=NOTICE
+              env:
+                - { name: HOME, value: /tmp }
+                - { name: RCLONE_CONFIG, value: /tmp/rclone.conf }
+                - { name: RCLONE_CONFIG_LOCAL_TYPE, value: s3 }
+                - { name: RCLONE_CONFIG_LOCAL_PROVIDER, value: Other }
+                - { name: RCLONE_CONFIG_LOCAL_ENDPOINT, value: {{ $srcEndpoint | quote }} }
+                - { name: RCLONE_CONFIG_LOCAL_REGION, value: {{ $srcRegion | quote }} }
+                - { name: RCLONE_CONFIG_LOCAL_FORCE_PATH_STYLE, value: "true" }
+                - name: RCLONE_CONFIG_LOCAL_ACCESS_KEY_ID
+                  valueFrom: { secretKeyRef: { name: {{ $srcSecret }}, key: ACCESS_KEY_ID } }
+                - name: RCLONE_CONFIG_LOCAL_SECRET_ACCESS_KEY
+                  valueFrom: { secretKeyRef: { name: {{ $srcSecret }}, key: SECRET_ACCESS_KEY } }
+                - { name: RCLONE_CONFIG_OFFHOST_TYPE, value: s3 }
+                - { name: RCLONE_CONFIG_OFFHOST_PROVIDER, value: Other }
+                - { name: RCLONE_CONFIG_OFFHOST_ENDPOINT, value: {{ $off.endpointURL | quote }} }
+                - { name: RCLONE_CONFIG_OFFHOST_REGION, value: {{ $off.region | quote }} }
+                - { name: RCLONE_CONFIG_OFFHOST_FORCE_PATH_STYLE, value: "true" }
+                - name: RCLONE_CONFIG_OFFHOST_ACCESS_KEY_ID
+                  valueFrom: { secretKeyRef: { name: {{ $off.credentialsSecret }}, key: ACCESS_KEY_ID } }
+                - name: RCLONE_CONFIG_OFFHOST_SECRET_ACCESS_KEY
+                  valueFrom: { secretKeyRef: { name: {{ $off.credentialsSecret }}, key: SECRET_ACCESS_KEY } }
+              resources: {{- toYaml $off.sync.resources | nindent 16 }}
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {}
+{{- end }}
+{{- end }}

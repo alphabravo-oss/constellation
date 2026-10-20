@@ -23,7 +23,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/alphabravocompany/constellation/pkg/quarantine"
 )
@@ -306,7 +305,8 @@ type EvidenceArtifactDetail struct {
 // PolicyEngine is the built-in evaluator. Policies are simple structured rules — anything
 // requiring Rego/CEL goes through the Phase-5 plugin engines.
 type PolicyEngine struct {
-	mu sync.RWMutex
+	WorkloadOwners WorkloadOwnerResolver
+	mu             sync.RWMutex
 
 	// Rules is the active policy set. Hot-reloaded by the webhook server.
 	Rules []Rule
@@ -436,6 +436,13 @@ type Rule struct {
 	// Namespaces and NamespaceSelector are OR-combined: a request in a listed
 	// namespace OR a namespace whose labels match fires the rule.
 	NamespaceSelector map[string]string
+	// ExcludeNamespaces / ExcludeNamespaceSelector carve namespaces OUT of the
+	// rule (evaluated before the include matchers): system namespaces whose
+	// pods legitimately use hostNetwork/hostPID (CNI, node-exporter, ingress)
+	// are exempted from the built-in rules this way (chart
+	// admission.exemptNamespaces + admission.exemptNamespaceLabel=ignore).
+	ExcludeNamespaces        []string
+	ExcludeNamespaceSelector map[string]string
 	// Groups, when non-empty, scopes the rule to pods that resolve into at
 	// least one Constellation group by id or name. Empty = all groups.
 	Groups []string
@@ -525,6 +532,7 @@ type EvidenceGate struct {
 	DeniedCVEs                   []string // vulnerability: deny if any of these CVE ids is present, regardless of severity/count (NeuVector CriteriaKeyCVENames). Normalized upper-case.
 	CVEGraceDays                 *int     // vulnerability: ignore CVEs published within this many days when counting/denying (NeuVector SubCriteriaPublishDays). nil/<=0 = no grace window.
 	RequireKnownScanResult       bool
+	RequiredSuccessfulEngines    []string
 	HonorActiveExceptions        bool
 	MaxScanAgeSeconds            int64
 	RequireVulnDBBundle          bool
@@ -614,6 +622,25 @@ func DefaultRules() []Rule {
 	}
 }
 
+// ExemptNamespaces returns rules with ExcludeNamespaces / ExcludeNamespaceSelector
+// applied to every rule (used on DefaultRules at start-up; label is the namespace
+// label whose value "ignore" opts a namespace out, empty disables the selector).
+func ExemptNamespaces(rules []Rule, namespaces []string, label string) []Rule {
+	out := make([]Rule, len(rules))
+	for i, r := range rules {
+		r.ExcludeNamespaces = append(append([]string(nil), r.ExcludeNamespaces...), namespaces...)
+		if label != "" {
+			sel := map[string]string{label: "ignore"}
+			for k, v := range r.ExcludeNamespaceSelector {
+				sel[k] = v
+			}
+			r.ExcludeNamespaceSelector = sel
+		}
+		out[i] = r
+	}
+	return out
+}
+
 // SetRules replaces the active rules. It is safe to call while Evaluate is serving requests.
 func (e *PolicyEngine) SetRules(rules []Rule) {
 	e.mu.Lock()
@@ -632,11 +659,18 @@ func (e *PolicyEngine) SnapshotRules() []Rule {
 // matches surface as warnings (returned via the response Warnings field) but do not block.
 func (e *PolicyEngine) Evaluate(ctx context.Context, req *admissionv1.AdmissionRequest) *admissionv1.AdmissionResponse {
 	resp := &admissionv1.AdmissionResponse{UID: req.UID, Allowed: true}
+	// Retiring replicas must not require re-admitting an unchanged pod
+	// template. New pods and scale-ups still pass the normal checks, and the
+	// ChainEngine continues to evaluate explicit Rego/CEL policies.
+	if isReplicaReduction(req) {
+		return resp
+	}
 
 	e.mu.RLock()
 	rules := append([]Rule(nil), e.Rules...)
 	evidence := e.Evidence
 	qsrc := e.Quarantine
+	workloadOwners := e.WorkloadOwners
 	onDeny := e.OnDeny
 	rbac := e.RBAC
 	labeler := e.NamespaceLabeler
@@ -673,7 +707,13 @@ func (e *PolicyEngine) Evaluate(ctx context.Context, req *admissionv1.AdmissionR
 	// deny event whose RuleID encodes the quarantine entry id so the
 	// audit trail links pod → quarantine entry → upstream alert.
 	if qsrc != nil {
-		if hit := qsrc.Current().Match(pod); hit != nil {
+		hit, resolveErr := matchQuarantine(ctx, req, pod, qsrc.Current(), workloadOwners)
+		if resolveErr != nil {
+			resp.Allowed = false
+			resp.Result = &metav1.Status{Message: "quarantine workload identity unavailable: " + resolveErr.Error()}
+			return resp
+		}
+		if hit != nil {
 			resp.Allowed = false
 			resp.Result = &metav1.Status{
 				Message: fmt.Sprintf("quarantined by constellation (scope=%s match=%s): %s",
@@ -716,7 +756,8 @@ func (e *PolicyEngine) Evaluate(ctx context.Context, req *admissionv1.AdmissionR
 			continue
 		}
 		if rule.Mode == "enforce" {
-			resp.Warnings = append(warnings, fmt.Sprintf("policy %q (allow): admitted by carve-out: %s", rule.ID, reason))
+			warnings = append(warnings, fmt.Sprintf("policy %q (allow): admitted by carve-out: %s", rule.ID, reason))
+			resp.Warnings = warnings
 			return resp
 		}
 		warnings = append(warnings, fmt.Sprintf("policy %q (allow, monitor): would carve out of deny rules: %s", rule.ID, reason))
@@ -1292,6 +1333,20 @@ func namespaceMatcher(ctx context.Context, labeler NamespaceLabelResolver, names
 		resolErr error
 	)
 	return func(r Rule) bool {
+		for _, ns := range r.ExcludeNamespaces {
+			if ns == namespace {
+				return false
+			}
+		}
+		if len(r.ExcludeNamespaceSelector) > 0 && labeler != nil {
+			if !resolved {
+				labels, resolErr = labeler.NamespaceLabels(ctx, namespace)
+				resolved = true
+			}
+			if resolErr == nil && labelsMatchSelector(labels, r.ExcludeNamespaceSelector) {
+				return false
+			}
+		}
 		if len(r.Namespaces) == 0 && len(r.NamespaceSelector) == 0 {
 			return true
 		}
@@ -1466,8 +1521,8 @@ func imageInAllowlist(image string, allowlist []string) bool {
 			continue
 		}
 		eHost, ePath := e, ""
-		if slash := strings.Index(e, "/"); slash != -1 {
-			eHost, ePath = e[:slash], e[slash+1:]
+		if h, rest, ok := strings.Cut(e, "/"); ok {
+			eHost, ePath = h, rest
 		}
 		if !strings.EqualFold(eHost, host) {
 			continue
@@ -1510,6 +1565,3 @@ func explicitImageTag(image string) (string, bool) {
 	}
 	return ref[lastColon+1:], true
 }
-
-// runtimeScheme is exported only so the webhook server can register types when wiring TLS.
-var runtimeScheme = runtime.NewScheme()

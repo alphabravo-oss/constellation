@@ -1,6 +1,6 @@
-import { Link } from "react-router-dom";
+import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
   BellRing,
@@ -16,11 +16,13 @@ import {
 
 import { useCluster } from "@/hooks/useCluster";
 import { PageContainer, PageHeader, PageSection } from "@/components/ui/page";
+import { Tabs, useTabParam } from "@/components/ui/tabs";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusPill } from "@/components/ui/status-pill";
 import { ImportExportButtons } from "@/components/ImportExportButtons";
-import { groupsApi, networkRules, runtimeDLP, runtimeSignatures, vulnProfiles } from "@/api/client";
+import { enterprise, groupsApi, networkRules, runtimeDLP, runtimeSignatures, vulnProfiles, type MigrationImportListItem, type MigrationUnsupported } from "@/api/client";
 
 interface PolicyFamily {
   title: string;
@@ -31,93 +33,104 @@ interface PolicyFamily {
   icon: ReactNode;
   mode?: "learn" | "monitor" | "enforce";
   ordered?: boolean;
-  importable?: boolean;
+  reorder?: "move-top" | "up-down";
   portable?: "network-rules" | "dlp" | "signatures" | "groups" | "vuln-profiles";
 }
 
+type ChangeFamily = Exclude<NonNullable<PolicyFamily["portable"]>, "network-rules">;
+
+const changeQueryKeys: Record<ChangeFamily, string> = {
+  dlp: "runtime-dlp-rules",
+  signatures: "runtime-signatures",
+  groups: "groups",
+  "vuln-profiles": "vuln-profiles",
+};
+
+const changeScopes: Record<ChangeFamily, string> = {
+  dlp: "Active listed cluster rules only",
+  signatures: "Active listed cluster signatures only",
+  groups: "Visible cluster and org-wide groups",
+  "vuln-profiles": "Visible cluster and org-wide profiles",
+};
+
 const policyFamilies: PolicyFamily[] = [
   {
-    title: "Network Rules",
+    title: "Network rules",
     nvName: "Network policy",
     route: "network-rules",
     createRoute: "network-rules/new",
     icon: <Network className="h-4 w-4" aria-hidden />,
     mode: "monitor",
     ordered: true,
-    importable: true,
+    reorder: "move-top",
     portable: "network-rules",
   },
   {
-    title: "Admission Control",
+    title: "Admission control",
     nvName: "Admission rules",
     route: "admission",
     createRoute: "admission/new",
     icon: <ShieldCheck className="h-4 w-4" aria-hidden />,
     mode: "enforce",
     ordered: true,
-    importable: true,
   },
   {
-    title: "Runtime Policies",
+    title: "Runtime policies",
     nvName: "Response protection",
     route: "runtime-policies",
     createRoute: "runtime-policies/new",
     icon: <ScrollText className="h-4 w-4" aria-hidden />,
     mode: "monitor",
-    importable: true,
   },
   {
-    title: "Process Baselines",
+    title: "Process baselines",
     nvName: "Process profile",
     route: "runtime/baselines",
     icon: <GitMerge className="h-4 w-4" aria-hidden />,
     mode: "learn",
   },
   {
-    title: "File Monitor",
+    title: "File monitor",
     nvName: "File profile",
     route: "file-monitor",
     createRoute: "file-monitor/new",
     icon: <FileWarning className="h-4 w-4" aria-hidden />,
     mode: "monitor",
-    importable: true,
   },
   {
-    title: "DLP Rules",
+    title: "DLP rules",
     nvName: "DLP sensors",
     switchTerms: ["NV DLP Sensors -> DLP Rules", "NV dlp_group -> DLP group scope"],
     route: "runtime-dlp",
     createRoute: "runtime-dlp/new",
     icon: <ShieldCheck className="h-4 w-4" aria-hidden />,
     mode: "monitor",
-    importable: true,
     portable: "dlp",
   },
   {
-    title: "WAF / DPI Signatures",
+    title: "WAF / DPI signatures",
     nvName: "WAF sensors",
     switchTerms: ["NV WAF Sensors -> WAF/DPI Signatures", "NV waf_group -> WAF/DPI group scope"],
     route: "runtime-signatures",
     createRoute: "runtime-signatures/new",
     icon: <Activity className="h-4 w-4" aria-hidden />,
     mode: "monitor",
-    importable: true,
     portable: "signatures",
   },
   {
-    title: "Response Rules",
+    title: "Response rules",
     nvName: "Response rules",
     route: "response-rules",
     createRoute: "response-rules/new",
     icon: <BellRing className="h-4 w-4" aria-hidden />,
     ordered: true,
+    reorder: "up-down",
   },
   {
-    title: "Vulnerability Profiles",
+    title: "Vulnerability profiles",
     nvName: "Vulnerability profile",
     route: "vuln-profiles",
     icon: <FileWarning className="h-4 w-4" aria-hidden />,
-    importable: true,
     portable: "vuln-profiles",
   },
   {
@@ -126,57 +139,106 @@ const policyFamilies: PolicyFamily[] = [
     route: "groups",
     icon: <UsersRound className="h-4 w-4" aria-hidden />,
     mode: "monitor",
-    importable: true,
     portable: "groups",
   },
   {
-    title: "Declarative Policies",
+    title: "Declarative policies",
     nvName: "Policy list",
     route: "policies",
     createRoute: "policies/new",
     icon: <FileText className="h-4 w-4" aria-hidden />,
     mode: "monitor",
-    importable: true,
   },
   {
-    title: "Response Catalog",
+    title: "Response catalog",
     nvName: "Response actions",
     route: "response",
     icon: <RadioTower className="h-4 w-4" aria-hidden />,
   },
 ];
 
+type MigrationDiagnostic = { item: MigrationUnsupported; importRecord: MigrationImportListItem };
+
+const diagnosticFamilies: Record<string, string> = {
+  network_rule: "network-rules",
+  group: "groups",
+  group_criterion: "groups",
+  process_profile: "runtime/baselines",
+  file_profile: "file-monitor",
+  vulnerability_profile: "vuln-profiles",
+  dlp_group_scope: "runtime-dlp",
+  waf_group_scope: "runtime-signatures",
+};
+
+function diagnosticFamily(item: MigrationUnsupported): string | null {
+  if (item.kind === "dpi_rule" || item.kind === "dpi_pattern") {
+    if (item.source?.category === "dlp") return "runtime-dlp";
+    if (item.source?.category === "waf") return "runtime-signatures";
+    return null;
+  }
+  return diagnosticFamilies[item.kind] ?? null;
+}
+
+function MigrationDiagnostics({ diagnostics, clusterId }: { diagnostics: MigrationDiagnostic[]; clusterId?: string }) {
+  return (
+    <div className="space-y-2 border-t pt-3 text-xs" aria-label="Saved NeuVector migration diagnostics">
+      <div className="font-medium text-foreground">NeuVector migration diagnostics · org history</div>
+      {diagnostics.map(({ item, importRecord }, index) => (
+        <div key={`${importRecord.id}:${index}`} className="rounded border bg-muted/30 p-2">
+          <div className="font-medium text-foreground">{item.kind} · {item.name}</div>
+          <div>{item.reason}</div>
+          {item.suggestion ? <div>Suggestion: {item.suggestion}</div> : null}
+          <div className="mt-1 text-muted-foreground">
+            Import {importRecord.id} · {importRecord.status} · {importRecord.created_at} · {importRecord.target_cluster_id
+              ? importRecord.target_cluster_id === clusterId ? "Target: selected cluster" : `Target: other cluster (${importRecord.target_cluster_id})`
+              : "Target: unknown or unspecified (including legacy imports)"}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function PolicyCenterPage() {
   const { clusterId } = useCluster();
+  const [requestedTab, setTab] = useTabParam("tab", "families");
+  const tab = ["families", "migration", "modes"].includes(requestedTab) ? requestedTab : "families";
   const queryClient = useQueryClient();
+  const importsQuery = useInfiniteQuery({
+    queryKey: ["migration-imports-pages"],
+    queryFn: ({ pageParam }) => enterprise.migrationImportsPage(pageParam ? { limit: 25, cursor: pageParam } : { limit: 25 }),
+    initialPageParam: "",
+    getNextPageParam: (page) => page.has_more ? page.next_cursor : undefined,
+  });
+  const diagnostics: MigrationDiagnostic[] = (importsQuery.data?.pages.flatMap((page) => page.imports) ?? [])
+    .filter((importRecord) => importRecord.source === "neuvector")
+    .flatMap((importRecord) => (importRecord.unsupported ?? []).map((item) => ({ item, importRecord })));
+  const relevantDiagnostics = diagnostics.filter(({ importRecord }) => !importRecord.target_cluster_id || importRecord.target_cluster_id === clusterId);
+  const otherClusterDiagnostics = diagnostics.filter(({ importRecord }) => importRecord.target_cluster_id && importRecord.target_cluster_id !== clusterId);
+  const generalDiagnostics = relevantDiagnostics.filter(({ item }) => diagnosticFamily(item) === null);
   const to = (route: string) => clusterId ? `/clusters/${clusterId}/${route}` : "/clusters";
 
   return (
     <PageContainer data-testid="policy-center-page">
       <PageHeader
-        title="Policy Center"
-        description="One cluster policy entry point for NeuVector-style groups, rules, profiles, sensors, and response actions."
+        title="Policy transfer"
+        description="Manage this cluster’s policies, review migration diagnostics, and open the workflow for each policy family."
         actions={
           <Button asChild variant="outline">
-            <Link to="/settings/migration">Migration Imports</Link>
+            <Link to="/settings/migration">NeuVector migration</Link>
           </Button>
         }
       />
 
+      <VerdictBanner status={!clusterId || importsQuery.isError ? "degraded" : "info"}
+        title={!clusterId ? "Select a cluster to manage policies" : importsQuery.isError ? "Migration diagnostics could not be refreshed" : "Choose a policy family to review or change"}
+        detail="This directory links to configured policies. Enforcement status must be checked in the selected policy workflow." numbers={[{ label: "Policy families", value: policyFamilies.length }, { label: "Families with YAML transfer", value: policyFamilies.filter((family) => family.portable).length }, { label: "Loaded import diagnostics", value: importsQuery.data ? diagnostics.length : "—", title: "Organization import history" }]} />
+      
+      <Tabs value={tab} onValueChange={setTab} items={[
+        { value: "families", label: "Policy families", content: (
       <PageSection
-        title="Mode Vocabulary"
-        description="NeuVector modes are shown beside the Constellation mode used by the target policy family."
-      >
-        <div className="grid gap-3 md:grid-cols-3" data-testid="policy-mode-vocabulary">
-          <ModeBridge nv="Discover" constellation="Learn" detail="Observe behavior and build candidate baselines." />
-          <ModeBridge nv="Monitor" constellation="Monitor" detail="Detect and alert without blocking traffic or workload activity." />
-          <ModeBridge nv="Protect" constellation="Enforce" detail="Block or deny according to the active rule family." />
-        </div>
-      </PageSection>
-
-      <PageSection
-        title="Policy Families"
-        description="Every enforcement and detection surface reachable from one place."
+        title="Policy families"
+        description="Diagnostics are import-time findings; missing IDs remain unknown or unspecified."
       >
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3" data-testid="policy-family-grid">
           {policyFamilies.map((family) => (
@@ -189,7 +251,6 @@ export function PolicyCenterPage() {
                   </span>
                 }
                 description={family.nvName}
-                action={family.mode ? <ModePair mode={family.mode} /> : undefined}
                 className="rounded-lg"
               >
                 <div className="flex min-h-[116px] flex-col justify-between gap-4">
@@ -198,36 +259,148 @@ export function PolicyCenterPage() {
                       <span key={term} className="rounded border border-primary/20 bg-primary/5 px-2 py-1 text-primary">{term}</span>
                     ))}
                     {family.ordered ? <span className="rounded bg-muted px-2 py-1">ordered</span> : null}
-                    {family.importable ? <span className="rounded bg-muted px-2 py-1">importable</span> : null}
                     {family.portable ? <span className="rounded bg-muted px-2 py-1">yaml</span> : null}
-                    <span className="rounded bg-muted px-2 py-1">cluster scoped</span>
+                    <span className="rounded bg-muted px-2 py-1">
+                      {family.portable === "groups" || family.portable === "vuln-profiles" ? "cluster + org scoped" : "cluster scoped"}
+                    </span>
                   </div>
+                  {family.portable && family.portable !== "network-rules" ? (
+                    <PolicyFamilyLastChanged family={family.portable} clusterId={clusterId} />
+                  ) : null}
+                  {family.portable === "network-rules" ? <NetworkRuleMatchStats clusterId={clusterId} /> : null}
+                  {family.reorder && clusterId ? (
+                    <div className="text-xs text-muted-foreground" data-testid={`policy-family-${familySlug(family.route)}-reorder`}>
+                      <Link to="." href={to(family.route)} className="text-link font-medium" aria-label={`Manage ${family.title} precedence`}>
+                        Manage precedence
+                      </Link>
+                      <div>{family.reorder === "move-top"
+                        ? "Move a network rule to the top; arbitrary positions are not supported. The rule table initially follows evaluation order."
+                        : "Move response rules up or down in the visible cluster and org-wide list."}</div>
+                    </div>
+                  ) : null}
                   <div className="flex flex-wrap gap-2">
                     <Button asChild size="sm" variant="primary">
-                      <Link to={to(family.route)} aria-label={`Open ${family.title}`}>Open</Link>
+                      <Link to="." href={to(family.route)} aria-label={`Open ${family.title}`}>Open</Link>
                     </Button>
                     {family.createRoute ? (
                       <Button asChild size="sm" variant="outline">
-                        <Link to={to(family.createRoute)} aria-label={`Create ${family.title}`}>Create</Link>
+                        <Link to="." href={to(family.createRoute)} aria-label={`Create ${family.title}`}>Create</Link>
                       </Button>
                     ) : null}
                     {family.portable ? (
                       <span className="contents" data-testid={`policy-family-${familySlug(family.route)}-portable`}>
                         <PolicyFamilyImportExport family={family.portable} clusterId={clusterId} queryClient={queryClient} />
                       </span>
-                    ) : family.importable ? (
-                      <Button asChild size="sm" variant="ghost">
-                        <Link to="/settings/migration" aria-label={`Import ${family.title}`}>Import</Link>
-                      </Button>
                     ) : null}
                   </div>
                 </div>
               </Card>
+              {relevantDiagnostics.some(({ item }) => diagnosticFamily(item) === family.route) ? (
+                <MigrationDiagnostics diagnostics={relevantDiagnostics.filter(({ item }) => diagnosticFamily(item) === family.route)} clusterId={clusterId} />
+              ) : null}
             </div>
           ))}
         </div>
       </PageSection>
+        ) },
+        { value: "migration", label: "Migration diagnostics", content: (
+      <PageSection title="Migration diagnostics" description="Org-wide saved NeuVector import history. Only records with a matching target ID are attributed to the selected cluster; missing IDs remain unknown or unspecified. Loaded pages may not cover all history.">
+        {importsQuery.isPending ? <p role="status">Loading migration diagnostics…</p> : null}
+        {importsQuery.isError && !importsQuery.isFetchNextPageError ? (
+          <p role="alert">{importsQuery.data
+            ? "Could not refresh migration diagnostics; showing previously loaded history."
+            : "Migration diagnostics are unavailable. Review saved imports on the Migration Imports page."}</p>
+        ) : null}
+        {importsQuery.data && !importsQuery.isError && diagnostics.length === 0 ? <p>No saved NeuVector unsupported diagnostics in loaded import history.</p> : null}
+        {generalDiagnostics.length > 0 ? (
+          <div data-testid="migration-general-diagnostics">
+            <h3 className="text-sm font-medium">Other unsupported objects</h3>
+            <MigrationDiagnostics diagnostics={generalDiagnostics} clusterId={clusterId} />
+          </div>
+        ) : null}
+        {otherClusterDiagnostics.length > 0 ? (
+          <div data-testid="migration-other-cluster-diagnostics">
+            <h3 className="text-sm font-medium">Other cluster imports</h3>
+            <MigrationDiagnostics diagnostics={otherClusterDiagnostics} clusterId={clusterId} />
+          </div>
+        ) : null}
+        {importsQuery.isFetchNextPageError ? <p role="alert">Could not load more migration history. Try again.</p> : null}
+        {importsQuery.hasNextPage ? (
+          <Button variant="outline" disabled={importsQuery.isFetchingNextPage} onClick={() => void importsQuery.fetchNextPage()}>
+            {importsQuery.isFetchingNextPage ? "Loading more…" : "Load more imports"}
+          </Button>
+        ) : null}
+      </PageSection>
+        ) },
+        { value: "modes", label: "Mode guide", content: (
+      <PageSection
+        title="Mode vocabulary"
+        description="NeuVector modes are shown beside the Constellation mode used by the target policy family."
+      >
+        <div className="grid gap-3 md:grid-cols-3" data-testid="policy-mode-vocabulary">
+          <ModeBridge nv="Discover" constellation="Learn" detail="Observe behavior and build candidate baselines." />
+          <ModeBridge nv="Monitor" constellation="Monitor" detail="Detect and alert without blocking traffic or workload activity." />
+          <ModeBridge nv="Protect" constellation="Enforce" detail="Block or deny according to the active rule family." />
+        </div>
+      </PageSection>
+
+        ) },
+      ]} />
     </PageContainer>
+  );
+}
+
+async function listedChangeTimes(family: ChangeFamily, clusterId: string): Promise<Array<string | undefined>> {
+  if (family === "dlp") return (await runtimeDLP.list(clusterId)).map((rule) => rule.updated_at);
+  if (family === "signatures") return (await runtimeSignatures.list(clusterId)).map((rule) => rule.updated_at);
+  if (family === "groups") return (await groupsApi.list({ cluster_id: clusterId })).groups.map((group) => group.updated_at);
+  return (await vulnProfiles.list({ cluster_id: clusterId })).profiles.map((profile) => profile.updated_at);
+}
+
+function PolicyFamilyLastChanged({ family, clusterId }: { family: ChangeFamily; clusterId?: string }) {
+  const changes = useQuery({
+    queryKey: [changeQueryKeys[family], clusterId, "policy-center-last-changed"],
+    queryFn: () => listedChangeTimes(family, clusterId ?? ""),
+    enabled: Boolean(clusterId),
+  });
+  const latest = changes.data?.reduce((mostRecent, value) => {
+    const timestamp = Date.parse(value ?? "");
+    return Number.isFinite(timestamp) ? Math.max(mostRecent, timestamp) : mostRecent;
+  }, Number.NEGATIVE_INFINITY);
+
+  return (
+    <div className="text-xs text-muted-foreground" data-testid={`policy-family-${family}-last-changed`}>
+      <div>
+        Latest listed change: {!clusterId ? "Select a cluster" : changes.isPending ? "Loading…" : changes.isError ? "Unavailable" : latest !== undefined && Number.isFinite(latest) ? (
+          <time dateTime={new Date(latest).toISOString()}>{new Date(latest).toLocaleString()}</time>
+        ) : changes.data?.length ? "Unavailable" : "No listed items"}
+      </div>
+      <div>{changeScopes[family]}</div>
+    </div>
+  );
+}
+
+function NetworkRuleMatchStats({ clusterId }: { clusterId?: string }) {
+  const rules = useQuery({
+    queryKey: ["network-rules", clusterId, "policy-center-match-stats"],
+    queryFn: () => networkRules.list(clusterId ?? ""),
+    enabled: Boolean(clusterId),
+  });
+  const counts = rules.data?.rules.map((rule) => rule.match_counter);
+  const total = counts?.reduce((sum, count) => sum + count, 0);
+  const validTotal = counts?.every((count) => Number.isSafeInteger(count) && count >= 0) && Number.isSafeInteger(total);
+  const timestamps = rules.data?.rules.map((rule) => rule.last_match_timestamp);
+  const validTimestamps = timestamps?.every((value) => Number.isSafeInteger(value) && value >= 0);
+  const lastMatch = Math.max(0, ...(timestamps ?? []));
+  const lastDate = validTimestamps ? new Date(lastMatch * 1000) : null;
+  const validDate = lastDate && !Number.isNaN(lastDate.getTime()) ? lastDate : null;
+
+  return (
+    <div className="text-xs text-muted-foreground" data-testid="policy-family-network-rules-match-stats">
+      <div>Listed matches: {!clusterId ? "Select a cluster" : rules.isPending ? "Loading…" : rules.isError || !validTotal ? "Unavailable" : total?.toLocaleString()}</div>
+      <div>Last listed match: {!clusterId ? "Select a cluster" : rules.isPending ? "Loading…" : rules.isError || !validDate ? "Unavailable" : lastMatch === 0 ? "Never" : <time dateTime={validDate.toISOString()}>{validDate.toLocaleString()}</time>}</div>
+      <div>Listed network rules only; match counts do not prove enforcement health.</div>
+    </div>
   );
 }
 
@@ -307,20 +480,6 @@ function ModeBridge({ nv, constellation, detail }: { nv: string; constellation: 
   );
 }
 
-function ModePair({ mode }: { mode: "learn" | "monitor" | "enforce" }) {
-  return (
-    <div className="flex flex-wrap items-center justify-end gap-1.5">
-      <StatusPill label={nvMode(mode)} tone={modeTone(mode)} />
-      <StatusPill label={mode} tone={modeTone(mode)} />
-    </div>
-  );
-}
-
-function nvMode(mode: "learn" | "monitor" | "enforce") {
-  if (mode === "learn") return "Discover";
-  if (mode === "enforce") return "Protect";
-  return "Monitor";
-}
 
 function modeTone(mode: string): "neutral" | "success" | "warning" | "error" | "info" | "pending" | "accent" {
   const normalized = mode.toLowerCase();

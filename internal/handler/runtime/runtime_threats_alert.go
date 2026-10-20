@@ -234,7 +234,7 @@ func (h *RuntimeThreats) fanOutOneThreat(ctx context.Context, orgID uuid.UUID, p
 	row := p.row
 	sev := threatSeverityLabel(row.Severity)
 	name := handler.NeuVectorThreatName(row.ThreatID)
-	category := threatCategory(int32(row.ThreatID))
+	category := threatCategory(int64(row.ThreatID))
 	action := "runtime.alert.dpi"
 
 	// E1 declarative response rules first, so a suppress_log action can gate
@@ -322,10 +322,17 @@ func (h *RuntimeThreats) fanOutOneThreat(ctx context.Context, orgID uuid.UUID, p
 }
 
 func responseEventForThreat(p *pendingThreatAlert, sev, name, action string) response.Event {
+	eventType := response.EventThreat
+	switch threatCategory(int64(p.row.ThreatID)) {
+	case "dlp":
+		eventType = response.EventDLP
+	case "waf":
+		eventType = response.EventWAF
+	}
 	return response.Event{
 		ID:        uuid.NewString(),
 		Name:      name,
-		Type:      response.EventThreat,
+		Type:      eventType,
 		Severity:  sev,
 		Cluster:   p.clusterID.String(),
 		Namespace: p.namespace,
@@ -447,7 +454,7 @@ func (h *RuntimeThreats) evalThreatRulesSafe(ctx context.Context, orgID uuid.UUI
 // applyThreatResponseRuleActions applies the ordered E1 actions, reusing the
 // same quarantineRuntime bridge the events path uses. Each action is audited so
 // the enforcement is observable. suppress_log was already honored (audit/notify
-// skipped); webhooks fired inside the evaluator; quarantine/isolate/tag land
+// skipped); webhooks fired inside the evaluator; quarantine/isolate land
 // here. Best-effort, mirrors EventsIngest.applyResponseRuleActions.
 func (h *RuntimeThreats) applyThreatResponseRuleActions(ctx context.Context, orgID uuid.UUID, p *pendingThreatAlert, actions []responserule.Action) {
 	for i := range actions {
@@ -468,7 +475,8 @@ func (h *RuntimeThreats) applyThreatResponseRuleActions(ctx context.Context, org
 		case responserule.ActionSuppressLog:
 			after["enforced"] = "suppressed_log"
 		case responserule.ActionTag:
-			after["enforced"] = "tagged"
+			after["enforced"] = "unsupported"
+			after["enforce_error"] = "tag action has no event or workload label side effect"
 		case responserule.ActionWebhook:
 			after["enforced"] = "webhook_dispatched"
 		case responserule.ActionQuarantine:

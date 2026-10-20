@@ -1,25 +1,37 @@
 # syntax=docker/dockerfile:1.7
 # Constellation FIPS 140-3 build.
 #
-# Customer baseline: FedRAMP Moderate, DoD STIG, FIPS-validated TLS + KDF + crypto path.
-# The image enables Go's bundled FIPS 140-3 module (GOFIPS140=v1.0.0 + -tags fips) and
-# uses Chainguard's wolfi-fips base for the FIPS-validated OpenSSL provider.
+# Select the frozen Go cryptographic module and enforce its runtime mode.
+# The ordinary Wolfi runtime is not a FIPS OpenSSL distribution.
+# Whole-product qualification and the native boundary are tracked in docs/fips.md.
 
-ARG GO_VERSION=1.26
+# GO_VERSION has NO default: the Makefile passes --build-arg GO_VERSION from go.mod
+# (make check-go-version enforces this). The builder is additionally pinned by
+# multi-arch index digest so a Go bump is one value change per file.
+# Refresh with: docker buildx imagetools inspect golang:<ver>-bookworm
+# Pinned to the 1.27.3-bookworm multi-arch index digest of the Go builder (matches go.mod).
+ARG GO_VERSION
+ARG GO_IMAGE_DIGEST=sha256:5c3e9b43cfd3bb95c7937462e29d87ada57b481a96fa23ad0eb61778d7a00110
 ARG WOLFI_FIPS_IMAGE=cgr.dev/chainguard/wolfi-base@sha256:34977aa13765da89f60fee8fe5230e2bb1c55192df08e383c58221ee0d1277fb
 
-FROM golang:${GO_VERSION}-bookworm AS build
+FROM golang:${GO_VERSION}-bookworm@${GO_IMAGE_DIGEST} AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 ARG VERSION=dev
+ARG COMMIT=dev
+ARG BUILD_TIME=
 ENV CGO_ENABLED=0 GOOS=linux GOFIPS140=v1.0.0
 RUN go build -trimpath -tags fips \
-      -ldflags="-s -w -X main.version=${VERSION}-fips" \
+      -ldflags="-s -w -X github.com/alphabravocompany/constellation/pkg/version.Version=${VERSION}-fips -X github.com/alphabravocompany/constellation/pkg/version.Commit=${COMMIT} -X github.com/alphabravocompany/constellation/pkg/version.BuildTime=${BUILD_TIME}" \
       -o /out/constellation-api ./cmd/constellation-api
 
 FROM ${WOLFI_FIPS_IMAGE} AS runtime
+ARG VERSION=dev
+ARG COMMIT=dev
+LABEL org.opencontainers.image.version="${VERSION}-fips" \
+      org.opencontainers.image.revision="${COMMIT}"
 RUN apk add --no-cache ca-certificates tzdata
 COPY --from=build /out/constellation-api /usr/local/bin/constellation-api
 RUN addgroup -S -g 10001 constellation && adduser -S -u 10001 -G constellation constellation

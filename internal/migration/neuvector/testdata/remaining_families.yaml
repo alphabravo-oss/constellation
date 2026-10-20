@@ -1,0 +1,86 @@
+# Canonical MIG-1 remaining-family export. Every secret marker must be redacted.
+vulnerability_profiles:
+  - name: approved-cves
+    description: Reviewed CVE suppressions
+    cfg_type: user_created
+    entries:
+      - id: 1
+        name: CVE-2026-1234
+        comment: Reviewed upstream advisory
+      - id: 2
+        name: CVE-2025-*
+  - name: unsupported-scoped-profile
+    entries:
+      - name: CVE-2026-1234
+      - name: _RecentVulnWithoutFix
+        days: 30
+        domains: [production]
+registries:
+  - name: internal-images
+    registry_type: Docker Registry
+    registry: https://registry.example.test
+    filters: [team/*]
+    username: SECRET_REGISTRY_USER
+    password: SECRET_REGISTRY_PASSWORD
+    auth:
+      aws_key:
+        secret_access_key: SECRET_AWS_KEY
+    schedule:
+      schedule: auto
+      interval: 3600
+  - name: unsupported-registry
+    registry_type: SECRET_UNKNOWN_ADAPTER
+    registry: https://SECRET_URL_USER:SECRET_URL_PASSWORD@registry.example.test
+users:
+  - fullname: SECRET_USER_NAME
+    password: SECRET_USER_PASSWORD
+roles:
+  - name: SECRET_ROLE_NAME
+    permissions: [admin]
+role_mappings:
+  - group: SECRET_IDENTITY_GROUP
+    role: admin
+compliance_profiles:
+  - name: SECRET_COMPLIANCE_NAME
+routing:
+  - name: SECRET_ROUTE_NAME
+    url: https://SECRET_ROUTE_TOKEN@example.test
+authentication:
+  oidc:
+    client_secret: SECRET_OIDC_CLIENT
+tokens:
+  - name: SECRET_TOKEN_NAME
+    value: SECRET_TOKEN_VALUE
+federation:
+  name: SECRET_FEDERATION_NAME
+  join_token: SECRET_FEDERATION_TOKEN
+SECRET_UNKNOWN_KEY:
+  name: SECRET_UNKNOWN_NAME
+  value: SECRET_UNKNOWN_VALUE
+---
+apiVersion: neuvector.com/v1
+kind: NvVulnerabilityProfile
+metadata:
+  name: cve-profile
+spec:
+  profile:
+    name: crd-suppressions
+    entries:
+      - name: CVE-2024-5678
+---
+apiVersion: v1
+kind: List
+items:
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: SECRET_CRD_NAME
+    data:
+      password: SECRET_CRD_PASSWORD
+  - apiVersion: neuvector.com/v1
+    kind: NvComplianceProfile
+    metadata:
+      name: SECRET_COMPLIANCE_CRD_NAME
+    spec:
+      profile:
+        name: SECRET_COMPLIANCE_CRD_PROFILE

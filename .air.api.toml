@@ -1,0 +1,21 @@
+# Air live-reload for constellation-api. One file per binary (guide ch.04).
+root = "."
+tmp_dir = "tmp/api"
+
+[build]
+  cmd = "go build -trimpath -ldflags=\"-X github.com/alphabravocompany/constellation/pkg/version.Version=dev-air -X github.com/alphabravocompany/constellation/pkg/version.Commit=$(git rev-parse --short HEAD 2>/dev/null || echo dev) -X github.com/alphabravocompany/constellation/pkg/version.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)\" -o tmp/api/constellation-api ./cmd/constellation-api"
+  bin = "tmp/api/constellation-api"
+  entrypoint = ["env", "CONSTELLATION_DEV_MODE=true", "tmp/api/constellation-api"]
+  include_ext = ["go", "yaml", "sql"]
+  exclude_dir = ["tmp", "bin", "frontend", "node_modules", "deploy", "docs", "scripts", "third_party", "tests", "artifacts", "test-results", "db/migrations/README.md", "internal/runtime/ebpf/bpf"]
+  exclude_regex = ["_test\\.go$"]
+  delay = 1000
+  stop_on_error = true
+  send_interrupt = true
+  kill_delay = 500
+
+[log]
+  time = true
+
+[misc]
+  clean_on_exit = false

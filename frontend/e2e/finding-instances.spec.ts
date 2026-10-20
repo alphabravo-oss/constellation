@@ -1,0 +1,70 @@
+import { expect, test } from "@playwright/test";
+import { findingInstances, instanceID, instanceRoot, instanceTimes } from "./fixtures/finding-instances";
+
+test("Ambiguous finding links require a choice and retain microsecond identity through comments and history", async ({ page }) => {
+  const fixture = findingInstances(); await fixture.install(page);
+  await page.goto(`${instanceRoot}/${instanceID}`);
+  await expect(page.getByText("This finding has multiple retained observations.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Suppress", exact: true })).toHaveCount(0);
+  await page.getByRole("link", { name: "Choose an observation", exact: true }).click();
+  await expect(page).toHaveURL(url => url.searchParams.get("q") === `id:${instanceID}` && url.searchParams.get("lifecycle") === "all");
+  const table = page.getByTestId("findings-table");
+  await expect(table.locator("tbody tr")).toHaveCount(2);
+  await table.getByText("Retained observation 2", { exact: true }).click();
+  await expect(page).toHaveURL(url => url.searchParams.get("first_seen_at") === instanceTimes[1]);
+  await expect(page.getByTestId("comments-list")).toContainText("Discussion for observation 2");
+  await expect(page.getByTestId("comments-list")).not.toContainText("Discussion for observation 1");
+  await expect(page.getByText("Earlier unqualified discussion", { exact: true })).not.toBeVisible();
+  await page.locator("summary").filter({ hasText: "Earlier discussion for this finding ID" }).click();
+  await expect(page.getByText("Earlier unqualified discussion", { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "Add comment", exact: true }).click();
+  await page.getByLabel(/^Comment/).fill("Only the second observation was reviewed.");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByTestId("comments-list")).toContainText("Only the second observation was reviewed.");
+  expect(fixture.writes).toEqual([{ firstSeen: instanceTimes[1], action: "comments", body: { reviewed_revision: "1", body: "Only the second observation was reviewed." }, status: 200 }]);
+  expect(fixture.comments[0]).toHaveLength(1);
+  await page.reload();
+  await expect(page.getByTestId("comments-list")).toContainText("Only the second observation was reviewed.");
+  await page.goBack();
+  await expect(page).toHaveURL(url => url.pathname.endsWith("/comments/new") && url.searchParams.get("first_seen_at") === instanceTimes[1]);
+  await page.goBack();
+  await expect(page).toHaveURL(url => url.pathname.endsWith(instanceID) && url.searchParams.get("first_seen_at") === instanceTimes[1]);
+});
+
+test("Bulk selection keeps two retained observations with the same UUID independent", async ({ page }) => {
+  const fixture = findingInstances(); await fixture.install(page);
+  await page.goto(`${instanceRoot}?view=instances&lifecycle=all`);
+  const table = page.getByTestId("findings-table");
+  await expect(table.locator("tbody tr")).toHaveCount(2);
+  await table.getByRole("checkbox", { name: "Select all", exact: true }).check();
+  await expect(page.getByText("2 selected", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Triage", exact: true }).click();
+  await expect.poll(() => fixture.writes.length).toBe(2);
+  expect(fixture.writes.map(write => write.firstSeen).sort()).toEqual(instanceTimes);
+  expect(fixture.writes.every(write => write.status === 200 && write.body.reviewed_revision === "1" && write.action === "triage")).toBe(true);
+  await expect(table.locator("tbody tr").filter({ hasText: "triaged" })).toHaveCount(2);
+});
+
+test("A stale observation pauses Save and preserves the draft until explicit review refresh", async ({ page }) => {
+  const fixture = findingInstances(); await fixture.install(page);
+  await page.goto(fixture.href(0, "suppress"));
+  const reason = page.getByLabel(/^Reason/);
+  const save = page.getByRole("button", { name: "Save", exact: true });
+  await reason.fill("Compensating control reviewed for this occurrence.");
+  await expect(save).toBeEnabled();
+  fixture.rows[0].revision = "2"; fixture.rows[0].lifecycle = "triaged";
+  await save.click();
+  const refresh = page.getByRole("button", { name: "Refresh observation", exact: true });
+  await expect(refresh).toBeVisible(); await expect(save).toBeDisabled();
+  await expect(reason).toHaveValue("Compensating control reviewed for this occurrence.");
+  expect(fixture.writes).toHaveLength(1); expect(fixture.writes[0].status).toBe(409);
+  await refresh.click(); await expect(save).toBeEnabled();
+  await expect(reason).toHaveValue("Compensating control reviewed for this occurrence.");
+  await page.locator("summary").filter({ hasText: "Observation details" }).click();
+  await expect(page.getByText(instanceTimes[0], { exact: true })).toBeVisible();
+  await expect(page.getByText("triaged", { exact: true })).toBeVisible();
+  await save.click();
+  await expect(page).toHaveURL(url => url.pathname.endsWith(instanceID) && url.searchParams.get("first_seen_at") === instanceTimes[0]);
+  expect(fixture.writes.map(write => ({ revision: write.body.reviewed_revision, status: write.status }))).toEqual([{ revision: "1", status: 409 }, { revision: "2", status: 200 }]);
+  expect(fixture.rows.map(row => row.lifecycle)).toEqual(["suppressed", "open"]);
+});

@@ -1,0 +1,80 @@
+import { downloadCsv } from "@/lib/csv";
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { createMemoryHistory, type RouterHistory } from "@tanstack/react-router";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { beforeEach, afterEach, expect, it, vi } from "vitest";
+import { assets, type Asset } from "@/api/client";
+import { TestRouter } from "@/test/router";
+import { chooseExport, exportAvailable } from "@/test/export-menu";
+import { AssetsPage } from "./AssetsPage";
+const scope=vi.hoisted(()=>({clusterId:"cluster",cluster:{id:"cluster"} as {id:string}|undefined,isLoading:false,error:null as Error|null}));
+vi.mock("@/hooks/useCluster",()=>({useCluster:()=>scope}));
+vi.mock("@/api/client",()=>({assets:{list:vi.fn(),exportCsv:vi.fn()}}));
+vi.mock("@/lib/csv", () => ({ downloadCsv: vi.fn() }));
+let root:Root,host:HTMLDivElement,client:QueryClient,history:RouterHistory;
+const row=(name="needle"):Asset=>({id:name,cluster_id:"cluster",kind:"workload",name,labels:{team:"prod"},ai_workload:true,criticality:"high",finding_count:1,critical_findings:1,high_findings:0,open_findings:1,sbom_count:0,first_seen_at:"2026-10-12T00:00:00Z",last_seen_at:"2026-10-12T00:00:00Z"});
+const response=(rows:Asset[],total=rows.length,offset=0,sort="risk",order:"asc"|"desc"="desc")=>({assets:rows,total,offset,limit:100,has_more:offset+rows.length<total,sort,order,summary:{total,images:0,workloads:total,critical_high:total,open_findings:total,signed_images:0,unsigned_images:0,signature_unknown:0,with_sbom:0,missing_sbom:0,ai:total}});
+beforeEach(()=>{localStorage.clear();Object.assign(scope,{clusterId:"cluster",cluster:{id:"cluster"},isLoading:false,error:null});vi.mocked(assets.list).mockImplementation(async params=>response([row()],params?.offset?601:601,params?.offset??0,params?.sort??"risk",params?.order??"desc"));vi.mocked(assets.exportCsv).mockResolvedValue({total:601,exported:601,limit:100000,truncated:false});});
+afterEach(()=>{act(()=>root?.unmount());client?.clear();host?.remove();vi.resetAllMocks();vi.restoreAllMocks();});
+async function render(url:string, seed?: (client:QueryClient)=>void){host=document.createElement("div");document.body.appendChild(host);root=createRoot(host);client=new QueryClient({defaultOptions:{queries:{retry:false}}});seed?.(client);history=createMemoryHistory({initialEntries:[url]});await act(async()=>root.render(<QueryClientProvider client={client}><TestRouter history={history}><AssetsPage/></TestRouter></QueryClientProvider>));}
+async function settled(check:()=>void|Promise<void>){await vi.waitFor(async()=>{await act(async()=>{});await check();});}
+const button=(label:string)=>[...host.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === label || b.getAttribute("aria-label") === label || b.getAttribute("data-export-label") === label)!;
+async function select(testId:string,value:string){await act(async()=>{const input=host.querySelector<HTMLSelectElement>(`[data-testid="${testId}"]`)!;input.value=value;input.dispatchEvent(new Event("change",{bubbles:true}));});}
+it("loads an exact filtered inventory beyond500 and sends its cohort to full export",async()=>{await render("/clusters/cluster/assets?q=needle&kind=workload&criticality=high&ai_workload=true&sort=asset&order=asc&page=7&selected=needle#evidence");await settled(()=>expect(host.textContent).toContain("601 matching assets"));expect(assets.list).toHaveBeenLastCalledWith({cluster_id:"cluster",search:"needle",kind:"workload",criticality:"high",ai_workload:true,sort:"asset",order:"asc",limit:100,offset:600});expect(host.querySelector('[data-testid="assets-page-scope"]')?.textContent).toContain("601–601 of 601");expect(host.querySelector('[data-testid="assets-summary"]')?.textContent).toContain("601");await chooseExport("Matching assets", host);expect(assets.exportCsv).toHaveBeenCalledWith(expect.objectContaining({search:"needle",kind:"workload",criticality:"high",ai_workload:true,sort:"asset",order:"asc"}), expect.any(Function));expect(assets.exportCsv).toHaveBeenCalledWith(expect.not.objectContaining({offset:expect.anything()}), expect.any(Function));await settled(()=>expect(host.textContent).toContain("Exported 601 of 601"));});
+it("resets page and selection on filter changes and restores the URL through history",async()=>{await render("/clusters/cluster/assets?kind=image&page=7&selected=missing&context=keep#evidence");await settled(()=>expect(host.textContent).toContain("selected asset is not in the loaded matches"));expect(host.querySelector('[data-testid="asset-preview"]')).toBeNull();await select("asset-kind-filter","workload");await settled(()=>expect(assets.list).toHaveBeenLastCalledWith(expect.objectContaining({kind:"workload",offset:0})));expect(history.location.search).not.toContain("selected=");expect(history.location.search).not.toContain("page=");expect(history.location.search).toContain("context=keep");expect(history.location.hash).toBe("#evidence");await act(async()=>history.back());await settled(()=>expect(assets.list).toHaveBeenLastCalledWith(expect.objectContaining({kind:"image",offset:600})));expect(history.location.search).toContain("selected=missing");await act(async()=>history.forward());await settled(()=>expect(assets.list).toHaveBeenLastCalledWith(expect.objectContaining({kind:"workload",offset:0})));});
+it("requests global sort and leaves returned source order intact",async()=>{vi.mocked(assets.list).mockImplementation(async params=>response([row("z-returned-first"),row("a-returned-second")],2,0,params?.sort??"risk",params?.order??"desc"));await render("/clusters/cluster/assets");await settled(()=>expect(host.querySelectorAll('[data-testid="asset-row"]')).toHaveLength(2));const header=[...host.querySelectorAll<HTMLButtonElement>("thead button")].find((b) => b.textContent === "Asset" || b.getAttribute("aria-label") === "Asset" || b.getAttribute("data-export-label") === "Asset")!;await act(async()=>header.click());await settled(()=>expect(assets.list).toHaveBeenLastCalledWith(expect.objectContaining({sort:"asset",order:"desc",offset:0})));await settled(()=>expect([...host.querySelectorAll('[data-testid="asset-row"]')].map(r=>r.textContent?.includes("z-returned-first"))).toEqual([true,false]));});
+it("hides source metrics and disables export while search is debouncing or refresh fails",async()=>{await render("/clusters/cluster/assets?page=7");await settled(()=>expect(host.textContent).toContain("601 matching assets"));await act(async()=>{const input=host.querySelector<HTMLInputElement>('[data-testid="asset-search"]')!;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value")!.set!.call(input,"different");input.dispatchEvent(new Event("input",{bubbles:true}));});expect(await exportAvailable("Matching assets", host)).toBe(false);await settled(()=>expect(assets.list).toHaveBeenLastCalledWith(expect.objectContaining({search:"different",offset:0})));vi.mocked(assets.list).mockRejectedValue(new Error("refresh offline"));await act(async()=>{await client.invalidateQueries({queryKey:["assets"]});});await settled(()=>expect(host.textContent).toContain("Could not load or refresh assets"));expect(host.querySelector("table")).toBeNull();expect(host.querySelector('[data-testid="assets-summary"]')?.textContent?.match(/—/g)).toHaveLength(4);expect(await exportAvailable("Matching assets", host)).toBe(false);});
+it("recovers an out of range page without displaying a false pager range",async()=>{vi.mocked(assets.list).mockImplementation(async params=>response([],0,params?.offset??0));await render("/clusters/cluster/assets?page=8");await settled(()=>expect(button("First page")).toBeTruthy());expect(host.querySelector('[data-testid="assets-page-scope"]')?.textContent).toContain("0–0 of 0");expect(button("Next")).toBeUndefined();await act(async()=>button("First page").click());await settled(()=>expect(history.location.search).not.toContain("page="));});
+it.each(["summary","foreign","duplicate"])("blocks invalid %s evidence",async kind=>{const payload=response([row()],1);if(kind==="summary")payload.summary.total=99;if(kind==="foreign")payload.assets[0].cluster_id="other";if(kind==="duplicate")payload.assets.push(row());vi.mocked(assets.list).mockResolvedValue(payload);await render("/clusters/cluster/assets");await settled(()=>expect(host.textContent).toContain("Could not load or refresh assets"));expect(host.querySelector("table")).toBeNull();expect(await exportAvailable("Matching assets", host)).toBe(false);});
+it("reports full-export failure without a success claim",async()=>{vi.mocked(assets.exportCsv).mockRejectedValue(new Error("scope metadata failed"));await render("/clusters/cluster/assets");await settled(async () =>expect(await exportAvailable("Matching assets", host)).toBe(true));await chooseExport("Matching assets", host);await settled(()=>expect(host.textContent).toContain("Asset export failed"));expect(host.textContent).not.toContain("Exported 601");});
+
+it("does not fetch an asset inventory while cached cluster membership is refreshing",async()=>{let finish!:(value:{clusters:{id:string}[]})=>void;await render("/clusters/cluster/assets",qc=>{qc.setQueryData(["clusters"],{clusters:[{id:"cluster"}]});void qc.fetchQuery({queryKey:["clusters"],queryFn:()=>new Promise<{clusters:{id:string}[]}>(resolve=>{finish=resolve;})}).catch(()=>{});});expect(assets.list).not.toHaveBeenCalled();expect(host.textContent).toContain("Loading cluster");await act(async()=>finish({clusters:[{id:"cluster"}]}));});
+
+it.each(["host", "repository", "serverless"])("labels supported %s kind deep links",async kind=>{await render(`/clusters/cluster/assets?kind=${kind}`);await settled(()=>expect(assets.list).toHaveBeenLastCalledWith(expect.objectContaining({kind})));const filter=host.querySelector<HTMLSelectElement>('[data-testid="asset-kind-filter"]')!;expect(filter.value).toBe(kind);expect(filter.selectedOptions[0]?.textContent).toBe(kind.charAt(0).toUpperCase()+kind.slice(1));});
+
+it("shows image names and reveals their digest only on request",async()=>{
+  const image={...row(),kind:"image",name:"sha256:raw",digest:"sha256:raw",labels:{image_ref_normalized:"docker.io/team/api:v2@sha256:raw"}};
+  vi.mocked(assets.list).mockResolvedValue(response([image],1));
+  await render("/clusters/cluster/assets");await settled(()=>expect(host.querySelector('[data-testid="asset-row"] a')?.textContent).toBe("docker.io/team/api:v2"));
+  const cell=host.querySelector('[data-testid="asset-row"] td')!;
+  const disclosure=cell.querySelector("details")!;
+  expect(disclosure.open).toBe(false);expect(disclosure.querySelector("code")?.textContent).toBe("sha256:raw");
+  expect(cell.querySelector("a")?.textContent).not.toContain("sha256");
+  await act(async()=>disclosure.querySelector("summary")!.click());expect(disclosure.open).toBe(true);
+  expect(host.querySelector('[data-testid="asset-preview"] h2')?.textContent).toBe("docker.io/team/api:v2");
+  expect(host.querySelector('[data-testid="asset-preview"] details')?.hasAttribute("open")).toBe(false);
+});
+
+it("exports evaluated platform roles from the selected page columns without inferring labels", async () => {
+  vi.mocked(assets.list).mockResolvedValue(response([{ ...row("core"), platform_role: "core" }, { ...row("unknown"), platform_role: "" }, row("legacy")], 3));
+  await render("/clusters/cluster/assets"); await settled(() => expect(host.querySelector('[data-testid="assets-table"]')).not.toBeNull());
+  expect(host.querySelector('[data-testid="assets-table"] thead')?.textContent).not.toContain("Platform role");
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="assets-table-columns-trigger"]')!.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 })));
+  await settled(() => expect(document.querySelector('[role="menuitemcheckbox"]')).not.toBeNull());
+  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((item) => item.textContent === "Platform role" || item.getAttribute("aria-label") === "Platform role" || item.getAttribute("data-export-label") === "Platform role")!.click());
+  expect(host.textContent).toContain("Core"); expect(host.textContent).toContain("Unclassified"); expect(host.textContent).toContain("Not reported");
+  await chooseExport("This table", host);
+  const [, headers, rows] = vi.mocked(downloadCsv).mock.calls.at(-1)!;
+  const role = headers.indexOf("Platform role"); expect(role).toBeGreaterThanOrEqual(0);
+  expect(rows.map(row => row[role])).toEqual(["core", "", ""]);
+});
+
+it("discards a pending matching export when refreshed evidence becomes ready again", async () => {
+  let complete!: () => void;
+  let guard!: () => boolean;
+  vi.mocked(assets.exportCsv).mockImplementation((_filters, shouldDownload) => new Promise(resolve => {
+    guard = shouldDownload!;
+    complete = () => resolve({ total: 601, exported: 601, limit: 100000, truncated: false });
+  }));
+  await render("/clusters/cluster/assets?q=needle&sort=asset&order=asc");
+  await settled(async () => expect(await exportAvailable("Matching assets", host)).toBe(true));
+  await chooseExport("Matching assets", host);
+  expect(guard()).toBe(true);
+  await act(async () => client.invalidateQueries({ queryKey: ["assets"] }));
+  await settled(() => expect(client.isFetching()).toBe(0));
+  expect(guard()).toBe(false);
+  await act(async () => complete());
+  await settled(async () => expect(await exportAvailable("Matching assets", host)).toBe(true));
+  expect(host.textContent).not.toContain("Exported 601");
+});

@@ -41,6 +41,7 @@ func (s *fakeRuntime) Kill(_ context.Context, w, _ string) error {
 }
 
 func TestRule_Match_NameAndLevel(t *testing.T) {
+	t.Parallel()
 	r := Rule{
 		Enabled:   true,
 		EventType: EventRuntime,
@@ -60,6 +61,7 @@ func TestRule_Match_NameAndLevel(t *testing.T) {
 }
 
 func TestRule_Match_CVECritical(t *testing.T) {
+	t.Parallel()
 	r := Rule{
 		Enabled:    true,
 		EventType:  EventScan,
@@ -76,6 +78,7 @@ func TestRule_Match_CVECritical(t *testing.T) {
 }
 
 func TestRule_Match_SelectorAndProc(t *testing.T) {
+	t.Parallel()
 	r := Rule{
 		Enabled:   true,
 		EventType: EventRuntime,
@@ -95,6 +98,7 @@ func TestRule_Match_SelectorAndProc(t *testing.T) {
 }
 
 func TestRule_Match_GroupSelector(t *testing.T) {
+	t.Parallel()
 	r := Rule{
 		Enabled:   true,
 		EventType: EventRuntime,
@@ -117,6 +121,7 @@ func TestRule_Match_GroupSelector(t *testing.T) {
 }
 
 func TestEngine_Dispatch_NotifyAndQuarantine(t *testing.T) {
+	t.Parallel()
 	slack := &fakeReceiver{name: "slack"}
 	rt := &fakeRuntime{}
 	eng := NewEngine(map[string]notify.Receiver{"slack": slack}, rt, nil)
@@ -141,6 +146,7 @@ func TestEngine_Dispatch_NotifyAndQuarantine(t *testing.T) {
 }
 
 func TestEngine_Dispatch_WebhookAlias(t *testing.T) {
+	t.Parallel()
 	hook := &fakeReceiver{name: "hook"}
 	eng := NewEngine(map[string]notify.Receiver{"hook": hook}, nil, nil)
 	eng.SetRules([]Rule{{
@@ -161,6 +167,7 @@ func TestEngine_Dispatch_WebhookAlias(t *testing.T) {
 }
 
 func TestEngine_MatchRules_SuppressLog(t *testing.T) {
+	t.Parallel()
 	eng := NewEngine(nil, nil, nil)
 	eng.SetRules([]Rule{
 		{
@@ -194,6 +201,7 @@ func TestEngine_MatchRules_SuppressLog(t *testing.T) {
 }
 
 func TestEngine_Dispatch_Kill(t *testing.T) {
+	t.Parallel()
 	rt := &fakeRuntime{}
 	eng := NewEngine(nil, rt, nil)
 	eng.SetRules([]Rule{{
@@ -211,6 +219,7 @@ func TestEngine_Dispatch_Kill(t *testing.T) {
 }
 
 func TestEngine_Dispatch_RuntimeMissing(t *testing.T) {
+	t.Parallel()
 	eng := NewEngine(nil, nil, nil)
 	eng.SetRules([]Rule{{
 		ID: "r1", Name: "iso", Enabled: true, EventType: EventRuntime,
@@ -224,6 +233,7 @@ func TestEngine_Dispatch_RuntimeMissing(t *testing.T) {
 }
 
 func TestRule_Validate(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		r    Rule
 		want bool // want error
@@ -256,7 +266,10 @@ func TestRule_Match_EventAliases(t *testing.T) {
 	}{
 		{"legacy runtime catches threat", EventRuntime, EventThreat, true},
 		{"nv security-event catches runtime", EventSecurity, EventRuntime, true},
-		{"threat is specific", EventThreat, EventWAF, false},
+		{"legacy threat catches waf", EventThreat, EventWAF, true},
+		{"legacy threat catches dlp", EventThreat, EventDLP, true},
+		{"waf excludes dlp", EventWAF, EventDLP, false},
+		{"dlp excludes ips threat", EventDLP, EventThreat, false},
 		{"scan catches cve-report", EventScan, EventCVEReport, true},
 		{"cve-report catches scan", EventCVEReport, EventScan, true},
 		{"admission catches admission-control", EventAdmission, EventAdmissionControl, true},
@@ -281,6 +294,7 @@ func TestRule_Match_EventAliases(t *testing.T) {
 
 // RSP-CVE-52 — count/age-based CVE conditions.
 func TestRule_Match_CVECounts(t *testing.T) {
+	t.Parallel()
 	// Event carries: 2 critical, 1 high, one of the criticals fixable & old.
 	ev := &Event{Type: EventScan, CVEs: []CVERef{
 		{ID: "CVE-A", Severity: "critical", BaseScore: 9.8, Fixed: true, AgeDays: 120},
@@ -328,6 +342,7 @@ func TestRule_Match_CVECounts(t *testing.T) {
 }
 
 func TestRule_Validate_CVECounts(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		r    Rule
 		want bool // want error

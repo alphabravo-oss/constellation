@@ -1,3 +1,5 @@
+//go:build integration
+
 package scanning
 
 import (
@@ -23,6 +25,7 @@ import (
 )
 
 func TestScanAttestationsReportLinksRepositoryScan(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -67,7 +70,7 @@ INSERT INTO users (id, org_id, email, display_name) VALUES ($1, $2, $3, 'Attesta
 			Purl:      "pkg:npm/left-pad@1.3.0",
 		}},
 	})
-	repoReq := httptest.NewRequest(http.MethodPost, "/api/v1/repository-packages:report", bytes.NewReader(repoBody))
+	repoReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/repository-packages:report", bytes.NewReader(repoBody))
 	repoReq = repoReq.WithContext(authctx.WithSubject(repoReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	repoRec := httptest.NewRecorder()
 	handler.NewRepositoryPackages(d).Report(repoRec, repoReq)
@@ -93,7 +96,7 @@ INSERT INTO users (id, org_id, email, display_name) VALUES ($1, $2, $3, 'Attesta
 		"predicateType": "https://slsa.dev/provenance/v1",
 		"subject": []map[string]any{{
 			"name":   imageRef,
-			"digest": map[string]any{"sha256": imageDigest[len("sha256:"):len(imageDigest)]},
+			"digest": map[string]any{"sha256": imageDigest[len("sha256:"):]},
 		}},
 		"predicate": map[string]any{"buildType": "github-actions", "invocation": map[string]any{"configSource": repoRef}},
 	}
@@ -159,7 +162,7 @@ INSERT INTO users (id, org_id, email, display_name) VALUES ($1, $2, $3, 'Attesta
 		Reason:        "attestation trusted",
 		Payload:       first.Payload,
 	}}
-	verifyReq := httptest.NewRequest(http.MethodPost, "/api/v1/repository-scan-attestations/"+first.ID.String()+":verify", bytes.NewReader(verifyBody))
+	verifyReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/repository-scan-attestations/"+first.ID.String()+":verify", bytes.NewReader(verifyBody))
 	verifyReq = verifyReq.WithContext(authctx.WithSubject(verifyReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	verifyCtx := chi.NewRouteContext()
 	verifyCtx.URLParams.Add("id", first.ID.String())
@@ -191,7 +194,7 @@ INSERT INTO users (id, org_id, email, display_name) VALUES ($1, $2, $3, 'Attesta
 		t.Fatalf("verified policy linkage = %+v", verified.Attestation)
 	}
 
-	historyReq := httptest.NewRequest(http.MethodGet, "/api/v1/repository-scan-attestations/"+first.ID.String()+"/verifications", nil)
+	historyReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/repository-scan-attestations/"+first.ID.String()+"/verifications", nil)
 	historyReq = historyReq.WithContext(authctx.WithSubject(historyReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	historyCtx := chi.NewRouteContext()
 	historyCtx.URLParams.Add("id", first.ID.String())
@@ -225,7 +228,7 @@ INSERT INTO users (id, org_id, email, display_name) VALUES ($1, $2, $3, 'Attesta
 		t.Fatalf("verification row = %+v", verification)
 	}
 
-	exportReq := httptest.NewRequest(http.MethodGet, "/api/v1/repository-scan-attestations/"+first.ID.String()+"/export", nil)
+	exportReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/repository-scan-attestations/"+first.ID.String()+"/export", nil)
 	exportReq = exportReq.WithContext(authctx.WithSubject(exportReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	exportCtx := chi.NewRouteContext()
 	exportCtx.URLParams.Add("id", first.ID.String())
@@ -272,7 +275,7 @@ SELECT COUNT(*) FROM audit_events
 		t.Fatalf("duplicate attestation = %+v want id/hash %s/%s trusted", second, first.ID, first.PayloadSHA256)
 	}
 
-	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/repository-scan-attestations/"+first.ID.String(), nil)
+	getReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/repository-scan-attestations/"+first.ID.String(), nil)
 	getReq = getReq.WithContext(authctx.WithSubject(getReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	getCtx := chi.NewRouteContext()
 	getCtx.URLParams.Add("id", first.ID.String())
@@ -283,7 +286,7 @@ SELECT COUNT(*) FROM audit_events
 		t.Fatalf("get attestation status: %d body: %s", getRec.Code, getRec.Body.String())
 	}
 
-	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/repository-scans/"+repoReport.ScanTargetID.String()+"/attestations", nil)
+	listReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/repository-scans/"+repoReport.ScanTargetID.String()+"/attestations", nil)
 	listReq = listReq.WithContext(authctx.WithSubject(listReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	listCtx := chi.NewRouteContext()
 	listCtx.URLParams.Add("id", repoReport.ScanTargetID.String())
@@ -303,7 +306,7 @@ SELECT COUNT(*) FROM audit_events
 		t.Fatalf("listed attestations = %+v", listed.Attestations)
 	}
 
-	inventoryReq := httptest.NewRequest(http.MethodGet, "/api/v1/repository-scans/"+repoReport.ScanTargetID.String(), nil)
+	inventoryReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/repository-scans/"+repoReport.ScanTargetID.String(), nil)
 	inventoryReq = inventoryReq.WithContext(authctx.WithSubject(inventoryReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	inventoryCtx := chi.NewRouteContext()
 	inventoryCtx.URLParams.Add("id", repoReport.ScanTargetID.String())
@@ -331,7 +334,7 @@ SELECT COUNT(*) FROM audit_events
 	trustedBody["trusted"] = true
 	trustedBody["verification_status"] = "trusted"
 	raw, _ := json.Marshal(trustedBody)
-	trustedReq := httptest.NewRequest(http.MethodPost, "/api/v1/repository-scan-attestations:report", bytes.NewReader(raw))
+	trustedReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/repository-scan-attestations:report", bytes.NewReader(raw))
 	trustedReq = trustedReq.WithContext(authctx.WithSubject(trustedReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	trustedRec := httptest.NewRecorder()
 	NewScanAttestations(d).Report(trustedRec, trustedReq)
@@ -346,7 +349,7 @@ SELECT COUNT(*) FROM audit_events
 		"predicateType": "https://slsa.dev/provenance/v1",
 		"subject": []map[string]any{{
 			"name":   autoRef,
-			"digest": map[string]any{"sha256": autoDigest[len("sha256:"):len(autoDigest)]},
+			"digest": map[string]any{"sha256": autoDigest[len("sha256:"):]},
 		}},
 		"predicate": map[string]any{"buildType": "github-actions"},
 	}
@@ -370,7 +373,7 @@ SELECT COUNT(*) FROM audit_events
 		Payload:       autoPayloadCanonical,
 	}}
 	autoRaw, _ := json.Marshal(autoBody)
-	autoReq := httptest.NewRequest(http.MethodPost, "/api/v1/repository-scan-attestations:report", bytes.NewReader(autoRaw))
+	autoReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/repository-scan-attestations:report", bytes.NewReader(autoRaw))
 	autoReq = autoReq.WithContext(authctx.WithSubject(autoReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	autoRec := httptest.NewRecorder()
 	NewScanAttestationsWithVerifierAndAudit(d, autoVerifier, audit.New(pool)).Report(autoRec, autoReq)
@@ -387,7 +390,7 @@ SELECT COUNT(*) FROM audit_events
 		t.Fatalf("auto verified attestation = %+v", autoOut.Attestation)
 	}
 
-	autoHistoryReq := httptest.NewRequest(http.MethodGet, "/api/v1/repository-scan-attestations/"+autoOut.Attestation.ID.String()+"/verifications", nil)
+	autoHistoryReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/repository-scan-attestations/"+autoOut.Attestation.ID.String()+"/verifications", nil)
 	autoHistoryReq = autoHistoryReq.WithContext(authctx.WithSubject(autoHistoryReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	autoHistoryCtx := chi.NewRouteContext()
 	autoHistoryCtx.URLParams.Add("id", autoOut.Attestation.ID.String())
@@ -409,6 +412,7 @@ SELECT COUNT(*) FROM audit_events
 }
 
 func TestScanAttestationTrustPolicyPublicKeyMode(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -453,7 +457,7 @@ INSERT INTO users (id, org_id, email, display_name) VALUES ($1, $2, $3, 'Attesta
 		"predicate_types": []string{"https://slsa.dev/provenance/v1"},
 		"public_key_pem":  publicKey,
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/repository-scan-attestation-trust-policies", bytes.NewReader(raw))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/repository-scan-attestation-trust-policies", bytes.NewReader(raw))
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rec := httptest.NewRecorder()
 	NewScanAttestationsWithAudit(d, audit.New(pool)).CreateTrustPolicy(rec, req)
@@ -477,7 +481,7 @@ INSERT INTO users (id, org_id, email, display_name) VALUES ($1, $2, $3, 'Attesta
 func createTrustPolicy(t *testing.T, d *db.DB, userID, orgID uuid.UUID, body map[string]any) uuid.UUID {
 	t.Helper()
 	raw, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/repository-scan-attestation-trust-policies", bytes.NewReader(raw))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/repository-scan-attestation-trust-policies", bytes.NewReader(raw))
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rec := httptest.NewRecorder()
 	NewScanAttestationsWithAudit(d, audit.New(d.Pool())).CreateTrustPolicy(rec, req)
@@ -494,7 +498,7 @@ func createTrustPolicy(t *testing.T, d *db.DB, userID, orgID uuid.UUID, body map
 		t.Fatalf("trust policy create response = %+v", out.Policy)
 	}
 
-	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/repository-scan-attestation-trust-policies", nil)
+	listReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/repository-scan-attestation-trust-policies", nil)
 	listReq = listReq.WithContext(authctx.WithSubject(listReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	listRec := httptest.NewRecorder()
 	NewScanAttestations(d).ListTrustPolicies(listRec, listReq)
@@ -516,7 +520,7 @@ func createTrustPolicy(t *testing.T, d *db.DB, userID, orgID uuid.UUID, body map
 func reportAttestation(t *testing.T, d *db.DB, userID, orgID uuid.UUID, body map[string]any) scanAttestationDTO {
 	t.Helper()
 	raw, _ := json.Marshal(body)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/repository-scan-attestations:report", bytes.NewReader(raw))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/repository-scan-attestations:report", bytes.NewReader(raw))
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rec := httptest.NewRecorder()
 	NewScanAttestations(d).Report(rec, req)

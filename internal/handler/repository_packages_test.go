@@ -1,3 +1,5 @@
+//go:build integration
+
 package handler
 
 import (
@@ -85,7 +87,7 @@ INSERT INTO users (id, org_id, email, display_name) VALUES ($1, $2, $3, 'Reposit
 			Purl:      "pkg:npm/lodash@4.17.20",
 		}},
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/repository-packages:report", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/repository-packages:report", bytes.NewReader(body))
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	rec := httptest.NewRecorder()
 	NewRepositoryPackages(d).Report(rec, req)
@@ -185,7 +187,7 @@ SELECT id
 		t.Fatalf("claim evidence = %s want %s", claimEvidenceID, report.ScanEvidenceID)
 	}
 
-	evidenceReq := httptest.NewRequest(http.MethodGet, "/api/v1/scan-evidence/"+report.ScanEvidenceID.String(), nil)
+	evidenceReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scan-evidence/"+report.ScanEvidenceID.String(), nil)
 	evidenceReq.Header.Set("Authorization", "Bearer "+rawToken)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", report.ScanEvidenceID.String())

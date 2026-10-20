@@ -33,7 +33,7 @@ import (
 
 // FormatVersion is the on-disk schema identifier. Bump on any non-backward-compatible
 // change to the file layout, manifest fields, or table exports. Restore refuses to
-// process unfamiliar versions unless --allow-unverified is passed.
+// process unfamiliar versions, including when signature verification is waived.
 const FormatVersion = "constellation-orgbackup/v1"
 
 // Manifest is the top-level JSON document inside every backup tarball.
@@ -42,23 +42,23 @@ type Manifest struct {
 	FormatVersion string `json:"format_version"`
 	// OrgID is the source org's UUID. UPSERT on restore is by (OrgName) so cross-instance
 	// restore works even if UUIDs differ; OrgID is recorded for audit-trail purposes.
-	OrgID string `json:"org_id"`
-	OrgName string `json:"org_name"`
-	GeneratedAt time.Time `json:"generated_at"`
-	GeneratedBy string `json:"generated_by,omitempty"` // best-effort email of the user that kicked the backup
-	SourceInstance string `json:"source_instance,omitempty"` // best-effort hostname for ops triage
-	Tables []TableEntry `json:"tables"`
-	RootHash string `json:"root_hash"` // sha256 over JSON of [{table, sha256, rows}, ...]
+	OrgID          string       `json:"org_id"`
+	OrgName        string       `json:"org_name"`
+	GeneratedAt    time.Time    `json:"generated_at"`
+	GeneratedBy    string       `json:"generated_by,omitempty"`    // best-effort email of the user that kicked the backup
+	SourceInstance string       `json:"source_instance,omitempty"` // best-effort hostname for ops triage
+	Tables         []TableEntry `json:"tables"`
+	RootHash       string       `json:"root_hash"` // sha256 over JSON of [{table, sha256, rows}, ...]
 	// SignerIdentity is set after signing. "keyless:<fulcio-subject>" or "key:<sha256-pubkey>".
 	SignerIdentity string `json:"signer_identity,omitempty"`
 }
 
 // TableEntry summarizes one exported table.
 type TableEntry struct {
-	Name string `json:"name"` // e.g. "clusters"
-	Rows int64 `json:"rows"`
+	Name   string `json:"name"` // e.g. "clusters"
+	Rows   int64  `json:"rows"`
 	SHA256 string `json:"sha256"` // hex of sha256(table.jsonl bytes)
-	Bytes int64 `json:"bytes"`
+	Bytes  int64  `json:"bytes"`
 }
 
 // ComputeRootHash returns the manifest's RootHash given its Tables list. Stable: re-sorts
@@ -71,9 +71,9 @@ func ComputeRootHash(tables []TableEntry) (string, error) {
 
 	// JSON-encode each entry into a stable shape (only the fields that affect identity).
 	type ent struct {
-		Name string `json:"name"`
+		Name   string `json:"name"`
 		SHA256 string `json:"sha256"`
-		Rows int64 `json:"rows"`
+		Rows   int64  `json:"rows"`
 	}
 	items := make([]ent, len(out))
 	for i, t := range out {
@@ -94,32 +94,32 @@ func ComputeRootHash(tables []TableEntry) (string, error) {
 // "Optional" tables that may not be present in this DB version are tolerated by the
 // exporter (it logs and skips) and by the restorer (missing files are not an error).
 var OrderedTables = []string{
-	"orgs",                  // 1
-	"users",                 // 2 (FK -> orgs; password_hash REDACTED at export time)
-	"custom_roles",          // 3 (FK -> orgs; org-defined RBAC verb bundles)
-	"role_bindings",         // 4 (FK -> orgs, users; subject_id/role_id)
-	"org_settings",          // 5 (FK -> orgs; registry_kek REDACTED at export time)
-	"clusters",              // 6 (FK -> orgs)
-	"deployments",           // 7 (FK -> orgs, clusters)
-	"assets",                // 8 (FK -> orgs, clusters)
-	"policies",              // 9 (FK -> orgs, clusters)
-	"groups",                // 10 (FK -> orgs, clusters)
-	"vuln_profiles",         // 11
-	"response_rules_v2",     // 12
-	"response_rules",        // 12b E1 declarative response-rule engine (ConstellationResponseRule CRD)
-	"receivers",             // 13 (secret_key REDACTED at export time)
-	"registries",            // 14 (auth_secret stays AES-GCM SEALED; hex-encoded, never cleartext)
-	"waf_groups",            // 15
-	"runtime_dlp_rules",     // 16 (NET-BACKUP-44: the LIVE enforced DLP + L7/WAF rule store —
+	"orgs",              // 1
+	"users",             // 2 (FK -> orgs; password_hash REDACTED at export time)
+	"custom_roles",      // 3 (FK -> orgs; org-defined RBAC verb bundles)
+	"role_bindings",     // 4 (FK -> orgs, users; subject_id/role_id)
+	"org_settings",      // 5 (FK -> orgs; registry_kek REDACTED at export time)
+	"clusters",          // 6 (FK -> orgs)
+	"deployments",       // 7 (FK -> orgs, clusters)
+	"assets",            // 8 (FK -> orgs, clusters)
+	"policies",          // 9 (FK -> orgs, clusters)
+	"groups",            // 10 (FK -> orgs, clusters)
+	"vuln_profiles",     // 11
+	"response_rules_v2", // 12
+	"response_rules",    // 12b E1 declarative response-rule engine (ConstellationResponseRule CRD)
+	"receivers",         // 13 (secret_key REDACTED at export time)
+	"registries",        // 14 (auth_secret stays AES-GCM SEALED; hex-encoded, never cleartext)
+	"waf_groups",        // 15
+	"runtime_dlp_rules", // 16 (NET-BACKUP-44: the LIVE enforced DLP + L7/WAF rule store —
 	//      the single authoritative table after waf_groups CRUD (WS-G G1) and the
 	//      DLP-sensor CRUD (P0-01) were removed; FK org_id+cluster_id so it restores after clusters)
-	"image_acceptances",     // 17
-	"custom_frameworks",     // 18
-	"api_tokens",            // 19 (optional; token_hash EXCLUDED — metadata only, not restorable)
-	"compliance_schedules",  // 20 (optional, N8)
-	"federation_state",      // 21
-	"fed_members",           // 22
-	"audit_events_recent",   // 23 (last 30d only; full archive belongs to audit-archiver)
+	"image_acceptances",    // 17
+	"custom_frameworks",    // 18
+	"api_tokens",           // 19 (optional; token_hash EXCLUDED — metadata only, not restorable)
+	"compliance_schedules", // 20 (optional, N8)
+	"federation_state",     // 21
+	"fed_members",          // 22
+	"audit_events_recent",  // 23 (last 30d only; full archive belongs to audit-archiver)
 }
 
 // IsOptionalTable returns true for tables whose absence (missing table in source DB or

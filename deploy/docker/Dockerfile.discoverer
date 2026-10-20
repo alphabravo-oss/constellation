@@ -11,25 +11,42 @@
 # Compose runs ONE replica per cluster; in K8s the chart fans this out via a Deployment-
 # per-managed-cluster pattern.
 
-ARG GO_VERSION=1.26
-ARG RUNTIME_IMAGE=debian:bookworm-slim
+# GO_VERSION has NO default: the Makefile passes --build-arg GO_VERSION from go.mod
+# (make check-go-version enforces this). The builder is additionally pinned by
+# multi-arch index digest so a Go bump is one value change per file.
+# Refresh with: docker buildx imagetools inspect golang:<ver>-bookworm
+# Pinned to the 1.27.3-bookworm multi-arch index digest of the Go builder (matches go.mod).
+ARG GO_VERSION
+ARG GO_IMAGE_DIGEST=sha256:5c3e9b43cfd3bb95c7937462e29d87ada57b481a96fa23ad0eb61778d7a00110
+ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian13:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3
 
-FROM golang:${GO_VERSION}-bookworm AS build
+FROM golang:${GO_VERSION}-bookworm@${GO_IMAGE_DIGEST} AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 ARG VERSION=dev
+ARG COMMIT=dev
+ARG BUILD_TIME=
 ENV CGO_ENABLED=0 GOOS=linux
-RUN go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
+RUN go build -tags timetzdata -trimpath -ldflags="-s -w -X github.com/alphabravocompany/constellation/pkg/version.Version=${VERSION} -X github.com/alphabravocompany/constellation/pkg/version.Commit=${COMMIT} -X github.com/alphabravocompany/constellation/pkg/version.BuildTime=${BUILD_TIME}" \
       -o /out/constellation-discoverer ./cmd/constellation-discoverer
 
+# Prepare account data without shipping account-management utilities.
+RUN mkdir -p /out/home \
+ && printf 'root:x:0:0:root:/root:/sbin/nologin\nconstellation:x:10001:10001:Constellation:/home/constellation:/sbin/nologin\n' > /out/passwd \
+ && printf 'root:x:0:\nconstellation:x:10001:\n' > /out/group
+
 FROM ${RUNTIME_IMAGE} AS runtime
-RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates tzdata \
- && rm -rf /var/lib/apt/lists/*
+ARG VERSION=dev
+ARG COMMIT=dev
+LABEL org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT}"
+COPY --from=build /out/passwd /etc/passwd
+COPY --from=build /out/group /etc/group
+COPY --from=build --chown=10001:10001 /out/home/ /home/constellation/
 COPY --from=build /out/constellation-discoverer /usr/local/bin/constellation-discoverer
-RUN groupadd -r constellation && useradd -r -g constellation -m -d /home/constellation -s /usr/sbin/nologin constellation
-USER constellation
+ENV HOME=/home/constellation
+USER 10001:10001
 WORKDIR /home/constellation
 ENTRYPOINT ["/usr/local/bin/constellation-discoverer"]

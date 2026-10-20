@@ -28,10 +28,7 @@ async function globalSetup() {
     console.log("[playwright global-setup] reseeded test DB");
     return;
   }
-  console.warn(
-    "[playwright global-setup] reseed failed; tests may be order-dependent:",
-    res.stderr?.toString().trim(),
-  );
+  throw new Error(`[playwright global-setup] reseed failed: ${res.stderr?.toString().trim()}`);
 }
 
 export default globalSetup;

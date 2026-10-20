@@ -2,11 +2,10 @@
 
 **Enterprise cloud-native security, built for Kubernetes, containers, and modern software delivery.**
 
-> ⚠️ **ALPHA — DO NOT USE.** This project is in early **alpha** and under active
-> development. It is **not** production-ready, APIs and data formats will change
-> without notice, and there are **no stability, security, or support guarantees**.
-> Published for transparency and early feedback only — do not deploy it anywhere
-> you care about.
+> **Status: pre-release.** Constellation is under active development and has not shipped a
+> production release. APIs, data formats and the Helm values surface change between
+> commits; see [`CHANGELOG.md`](CHANGELOG.md) for what is landing and
+> [`docs/SECURITY-BACKLOG.md`](docs/SECURITY-BACKLOG.md) for known open findings.
 
 Constellation gives security teams, platform engineers, and operators one place to see what is running, understand what is vulnerable, control what is allowed, and prove what happened. It combines vulnerability intelligence, runtime visibility, admission control, compliance evidence, network security, and enterprise governance into a single Kubernetes-native security platform.
 
@@ -185,44 +184,49 @@ The platform is API-first for automation, but the primary user experience is des
 
 ## Deployment Model
 
-Constellation is Kubernetes-native and deploys into the environments it protects.
+Constellation is Kubernetes-native and deploys into the environments it protects. **Helm is
+the only supported deployment path** (ADR 0007); the chart lives at
+[`deploy/charts/constellation`](deploy/charts/constellation/).
 
-- Helm-based installation for Kubernetes and k3s environments
-- Frontend, API, scanner, admission, runtime, discoverer, operator, and supporting services
-- Local demo support through Docker Compose
-- In-cluster scanning and evidence collection
-- Separate VulnDB bundle import path for connected or restricted deployments
-- Designed for enterprise ingress, TLS, cert-manager, and standard Kubernetes operations
-
-For production deployments, use the Helm chart in [`deploy/charts/constellation`](deploy/charts/constellation/).
-
-## Evaluation And Demo
-
-For a single-host evaluation:
+- Frontend, API, scanner, admission webhook, runtime agent, discoverer, operator and
+  supporting jobs are separate per-role images under `ghcr.io/alphabravo-oss/constellation/<role>`
+- PostgreSQL 16 (pgvector) through the CloudNativePG operator in production (`postgres.mode=cnpg`),
+  or an external DSN (`postgres.mode=external`)
+- Optional in-cluster object store for Barman backups (`backup.objectStore`)
+- Ingress or Gateway API, cert-manager TLS, OIDC/SAML/LDAP, VulnDB bundle import for
+  connected or air-gapped clusters
 
 ```sh
-make compose-images
-docker compose --profile seed up -d
-open http://localhost:3000
+helm upgrade --install constellation deploy/charts/constellation \
+  -n constellation-system --create-namespace -f my-values.yaml
 ```
 
-Default demo credentials:
+Pre-install `cloudnative-pg` once per cluster before the first install (see
+[`docs/deployment-helm.md`](docs/deployment-helm.md)).
 
-```text
-admin@demo.test
-Constellation!1
+## Local Development
+
+One command brings up Postgres, the API/operator/scanner under Air live-reload, the Vite
+dev server and a Prometheus/Tempo/Loki/Grafana stack:
+
+```sh
+make dev          # scripts/dev.sh up
+make dev-logs     # tail everything
+make dev-down
 ```
 
-For Kubernetes deployments, use the Helm chart and configure ingress, TLS, authentication, and VulnDB bundle imports according to the target environment.
+The dev loop seeds `admin@demo.test` / `Constellation!1`. Ports and overrides live in
+`.env.dev` (tracked) and `.env.dev.local` (yours). `make check` runs lint, vet, format,
+shellcheck, the frontend lint and the unit suite; `make test-integration` runs the
+integration suite against a disposable Postgres. See [`docs/development.md`](docs/development.md).
 
 ## Documentation
 
 - Architecture: [`docs/architecture.md`](docs/architecture.md)
-- Development: [`docs/development.md`](docs/development.md)
-- Docker Compose deployment: [`docs/deployment-compose.md`](docs/deployment-compose.md)
-- Helm chart: [`deploy/charts/constellation`](deploy/charts/constellation/)
-- VulnDB producer repository: `../constellation-vulndb`
-- Enterprise parity and roadmap planning: [`docs/constellation-neuvector-vulndb-review-plan.md`](docs/constellation-neuvector-vulndb-review-plan.md)
+- Development: [`docs/development.md`](docs/development.md) and the root [`CLAUDE.md`](CLAUDE.md)
+- Helm chart and values: [`docs/deployment-helm.md`](docs/deployment-helm.md)
+- Decisions: [`docs/decisions/`](docs/decisions/)
+- Security policy: [`SECURITY.md`](SECURITY.md)
 
 ## The Constellation Promise
 

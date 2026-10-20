@@ -25,7 +25,6 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -38,8 +37,8 @@ import (
 
 const (
 	gcpCloudPlatformScope = "https://www.googleapis.com/auth/cloud-platform"
-	gcpDefaultTokenURI    = "https://oauth2.googleapis.com/token"
-	gcpJWTBearerGrant     = "urn:ietf:params:oauth:grant-type:jwt-bearer"
+	gcpDefaultTokenURI    = "https://oauth2.googleapis.com/token"         //nolint:gosec // G101: public OAuth endpoint, not a credential
+	gcpJWTBearerGrant     = "urn:ietf:params:oauth:grant-type:jwt-bearer" //nolint:gosec // G101: RFC 7523 grant type URN, not a credential
 )
 
 // serviceAccountKey is the subset of a GCP SA JSON key we need to sign a JWT.
@@ -64,7 +63,7 @@ func (cfg Config) gcpAccessToken(ctx context.Context, client *http.Client) (stri
 	}
 	var sa serviceAccountKey
 	if err := json.Unmarshal([]byte(cfg.ServiceAccountJSON), &sa); err != nil {
-		return "", fmt.Errorf("gcp: parse service_account_json: %w", err)
+		return "", responseFailure("gcp credentials", "invalid service account JSON", 0, err)
 	}
 	if sa.ClientEmail == "" || sa.PrivateKey == "" {
 		return "", errors.New("gcp: service_account_json missing client_email/private_key")
@@ -74,7 +73,7 @@ func (cfg Config) gcpAccessToken(ctx context.Context, client *http.Client) (stri
 		tokenURI = gcpDefaultTokenURI
 	}
 
-	key := tokenCacheKey("gcp", sa.ClientEmail, tokenURI, gcpCloudPlatformScope)
+	key := cfg.credentialCacheKey("gcp", sa.ClientEmail, tokenURI, gcpCloudPlatformScope, sa.PrivateKey)
 	if tok, ok := tokenCacheGet(key); ok {
 		return tok, nil
 	}
@@ -128,7 +127,7 @@ func exchangeGCPAssertion(ctx context.Context, client *http.Client, tokenURI, as
 	form.Set("assertion", assertion)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURI, strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", time.Time{}, err
+		return "", time.Time{}, errors.New("registry: invalid request endpoint")
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
@@ -144,7 +143,7 @@ const (
 	azureAuthorityBase = "https://login.microsoftonline.com"
 	azureARMScope      = "https://management.azure.com/.default"
 	azureARMResource   = "https://management.azure.com/"
-	azureIMDSTokenURL  = "http://169.254.169.254/metadata/identity/oauth2/token"
+	azureIMDSTokenURL  = "http://169.254.169.254/metadata/identity/oauth2/token" //nolint:gosec // G101: IMDS endpoint URL, not a credential
 	// acrPullScope requests catalog + pull/metadata across all repositories, which is
 	// what repository enumeration + digest resolution need.
 	acrPullScope = "registry:catalog:* repository:*:pull repository:*:metadata_read"
@@ -167,9 +166,15 @@ func (cfg Config) acrAccessToken(ctx context.Context, client *http.Client, host 
 		return "", errors.New("acr: Token, or tenant_id+client_id+client_secret, or azure-managed-id auth required")
 	}
 
-	cacheKey := tokenCacheKey("acr", host, cfg.TenantID, cfg.ClientID, boolStr(managed))
-	if tok, ok := tokenCacheGet(cacheKey); ok {
-		return tok, nil
+	// Static credentials establish the identity before cache lookup. Managed
+	// identity must first resolve the current token; public client IDs alone do
+	// not establish which ambient credential is effective.
+	cacheKey := ""
+	if !managed {
+		cacheKey = cfg.credentialCacheKey("acr", host, cfg.TenantID, cfg.ClientID, cfg.ClientSecret, acrPullScope)
+		if tok, ok := tokenCacheGet(cacheKey); ok {
+			return tok, nil
+		}
 	}
 
 	// 1. AAD access token.
@@ -184,6 +189,13 @@ func (cfg Config) acrAccessToken(ctx context.Context, client *http.Client, host 
 	}
 	if err != nil {
 		return "", err
+	}
+
+	if managed {
+		cacheKey = cfg.credentialCacheKey("acr-managed", host, cfg.TenantID, cfg.ClientID, aadTok, acrPullScope)
+		if tok, ok := tokenCacheGet(cacheKey); ok {
+			return tok, nil
+		}
 	}
 
 	// 2. Exchange the AAD token for an ACR refresh token.
@@ -212,7 +224,7 @@ func azureClientCredentialsRequest(ctx context.Context, tenant, clientID, client
 	form.Set("scope", scope)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
-		return nil, err
+		return nil, errors.New("registry: invalid request endpoint")
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
@@ -238,7 +250,7 @@ func azureIMDSToken(ctx context.Context, client *http.Client, resource, clientID
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, azureIMDSTokenURL+"?"+q.Encode(), nil)
 	if err != nil {
-		return "", time.Time{}, err
+		return "", time.Time{}, errors.New("registry: invalid request endpoint")
 	}
 	req.Header.Set("Metadata", "true")
 	return readOAuthToken(client, req, "imds")
@@ -257,11 +269,11 @@ func acrExchangeRefreshToken(ctx context.Context, client *http.Client, host, ten
 	endpoint := "https://" + host + "/oauth2/exchange"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", err
+		return "", errors.New("registry: invalid request endpoint")
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
-	body, err := doReadBody(client, req, "acr exchange")
+	body, status, err := doReadBody(client, req, "acr exchange")
 	if err != nil {
 		return "", err
 	}
@@ -269,10 +281,10 @@ func acrExchangeRefreshToken(ctx context.Context, client *http.Client, host, ten
 		RefreshToken string `json:"refresh_token"`
 	}
 	if err := json.Unmarshal(body, &out); err != nil {
-		return "", fmt.Errorf("acr: decode refresh token: %w", err)
+		return "", responseFailure("acr exchange", "invalid refresh token response", status, err)
 	}
 	if out.RefreshToken == "" {
-		return "", errors.New("acr: exchange returned empty refresh_token")
+		return "", responseFailure("acr exchange", "response missing refresh token", status, nil)
 	}
 	return out.RefreshToken, nil
 }
@@ -288,7 +300,7 @@ func acrExchangeAccessToken(ctx context.Context, client *http.Client, host, refr
 	endpoint := "https://" + host + "/oauth2/token"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", time.Time{}, err
+		return "", time.Time{}, errors.New("registry: invalid request endpoint")
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
@@ -311,16 +323,16 @@ type oauthTokenResponse struct {
 // readOAuthToken performs the request and decodes a standard OAuth token response,
 // computing the absolute expiry. label prefixes error messages.
 func readOAuthToken(client *http.Client, req *http.Request, label string) (string, time.Time, error) {
-	body, err := doReadBody(client, req, label+" token")
+	body, status, err := doReadBody(client, req, label+" token")
 	if err != nil {
 		return "", time.Time{}, err
 	}
 	var tok oauthTokenResponse
 	if err := json.Unmarshal(body, &tok); err != nil {
-		return "", time.Time{}, fmt.Errorf("%s: decode token: %w", label, err)
+		return "", time.Time{}, responseFailure(label+" token", "invalid token response", status, err)
 	}
 	if tok.AccessToken == "" {
-		return "", time.Time{}, fmt.Errorf("%s: token response missing access_token", label)
+		return "", time.Time{}, responseFailure(label+" token", "response missing access token", status, nil)
 	}
 	expiry := time.Now().Add(time.Hour) // conservative default when TTL is absent
 	if tok.ExpiresIn > 0 {
@@ -334,20 +346,22 @@ func readOAuthToken(client *http.Client, req *http.Request, label string) (strin
 }
 
 // doReadBody sends req and returns the response body, mapping non-2xx to an error.
-func doReadBody(client *http.Client, req *http.Request, what string) ([]byte, error) {
+func doReadBody(client *http.Client, req *http.Request, what string) ([]byte, int, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", what, err)
+		return nil, 0, responseFailure(what, "request failed", 0, err)
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	body, readErr := readRegistryPage(resp, 1<<20)
+	if readErr != nil {
+		return nil, resp.StatusCode, responseFailure(what, "response read or close failed", resp.StatusCode, readErr)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("%s: status %d: %s", what, resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, resp.StatusCode, responseFailure(what, "response rejected", resp.StatusCode, nil)
 	}
-	return body, nil
+	return body, resp.StatusCode, nil
 }
 
 // parseRSAPrivateKey decodes a PEM RSA private key in PKCS#8 (GCP's default) or PKCS#1.
@@ -370,13 +384,6 @@ func parseRSAPrivateKey(pemStr string) (*rsa.PrivateKey, error) {
 }
 
 func b64url(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
-
-func boolStr(b bool) string {
-	if b {
-		return "1"
-	}
-	return "0"
-}
 
 func parseUnixString(s string) (int64, error) {
 	s = strings.TrimSpace(s)

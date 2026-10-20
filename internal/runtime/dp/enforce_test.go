@@ -155,10 +155,10 @@ func (f *fakeEnforceProvider) Desired(ctx context.Context) ([]EnforceTarget, err
 }
 
 // TestEnforceManager_ReconcileAddRemove walks through:
-//   1. provider returns 2 targets → both added, iptables rules installed,
-//      dp AddNfqPort + AddMAC called for each, queue numbers allocated.
-//   2. provider drops one → that target's rules removed, queue released.
-//   3. teardown removes everything.
+//  1. provider returns 2 targets → both added, iptables rules installed,
+//     dp AddNfqPort + AddMAC called for each, queue numbers allocated.
+//  2. provider drops one → that target's rules removed, queue released.
+//  3. teardown removes everything.
 //
 // Uses fakes for both the iptables runner and the dp client, so the test
 // runs without dp present.

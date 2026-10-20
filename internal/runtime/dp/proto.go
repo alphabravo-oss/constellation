@@ -14,19 +14,19 @@ const DPMsgSize = 8192
 // Message kinds, mirrored from defs.h DP_KIND_*. dp sends one of these in the
 // header's Kind field for every notification it emits on /tmp/ctrl_listen.sock.
 const (
-	KindAppUpdate              = 1
-	KindSessionList            = 2
-	KindSessionCount           = 3
-	KindDeviceCounter          = 4
-	KindMeterList              = 5
-	KindThreatLog              = 6
-	KindConnection             = 7
-	KindMacStats               = 8
-	KindDeviceStats            = 9
-	KindKeepAlive              = 10
-	KindFqdnUpdate             = 11
-	KindIPFqdnStorageUpdate    = 12
-	KindIPFqdnStorageRelease   = 13
+	KindAppUpdate            = 1
+	KindSessionList          = 2
+	KindSessionCount         = 3
+	KindDeviceCounter        = 4
+	KindMeterList            = 5
+	KindThreatLog            = 6
+	KindConnection           = 7
+	KindMacStats             = 8
+	KindDeviceStats          = 9
+	KindKeepAlive            = 10
+	KindFqdnUpdate           = 11
+	KindIPFqdnStorageUpdate  = 12
+	KindIPFqdnStorageRelease = 13
 )
 
 // kindName returns a human-readable label for a DP_KIND_* value. Falls back
@@ -345,6 +345,17 @@ func decodeConnection(b []byte) (*Connection, error) {
 		EpSessIn12:   binary.BigEndian.Uint32(b[84:88]),
 		EpByteIn12:   binary.BigEndian.Uint64(b[88:96]),
 	}
+	flags := binary.BigEndian.Uint16(b[46:48])
+	c.Ingress = flags&ConnFlagIngress != 0
+	c.ExternalPeer = flags&ConnFlagExternal != 0
+	c.XFF = flags&ConnFlagXFF != 0
+	c.SvcExtIP = flags&ConnFlagSvcExtIP != 0
+	c.MeshToSvr = flags&ConnFlagMeshToSvr != 0
+	c.LinkLocal = flags&ConnFlagLinkLocal != 0
+	c.TmpOpen = flags&ConnFlagTmpOpen != 0
+	c.UwlIP = flags&ConnFlagUwlIP != 0
+	c.NBE = flags&ConnFlagCheckNbe != 0
+	c.NBESns = flags&ConnFlagNbeSns != 0
 	// IP fields are 16-byte wide regardless of family; trim to the right
 	// width for IPv4 so net.IP renders as 1.2.3.4 not ::ffff:1.2.3.4.
 	switch c.EtherType {
@@ -360,17 +371,6 @@ func decodeConnection(b []byte) (*Connection, error) {
 		c.ClientIP = net.IP(append([]byte(nil), b[12:28]...))
 		c.ServerIP = net.IP(append([]byte(nil), b[28:44]...))
 	}
-	flags := binary.BigEndian.Uint16(b[46:48])
-	c.Ingress = flags&ConnFlagIngress != 0
-	c.ExternalPeer = flags&ConnFlagExternal != 0
-	c.XFF = flags&ConnFlagXFF != 0
-	c.SvcExtIP = flags&ConnFlagSvcExtIP != 0
-	c.MeshToSvr = flags&ConnFlagMeshToSvr != 0
-	c.LinkLocal = flags&ConnFlagLinkLocal != 0
-	c.TmpOpen = flags&ConnFlagTmpOpen != 0
-	c.UwlIP = flags&ConnFlagUwlIP != 0
-	c.NBE = flags&ConnFlagCheckNbe != 0
-	c.NBESns = flags&ConnFlagNbeSns != 0
 	return c, nil
 }
 
@@ -392,40 +392,40 @@ const dpMsgSessionSize = 140
 // match defs.h exactly; not every dp field is plumbed up — we surface
 // what the flow ingest + threat path actually need.
 type Session struct {
-	ID           uint32
-	EPMAC        net.HardwareAddr
-	EtherType    uint16
-	ClientMAC    net.HardwareAddr
-	ServerMAC    net.HardwareAddr
-	ClientIP     net.IP
-	ServerIP     net.IP
-	ClientPort   uint16
-	ServerPort   uint16
-	ICMPCode     uint8
-	ICMPType     uint8
-	IPProto      uint8
-	ClientPkts   uint32
-	ServerPkts   uint32
-	ClientBytes  uint32
-	ServerBytes  uint32
+	ID             uint32
+	EPMAC          net.HardwareAddr
+	EtherType      uint16
+	ClientMAC      net.HardwareAddr
+	ServerMAC      net.HardwareAddr
+	ClientIP       net.IP
+	ServerIP       net.IP
+	ClientPort     uint16
+	ServerPort     uint16
+	ICMPCode       uint8
+	ICMPType       uint8
+	IPProto        uint8
+	ClientPkts     uint32
+	ServerPkts     uint32
+	ClientBytes    uint32
+	ServerBytes    uint32
 	ClientAsmPkts  uint32
 	ServerAsmPkts  uint32
 	ClientAsmBytes uint32
 	ServerAsmBytes uint32
-	ClientState  uint8
-	ServerState  uint8
-	Idle         uint16
-	Age          uint32
-	Life         uint16
-	Application  uint16
-	ThreatID     uint32
-	PolicyID     uint32
-	PolicyAction uint8
-	Severity     uint8
-	Flags        uint16
-	XffIP        net.IP
-	XffApp       uint16
-	XffPort      uint16
+	ClientState    uint8
+	ServerState    uint8
+	Idle           uint16
+	Age            uint32
+	Life           uint16
+	Application    uint16
+	ThreatID       uint32
+	PolicyID       uint32
+	PolicyAction   uint8
+	Severity       uint8
+	Flags          uint16
+	XffIP          net.IP
+	XffApp         uint16
+	XffPort        uint16
 }
 
 // decodeSessions parses one DPMsgSessionHdr + N DPMsgSession records.
@@ -497,6 +497,7 @@ func decodeSession(b []byte) (*Session, error) {
 		XffApp:         binary.BigEndian.Uint16(b[136:138]),
 		XffPort:        binary.BigEndian.Uint16(b[138:140]),
 	}
+	s.XffIP = net.IP(append([]byte(nil), b[120:136]...))
 	switch s.EtherType {
 	case ethTypeIPv4:
 		s.ClientIP = net.IP(append([]byte(nil), b[24:28]...))
@@ -508,7 +509,6 @@ func decodeSession(b []byte) (*Session, error) {
 		s.ClientIP = net.IP(append([]byte(nil), b[24:40]...))
 		s.ServerIP = net.IP(append([]byte(nil), b[40:56]...))
 	}
-	s.XffIP = net.IP(append([]byte(nil), b[120:136]...))
 	return s, nil
 }
 
@@ -585,17 +585,6 @@ func decodeThreatLog(b []byte) (*ThreatLog, error) {
 	t.Tap = flags&ThreatFlagTap != 0
 	t.EPMAC = net.HardwareAddr(append([]byte(nil), b[16:22]...))
 	t.EtherType = binary.BigEndian.Uint16(b[22:24])
-	switch t.EtherType {
-	case ethTypeIPv4:
-		t.SrcIP = net.IP(append([]byte(nil), b[24:28]...))
-		t.DstIP = net.IP(append([]byte(nil), b[40:44]...))
-	case ethTypeIPv6:
-		t.SrcIP = net.IP(append([]byte(nil), b[24:40]...))
-		t.DstIP = net.IP(append([]byte(nil), b[40:56]...))
-	default:
-		t.SrcIP = net.IP(append([]byte(nil), b[24:40]...))
-		t.DstIP = net.IP(append([]byte(nil), b[40:56]...))
-	}
 	t.SrcPort = binary.BigEndian.Uint16(b[56:58])
 	t.DstPort = binary.BigEndian.Uint16(b[58:60])
 	t.ICMPCode = b[60]
@@ -613,6 +602,17 @@ func decodeThreatLog(b []byte) (*ThreatLog, error) {
 	hashOff := 68 + threatLogMsgLen + threatLogPktLen
 	if len(b) >= hashOff+4 {
 		t.DlpNameHash = binary.BigEndian.Uint32(b[hashOff : hashOff+4])
+	}
+	switch t.EtherType {
+	case ethTypeIPv4:
+		t.SrcIP = net.IP(append([]byte(nil), b[24:28]...))
+		t.DstIP = net.IP(append([]byte(nil), b[40:44]...))
+	case ethTypeIPv6:
+		t.SrcIP = net.IP(append([]byte(nil), b[24:40]...))
+		t.DstIP = net.IP(append([]byte(nil), b[40:56]...))
+	default:
+		t.SrcIP = net.IP(append([]byte(nil), b[24:40]...))
+		t.DstIP = net.IP(append([]byte(nil), b[40:56]...))
 	}
 	return t, nil
 }

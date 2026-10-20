@@ -156,7 +156,7 @@ func runGovulncheckBinary(ctx context.Context, binaryPath string) ([]byte, error
 		return nil, err
 	}
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, bin, "-mode", "binary", "-format", "json", binaryPath)
+	cmd := exec.CommandContext(ctx, bin, "-mode", "binary", "-format", "json", binaryPath) //nolint:gosec // G204: bin is the fixed govulncheck tool; binaryPath is a file we extracted
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	// govulncheck exits non-zero when it finds vulnerabilities; that is expected

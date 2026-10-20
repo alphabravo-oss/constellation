@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
@@ -59,7 +61,7 @@ func (c *CustomChecks) List(w http.ResponseWriter, r *http.Request) {
 SELECT id, name, description, severity, target_kind, expression, remediation, enabled, created_at
   FROM custom_compliance_checks WHERE org_id = $1 ORDER BY created_at DESC`, subj.OrgID)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()
@@ -86,33 +88,33 @@ func (c *CustomChecks) Create(w http.ResponseWriter, r *http.Request) {
 	subj, _ := authctx.SubjectFrom(r.Context())
 	var body customCheckBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid body")
 		return
 	}
 	body.Name = strings.TrimSpace(body.Name)
 	body.TargetKind = strings.TrimSpace(body.TargetKind)
 	body.Expression = strings.TrimSpace(body.Expression)
 	if body.Name == "" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "name required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "name required")
 		return
 	}
 	if !validTargetKinds[body.TargetKind] {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "target_kind must be one of Namespace, ClusterRole, Deployment, StatefulSet, DaemonSet"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "target_kind must be one of Namespace, ClusterRole, Deployment, StatefulSet, DaemonSet")
 		return
 	}
 	if body.Expression == "" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "expression required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "expression required")
 		return
 	}
 	if err := k8scompliance.ValidateExpression(body.Expression); err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid CEL expression: " + err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid CEL expression: "+err.Error())
 		return
 	}
 	if body.Severity == "" {
 		body.Severity = "medium"
 	}
 	if !validSeverities[body.Severity] {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "severity must be one of info, low, medium, high, critical"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "severity must be one of info, low, medium, high, critical")
 		return
 	}
 	enabled := true
@@ -128,7 +130,7 @@ INSERT INTO custom_compliance_checks (id, org_id, name, description, severity, t
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
 		id, subj.OrgID, body.Name, body.Description, body.Severity, body.TargetKind, body.Expression, body.Remediation, enabled, subj.UserID,
 	); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	_, _, _ = c.audit.Log(r.Context(), audit.Event{
@@ -146,13 +148,13 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
 func (c *CustomChecks) Delete(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	subj, _ := authctx.SubjectFrom(r.Context())
 	if _, err := c.db.Pool().Exec(r.Context(),
 		`DELETE FROM custom_compliance_checks WHERE id = $1 AND org_id = $2`, id, subj.OrgID); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	uid := subj.UserID

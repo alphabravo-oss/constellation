@@ -1,56 +1,95 @@
-import axios, { type AxiosInstance } from "axios";
+import axios, { type AxiosInstance, type InternalAxiosRequestConfig } from "axios";
 
-const STORAGE_TOKEN = "constellation.token";
+type SessionRequest = InternalAxiosRequestConfig & { sessionRetried?: boolean; sessionGeneration?: number };
+let sessionGeneration = 0;
+let refreshInFlight: Promise<void> | null = null;
+
+if (typeof localStorage !== "undefined") localStorage.removeItem("constellation.token");
 
 const api: AxiosInstance = axios.create({
   baseURL: "/api/v1",
   withCredentials: true,
+  headers: { "X-Constellation-Client": "browser" },
 });
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem(STORAGE_TOKEN);
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
+  const request = config as SessionRequest;
+  request.sessionGeneration ??= sessionGeneration;
   return config;
 });
 
+const sessionTransport = axios.create({
+  baseURL: "/api/v1",
+  withCredentials: true,
+  headers: { "X-Constellation-Client": "browser" },
+});
+
+export function refreshBrowserSession(): Promise<void> {
+  if (!refreshInFlight) {
+    const rotate = async () => {
+      await sessionTransport.post("/auth/refresh");
+      sessionGeneration += 1;
+    };
+    const refresh = typeof navigator !== "undefined" && navigator.locks
+      ? navigator.locks.request("constellation-session-refresh", async () => {
+        try {
+          await sessionTransport.get("/auth/me");
+          sessionGeneration += 1;
+        } catch (error) {
+          if (!axios.isAxiosError(error) || error.response?.status !== 401) throw error;
+          await rotate();
+        }
+      })
+      : rotate();
+    refreshInFlight = Promise.resolve(refresh).then(() => {}).finally(() => { refreshInFlight = null; });
+  }
+  return refreshInFlight;
+}
+
 api.interceptors.response.use(
   (r) => r,
-  (err) => {
-    if (err.response?.status === 401) {
-      const sentAuth = Boolean(err.config?.headers?.Authorization);
-      const url: string = err.config?.url || "";
-      // Only treat as a real session expiry if the request carried our token AND
-      // it was either /auth/me (the canonical session probe) or any non-auth API call.
-      // Login attempts (/auth/login) returning 401 are user-typo events, not session expiry.
-      const isLoginAttempt = url.includes("/auth/login");
-      if (sentAuth && !isLoginAttempt) {
-        localStorage.removeItem(STORAGE_TOKEN);
-        if (!window.location.pathname.startsWith("/auth/login") && !window.location.pathname.startsWith("/login")) {
-          window.location.href = "/auth/login";
+  async (err) => {
+    const request = err.config as SessionRequest | undefined;
+    const url = request?.url ?? "";
+    const protectedRequest = !url.startsWith("/auth/") || ["/auth/me", "/auth/logout", "/auth/change-password"].includes(url);
+    if (err.response?.status === 401 && request && protectedRequest && !request.headers.Authorization) {
+      if (!request.sessionRetried) {
+        request.sessionRetried = true;
+        try {
+          if (request.sessionGeneration === sessionGeneration) await refreshBrowserSession();
+          return await api.request(request);
+        } catch (refreshError) {
+          if (!axios.isAxiosError(refreshError) || refreshError.response?.status !== 401) throw refreshError;
         }
+      }
+      if (!window.location.pathname.startsWith("/auth/login") && !window.location.pathname.startsWith("/login")) {
+        window.location.href = "/auth/login";
       }
     }
     return Promise.reject(err);
   },
 );
 
-export function setToken(t: string | null) {
-  if (t) localStorage.setItem(STORAGE_TOKEN, t);
-  else localStorage.removeItem(STORAGE_TOKEN);
-}
-
-export function getToken(): string | null {
-  return localStorage.getItem(STORAGE_TOKEN);
-}
-
 export { api };
 
 // --- typed endpoints (thin layer) ---
 
-export async function downloadAPIFile(path: string, filename: string) {
-  const response = await api.get(path, { responseType: "blob" });
+export async function downloadAPIFile(path: string, filename: string, shouldDownload?: ScanInventoryDownloadGuard) {
+  const response = await api.get<Blob>(path, { responseType: "blob" });
+  assertInventoryDownloadCurrent(shouldDownload);
+  dispatchAPIFile(response, filename);
+}
+
+export async function downloadExecutiveReport(orgId: string, clusterId: string, shouldDownload: ScanInventoryDownloadGuard) {
+  const response = await api.get<Blob>("/reports/executive.html", { params: { cluster_id: clusterId }, responseType: "blob" });
+  assertInventoryDownloadCurrent(shouldDownload);
+  if (response.headers["x-report-org-id"] !== orgId || response.headers["x-report-cluster-id"] !== clusterId) {
+    throw new Error("The report response did not confirm the requested organization and cluster.");
+  }
+  dispatchAPIFile(response, "constellation-executive-report.html");
+}
+
+function dispatchAPIFile(response: { data: Blob; headers: Record<string, unknown> }, filename: string) {
   const blob = response.data instanceof Blob ? response.data : new Blob([response.data]);
   // Prefer the server-provided filename (Content-Disposition) when present.
   const cd = String(response.headers?.["content-disposition"] ?? "");
@@ -66,6 +105,19 @@ export async function downloadAPIFile(path: string, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+export interface LookaheadExportResult { exported: number; limit: number; truncated: boolean }
+export async function downloadLookaheadCSV(path: string, params: Record<string, string | number | undefined>, filename: string, shouldDownload: ScanInventoryDownloadGuard): Promise<LookaheadExportResult> {
+  const response = await api.get<Blob>(path, { params, responseType: "blob" });
+  const rows = String(response.headers["x-export-rows"] ?? ""), cap = String(response.headers["x-export-limit"] ?? ""), more = String(response.headers["x-export-truncated"] ?? "");
+  const exported = Number(rows), limit = Number(cap), truncated = more === "true";
+  if (!/^\d+$/.test(rows) || !/^\d+$/.test(cap) || !Number.isSafeInteger(exported) || !Number.isSafeInteger(limit) || limit !== 100000 || exported > limit || !["true", "false"].includes(more) || truncated && exported !== limit) throw new Error("Export scope could not be confirmed.");
+  assertInventoryDownloadCurrent(shouldDownload);
+  const blob = response.data instanceof Blob ? response.data : new Blob([response.data]);
+  const url = URL.createObjectURL(blob), anchor = document.createElement("a");
+  anchor.href = url; anchor.download = filename; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
+  return { exported, limit, truncated };
+}
+
 export type Severity = "info" | "low" | "medium" | "high" | "critical";
 export type Lifecycle = "open" | "triaged" | "in_progress" | "resolved" | "suppressed" | "accepted";
 export type FindingKind =
@@ -73,6 +125,16 @@ export type FindingKind =
   | "secret" | "signature" | "ml-model" | "compliance" | "runtime";
 
 export interface Finding {
+  /** Phase 1 (GET /findings/{id}): display names, so detail views never show ids. */
+  asset_name?: string;
+  asset_kind?: string;
+  cluster_name?: string;
+  row_id?: string;
+  revision?: string;
+  source_cluster_id?: string | null;
+  target_cluster_id?: string | null;
+  platform_role?: string;
+  risk?: { composite: number; factors: Array<{ name: string; description: string; score: number; raw: number; weight: number }> };
   id: string;
   kind: FindingKind;
   external_id?: string;
@@ -148,6 +210,10 @@ export interface Comment {
   created_at: string;
 }
 
+export interface FindingInstanceSelector { first_seen_at: string; cluster_id?: string }
+export interface FindingInstanceReceipt { status: string; id: string; row_id: string; first_seen_at: string; revision: string; source_cluster_id: string | null; target_cluster_id: string | null }
+export interface FindingInstanceComments { row_id: string; first_seen_at: string; revision: string; comments: Comment[]; legacy_comments: Comment[]; legacy_history_scope: "uuid" }
+
 export interface CVERollup {
   cve: string;
   severity: Severity;
@@ -167,11 +233,22 @@ export interface CVERollup {
 }
 
 export const findings = {
-  list: (params: { kind?: FindingKind; lifecycle?: Lifecycle; cluster_id?: string; q?: string; limit?: number; offset?: number; fixable?: boolean } = {}) =>
-    api.get<{ findings: Finding[]; limit: number; offset: number; lifecycle_counts?: Record<Lifecycle, number> }>("/findings", { params: { ...params, fixable: params.fixable ? "1" : undefined } }).then((r) => r.data),
+  list: (params: { kind?: FindingKind; lifecycle?: Lifecycle; cluster_id?: string; workload_scope?: "application" | "all" | "constellation"; target_type?: string; group_mode?: string; id_scope?: "all"; q?: string; limit?: number; offset?: number; fixable?: boolean; sort?: string; order?: "asc" | "desc" } = {}) =>
+    api.get<{ findings: Finding[]; limit: number; offset: number; total: number; has_more: boolean; system_total?: number | null; lifecycle_counts?: Record<Lifecycle, number> }>("/findings", { params: { ...params, fixable: params.fixable ? "1" : undefined } }).then((r) => r.data),
   // NeuVector-style rollup: one row per CVE with its blast radius (affected images/clusters).
-  byCVE: (params: { cluster_id?: string; lifecycle?: Lifecycle; limit?: number; offset?: number; fixable?: boolean; q?: string } = {}) =>
+  byCVE: (params: { cluster_id?: string; workload_scope?: "application" | "all" | "constellation"; target_type?: string; group_mode?: string; id_scope?: "all"; lifecycle?: Lifecycle; limit?: number; offset?: number; fixable?: boolean; q?: string } = {}) =>
     api.get<{ cves: CVERollup[]; limit: number; offset: number; total: number }>("/findings/by-cve", { params: { ...params, fixable: params.fixable ? "true" : undefined, q: params.q || undefined } }).then((r) => r.data),
+  exportCSV: (params: { kind?: FindingKind; lifecycle?: Lifecycle; cluster_id?: string; workload_scope?: "application" | "all" | "constellation"; target_type?: string; group_mode?: string; id_scope?: "all"; q?: string; limit?: number; offset?: number; fixable?: boolean; sort?: string; order?: "asc" | "desc" } = {}, shouldDownload?: ScanInventoryDownloadGuard) => {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== false && value !== "") query.set(key, value === true ? "1" : String(value));
+    return downloadAPIFile(`/findings.csv?${query}`, "constellation-findings-instances.csv", shouldDownload);
+  },
+  instance: (id: string, selector: FindingInstanceSelector) => api.get<Finding>(`/finding-instances/${encodeURIComponent(id)}`, { params: selector }).then(r => r.data),
+  instanceTriage: (id: string, selector: FindingInstanceSelector, body: { reviewed_revision: string; assignee_id?: string; priority?: string }) => api.post<FindingInstanceReceipt>(`/finding-instances/${encodeURIComponent(id)}/triage`, body, { params: selector }).then(r => r.data),
+  instanceSuppress: (id: string, selector: FindingInstanceSelector, body: { reviewed_revision: string; reason: string }) => api.post<FindingInstanceReceipt>(`/finding-instances/${encodeURIComponent(id)}/suppress`, body, { params: selector }).then(r => r.data),
+  instanceAcceptRisk: (id: string, selector: FindingInstanceSelector, body: { reviewed_revision: string; reason: string; approver_id?: string; accepted_until: string }) => api.post<FindingInstanceReceipt>(`/finding-instances/${encodeURIComponent(id)}/accept-risk`, body, { params: selector }).then(r => r.data),
+  instanceComments: (id: string, selector: FindingInstanceSelector) => api.get<FindingInstanceComments>(`/finding-instances/${encodeURIComponent(id)}/comments`, { params: selector }).then(r => r.data),
+  instanceAddComment: (id: string, selector: FindingInstanceSelector, body: { reviewed_revision: string; body: string }) => api.post<Comment & Omit<FindingInstanceReceipt, "id" | "status">>(`/finding-instances/${encodeURIComponent(id)}/comments`, body, { params: selector }).then(r => r.data),
   get: (id: string) => api.get<Finding>(`/findings/${id}`).then((r) => r.data),
   triage:     (id: string, body: { assignee_id?: string; priority?: string }) =>
     api.post(`/findings/${id}/triage`, body).then((r) => r.data),
@@ -197,9 +274,12 @@ export const sbom = {
 };
 
 export interface Asset {
+  platform_role?: string;
   id: string;
+  cluster_id?: string;
   kind: string;
   name: string;
+  display_name?: string;
   digest?: string;
   labels: Record<string, string>;
   ai_workload: boolean;
@@ -219,6 +299,11 @@ export interface Asset {
 }
 
 export interface AssetFinding {
+  first_seen_at?: string | null;
+  revision?: string;
+  source_cluster_id?: string | null;
+  target_cluster_id?: string | null;
+  platform_role?: string;
   id: string;
   kind: FindingKind;
   external_id: string;
@@ -229,6 +314,14 @@ export interface AssetFinding {
   last_seen_at: string;
   image_scan_result_id?: string;
   finding_key?: string;
+}
+
+export interface AssetFindingInventoryParams extends ScanInventoryParams { cluster_id?: string; severity?: string; lifecycle?: string; source?: string }
+export interface AssetFindingInventoryResponse {
+  asset_id: string; cluster_id: string | null;
+  items: Array<AssetFinding & { row_id: string; source: "asset" | "image_scan" }>;
+  total: number; summary: Record<string, number>; has_more: boolean; limit: number; offset: number;
+  sort: string; order: "asc" | "desc"; q: string; severity: string; lifecycle: string; source: string;
 }
 
 export interface AssetImageDetail {
@@ -271,14 +364,27 @@ export interface AssetDetail {
   image_acceptances: ImageAcceptance[];
 }
 
+export interface AssetsListParams { limit?: number; offset?: number; cluster_id?: string; q?: string; search?: string; kind?: string; criticality?: string; ai_workload?: boolean; sort?: string; order?: "asc" | "desc" }
+export interface AssetsListResponse { assets: Asset[]; limit: number; offset: number; has_more: boolean; total: number; summary: Record<string, number>; sort: string; order: "asc" | "desc" }
 export const assets = {
-  list: (params: { limit?: number; offset?: number; cluster_id?: string } = {}) =>
-    api.get<{ assets: Asset[]; limit: number; offset: number }>("/assets", { params }).then((r) => r.data),
+  findings: (id: string, params: AssetFindingInventoryParams) => api.get<AssetFindingInventoryResponse>(`/assets/${encodeURIComponent(id)}/findings`, { params }).then(r => r.data),
+  findingsCSV: (id: string, params: AssetFindingInventoryParams, shouldDownload?: ScanInventoryDownloadGuard) => downloadScanInventoryCSV(`/assets/${encodeURIComponent(id)}/findings.csv`, params, `asset-${id}-findings.csv`, shouldDownload),
+  list: (params: AssetsListParams = {}) =>
+    api.get<AssetsListResponse>("/assets", { params }).then((r) => r.data),
+  exportCsv: async (params: AssetsListParams = {}, shouldDownload?: ScanInventoryDownloadGuard) => {
+    const filters = { ...params }; delete filters.limit; delete filters.offset;
+    const response = await api.get<Blob>("/assets.csv", { params: filters, responseType: "blob" });
+    const total = Number(response.headers["x-export-total"]), limit = Number(response.headers["x-export-limit"]), truncated = response.headers["x-export-truncated"];
+    if (!Number.isSafeInteger(total) || total < 0 || limit !== 100000 || !["true", "false"].includes(String(truncated)) || (truncated === "true") !== (total > limit)) throw new Error("Asset export scope could not be confirmed.");
+    assertInventoryDownloadCurrent(shouldDownload);
+    const blob = response.data instanceof Blob ? response.data : new Blob([response.data]); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = "constellation-assets.csv"; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
+    return { total, exported: Math.min(total, limit), limit, truncated: truncated === "true" };
+  },
   get: (id: string) => api.get<AssetDetail>(`/assets/${id}`).then((r) => r.data),
-  createImageAcceptance: (id: string, body: { rationale: string; accepted_until: string }) =>
-    api.post<{ id: string; image_acceptances: ImageAcceptance[] }>(`/assets/${id}/image-acceptances`, body).then((r) => r.data),
-  revokeImageAcceptance: (assetID: string, acceptanceID: string) =>
-    api.post<{ status: string; image_acceptances: ImageAcceptance[] }>(`/assets/${assetID}/image-acceptances/${acceptanceID}/revoke`).then((r) => r.data),
+  createImageAcceptance: (id: string, body: { rationale: string; accepted_until: string; expected_image_digest?: string; cluster_id?: string }) =>
+    api.post<{ id: string; asset_id?: string; cluster_id?: string; image_digest?: string; image_acceptances: ImageAcceptance[] }>(`/assets/${id}/image-acceptances`, body).then((r) => r.data),
+  revokeImageAcceptance: (assetID: string, acceptanceID: string, body?: { expected_image_digest: string; cluster_id: string }) =>
+    api.post<{ status: string; asset_id?: string; cluster_id?: string; image_digest?: string; image_acceptances: ImageAcceptance[] }>(`/assets/${assetID}/image-acceptances/${acceptanceID}/revoke`, body).then((r) => r.data),
 };
 
 export interface HostVulnerability {
@@ -351,10 +457,29 @@ export interface NodeListSummary {
   cis_failed: number;
 }
 
+export interface NodeInventoryParams { q?: string; agent?: string; risk?: string; host_cves?: "open"; sort?: string; order?: "asc" | "desc"; limit?: number; offset?: number }
+
 export interface NodeListResponse {
   cluster_id: string;
   items: NodeSummary[];
   summary: NodeListSummary;
+  total?: number; has_more?: boolean; limit?: number; offset?: number; q?: string; agent?: string; risk?: string; host_cves?: string; sort?: string; order?: "asc" | "desc";
+}
+
+export interface NodeVulnerability extends HostVulnerability {
+  id: string;
+  row_id: string;
+  first_seen_at: string;
+  source_cluster_id?: string | null;
+  risk_score: number;
+  fixable: boolean;
+}
+export interface NodeVulnerabilityParams { q?: string; severity?: string; fixable?: "true" | "false"; source?: string; sort?: string; order?: "asc" | "desc"; limit?: number; offset?: number }
+export interface NodeVulnerabilityResponse {
+  node: string; cluster_id: string; items: NodeVulnerability[];
+  total: number; has_more: boolean; limit: number; offset: number;
+  q: string; severity: string; fixable: string; source: string; sort: string; order: "asc" | "desc";
+  summary: { total: number; critical: number; high: number; fixable: number; unique_cves: number };
 }
 
 export interface NodeDetail {
@@ -364,14 +489,17 @@ export interface NodeDetail {
   containers?: unknown;
   processes?: unknown;
   cis?: unknown;
-  vulnerabilities: HostVulnerability[];
+  vulnerabilities: Array<HostVulnerability & { id?: string; row_id?: string; first_seen_at?: string; source_cluster_id?: string | null; risk_score?: number; fixable?: boolean }>;
+  vulnerabilities_total?: number; vulnerabilities_limit?: number; vulnerabilities_has_more?: boolean;
 }
 
 export interface ContainerRow {
+  row_id: string;
   node: string;
   id: string;
   name: string;
   namespace: string;
+  platform_role?: string;
   pod_name: string;
   image: string;
   state: string;
@@ -383,14 +511,23 @@ export interface ContainerRow {
   high: number;
   observed_at: string;
 }
+export interface ContainerListParams { q?: string; namespace?: string; node?: string; hide_platform?: boolean; platform_role?: string; sort?: string; order?: "asc" | "desc"; limit?: number; offset?: number }
 export interface ContainerListResponse {
-  cluster_id: string;
-  items: ContainerRow[];
-  summary: { total: number; running: number; privileged: number; run_as_root: number };
+  cluster_id: string; items: ContainerRow[]; total: number; limit: number; offset: number; has_more: boolean; sort: string; order: "asc" | "desc";
+  summary: { total: number; running: number; privileged: number; run_as_root: number; platform_count: number };
 }
 export const containers = {
-  list: (clusterID: string) =>
-    api.get<ContainerListResponse>(`/clusters/${encodeURIComponent(clusterID)}/containers`).then((r) => r.data),
+  list: (clusterID: string, params: ContainerListParams = {}) =>
+    api.get<ContainerListResponse>(`/clusters/${encodeURIComponent(clusterID)}/containers`, { params }).then((r) => r.data),
+  exportCSV: async (clusterID: string, params: ContainerListParams = {}, shouldDownload?: ScanInventoryDownloadGuard) => {
+    const filters = { ...params }; delete filters.limit; delete filters.offset;
+    const response = await api.get<Blob>(`/clusters/${encodeURIComponent(clusterID)}/containers.csv`, { params: filters, responseType: "blob" });
+    const total = Number(response.headers["x-export-total"]), limit = Number(response.headers["x-export-limit"]), truncated = response.headers["x-export-truncated"];
+    if (!/^\d+$/.test(String(response.headers["x-export-total"])) || !Number.isSafeInteger(total) || total < 0 || limit !== 100000 || !["true", "false"].includes(String(truncated)) || (truncated === "true") !== (total > limit)) throw new Error("Container export scope could not be confirmed.");
+    assertInventoryDownloadCurrent(shouldDownload);
+    const blob = response.data instanceof Blob ? response.data : new Blob([response.data]); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = "constellation-running-containers.csv"; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
+    return { total, exported: Math.min(total, limit), limit, truncated: truncated === "true" };
+  },
 };
 
 export interface NetworkRule {
@@ -408,6 +545,22 @@ export interface NetworkRule {
   match_counter: number;
   last_match_timestamp: number;
 }
+export interface NetworkRuleInventoryRow extends NetworkRule {
+  row_id: string;
+  from_platform_role: string;
+  to_platform_role: string;
+}
+export interface NetworkRuleInventoryParams {
+  q?: string; from?: string; to?: string; action?: string; status?: string; cfg_type?: string;
+  hide_platform?: boolean; sort?: string; order?: "asc" | "desc"; limit?: number; offset?: number;
+}
+export interface NetworkRuleInventoryResponse {
+  cluster_id: string; rules: NetworkRuleInventoryRow[]; total: number; has_more: boolean;
+  summary: { total: number; allow: number; deny: number; learned: number; disabled: number };
+  limit: number; offset: number; sort: string; order: 'asc' | 'desc';
+  filters: { q: string; from: string; to: string; action: string; status: string; cfg_type: string; hide_platform: boolean };
+  source: 'retained_flow_rollups_and_authored_overrides'; summary_scope: 'matching_rules'; source_complete: true;
+}
 export interface NetworkRuleInput {
   from: string;
   to: string;
@@ -419,6 +572,10 @@ export interface NetworkRuleInput {
   priority?: number;
 }
 export const networkRules = {
+  inventory: (clusterID: string, params: NetworkRuleInventoryParams = {}) =>
+    api.get<NetworkRuleInventoryResponse>(`/clusters/${encodeURIComponent(clusterID)}/network-rules/inventory`, { params }).then(r => r.data),
+  inventoryCSV: (clusterID: string, params: NetworkRuleInventoryParams = {}, shouldDownload?: ScanInventoryDownloadGuard) =>
+    downloadScanInventoryCSV(`/clusters/${encodeURIComponent(clusterID)}/network-rules/inventory.csv`, params, 'constellation-network-rules.csv', shouldDownload),
   list: (clusterID: string) =>
     api.get<{ cluster_id: string; rules: NetworkRule[]; summary: { total: number; allow: number; deny: number; learned: number; disabled: number } }>(`/clusters/${encodeURIComponent(clusterID)}/network-rules`).then((r) => r.data),
   upsert: (clusterID: string, body: NetworkRuleInput) =>
@@ -439,16 +596,32 @@ export const networkRules = {
 };
 
 export const nodes = {
-  list: (clusterID: string) =>
-    api.get<NodeListResponse>(`/clusters/${encodeURIComponent(clusterID)}/nodes`).then((r) => r.data),
+  list: (clusterID: string, params?: NodeInventoryParams) =>
+    api.get<NodeListResponse>(`/clusters/${encodeURIComponent(clusterID)}/nodes`, { params }).then((r) => r.data),
+  exportCSV: async (clusterID: string, params: NodeInventoryParams = {}, shouldDownload?: ScanInventoryDownloadGuard) => {
+    const filters = { ...params }; delete filters.limit; delete filters.offset;
+    const response = await api.get<Blob>(`/clusters/${encodeURIComponent(clusterID)}/nodes.csv`, { params: filters, responseType: "blob" });
+    const total = Number(response.headers["x-export-total"]), limit = Number(response.headers["x-export-limit"]), truncated = response.headers["x-export-truncated"];
+    if (!/^\d+$/.test(String(response.headers["x-export-total"])) || !Number.isSafeInteger(total) || total < 0 || limit !== 100000 || !["true", "false"].includes(String(truncated)) || (truncated === "true") !== (total > limit)) throw new Error("Node export scope could not be confirmed.");
+    assertInventoryDownloadCurrent(shouldDownload);
+  const blob = response.data instanceof Blob ? response.data : new Blob([response.data]); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = "constellation-nodes.csv"; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
+    return { total, exported: Math.min(total, limit), limit, truncated: truncated === "true" };
+  },
   get: (clusterID: string, node: string) =>
     api.get<NodeDetail>(`/clusters/${encodeURIComponent(clusterID)}/nodes/${encodeURIComponent(node)}`).then((r) => r.data),
+  vulnerabilities: (clusterID: string, node: string, params: NodeVulnerabilityParams = {}) =>
+    api.get<NodeVulnerabilityResponse>(`/clusters/${encodeURIComponent(clusterID)}/nodes/${encodeURIComponent(node)}/vulnerabilities`, { params }).then(r => r.data),
+  exportVulnerabilitiesCSV: (clusterID: string, node: string, params: NodeVulnerabilityParams = {}, shouldDownload?: ScanInventoryDownloadGuard) =>
+    downloadScanInventoryCSV(`/clusters/${encodeURIComponent(clusterID)}/nodes/${encodeURIComponent(node)}/vulnerabilities.csv`, params, "constellation-node-host-vulnerabilities.csv", shouldDownload),
   scan: (scanTargetID: string) =>
     api.post(`/scan/host/${encodeURIComponent(scanTargetID)}`, {}).then((r) => r.data),
 };
 
 export interface Framework { id: string; name: string; category: string }
 export interface ComplianceCheck {
+  id?: string;
+  cluster_id?: string;
+  asset_id?: string;
   framework: string;
   control_id: string;
   title: string;
@@ -509,6 +682,7 @@ export interface ComplianceEvidenceItem {
   evidence?: string;
   remediation?: string;
   observed_at: string;
+  tags_v2?: ComplianceCheck["tags_v2"];
   exemption?: {
     id: string;
     reason: string;
@@ -524,9 +698,12 @@ export interface ComplianceEvidenceSummary {
   total: number;
   by_scope?: Record<string, Omit<ComplianceEvidenceSummary, "by_scope">>;
 }
+export interface ComplianceEvidenceParams { cluster_id?: string; scope?: string; framework?: string; namespace?: string; control_id?: string; status?: string; q?: string; target?: string; sort?: string; order?: "asc" | "desc"; limit?: number; offset?: number }
 export interface ComplianceEvidenceResponse {
   items: ComplianceEvidenceItem[];
   summary: ComplianceEvidenceSummary;
+  total?: number; limit?: number; offset?: number; sort?: string; order?: "asc" | "desc"; has_more?: boolean;
+  cluster_id?: string | null; scope?: string; framework?: string; namespace?: string; control_id?: string; status?: string; q?: string; target?: string;
 }
 
 // DB-backed compliance scheduling.
@@ -578,26 +755,104 @@ export interface ComplianceRunDB {
   summary: { pass?: number; fail?: number; manual?: number; total?: number };
   artifact_uri?: string;
   artifact_signature?: string;
+  artifact_format?: string;
+  artifact_media_type?: string;
+  artifact_filename?: string;
+  artifact_metadata_known?: boolean;
   artifact_size_bytes?: number;
   triggered_by: string;
   error_message?: string;
 }
 
+export interface ComplianceChecksParams { framework?: string; cluster_id?: string; profile?: string; control_id?: string; status?: string; q?: string; sort?: string; order?: "asc" | "desc"; limit?: number; offset?: number }
+export interface ComplianceChecksResponse { checks: ComplianceCheck[]; cluster_id?: string | null; framework?: string; profile?: string; control_id?: string; status?: string; q?: string; sort?: string; order?: "asc" | "desc"; limit?: number; offset?: number; total?: number; has_more?: boolean; summary?: Record<string, number> }
+
+export interface BenchmarkExecutionCounts {
+  total: number;
+  pass: number;
+  fail: number;
+  manual: number;
+  not_applicable: number;
+}
+export interface BenchmarkExecutionAttempt {
+  id: string;
+  request_id: string;
+  cluster_id: string;
+  runner_id: string;
+  claim_key: string;
+  node: string;
+  number: number;
+  status: string;
+  started_at: string;
+  lease_expires_at: string;
+  finished_at: string | null;
+  outcome: string;
+  report_sha256: string;
+  rows_ingested: number;
+  controls: BenchmarkExecutionCounts;
+}
+export interface BenchmarkExecutionRequest {
+  id: string;
+  request_key: string;
+  requested_cluster_id: string | null;
+  cluster_id: string | null;
+  profile: string;
+  benchmark: string;
+  status: string;
+  revision: string;
+  attempt_count: number;
+  requested_at: string;
+  completed_at: string | null;
+  active_attempt: BenchmarkExecutionAttempt | null;
+}
+export interface BenchmarkExecutionPage {
+  requests: BenchmarkExecutionRequest[];
+  total: number;
+  limit: number;
+  offset: number;
+  has_more: boolean;
+  source: "durable_v2_requests";
+  legacy_requests_included: false;
+}
+export interface BenchmarkExecutionDetail {
+  request: BenchmarkExecutionRequest;
+  attempts: BenchmarkExecutionAttempt[];
+}
+
 export const compliance = {
+  benchRequests: (params: { cluster_id: string; limit: number; offset: number }) =>
+    api.get<BenchmarkExecutionPage>("/compliance/bench/requests", { params }).then(r => r.data),
+  benchRequest: (id: string, cluster_id: string) =>
+    api.get<BenchmarkExecutionDetail>(`/compliance/bench/requests/${encodeURIComponent(id)}`, { params: { cluster_id } }).then(r => r.data),
+  createBenchRequest: (cluster_id: string, body: { request_key: string; profile: "kube-bench"; benchmark: string }) =>
+    api.post<{ request: BenchmarkExecutionRequest }>("/compliance/bench/requests", body, { params: { cluster_id } }).then(r => r.data),
+  retryBenchRequest: (id: string, cluster_id: string, reviewed_revision: string) =>
+    api.post<{ request: BenchmarkExecutionRequest }>(`/compliance/bench/requests/${encodeURIComponent(id)}/retry`, { reviewed_revision }, { params: { cluster_id } }).then(r => r.data),
+
   frameworks: () => api.get<{ frameworks: Framework[] }>("/compliance/frameworks").then((r) => r.data),
-  checks:     (framework?: string, cluster_id?: string) =>
-    api.get<{ checks: ComplianceCheck[] }>("/compliance/checks", { params: { framework, cluster_id } }).then((r) => r.data),
+  checks: (framework?: string | ComplianceChecksParams, cluster_id?: string, options?: Omit<ComplianceChecksParams, "framework" | "cluster_id">) =>
+    api.get<ComplianceChecksResponse>("/compliance/checks", { params: typeof framework === "object" ? framework : { framework, cluster_id, ...options } }).then((r) => r.data),
+  exportChecksCSV: async (params: ComplianceChecksParams, shouldDownload?: ScanInventoryDownloadGuard) => {
+    const filters = { ...params }; delete filters.limit; delete filters.offset;
+    const response = await api.get<Blob>("/compliance/checks/export.csv", { params: filters, responseType: "blob" });
+    const total = Number(response.headers["x-export-total"]), limit = Number(response.headers["x-export-limit"]), truncated = response.headers["x-export-truncated"];
+    if (!/^\d+$/.test(String(response.headers["x-export-total"])) || !Number.isSafeInteger(total) || total < 0 || limit !== 100000 || !["true", "false"].includes(String(truncated)) || (truncated === "true") !== (total > limit)) throw new Error("Compliance export scope could not be confirmed.");
+    assertInventoryDownloadCurrent(shouldDownload);
+  const blob = response.data instanceof Blob ? response.data : new Blob([response.data]); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = "constellation-compliance-checks.csv"; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
+    return { total, exported: Math.min(total, limit), limit, truncated: truncated === "true" };
+  },
   summary:    (cluster_id?: string) =>
     api.get<{ frameworks: ComplianceSummary[] }>("/compliance/summary", { params: { cluster_id } }).then((r) => r.data),
-  evidence: (params: { cluster_id?: string; scope?: string; framework?: string; namespace?: string; limit?: number } = {}) =>
+  evidence: (params: ComplianceEvidenceParams = {}) =>
     api.get<ComplianceEvidenceResponse>("/compliance/evidence", { params }).then((r) => r.data),
-  nodeEvidence: (params: { cluster_id?: string; framework?: string; limit?: number } = {}) =>
+  exportEvidenceCSV: (params: ComplianceEvidenceParams = {}, shouldDownload?: ScanInventoryDownloadGuard) => downloadScanInventoryCSV("/compliance/evidence.csv", params, "constellation-compliance-evidence.csv", shouldDownload),
+  nodeEvidence: (params: ComplianceEvidenceParams = {}) =>
     api.get<ComplianceEvidenceResponse>("/compliance/nodes", { params }).then((r) => r.data),
-  workloadEvidence: (params: { cluster_id?: string; framework?: string; namespace?: string; limit?: number } = {}) =>
+  workloadEvidence: (params: ComplianceEvidenceParams = {}) =>
     api.get<ComplianceEvidenceResponse>("/compliance/workloads", { params }).then((r) => r.data),
-  kubernetesEvidence: (params: { cluster_id?: string; framework?: string; limit?: number } = {}) =>
+  kubernetesEvidence: (params: ComplianceEvidenceParams = {}) =>
     api.get<ComplianceEvidenceResponse>("/compliance/kubernetes", { params }).then((r) => r.data),
-  cloudEvidence: (params: { cluster_id?: string; framework?: string; limit?: number } = {}) =>
+  cloudEvidence: (params: ComplianceEvidenceParams = {}) =>
     api.get<ComplianceEvidenceResponse>("/compliance/cloud", { params }).then((r) => r.data),
   listExemptions: (params: { framework?: string; control_id?: string; cluster_id?: string } = {}) =>
     api.get<{ exemptions: ComplianceExemption[] }>("/compliance/exemptions", { params }).then((r) => r.data),
@@ -619,7 +874,7 @@ export const compliance = {
     report_format?: string;
     report_template?: string;
   }) => api.post<ComplianceScheduleDB>("/compliance/schedules", body).then((r) => r.data),
-  patchSchedule: (id: string, body: Partial<ComplianceScheduleDB>) =>
+  patchSchedule: (id: string, body: Partial<ComplianceScheduleDB> & { expected_updated_at?: string }) =>
     api.patch<ComplianceScheduleDB>(`/compliance/schedules/${id}`, body).then((r) => r.data),
   deleteSchedule: (id: string) => api.delete(`/compliance/schedules/${id}`),
   runScheduleNow: (id: string) =>
@@ -627,14 +882,16 @@ export const compliance = {
   scheduleRuns: (id: string, limit = 50) =>
     api.get<{ runs: ComplianceRunDB[] }>(`/compliance/schedules/${id}/runs`, { params: { limit } }).then((r) => r.data),
   runArtifactURL: (id: string) => `/api/v1/compliance/runs/${id}/artifact`,
-  downloadRunArtifact: (id: string) =>
-    downloadAPIFile(`/compliance/runs/${id}/artifact`, `compliance-run-${id}.json`),
+  downloadRunArtifact: (id: string, shouldDownload?: ScanInventoryDownloadGuard) =>
+    downloadAPIFile(`/compliance/runs/${id}/artifact`, `compliance-run-${id}.json`, shouldDownload),
 };
 
 export interface Deployment {
+  inventory_presence?: "present" | "scaled_to_zero" | "absent" | "unverified";
   id: string;
   cluster_id?: string;
   namespace: string;
+  platform_role?: string;
   name: string;
   kind: string;
   labels: Record<string, string>;
@@ -703,8 +960,62 @@ export interface DeploymentFinding {
   last_seen_at: string;
 }
 
+export interface DeploymentFindingsParams {
+  cluster_id: string;
+  q?: string;
+  lifecycle?: Lifecycle | "all";
+  severity?: Severity | "unknown";
+  fixable?: boolean;
+  sort?: string;
+  order?: "asc" | "desc";
+  limit?: number;
+  offset?: number;
+}
+export interface DeploymentFindingInventoryRow extends Omit<DeploymentFinding, "severity" | "kind" | "lifecycle"> {
+  lifecycle: string;
+  severity: Severity | "unknown";
+  kind: string;
+  row_id: string;
+  first_seen_at: string;
+  external_id: string;
+  target_type: "workload";
+  target_ref: string;
+  package_name: string;
+  package_version: string;
+  fixed_version: string;
+  fixable: boolean;
+  source_cluster_id: string | null;
+  target_cluster_id: string | null;
+  effective_target_cluster_id: string;
+  platform_role: string;
+  attribution: "canonical" | "pod";
+  owner_count: number;
+  owner_ambiguous: boolean;
+}
+export interface DeploymentFindingsResponse {
+  deployment_id: string;
+  cluster_id: string;
+  workload_id: string;
+  owner_count: number;
+  owner_ambiguous: boolean;
+  items: DeploymentFindingInventoryRow[];
+  total: number;
+  summary: Record<string, number>;
+  has_more: boolean;
+  limit: number;
+  offset: number;
+  sort: string;
+  order: "asc" | "desc";
+  filters: { q: string; lifecycle: string; severity: string; fixable: string };
+  source_complete: boolean;
+  summary_scope: string;
+}
+
 export interface DeploymentNetworkFlow {
   id: string;
+  cluster_id?: string;
+  src_platform_role?: string;
+  dst_platform_role?: string;
   src: string;
   dst: string;
   src_addr?: string;
@@ -918,8 +1229,14 @@ export interface DeploymentDetail extends Deployment {
 }
 
 export const deployments = {
-  list: (params: { namespace?: string; cluster_id?: string; limit?: number } = {}) =>
-    api.get<{ deployments: Deployment[] }>("/deployments", { params }).then((r) => r.data),
+  findings: (id: string, params: DeploymentFindingsParams) =>
+    api.get<DeploymentFindingsResponse>(`/deployments/${encodeURIComponent(id)}/findings`, { params }).then(r => r.data),
+  findingsCSV: (id: string, params: DeploymentFindingsParams, shouldDownload?: ScanInventoryDownloadGuard) =>
+    downloadScanInventoryCSV(`/deployments/${encodeURIComponent(id)}/findings.csv`, params, `deployment-${id}-findings.csv`, shouldDownload),
+  list: (params: { q?: string; name?: string; namespace?: string; cluster_id?: string; hide_platform?: boolean; platform_role?: string; presence?: string; risk_fact?: string; group_mode?: string; limit?: number; offset?: number } = {}) =>
+    api.get<{ deployments: Deployment[]; total: number; limit: number; offset: number; has_more: boolean; platform_count: number; summary: { total: number; at_risk: number; finding_count: number; critical_count: number; high_count: number } }>("/deployments", { params }).then((r) => r.data),
+  exportCsv: (params: { q?: string; name?: string; namespace?: string; cluster_id?: string; hide_platform?: boolean; platform_role?: string; presence?: string; risk_fact?: string } = {}) =>
+    api.get<Blob>("/deployments.csv", { params, responseType: "blob" }).then((r) => r.data),
   get: (id: string) =>
     api.get<DeploymentDetail>(`/deployments/${id}`).then((r) => r.data),
 };
@@ -980,6 +1297,8 @@ export interface ProcessRule {
   rule_id: string;
   name: string;
   path: string;
+  sha256?: string;
+  parent_name?: string;
   action: "allow" | "deny";
   user: string;
   allow_update: boolean;
@@ -990,6 +1309,10 @@ export interface ProcessRule {
 export interface ProcessRuleInput {
   name: string;
   path?: string;
+  sha256?: string;
+  parent_name?: string;
+  expected_updated_at?: string;
+  require_absent?: boolean;
   action?: "allow" | "deny";
   user?: string;
   allow_update?: boolean;
@@ -1003,7 +1326,19 @@ export interface BaselineDetail extends BaselineSummary {
   rules: ProcessRule[];
 }
 
+export interface BaselineInventoryParams {
+ cluster_id: string; q?: string; namespace?: string; mode?: BaselineMode; hide_platform?: boolean; limit?: number; offset?: number; sort?: string; order?: "asc" | "desc";
+}
+export interface BaselineInventoryRow extends BaselineSummary {
+ row_id: string; cluster_id: string; owner_count: number; owner_ambiguous: boolean; platform_role: string; configured: boolean; rule_count: number;
+}
+export interface BaselineInventoryResponse {
+ profiles: BaselineInventoryRow[]; total: number; has_more: boolean; limit: number; offset: number; sort: string; order: "asc" | "desc"; cluster_id: string;
+ summary: Record<string,number>; filters: {q:string;namespace:string;mode:string;hide_platform:boolean}; namespaces:string[]; source_complete:boolean; summary_scope:string;
+}
 export const baselines = {
+ inventory: (params: BaselineInventoryParams) => api.get<BaselineInventoryResponse>("/runtime/baselines/inventory",{params}).then(r=>r.data),
+ inventoryCSV: (params: BaselineInventoryParams, shouldDownload?: ScanInventoryDownloadGuard) => downloadScanInventoryCSV("/runtime/baselines/inventory.csv",params,"process-baselines.csv", shouldDownload),
   list: (params: { cluster_id?: string; namespace?: string } = {}) =>
     api
       .get<{ profiles: BaselineSummary[]; summary: { total: number; learn: number; monitor: number; enforce: number } }>(
@@ -1015,16 +1350,16 @@ export const baselines = {
     api
       .get<BaselineDetail>(`/runtime/baselines/${encodeURIComponent(workloadID)}`, { params })
       .then((r) => r.data),
-  setMode: (workloadID: string, body: { mode: BaselineMode; reason?: string }, params: { cluster_id?: string } = {}) =>
+  setMode: (workloadID: string, body: { mode: BaselineMode; reason?: string; expected_mode?: BaselineMode }, params: { cluster_id?: string } = {}) =>
     api
       .post<BaselineSummary>(`/runtime/baselines/${encodeURIComponent(workloadID)}/mode`, body, { params })
       .then((r) => r.data),
-  createRule: (workloadID: string, body: ProcessRuleInput) =>
-    api.post<ProcessRule>(`/runtime/baselines/${encodeURIComponent(workloadID)}/rules`, body).then((r) => r.data),
-  updateRule: (workloadID: string, ruleID: string, body: ProcessRuleInput) =>
-    api.put<ProcessRule>(`/runtime/baselines/${encodeURIComponent(workloadID)}/rules/${encodeURIComponent(ruleID)}`, body).then((r) => r.data),
-  deleteRule: (workloadID: string, ruleID: string) =>
-    api.delete(`/runtime/baselines/${encodeURIComponent(workloadID)}/rules/${encodeURIComponent(ruleID)}`).then((r) => r.data),
+  createRule: (workloadID: string, body: ProcessRuleInput, params: { cluster_id?: string } = {}) =>
+    api.post<ProcessRule>(`/runtime/baselines/${encodeURIComponent(workloadID)}/rules`, body, { params }).then((r) => r.data),
+  updateRule: (workloadID: string, ruleID: string, body: ProcessRuleInput, params: { cluster_id?: string } = {}) =>
+    api.put<ProcessRule>(`/runtime/baselines/${encodeURIComponent(workloadID)}/rules/${encodeURIComponent(ruleID)}`, body, { params }).then((r) => r.data),
+  deleteRule: (workloadID: string, ruleID: string, params: { cluster_id?: string; expected_updated_at?: string } = {}) =>
+    api.delete<{ deleted: string }>(`/runtime/baselines/${encodeURIComponent(workloadID)}/rules/${encodeURIComponent(ruleID)}`, { params }).then((r) => r.data),
 };
 
 export interface FileProfileSummary {
@@ -1184,7 +1519,13 @@ export interface FileProfileDetail extends FileProfileSummary {
   watched_files: FileProfileWatch[];
 }
 
+export interface FileProfileInventoryParams { cluster_id: string; q?: string; namespace?: string; mode?: "learn" | "monitor" | "enforce"; platform_role?: "core" | "unknown"; hide_platform?: boolean; sort?: string; order?: "asc" | "desc"; limit?: number; offset?: number }
+export interface FileProfileInventoryRow extends FileProfileSummary { row_id: string; owner_count: number; owner_ambiguous: boolean; platform_role: string; retained_events: number; last_observed_at: string }
+export interface FileProfileInventoryResponse { profiles: FileProfileInventoryRow[]; total: number; limit: number; offset: number; has_more: boolean; sort: string; order: "asc" | "desc"; org_id: string; cluster_id: string; summary: Record<string,number>; filters: {q:string; namespace:string;mode:string;platform_role:string;hide_platform:boolean}; namespaces: string[]; source:"retained_file_events"; source_complete:boolean; summary_scope:"matching_shared_profiles" }
+
 export const fileProfiles = {
+  inventory: (params: FileProfileInventoryParams) => api.get<FileProfileInventoryResponse>("/runtime/file-profiles/inventory", {params}).then(r=>r.data),
+  inventoryCSV: (params: FileProfileInventoryParams, shouldDownload?: ScanInventoryDownloadGuard) => downloadScanInventoryCSV("/runtime/file-profiles/inventory.csv",params,"file-monitor-profiles.csv", shouldDownload),
   list: (params: { cluster_id?: string; namespace?: string } = {}) =>
     api
       .get<{ profiles: FileProfileSummary[]; summary: { total: number; learn: number; monitor: number; enforce: number } }>(
@@ -1239,13 +1580,14 @@ export const fileProfiles = {
       enabled?: boolean;
       description?: string;
       reason: string;
+      expected_updated_at?: string;
     },
     params: { cluster_id?: string } = {},
   ) =>
     api
       .put<FileProfileRule>(`/runtime/file-profiles/${encodeURIComponent(workloadID)}/rules/${encodeURIComponent(ruleID)}`, body, { params })
       .then((r) => r.data),
-  deleteRule: (workloadID: string, ruleID: string, body: { reason: string }, params: { cluster_id?: string } = {}) =>
+  deleteRule: (workloadID: string, ruleID: string, body: { reason: string; expected_updated_at?: string }, params: { cluster_id?: string } = {}) =>
     api
       .delete<{ deleted: string }>(`/runtime/file-profiles/${encodeURIComponent(workloadID)}/rules/${encodeURIComponent(ruleID)}`, { data: body, params })
       .then((r) => r.data),
@@ -1284,7 +1626,7 @@ export const fileProfiles = {
     api
       .put<FileProfileException>(`/runtime/file-profiles/${encodeURIComponent(workloadID)}/exceptions/${encodeURIComponent(exceptionID)}`, body, { params })
       .then((r) => r.data),
-  deleteException: (workloadID: string, exceptionID: string, body: { reason: string }, params: { cluster_id?: string } = {}) =>
+  deleteException: (workloadID: string, exceptionID: string, body: { reason: string; expected_updated_at?: string }, params: { cluster_id?: string } = {}) =>
     api
       .delete<{ deleted: string }>(`/runtime/file-profiles/${encodeURIComponent(workloadID)}/exceptions/${encodeURIComponent(exceptionID)}`, { data: body, params })
       .then((r) => r.data),
@@ -1297,7 +1639,20 @@ export interface ClusterStats {
   total_findings: number;
 }
 
+export interface ClusterExposure {
+  inventory_status: "fresh" | "stale" | "missing";
+  observed_at?: string;
+  current_critical: number;
+  current_high: number;
+  current_occurrences: number;
+  historical_occurrences: number;
+  unverified_occurrences: number;
+  /** Phase 1: present only when inventory is stale — counts at the last fresh inventory. */
+  last_known?: { critical: number; high: number; as_of: string };
+}
+
 export interface ClusterSummary {
+  exposure?: ClusterExposure;
   id: string;
   name: string;
   distro: string;
@@ -1458,7 +1813,7 @@ export interface PlatformFactsResponse {
 }
 
 export const clusters = {
-  list: () => api.get<{ clusters: ClusterSummary[] }>("/clusters").then((r) => r.data),
+  list: (params?: { workload_scope?: "application" | "all" | "constellation" }) => api.get<{ clusters: ClusterSummary[] }>("/clusters", { params }).then((r) => r.data),
   getOne: (id: string) => api.get<ClusterDetail>(`/clusters/${id}`).then((r) => r.data),
   health: (id: string) => api.get<ClusterHealth>(`/clusters/${id}/health`).then((r) => r.data),
   platformFacts: (id: string) => api.get<PlatformFactsResponse>(`/clusters/${id}/platform-facts`).then((r) => r.data),
@@ -1530,6 +1885,7 @@ export interface VulnerabilityException {
   };
   cve_refs: string[];
   finding_refs: string[];
+  finding_instances?: Array<{ id: string; row_id: string; first_seen_at: string; revision: string; source_cluster_id: string | null; target_cluster_id: string | null }>;
   requester: { id: string; name: string; email: string; team: string };
   approver?: { id: string; name: string; email: string; team: string };
   requested_at: string;
@@ -1554,8 +1910,14 @@ export interface VulnerabilityExceptionsResponse {
 }
 
 export const vulnerabilityExceptions = {
-  list: () => api.get<VulnerabilityExceptionsResponse>("/vulnerability-exceptions").then((r) => r.data),
+  list: (params: { cluster_id?: string } = {}) => api.get<VulnerabilityExceptionsResponse>("/vulnerability-exceptions", { params }).then((r) => r.data),
 };
+
+export interface ScannerEngineDbRevision {
+  download_revision?: string;
+  applied_revision?: string;
+  status?: string;
+}
 
 export interface SystemHealthHeartbeat {
   component: string;
@@ -1578,6 +1940,7 @@ export interface SystemHealthHeartbeat {
     engines?: Record<string, boolean>;
     cache_dirs?: Record<string, string>;
     cache_health?: Record<string, ScannerCacheHealthEntry>;
+    engine_db?: { trivy?: ScannerEngineDbRevision; grype?: ScannerEngineDbRevision };
     vulndb?: { enabled?: boolean; ready?: boolean; status?: string; path?: string; bundle_version?: string; payload_hash?: string; exported_at?: string; record_count?: number; error?: string };
   };
   last_seen_at: string;
@@ -1703,13 +2066,37 @@ export interface SupportBundle {
     scope: string;
     sha256: string;
     signed: boolean;
+    signature_algorithm?: "ed25519";
+    signature?: string;
+    public_key?: string;
+    key_id?: string;
     note?: string;
   };
   sections: Record<string, unknown>;
 }
 
+export interface SupportBundleJob {
+  id: string;
+  status: "queued" | "running" | "ready" | "failed" | "expired";
+  created_at: string;
+  started_at?: string;
+  finished_at?: string;
+  expires_at?: string;
+  bundle_id?: string;
+  error?: string;
+  audit_event_id?: number;
+}
+
+export interface SupportBundleJobList {
+  items: SupportBundleJob[];
+  next_cursor?: string | null;
+}
+
 export const supportBundles = {
-  download: () => api.get<SupportBundle>("/support/bundle").then((r) => r.data),
+  createJob: () => api.post<SupportBundleJob>("/support/bundle/jobs").then((r) => r.data),
+  listJobs: (cursor?: string) => api.get<SupportBundleJobList>("/support/bundle/jobs", { params: { limit: 50, ...(cursor ? { cursor } : {}) } }).then((r) => r.data),
+  getJob: (id: string) => api.get<SupportBundleJob>(`/support/bundle/jobs/${encodeURIComponent(id)}`).then((r) => r.data),
+  downloadJob: (id: string) => api.get<SupportBundle>(`/support/bundle/jobs/${encodeURIComponent(id)}/download`).then((r) => r.data),
 };
 
 export interface ComponentInventorySummary {
@@ -1745,6 +2132,7 @@ export interface ComponentRollup {
   latest_commit?: string;
   latest_seen_at?: string;
   last_status_cause?: string;
+  scanner_capacity?: { active_jobs: number; max_concurrent: number; idle_capacity: number };
 }
 
 export interface ComponentInstance {
@@ -1833,15 +2221,26 @@ export interface ComponentDiagnostics {
   debug: ComponentDiagnosticDebug;
 }
 
+export interface ComponentsInventoryParams { cluster_id?: string; component?: string; status?: string; role?: string; q?: string; sort?: string; order?: "asc" | "desc"; limit?: number; offset?: number }
 export interface ComponentInventoryResponse {
   summary: ComponentInventorySummary;
   rollups: ComponentRollup[];
   components: ComponentInstance[];
+  cluster_id?: string | null; q?: string; component?: string; status?: string; role?: string; sort?: string; order?: "asc" | "desc"; limit?: number; offset?: number; total?: number; has_more?: boolean; role_counts?: Record<string, number>; source_window_hours?: number;
 }
 
 export const componentsInventory = {
-  list: (params?: { cluster_id?: string; component?: string; status?: string; limit?: number }) =>
+  list: (params?: ComponentsInventoryParams) =>
     api.get<ComponentInventoryResponse>("/components", { params }).then((r) => r.data),
+  exportCSV: async (params: ComponentsInventoryParams = {}, shouldDownload?: ScanInventoryDownloadGuard) => {
+    const filters = { ...params }; delete filters.limit; delete filters.offset;
+    const response = await api.get<Blob>("/components/export.csv", { params: filters, responseType: "blob" });
+    const total = Number(response.headers["x-export-total"]), limit = Number(response.headers["x-export-limit"]), truncated = response.headers["x-export-truncated"];
+    if (!/^\d+$/.test(String(response.headers["x-export-total"])) || !Number.isSafeInteger(total) || total < 0 || limit !== 100000 || !["true", "false"].includes(String(truncated)) || (truncated === "true") !== (total > limit)) throw new Error("Component export scope could not be confirmed.");
+    assertInventoryDownloadCurrent(shouldDownload);
+  const blob = response.data instanceof Blob ? response.data : new Blob([response.data]); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = "constellation-components.csv"; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
+    return { total, exported: Math.min(total, limit), limit, truncated: truncated === "true" };
+  },
   get: (id: string) =>
     api.get<{ component: ComponentInstance }>(`/components/${encodeURIComponent(id)}`).then((r) => r.data),
   diagnostics: (id: string) =>
@@ -1855,6 +2254,7 @@ export interface NetworkWorkload {
   cluster_id?: string;
   cluster_name?: string;
   namespace: string;
+  platform_role?: string;
   name: string;
   kind: string;
   risk_score: number;
@@ -1867,6 +2267,8 @@ export interface NetworkWorkload {
 }
 
 export interface ConversationEntry {
+  /** Missing on legacy servers; false means historical signed MAX lost information. */
+  threat_id_complete?: boolean;
   protocol: string;
   application: string;
   port: number;
@@ -1881,6 +2283,8 @@ export interface ConversationEntry {
   last_seen_at: string;
 }
 export interface NetworkPeer {
+  peer_platform_role?: string;
+  peer_cluster_id?: string | null;
   peer_ip: string;
   peer?: string;
   fqdn?: string;
@@ -1893,6 +2297,12 @@ export interface NetworkPeer {
   protocols: string[];
   verdict: string;
   last_seen_at: string;
+}
+
+export interface NetworkPeerEvidenceResponse {
+  workload: string; cluster_id: string | null; workload_platform_role: string; hide_platform: boolean;
+  source_limit: number; total: number; has_more: boolean;
+  peers: Array<NetworkPeer & { peer_platform_role: string; peer_cluster_id: string | null }>;
 }
 
 // Phase-1 CNI enforcement action (isolate | block_ip) reconciled by the applier.
@@ -1916,16 +2326,33 @@ export interface EnforcementAction {
 export interface ConversationEntries {
   from: string;
   to: string;
+  from_platform_role?: string;
+  to_platform_role?: string;
   window_hours: number;
   entries: ConversationEntry[];
   totals: { bytes: number; client_bytes: number; server_bytes: number; packets: number; sessions: number };
 }
 
+export interface ConversationStreamInventoryParams extends NetworkConversationFilters {
+  cluster_id: string; from: string; to: string; q?: string; protocol?: string;
+}
+export interface ConversationStreamInventoryRow extends ConversationEntry {
+  row_id: string; from_platform_role: string; to_platform_role: string;
+}
+export interface ConversationStreamInventoryResponse {
+  cluster_id: string; from: string; to: string; window_hours: number;
+  entries: ConversationStreamInventoryRow[]; total: number; summary: Record<string, number>; totals: Record<string, number>;
+  limit: number; offset: number; has_more: boolean; sort: string; order: "asc" | "desc";
+  filters: Record<string, string | number | boolean>; source: "rollups"; source_complete: boolean; summary_scope: string;
+}
+
 // NV RESTSession — one live connection from the runtime-agent's dp session table.
 export interface NetworkSession {
+  row_id?: string; cluster_id?: string; updated_at?: string;
   id: number;
   node: string;
   workload_id?: string;
+  platform_role?: string;
   application: string;
   ip_proto: string;
   client_ip: string;
@@ -1959,6 +2386,7 @@ export interface NetworkSessionKillTarget {
 }
 
 export interface NetworkSessionKillResponse {
+  expires_at?: string;
   ok: boolean;
   queued: boolean;
   session_id: number;
@@ -1970,9 +2398,11 @@ export interface NetworkSessionKillResponse {
 }
 
 export interface NetworkSessionsResponse {
+  sort?: string; order?: "asc" | "desc"; summary?: Record<string, number>; filters?: Record<string, unknown>;
   sessions: NetworkSession[];
   total: number;
   limit: number;
+  offset: number;
   has_more: boolean;
   cluster_id?: string;
   selected_group?: string;
@@ -1980,8 +2410,11 @@ export interface NetworkSessionsResponse {
 }
 
 export interface NetworkSessionFilters {
+  sort?: string; order?: "asc" | "desc"; hide_platform?: boolean; q?: string;
   cluster_id?: string;
   limit?: number;
+  offset?: number;
+  hours?: number;
   group?: string;
   protocol?: string;
   application?: string;
@@ -1996,6 +2429,8 @@ export interface NetworkFlow {
   cluster_id?: string;
   src: string;
   dst: string;
+  src_platform_role?: string;
+  dst_platform_role?: string;
   src_addr?: string;
   dst_addr?: string;
   src_port?: number;
@@ -2025,6 +2460,8 @@ export interface NetworkFlow {
   /** dp-only: L7 application id (third_party/neuvector/dp/apis.h). 0 = unknown. */
   application_id?: number;
 
+  /** Whether the retained aggregate signature maximum is proven complete. */
+  threat_id_complete?: boolean;
   /** dp-only: NeuVector signature ID if this flow tripped a threat detector. */
   threat_id?: number;
   /** Resolved threat name for threat_id — lets the inspector label the threat even when
@@ -2049,6 +2486,7 @@ export interface RuntimeThreat {
   ep_mac?: string;
   workload_id?: string;
   namespace?: string;
+  platform_role?: string;
   pod_name?: string;
   threat_id: number;
   /** Human-friendly upstream name, eg. "SQL_INJECTION", "SSL_HEARTBLEED". */
@@ -2080,6 +2518,8 @@ export interface NetworkRecentFlow {
   cluster_id?: string;
   src: string;
   dst: string;
+  src_platform_role?: string;
+  dst_platform_role?: string;
   src_addr?: string;
   dst_addr?: string;
   src_port?: number;
@@ -2101,7 +2541,15 @@ export interface NetworkMap {
     clusters?: Array<{ id: string; name: string; state: string }>;
     workloads: number;
     flows: number;
+    flows_total?: number;
+    flows_limit?: number;
+    flows_offset?: number;
+    flows_has_more?: boolean;
     recent_flows?: number;
+    recent_flows_total?: number;
+    recent_flows_limit?: number;
+    recent_flows_offset?: number;
+    recent_flows_has_more?: boolean;
     total_bytes?: number;
     total_packets?: number;
     allowed?: number;
@@ -2142,8 +2590,11 @@ export interface NetworkConversationEdge {
 }
 
 export interface NetworkConversation {
+  row_id?: string;
   from: string;
   to: string;
+  from_platform_role?: string;
+  to_platform_role?: string;
   bytes: number;
   packets: number;
   edges: number;
@@ -2154,12 +2605,17 @@ export interface NetworkConversation {
 }
 
 export interface NetworkConversations {
+  cluster_id?: string | null; sort?: string; order?: "asc" | "desc"; summary?: Record<string, number>; filters?: Record<string, unknown>; source_complete?: boolean; summary_scope?: string;
   conversations: NetworkConversation[];
+  total?: number;
+  limit?: number;
+  offset?: number;
+  has_more?: boolean;
   nodes: string[];
   node_kinds: Record<string, NetworkNodeKind>;
   edges: NetworkConversationEdge[];
   window_hours: number;
-  source?: "live";
+  source?: "live" | "rollups";
   selected_group?: string;
   selected_group_members?: number;
 }
@@ -2186,6 +2642,7 @@ export interface NetworkPolicyLifecycle {
   id: string;
   cluster_id?: string;
   cluster_name?: string;
+  platform_role?: string;
   workload: string;
   namespace: string;
   current_mode: NetworkPolicyMode;
@@ -2213,6 +2670,7 @@ export interface NetworkPolicyLifecycle {
     last_observation: string;
   };
   tuple_preview: Array<{
+    peer_platform_role?: string;
     direction: string;
     peer: string;
     protocol: string;
@@ -2280,31 +2738,32 @@ export interface NetworkPolicyLifecycleResponse {
   };
 }
 
+export interface NetworkConversationFilters { from?: string; to?: string; verdict_group?: "blocked"; hours?: number; cluster_id?: string; namespace?: string; verdict?: string; group?: string; port?: number; peer?: string; application?: string; limit?: number; offset?: number; sort?: string; order?: "asc" | "desc"; hide_platform?: boolean }
+
 export const network = {
-  map: (params: { hours?: number; namespace?: string; group?: string; verdict?: string; cluster_id?: string } = {}) =>
+  conversationsCSV: (params: NetworkConversationFilters, shouldDownload?: ScanInventoryDownloadGuard) => downloadScanInventoryCSV("/network/conversations.csv", params, "network-conversations.csv", shouldDownload),
+  sessionsCSV: (params: NetworkSessionFilters, shouldDownload?: ScanInventoryDownloadGuard) => downloadScanInventoryCSV("/network/sessions.csv", params, "network-sessions.csv", shouldDownload),
+  map: (params: { hours?: number; namespace?: string; group?: string; verdict?: string; cluster_id?: string; port?: number; peer?: string; application?: string; offset?: number; recent_offset?: number } = {}) =>
     api.get<NetworkMap>("/network/map", { params }).then((r) => r.data),
   exposure: (params: { hours?: number; cluster_id?: string } = {}) =>
     api.get<ExposureResponse>("/network/exposure", { params }).then((r) => r.data),
-  conversations: (params: { hours?: number; cluster_id?: string; namespace?: string; verdict?: string; group?: string } = {}) =>
+  conversations: (params: NetworkConversationFilters = {}) =>
     api.get<NetworkConversations>("/network/conversations", { params }).then((r) => r.data),
   // NV per-conversation drill-down: every protocol/port/app stream between from→to,
   // with directional (in/out) bytes + session counts.
   // NV per-conversation peer list: every individual peer IP (incl. external) for a workload.
+  peersEvidence: (params: { workload: string; hours?: number; cluster_id: string; hide_platform: boolean }) => api.get<NetworkPeerEvidenceResponse>("/network/peers", { params }).then(r => r.data),
   peers: (params: { workload: string; hours?: number; cluster_id?: string }) =>
     api.get<{ workload: string; peers: NetworkPeer[] }>("/network/peers", { params }).then((r) => r.data.peers),
   conversationEntries: (params: { from: string; to: string; hours?: number; cluster_id?: string }) =>
     api.get<ConversationEntries>("/network/conversations/entries", { params }).then((r) => r.data),
+  conversationEntriesInventory: (params: ConversationStreamInventoryParams) =>
+    api.get<ConversationStreamInventoryResponse>("/network/conversations/streams", { params }).then(r => r.data),
+  conversationEntriesCSV: (params: ConversationStreamInventoryParams, shouldDownload?: ScanInventoryDownloadGuard) =>
+    downloadScanInventoryCSV("/network/conversations/streams.csv", params, "conversation-streams.csv", shouldDownload),
   // NV RESTSession: the live per-connection table (dp ctrl_list_session snapshot).
   sessions: (params: NetworkSessionFilters = {}) =>
-    api.get<Partial<NetworkSessionsResponse> & { sessions: NetworkSession[] }>("/network/sessions", { params }).then((r) => ({
-      sessions: r.data.sessions ?? [],
-      total: r.data.total ?? r.data.sessions?.length ?? 0,
-      limit: r.data.limit ?? params.limit ?? r.data.sessions?.length ?? 0,
-      has_more: r.data.has_more ?? false,
-      cluster_id: r.data.cluster_id,
-      selected_group: r.data.selected_group,
-      selected_group_members: r.data.selected_group_members,
-    })),
+    api.get<NetworkSessionsResponse>("/network/sessions", { params }).then(r => r.data),
   sessionsSummary: (params: { cluster_id?: string } = {}) =>
     api.get<Record<string, number>>("/network/sessions/summary", { params }).then((r) => r.data),
   // NV session-kill: queue a dp ctrl_clear_session for one live connection.
@@ -2345,14 +2804,17 @@ export const network = {
     const qs = new URLSearchParams();
     if (params.cluster_id) qs.set("cluster_id", params.cluster_id);
     const url = `/api/v1/network/flows:stream${qs.toString() ? `?${qs.toString()}` : ""}`;
-    const token = getToken();
     void (async () => {
       try {
-        const res = await fetch(url, {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        const options: RequestInit = {
           credentials: "include",
           signal: controller.signal,
-        });
+        };
+        let res = await fetch(url, options);
+        if (res.status === 401 && !controller.signal.aborted) {
+          await refreshBrowserSession();
+          res = await fetch(url, options);
+        }
         if (!res.ok || !res.body) return;
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
@@ -2430,6 +2892,7 @@ export interface PcapCapture {
   cluster_id: string;
   workload: string;
   namespace: string;
+  platform_role?: string;
   requested_by: string;
   requested_at: string;
   duration_s: number;
@@ -2452,7 +2915,24 @@ export interface PcapCapture {
   expires_at: string;
 }
 
+export interface PcapInventoryParams {
+  cluster_id: string; workload?: string; namespace?: string; node?: string; group?: string; status?: PcapCaptureStatus;
+  protocol?: string; src_ip?: string; dst_ip?: string; dst_port?: number; q?: string; hide_platform?: boolean;
+  limit?: number; offset?: number; sort?: string; order?: "asc" | "desc";
+}
+export interface PcapInventoryRow extends Omit<PcapCapture, "packet_count" | "file_size_bytes"> {
+  row_id: string; platform_role: string; packet_count: number | null; file_size_bytes: number | null;
+}
+export interface PcapInventoryResponse {
+  cluster_id: string; captures: PcapInventoryRow[]; total: number; summary: Record<string, number>;
+  limit: number; offset: number; has_more: boolean; sort: string; order: "asc" | "desc";
+  filters: Record<string, string | number | boolean>; source_complete: boolean; summary_scope: string;
+}
+
 export const runtimePcap = {
+  inventory: (params: PcapInventoryParams) => api.get<PcapInventoryResponse>("/runtime-pcap/inventory", { params }).then(r => r.data),
+  inventoryCSV: (params: PcapInventoryParams, shouldDownload?: ScanInventoryDownloadGuard) =>
+    downloadScanInventoryCSV("/runtime-pcap/inventory.csv", params, "capture-requests.csv", shouldDownload),
   start: (body: {
     cluster_id: string;
     workload: string;
@@ -2482,8 +2962,8 @@ export const runtimePcap = {
     api.get<PcapCapture>(`/runtime-pcap/${encodeURIComponent(id)}`).then((r) => r.data),
   downloadURL: (id: string) =>
     `${api.defaults.baseURL ?? ""}/runtime-pcap/${encodeURIComponent(id)}/download`,
-  download: (id: string) =>
-    downloadAPIFile(`/runtime-pcap/${encodeURIComponent(id)}/download`, `capture-${id}.pcap`),
+  download: (id: string, shouldDownload?: ScanInventoryDownloadGuard) =>
+    downloadAPIFile(`/runtime-pcap/${encodeURIComponent(id)}/download`, `capture-${id}.pcap`, shouldDownload),
   remove: (id: string) =>
     api.delete<{ deleted: string }>(`/runtime-pcap/${encodeURIComponent(id)}`).then((r) => r.data),
 };
@@ -2588,7 +3068,7 @@ export interface DPIGroupBinding {
 
 export const dpiGroupBindings = {
   list: () =>
-    api.get<{ bindings: DPIGroupBinding[] }>("/runtime/dpi-sensor-bindings").then((r) => r.data.bindings),
+    api.get<{ bindings: DPIGroupBinding[] | null }>("/runtime/dpi-sensor-bindings").then((r) => r.data.bindings ?? []),
   bind: (body: { group_id: string; sensor_kind: DPISensorKind; sensor_id?: string }) =>
     api.post<DPIGroupBinding>("/runtime/dpi-sensor-bindings", body).then((r) => r.data),
   unbind: (id: string) =>
@@ -2599,6 +3079,7 @@ export const dpiGroupBindings = {
 export type RuntimePolicyMode = "monitor" | "enforce" | "disabled";
 
 export interface RuntimePolicy {
+  revision?: string;
   id: string;
   dp_policy_id: number;
   org_id: string;
@@ -2650,7 +3131,14 @@ export interface PolicyMatchStats {
   }>>;
 }
 
+export interface RuntimePolicyReview { cluster_id: string; expected_version: string }
+export interface RuntimePolicyDeleteReceipt { deleted: string; id: string; cluster_id: string; revision: string; workload: string }
 export const runtimePolicies = {
+  updateReviewed: (id: string, body: RuntimePolicyReview & { rules: RuntimePolicyRule[]; name: string }) => api.put<RuntimePolicy>(`/runtime-policies/${encodeURIComponent(id)}/reviewed`, body).then(r => r.data),
+  promoteReviewed: (id: string, body: RuntimePolicyReview) => api.post<RuntimePolicy>(`/runtime-policies/${encodeURIComponent(id)}/reviewed/promote`, body).then(r => r.data),
+  demoteReviewed: (id: string, body: RuntimePolicyReview) => api.post<RuntimePolicy>(`/runtime-policies/${encodeURIComponent(id)}/reviewed/demote`, body).then(r => r.data),
+  disableReviewed: (id: string, body: RuntimePolicyReview) => api.post<RuntimePolicy>(`/runtime-policies/${encodeURIComponent(id)}/reviewed/disable`, body).then(r => r.data),
+  removeReviewed: (id: string, body: RuntimePolicyReview) => api.delete<RuntimePolicyDeleteReceipt>(`/runtime-policies/${encodeURIComponent(id)}/reviewed`, { data: body }).then(r => r.data),
   list: (cluster_id: string) =>
     api.get<{ policies: RuntimePolicy[] }>("/runtime-policies", { params: { cluster_id } })
       .then((r) => r.data.policies),
@@ -2713,9 +3201,14 @@ export interface GeneratePolicyResponse {
 }
 
 /** Wave 5: DPI threats from the NeuVector dp data-plane. */
+export interface RuntimeThreatFilters { hours?: number; severity_min?: number; cluster_id?: string; workload_id?: string; group?: string; category?: "dlp" | "waf" | "ips"; port?: number; peer?: string; application?: number | string; limit?: number; offset?: number; namespace?: string; node?: string; q?: string; hide_platform?: boolean; sort?: string; order?: "asc" | "desc" }
+export interface RuntimeThreatPage { threats: RuntimeThreat[]; total: number; limit: number; offset: number; has_more: boolean; cluster_id?: string | null; window_hours?: number; sort?: string; order?: "asc" | "desc"; summary?: Record<string, number>; filters?: Record<string, unknown> }
 export const runtimeThreats = {
-  list: (params: { hours?: number; severity_min?: number; cluster_id?: string; workload_id?: string; group?: string; category?: "dlp" | "waf" | "ips" } = {}) =>
+  exportCSV: (params: RuntimeThreatFilters, shouldDownload?: ScanInventoryDownloadGuard) => downloadScanInventoryCSV("/runtime-threats.csv", params, "runtime-threats.csv", shouldDownload),
+  list: (params: RuntimeThreatFilters = {}) =>
     api.get<{ threats: RuntimeThreat[] }>("/runtime-threats", { params }).then((r) => r.data.threats),
+  page: (params: RuntimeThreatFilters = {}) =>
+    api.get<RuntimeThreatPage>("/runtime-threats", { params }).then((r) => r.data),
   get: (id: string) =>
     api.get<RuntimeThreatDetail>(`/runtime-threats/${encodeURIComponent(id)}`).then((r) => r.data),
 };
@@ -2733,7 +3226,9 @@ export interface TimelineItem {
   workload_id?: string;
   namespace?: string;
   cluster_id?: string;
+  platform_role?: string;
   ref?: string;
+  verdict?: string;
 }
 
 export interface TimelineResponse {
@@ -2741,26 +3236,75 @@ export interface TimelineResponse {
   limit: number;
   offset: number;
   has_more: boolean;
+  total?: number;
+  lower_only?: boolean;
+  after_exclusive?: boolean;
   from: string;
   to: string;
 }
 
+export interface TimelineReadParams {
+  type?: string;
+  severity?: string;
+  from?: string;
+  to?: string;
+  q?: string;
+  namespace?: string;
+  workload?: string;
+  ref?: string;
+  limit?: number;
+  offset?: number;
+  cluster_id?: string;
+  after?: string;
+  hours?: number;
+  after_exclusive?: boolean;
+  verdict?: string;
+}
 export const securityTimeline = {
-  list: (
-    params: {
-      type?: string; // comma list of TimelineSource
-      severity?: string; // comma list of Severity
-      from?: string;
-      to?: string;
-      q?: string;
-      namespace?: string;
-      workload?: string;
-      ref?: string;
-      limit?: number;
-      offset?: number;
-      cluster_id?: string;
-    } = {},
-  ) => api.get<TimelineResponse>("/security/timeline", { params }).then((r) => r.data),
+  exportCSV: async (params: TimelineReadParams = {}, shouldDownload?: ScanInventoryDownloadGuard) => {
+    const filters = { ...params };
+    delete filters.limit;
+    delete filters.offset;
+    const response = await api.get<Blob>("/security/timeline.csv", {
+      params: filters,
+      responseType: "blob",
+    });
+    const total = Number(response.headers["x-export-total"]),
+      limit = Number(response.headers["x-export-limit"]),
+      truncated = response.headers["x-export-truncated"];
+    if (
+      !/^\d+$/.test(String(response.headers["x-export-total"])) ||
+      !Number.isSafeInteger(total) ||
+      total < 0 ||
+      limit !== 10000 ||
+      !["true", "false"].includes(String(truncated)) ||
+      (truncated === "true") !== total > limit
+    )
+      throw new Error(
+        "Event export scope could not be confirmed. Retry the export.",
+      );
+    assertInventoryDownloadCurrent(shouldDownload);
+    const blob =
+      response.data instanceof Blob ? response.data : new Blob([response.data]);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "constellation-security-events.csv";
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    return {
+      total,
+      exported: Math.min(total, limit),
+      limit,
+      truncated: truncated === "true",
+    };
+  },
+  list: (params: TimelineReadParams = {}) =>
+    api
+      .get<TimelineResponse>("/security/timeline", { params })
+      .then((r) => r.data),
 };
 
 // B8 — Score what-if / prediction.
@@ -2808,6 +3352,7 @@ export interface RuntimeOverview {
   rules: Array<{ id: string; name: string; source: string; severity: string; techniques: string[]; mode: string; event_count: number; affected_workloads: number; last_triggered_at?: string }>;
   summary: {
     window_hours: number;
+    window_start?: string;
     events: number;
     alerts: number;
     blocks: number;
@@ -2819,6 +3364,8 @@ export interface RuntimeOverview {
     id: string;
     at: string;
     cluster_id: string;
+    platform_role?: string;
+    namespace?: string;
     cluster_name?: string;
     workload_id: string;
     rule_id?: string;
@@ -2832,6 +3379,9 @@ export interface RuntimeOverview {
   }>;
   workloads: Array<{
     workload_id: string;
+    cluster_id?: string;
+    namespace?: string;
+    platform_role?: string;
     events: number;
     alerts: number;
     blocks: number;
@@ -2861,8 +3411,49 @@ export interface MigrationUnsupported {
   source?: Record<string, unknown>;
 }
 
+export type MigrationDiffAction = "create" | "update" | "unchanged";
+
+export interface MigrationVulnerabilityProfile {
+  name: string;
+  description: string;
+  active: boolean;
+  entries: VPEntry[];
+  domain_scope: VulnProfile["domain_scope"];
+  cluster_id?: string;
+  imported_from?: Record<string, string>;
+  diff_action: MigrationDiffAction;
+}
+
+export interface MigrationRegistry {
+  name: string;
+  kind: string;
+  endpoint: string;
+  image_globs: string[];
+  auth_kind: "none";
+  scan_cadence: "manual";
+  credentials_required: boolean;
+  imported_from?: Record<string, string>;
+  diff_action: MigrationDiffAction;
+}
+
+export interface MigrationAppliedSummary extends Record<string, number | undefined> {
+  created?: number;
+  updated?: number;
+  unchanged?: number;
+  policies?: number;
+  file_profiles?: number;
+  process_profiles?: number;
+  groups?: number;
+  network_rules?: number;
+  dpi_rules?: number;
+  dpi_bindings?: number;
+  vulnerability_profiles?: number;
+  registries?: number;
+}
+
 export interface MigrationPreview {
   import_id?: string;
+  target_cluster_id?: string;
   summary: {
     source: string;
     total: number;
@@ -2871,6 +3462,7 @@ export interface MigrationPreview {
     unaccounted_source?: number;
     create: number;
     update: number;
+    unchanged?: number;
     enforce: number;
     monitor: number;
     enabled: number;
@@ -2880,6 +3472,8 @@ export interface MigrationPreview {
     dpi_rules: number;
     dpi_bindings: number;
     network_rules: number;
+    vulnerability_profiles?: number;
+    registries?: number;
     unsupported: number;
     engines: Record<string, number>;
     categories: Record<string, number>;
@@ -2985,6 +3579,8 @@ export interface MigrationPreview {
     imported_from?: Record<string, string>;
     diff_action: "create" | "update";
   }>;
+  vulnerability_profiles?: MigrationVulnerabilityProfile[];
+  registries?: MigrationRegistry[];
   unsupported?: MigrationUnsupported[];
   rollback_bundle: string;
 }
@@ -2993,8 +3589,9 @@ export interface MigrationImportListItem {
   id: string;
   source: string;
   status: "previewed" | "applied" | "partial_applied" | "rolled_back" | "failed" | string;
+  target_cluster_id?: string;
   summary: MigrationPreview["summary"];
-  applied_summary?: Record<string, number>;
+  applied_summary?: MigrationAppliedSummary;
   unsupported?: MigrationUnsupported[];
   error?: string;
   created_at: string;
@@ -3002,22 +3599,50 @@ export interface MigrationImportListItem {
   rolled_back_at?: string;
 }
 
+export interface MigrationImportPage {
+  imports: MigrationImportListItem[];
+  has_more: boolean;
+  next_offset?: number;
+  next_cursor?: string;
+}
+
 export interface MigrationApplyResponse {
   id: string;
   status: string;
   already_applied?: boolean;
-  applied?: Record<string, number>;
+  applied?: MigrationAppliedSummary;
   unsupported?: MigrationUnsupported[];
 }
 
 export interface MigrationRollbackResponse {
   id: string;
   status: "rolled_back" | string;
-  restored: number;
-  deleted: number;
+  restored?: number;
+  deleted?: number;
+  already_rolled_back?: boolean;
 }
 
-export type MigrationRollbackBundle = Record<string, unknown>;
+export interface MigrationVulnerabilityRollback {
+  id: string;
+  action: "create" | "update";
+  applied_at: string;
+  before?: Omit<MigrationVulnerabilityProfile, "diff_action"> & { diff_action?: "" };
+  before_entries?: VPEntry[];
+  before_domain_scope?: Record<string, unknown>;
+}
+
+export interface MigrationRegistryRollback {
+  id: string;
+  action: "create";
+  applied_at: string;
+}
+
+export interface MigrationRollbackBundle extends Record<string, unknown> {
+  source?: string;
+  generated_at?: string;
+  vulnerability_profiles?: MigrationVulnerabilityRollback[];
+  registries?: MigrationRegistryRollback[];
+}
 
 export interface OnboardingOverview {
   install_methods: Array<{ id: string; name: string; status: string; command: string }>;
@@ -3030,8 +3655,8 @@ export const enterprise = {
   migration: () => api.get<MigrationOverview>("/migration/sources").then((r) => r.data),
   migrationPreview: (body: { source: string; export: string; cluster_id?: string }) =>
     api.post<MigrationPreview>("/migration/preview", body).then((r) => r.data),
-  migrationImports: () =>
-    api.get<{ imports: MigrationImportListItem[] }>("/migration/imports").then((r) => r.data.imports),
+  migrationImportsPage: (params: { limit?: number; offset?: number; cursor?: string } = {}) =>
+    api.get<MigrationImportPage>("/migration/imports", { params }).then((r) => r.data),
   migrationApply: (id: string) =>
     api.post<MigrationApplyResponse>(`/migration/imports/${id}:apply`).then((r) => r.data),
   migrationRollback: (id: string) =>
@@ -3102,6 +3727,9 @@ export interface AccessControlUser {
   roles: string[];
   last_login_at: string;
   mfa_enabled: boolean;
+  local_password?: boolean;
+  locked?: boolean;
+  password_reset_required?: boolean;
 }
 
 export interface AccessControlRole {
@@ -3200,6 +3828,10 @@ export const accessControl = {
   overview: () => api.get<AccessControlOverview>("/access-control").then((r) => r.data),
   createLocalUser: (body: { email: string; display_name: string; password: string; role: string }) =>
     api.post<{ id: string; email: string; role: string }>("/access-control/local-users", body).then((r) => r.data),
+  unlockLocalUser: (id: string) =>
+    api.post<{ status: "unlocked" }>(`/users/${encodeURIComponent(id)}/unlock`).then((r) => r.data),
+  forceLocalPasswordReset: (id: string) =>
+    api.post<{ status: "reset_required" }>(`/users/${encodeURIComponent(id)}/force-password-reset`).then((r) => r.data),
 };
 
 // Canonical user-facing roles (mirror pkg/rbac). Highest privilege first.
@@ -3655,6 +4287,7 @@ export interface ImageScanResult {
   image_digest: string;
   platform?: string;
   scanner_profile: string;
+  engine_status?: Record<string, "succeeded" | "failed">;
   vulndb_bundle_version?: string;
   vulndb_bundle_hash?: string;
   bundle_metadata?: VulnDBBundleMetadata;
@@ -3925,6 +4558,7 @@ export interface ImageConfigChecksResponse {
     fail_count?: number;
     warn_count?: number;
     status?: string;
+    reason?: string;
     error?: string;
   };
 }
@@ -4212,9 +4846,12 @@ export const connectorCoverage = {
     api.get<ScannerCacheData>(`/scanner-cache/${encodeURIComponent(scannerId)}/data`).then((r) => r.data),
 };
 
+export interface ScanJobInventoryParams extends ScanInventoryParams { cluster_id?: string; registry_id?: string; target_type?: string; status?: string }
+export interface ScanJobInventoryResponse extends ScanInventoryMetadata { jobs: ScanJob[]; queue_metrics?: ScanQueueMetric[]; limit?: number; offset?: number }
 export const scanJobs = {
-  list: (params?: { cluster_id?: string; target_type?: string; status?: string }) =>
-    api.get<{ jobs: ScanJob[]; queue_metrics?: ScanQueueMetric[] }>("/scan-jobs", { params }).then((r) => r.data),
+  list: (params?: ScanJobInventoryParams) =>
+    api.get<ScanJobInventoryResponse>("/scan-jobs", { params }).then((r) => r.data),
+  exportCSV: (params: ScanJobInventoryParams = {}, shouldDownload?: ScanInventoryDownloadGuard) => downloadScanInventoryCSV("/scan-jobs.csv", params, "constellation-scan-jobs.csv", shouldDownload),
   enqueue: (body: { target_type: string; target_ref: string; platform?: string; target_cluster_id?: string; source_type?: string; source_ref?: string; max_attempts?: number }) =>
     api.post<{ id: string; status: string }>("/scan-jobs", body).then((r) => r.data),
   attempts: (id: string) =>
@@ -4235,9 +4872,34 @@ export const scanTargets = {
     api.get<ScanTargetImpacts>(`/scan-targets/${encodeURIComponent(id)}/impacted-workloads`).then((r) => r.data),
 };
 
+export interface ScanInventoryParams { q?: string; sort?: string; order?: "asc" | "desc"; limit?: number; offset?: number }
+export interface ScanInventoryMetadata { total?: number; has_more?: boolean; summary?: Record<string, number>; sort?: string; order?: "asc" | "desc" }
+export interface ImageScanInventoryParams extends ScanInventoryParams { cluster_id?: string; image_digest?: string; digest?: string; severity?: string }
+export interface RepositoryScanInventoryParams extends ScanInventoryParams { branch?: string; workflow?: string; status?: string }
+export interface ServerlessInventoryParams extends ScanInventoryParams { provider?: string; account_id?: string; region?: string; posture?: string }
+export interface ScanInventoryExportResult { total: number; exported: number; limit: number; truncated: boolean }
+export type ScanInventoryDownloadGuard = () => boolean;
+function assertInventoryDownloadCurrent(shouldDownload?: ScanInventoryDownloadGuard) {
+  if (shouldDownload && !shouldDownload()) throw new Error("Refresh the inventory before exporting this scope.");
+}
+async function downloadScanInventoryCSV(path: string, params: ScanInventoryParams, filename: string, shouldDownload?: ScanInventoryDownloadGuard, expectedHeaders?: Record<string, string>): Promise<ScanInventoryExportResult> {
+  const filters = { ...params }; delete filters.limit; delete filters.offset;
+  const response = await api.get<Blob>(path, { params: filters, responseType: "blob" });
+  if (!/^[0-9]+$/.test(String(response.headers["x-export-total"] ?? "")) || !/^[0-9]+$/.test(String(response.headers["x-export-limit"] ?? ""))) throw new Error("Export scope could not be confirmed.");
+  const total = Number(response.headers["x-export-total"]), limit = Number(response.headers["x-export-limit"]);
+  const truncated = response.headers["x-export-truncated"];
+  if (!Number.isSafeInteger(total) || total < 0 || !Number.isSafeInteger(limit) || limit < 1 || !["true", "false"].includes(String(truncated)) || (truncated === "true") !== (total > limit)) throw new Error("Export scope could not be confirmed. Retry before treating the download as complete.");
+  assertInventoryDownloadCurrent(shouldDownload);
+  if (expectedHeaders && Object.entries(expectedHeaders).some(([header, expected]) => response.headers[header] !== expected)) throw new Error("Export response did not confirm the requested organization and inventory scope.");
+  const blob = response.data instanceof Blob ? response.data : new Blob([response.data]);
+  const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = filename; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
+  return { total, exported: Math.min(total, limit), limit, truncated: truncated === "true" };
+}
+
 export const imageScanResults = {
-  list: (params?: { cluster_id?: string; image_digest?: string; digest?: string; q?: string; limit?: number; offset?: number }) =>
-    api.get<{ image_scan_results: ImageScanResult[]; limit: number; offset: number }>("/image-scan-results", { params }).then((r) => r.data),
+  exportCSV: (params: ImageScanInventoryParams = {}, shouldDownload?: ScanInventoryDownloadGuard) => downloadScanInventoryCSV("/image-scan-results/export.csv", params, "constellation-image-scan-results.csv", shouldDownload),
+  list: (params?: ImageScanInventoryParams) =>
+    api.get<ScanInventoryMetadata & { image_scan_results: ImageScanResult[]; limit: number; offset: number }>("/image-scan-results", { params }).then((r) => r.data),
   get: (id: string) =>
     api.get<ImageScanResultDetail>(`/image-scan-results/${encodeURIComponent(id)}`).then((r) => r.data),
   packages: (id: string) =>
@@ -4273,15 +4935,17 @@ export const imageScanResults = {
 };
 
 export const serverlessFunctions = {
-  list: (params?: { q?: string; provider?: string; account_id?: string; region?: string; limit?: number; offset?: number }) =>
-    api.get<{ serverless_functions: ServerlessFunction[]; limit: number; offset: number }>("/serverless-functions", { params }).then((r) => r.data),
+  exportCSV: (params: ServerlessInventoryParams = {}, shouldDownload?: ScanInventoryDownloadGuard) => downloadScanInventoryCSV("/serverless-functions/export.csv", params, "constellation-serverless-functions.csv", shouldDownload),
+  list: (params?: ServerlessInventoryParams) =>
+    api.get<ScanInventoryMetadata & { serverless_functions: ServerlessFunction[]; limit: number; offset: number }>("/serverless-functions", { params }).then((r) => r.data),
   get: (id: string) =>
     api.get<ServerlessFunctionDetail>(`/serverless-functions/${encodeURIComponent(id)}`).then((r) => r.data),
 };
 
 export const repositoryScans = {
-  list: (params?: { q?: string; branch?: string; workflow?: string; limit?: number; offset?: number }) =>
-    api.get<{ repository_scans: RepositoryScan[]; limit: number; offset: number }>("/repository-scans", { params }).then((r) => r.data),
+  exportCSV: (params: RepositoryScanInventoryParams = {}, shouldDownload?: ScanInventoryDownloadGuard) => downloadScanInventoryCSV("/repository-scans/export.csv", params, "constellation-repository-scans.csv", shouldDownload),
+  list: (params?: RepositoryScanInventoryParams) =>
+    api.get<ScanInventoryMetadata & { repository_scans: RepositoryScan[]; limit: number; offset: number }>("/repository-scans", { params }).then((r) => r.data),
   get: (id: string) =>
     api.get<RepositoryScanDetail>(`/repository-scans/${encodeURIComponent(id)}`).then((r) => r.data),
   attestations: (id: string) =>
@@ -4510,7 +5174,7 @@ export const policies = {
   // DPI signature toggles (weak-TLS version detection). Applied live by the runtime-agent.
   dpiThreatSettings: (params: { cluster_id?: string } = {}) =>
     api.get<{ cluster_id: string; weak_tls_enabled: boolean }>("/policies/dpi-threats", { params }).then((r) => r.data),
-  updateDpiThreatSettings: (body: { weak_tls_enabled: boolean }, params: { cluster_id?: string } = {}) =>
+  updateDpiThreatSettings: (body: { weak_tls_enabled: boolean; expected_weak_tls_enabled?: boolean }, params: { cluster_id?: string } = {}) =>
     api.patch<{ cluster_id: string; weak_tls_enabled: boolean }>("/policies/dpi-threats", body, { params }).then((r) => r.data),
   // NV NewServiceMode / NewServiceProfileMode: default mode new service groups start in.
   serviceModeDefaults: (params: { cluster_id?: string } = {}) =>
@@ -4585,6 +5249,7 @@ export interface AdmissionDryRunHistoryRow {
 
 // ---------- New endpoints (Wave B) ----------
 export interface DashboardSummary {
+  finding_scope?: "application" | "all" | "constellation";
   generated_at: string;
   findings_by_severity: Record<string, number>;
   findings_total: number;
@@ -4594,6 +5259,7 @@ export interface DashboardSummary {
   assets_total: number;
   scan_queue_depth: number;
   recent_activity: Array<{
+    id?: string;
     at: string;
     action: string;
     target_kind: string;
@@ -4611,12 +5277,13 @@ export interface DashboardSummary {
     exposed_by_mode: Record<string, number>;    // net-exposed workloads by group mode (discover/monitor/protect)
     new_service_policy_mode: string;            // NV NewServiceMode: mode new service groups start in (network)
     new_service_profile_mode: string;           // NV NewServiceProfileMode: process/file mode for new groups
-    top_vulnerable: Array<{ namespace: string; name: string; critical: number; high: number }>;
+    top_vulnerable: Array<{ inventory_presence?: string; id?: string; cluster_id?: string | null; platform_role?: string; namespace: string; name: string; critical: number; high: number }>;
   };
 }
 
 export interface ExposedService {
   workload: string;
+  platform_role?: string;
   namespace: string;
   name: string;
   external_peers: number;
@@ -4631,12 +5298,12 @@ export interface ExposedService {
 export interface ExposureResponse { ingress: ExposedService[]; egress: ExposedService[] }
 
 export const dashboard = {
-  summary: (params: { cluster_id?: string } = {}) =>
+  summary: (params: { cluster_id?: string; workload_scope?: "application" | "all" | "constellation" } = {}) =>
     api.get<DashboardSummary>("/dashboard/summary", { params }).then((r) => r.data),
   // NV Security Events timeline: kept separate from summary — it scans the large events
   // partition (~6s) and must not slow the primary summary.
   eventsTimeline: (params: { cluster_id?: string } = {}) =>
-    api.get<{ events_timeline: Array<{ date: string; total: number; critical: number }> }>("/dashboard/events-timeline", { params }).then((r) => r.data),
+    api.get<{ events_timeline: Array<{ date: string; total: number; critical: number }>; window_start?: string }>("/dashboard/events-timeline", { params }).then((r) => r.data),
 };
 
 export const settingsApi = {
@@ -4648,6 +5315,11 @@ export const settingsApi = {
     api.patch<{ settings: Record<string, unknown> }>("/settings/user", patch).then((r) => r.data),
 };
 
+export interface ConfigProvenance {
+  source: "default" | "environment_bootstrap" | "database";
+  redacted: boolean;
+}
+
 export interface SystemConfigResponse {
   config: Record<string, unknown>;
   revision: number;
@@ -4655,13 +5327,24 @@ export interface SystemConfigResponse {
   updated_at?: string;
   updated_by?: string;
   updated_by_email?: string;
+  provenance?: Record<string, ConfigProvenance>;
+  applied?: {
+    provider: {
+      component: "system_config_provider";
+      scope: "serving_replica";
+      revision: number | null;
+      status: "current" | "behind" | "ahead" | "unavailable";
+    };
+  };
 }
 
 export const systemConfigApi = {
   get: () =>
     api.get<SystemConfigResponse>("/system/config").then((r) => r.data),
-  patch: (body: Record<string, unknown>) =>
-    api.patch<SystemConfigResponse>("/system/config", body).then((r) => r.data),
+  patch: (body: Record<string, unknown>, revision?: number) =>
+    api.patch<SystemConfigResponse>("/system/config", body, revision === undefined ? undefined : {
+      headers: { "If-Match": `"${revision}"` },
+    }).then((r) => r.data),
   refreshScanner: () =>
     api.post<{ refresh_now: number; revision: number }>("/scanner/refresh", {}).then((r) => r.data),
 };
@@ -4692,11 +5375,28 @@ export const securityPolicyApi = {
 export interface AuthServerConfig {
   // LDAP
   url?: string; bind_dn?: string; bind_password?: string; base_dn?: string;
-  user_filter?: string; group_attribute?: string; email_attribute?: string;
+  user_filter?: string; group_attribute?: string; group_base_dn?: string; group_member_attribute?: string; email_attribute?: string;
   // SAML
   idp_metadata_xml?: string; entity_id?: string; acs_url?: string; sp_cert_pem?: string; sp_key_pem?: string;
   // OIDC
-  issuer_url?: string; client_id?: string; client_secret?: string; redirect_url?: string; scopes?: string[];
+  issuer_url?: string; client_id?: string; client_secret?: string; redirect_url?: string; scopes?: string[]; groups_claim?: string;
+}
+
+export interface AuthRolePreview {
+  provider_type: string;
+  input_kind: string;
+  group_count: number;
+  matched_group_count: number;
+  default_applied: boolean;
+  grants: { role: string; scope: "organization" | "cluster" | "namespace"; cluster_id?: string; namespace?: string }[];
+}
+
+export interface AuthScopedMapping {
+  id: string;
+  group: string;
+  role: string;
+  cluster_id?: string;
+  namespace?: string;
 }
 
 export interface AuthServer {
@@ -4712,6 +5412,16 @@ export interface AuthServer {
 
 export const authServersApi = {
   list: () => api.get<{ auth_servers: AuthServer[] }>("/auth-servers").then((r) => r.data.auth_servers),
+  testConnection: (id: string) =>
+    api.post<{ ok: boolean; type: string; message?: string }>(`/auth-servers/${encodeURIComponent(id)}/test`).then((r) => r.data),
+  previewRoles: (id: string, groups: string[]) =>
+    api.post<AuthRolePreview>(`/auth-servers/${encodeURIComponent(id)}/role-preview`, { groups }).then((r) => r.data),
+  listScopedMappings: (id: string) =>
+    api.get<{ scoped_mappings: AuthScopedMapping[] }>(`/auth-servers/${encodeURIComponent(id)}/scoped-mappings`).then((r) => r.data.scoped_mappings),
+  createScopedMapping: (id: string, body: Omit<AuthScopedMapping, "id">) =>
+    api.post<AuthScopedMapping>(`/auth-servers/${encodeURIComponent(id)}/scoped-mappings`, body).then((r) => r.data),
+  deleteScopedMapping: (id: string, mappingId: string) =>
+    api.delete(`/auth-servers/${encodeURIComponent(id)}/scoped-mappings/${encodeURIComponent(mappingId)}`).then((r) => r.data),
   create: (body: Omit<AuthServer, "id" | "revision">) =>
     api.post<AuthServer>("/auth-servers", body).then((r) => r.data),
   update: (id: string, body: AuthServer) =>
@@ -4788,7 +5498,9 @@ export const receivers = {
 
 export const routing = {
   get: () => api.get<{ yaml: string; revision: number; updated_at: string }>("/routing.yaml").then((r) => r.data),
-  put: (yaml: string) => api.post<{ status: string }>("/routing.yaml", { yaml }).then((r) => r.data),
+  put: (yaml: string, revision?: number) => api.post<{ status: string; revision: number }>("/routing.yaml", { yaml },
+    revision === undefined ? undefined : { headers: { "If-Match": `"${revision}"` } },
+  ).then((r) => r.data),
 };
 
 export const forensics = {
@@ -4970,7 +5682,22 @@ export interface CVEAffectedResponse {
   clusters: CVEAffectedCluster[];
 }
 
+export type CVEAffectedInventoryView = "images" | "workloads" | "clusters" | "packages";
+export interface CVEAffectedInventoryParams { cluster_id?: string; q?: string; namespace?: string; severity?: string; sort?: string; order?: "asc" | "desc"; limit?: number; offset?: number }
+export interface CVEAffectedInventoryPackage extends CVEAffectedPackage { row_id: string; image_scan_result_id: string; image_ref: string; image_repository: string; image_tag: string; image_digest: string; last_seen_at: string }
+export interface CVEAffectedImageEvidence { image_ref: string; image_ref_normalized: string; image_repository: string; image_tag: string; image_digest: string }
+export interface CVEAffectedInventoryRows { images: CVEAffectedImage & {row_id: string}; workloads: CVEAffectedWorkload & {row_id: string; image_evidence: CVEAffectedImageEvidence[]}; clusters: CVEAffectedCluster & {row_id: string}; packages: CVEAffectedInventoryPackage }
+export interface CVEAffectedInventoryResponse<T> { cve_id: string; cluster_id: string | null; view: CVEAffectedInventoryView; items: T[]; total: number; summary: Record<string,number>; has_more: boolean; limit: number; offset: number; sort: string; order: "asc" | "desc" }
+
+function cveCatalogCSVParams(params: CVESearchParams): Record<string, string | number | undefined> {
+  return { q: params.q ?? "", kev: params.kev ? "true" : undefined, epss_gt: params.epss_gt, cvss_gt: params.cvss_gt, severity: params.severity, source: params.source, sort: params.sort, dir: params.dir };
+}
+
 export const cve = {
+  catalogCSVPath: "/cve/search.csv",
+  catalogCSVParams: cveCatalogCSVParams,
+  searchCSV: (params: CVESearchParams, shouldDownload: ScanInventoryDownloadGuard) =>
+    downloadLookaheadCSV("/cve/search.csv", cveCatalogCSVParams(params), "constellation-cve-catalog.csv", shouldDownload),
   search: (qOrParams: string | CVESearchParams = "") => {
     const params: Record<string, unknown> = typeof qOrParams === "string"
       ? { q: qOrParams }
@@ -4992,6 +5719,11 @@ export const cve = {
   stats:  () => api.get<CVEStats>(`/cve/stats`).then((r) => r.data),
   affected: (id: string, clusterId?: string) =>
     api.get<CVEAffectedResponse>(`/cve/${encodeURIComponent(id)}/affected`, { params: clusterId ? { cluster_id: clusterId } : undefined }).then((r) => r.data),
+  affectedInventory: <V extends CVEAffectedInventoryView>(id: string, view: V, params: CVEAffectedInventoryParams = {}) =>
+    api.get<CVEAffectedInventoryResponse<CVEAffectedInventoryRows[V]>>(`/cve/${encodeURIComponent(id)}/affected/${view}`, { params }).then(response => response.data),
+  affectedInventoryCSV: (id: string, view: CVEAffectedInventoryView, params: CVEAffectedInventoryParams = {}, shouldDownload?: ScanInventoryDownloadGuard) =>
+    downloadScanInventoryCSV(`/cve/${encodeURIComponent(id)}/affected/${view}.csv`, params, `constellation-cve-affected-${view}.csv`, shouldDownload),
+
 };
 
 // ----- Wave D: Response Rules V2 (NeuVector-style condition catalog) ------
@@ -5085,6 +5817,12 @@ export const responseRulesV2 = {
   delete: (id: string) => api.delete(`/response-rules-v2/${id}`).then((r) => r.data),
   reorder: (orderedIds: string[], params: { cluster_id?: string } = {}) =>
     api.patch<{ ok: boolean; count: number }>("/response-rules-v2:reorder", { ordered_ids: orderedIds }, { params }).then((r) => r.data),
+  exportYaml: (clusterID: string) =>
+    api.get<string>("/response-rules-v2:export", { params: { cluster_id: clusterID }, responseType: "text", headers: { Accept: "application/yaml" } }).then((r) => r.data),
+  importYaml: (clusterID: string, yaml: string) =>
+    api.post<{ created: number; replaced: number; results: Array<{ name: string; status: string }> }>(
+      "/response-rules-v2:import", yaml, { params: { cluster_id: clusterID }, headers: { "Content-Type": "application/yaml" } },
+    ).then((r) => ({ created: r.data.created, updated: r.data.replaced, results: r.data.results })),
 };
 
 // ----- Wave D: Vulnerability Profiles ------
@@ -5208,8 +5946,8 @@ export const groupsApi = {
     api.get<GroupUsage>(`/groups/${id}/usage`, { params }).then((r) => r.data),
   create: (body: Omit<Group, "id"|"created_at"|"updated_at">, params: { cluster_id?: string } = {}) =>
     api.post<{ id: string }>("/groups", body, { params }).then((r) => r.data),
-  update: (id: string, body: Omit<Group, "id"|"created_at"|"updated_at">) =>
-    api.put<{ id: string }>(`/groups/${id}`, body).then((r) => r.data),
+  update: (id: string, body: Omit<Group, "id"|"created_at"|"updated_at">, params: { cluster_id?: string } = {}) =>
+    api.put<{ id: string }>(`/groups/${id}`, body, { params }).then((r) => r.data),
   delete: (id: string) => api.delete(`/groups/${id}`).then((r) => r.data),
   exportYaml: (params: { cluster_id?: string } = {}) =>
     api.get<string>("/groups:export", { params, responseType: "text", headers: { Accept: "application/x-yaml" } }).then((r) => r.data),
@@ -5265,6 +6003,9 @@ export const federation = {
 // page surfaces alongside the curated evidence.
 export interface RuntimeEvent {
   id: string;
+  row_id?: string;
+  cluster_id?: string;
+  platform_role?: string;
   at: string;
   kind: string;
   source: string;
@@ -5278,17 +6019,33 @@ export interface RuntimeEvent {
   payload: Record<string, unknown>;
 }
 
+export interface RuntimeEventsParams { limit?: number; offset?: number; cluster_id?: string; kind?: string; severity?: Severity | "info"; workload?: string; q?: string; source?: string; verdict?: string; namespace?: string; node?: string; after?: string; before?: string; sort?: string; order?: "asc" | "desc" }
+export interface RuntimeEventsResponse {
+  events: RuntimeEvent[]; limit: number;
+  total?: number; offset?: number; sort?: string; order?: "asc" | "desc"; has_more?: boolean;
+  cluster_id?: string; q?: string; workload?: string; kind?: string; source?: string; severity?: string; verdict?: string; namespace?: string; node?: string; after?: string; before?: string;
+  summary?: { total: number; alerting: number; blocks: number; quarantines: number; affected_workloads: number; observed: number };
+}
 export const runtimeEvents = {
-  list: (params: { limit?: number; kind?: string; severity?: Severity; workload?: string; cluster_id?: string } = {}) =>
-    api.get<{ events: RuntimeEvent[]; limit: number }>("/events", { params }).then((r) => r.data),
+  list: (params: RuntimeEventsParams = {}) => api.get<RuntimeEventsResponse>("/events", { params }).then((r) => r.data),
+  exportCSV: (params: RuntimeEventsParams = {}, shouldDownload?: ScanInventoryDownloadGuard) => downloadScanInventoryCSV("/events.csv", params, "constellation-runtime-events.csv", shouldDownload),
 };
 
 export const auth = {
+  providers: () => api.get<{ oidc: boolean; saml: boolean }>("/auth/providers").then((r) => r.data),
   login: (email: string, password: string) =>
-    api.post<{ token: string; expires_at: string }>(`/auth/login`, { email, password }).then((r) => r.data),
+    api.post<{ expires_at: string }>(`/auth/login`, { email, password }).then((r) => r.data),
   me:    () => api.get<{ user_id: string; org_id: string; email: string; roles: string[] }>("/auth/me").then((r) => r.data),
   logout: () => api.post(`/auth/logout`).then((r) => r.data),
   oidcStart: () => api.get<{ authorize_url: string }>(`/auth/oidc/start`).then((r) => r.data),
+};
+
+// --------- Per-user preferences (Phase 1: GET/PUT /api/v1/me/preferences) ---------
+export type ThemePreference = "system" | "light" | "dark";
+export interface UserPreferences { theme: ThemePreference; updated_at?: string }
+export const mePreferences = {
+  get: () => api.get<UserPreferences>("/me/preferences").then((r) => r.data),
+  put: (body: Partial<UserPreferences>) => api.put<UserPreferences>("/me/preferences", body).then((r) => r.data),
 };
 
 // --------- API tokens (Personal Access Tokens) ---------
@@ -5344,7 +6101,7 @@ export const apiTokens = {
 
 export type RegistryKind =
   | "docker-hub" | "ghcr" | "ecr" | "gcr" | "acr"
-  | "quay" | "harbor" | "gitlab" | "jfrog";
+  | "quay" | "harbor" | "gitlab" | "jfrog" | "generic-v2" | "nexus" | "openshift" | "ibmcloud";
 
 export type RegistryAuthKind =
   | "static" | "aws-iam-role" | "gcp-service-account" | "azure-managed-id" | "none";
@@ -5403,6 +6160,14 @@ export interface RegistryImageRow {
   high: number;
 }
 
+export interface RegistryImageParams {
+  q?: string; scan_status?: string; severity?: string; sort?: string; order?: "asc" | "desc"; limit?: number; offset?: number;
+}
+export interface RegistryImageResponse {
+  registry_id: string; images: RegistryImageRow[]; total: number; limit: number; offset: number; has_more: boolean; sort: string; order: "asc" | "desc";
+  summary: { total: number; scanned: number; unscanned: number; critical: number; high: number };
+}
+
 export interface RegistryTestResult {
   ok: boolean;
   images_visible?: number;
@@ -5456,8 +6221,17 @@ export const registries = {
   syncNow:(id: string) => api.post<RegistrySyncResult>(`/registries/${id}/sync-now`).then((r) => r.data),
   cancelScans: (id: string) =>
     api.post<RegistryCancelScansResult>(`/registries/${id}/cancel-scans`).then((r) => r.data),
-  images: (id: string, params: { q?: string; limit?: number; offset?: number } = {}) =>
-    api.get<{ images: RegistryImageRow[]; total: number; limit: number; offset: number }>(`/registries/${id}/images`, { params: { ...params, q: params.q || undefined } }).then((r) => r.data),
+  images: (id: string, params: RegistryImageParams = {}) =>
+    api.get<RegistryImageResponse>(`/registries/${encodeURIComponent(id)}/images`, { params }).then((r) => r.data),
+  imagesCSV: async (id: string, params: RegistryImageParams = {}, shouldDownload?: ScanInventoryDownloadGuard) => {
+    const filters = { ...params }; delete filters.limit; delete filters.offset;
+    const response = await api.get<Blob>(`/registries/${encodeURIComponent(id)}/images.csv`, { params: filters, responseType: "blob" });
+    const total = Number(response.headers["x-export-total"]), limit = Number(response.headers["x-export-limit"]), truncated = response.headers["x-export-truncated"];
+    if (!/^\d+$/.test(String(response.headers["x-export-total"])) || !Number.isSafeInteger(total) || total < 0 || limit !== 100000 || !["true", "false"].includes(String(truncated)) || (truncated === "true") !== (total > limit)) throw new Error("Registry image export scope could not be confirmed.");
+    assertInventoryDownloadCurrent(shouldDownload);
+  const blob = response.data instanceof Blob ? response.data : new Blob([response.data]); const url = URL.createObjectURL(blob); const anchor = document.createElement("a"); anchor.href = url; anchor.download = "constellation-registry-images.csv"; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
+    return { total, exported: Math.min(total, limit), limit, truncated: truncated === "true" };
+  },
 };
 
 // Wave N5 — Backup / Restore.
@@ -5477,6 +6251,14 @@ export interface BackupSummary {
   error?: string;
 }
 
+export interface BackupInventoryParams extends ScanInventoryParams { status?: string; mode?: string; signed?: string }
+export interface BackupInventoryRow extends BackupSummary { org_id: string }
+export interface BackupInventoryResponse {
+ backups: BackupInventoryRow[]; org_id: string; filters: { q: string; status: string; mode: string; signed: string };
+ total: number; has_more: boolean; summary: Record<string, number>; latest_success: BackupInventoryRow | null;
+ limit: number; offset: number; sort: string; order: "asc" | "desc"; source_complete: boolean; summary_scope: string;
+}
+
 export interface BackupSchedule {
   cron_expr: string;
   enabled: boolean;
@@ -5490,6 +6272,7 @@ export interface BackupSchedule {
 }
 
 export interface BackupManifestDTO {
+  verified: boolean;
   format_version: string;
   org_id: string;
   org_name: string;
@@ -5590,17 +6373,22 @@ export const vulndbApi = {
 };
 
 export const backupsApi = {
+  inventory: (params: BackupInventoryParams = {}) => api.get<BackupInventoryResponse>("/backups/inventory", { params }).then(r => r.data),
+  inventoryCSV: async (params: BackupInventoryParams, expectedOrgID: string, shouldDownload?: ScanInventoryDownloadGuard) => {
+    if (!expectedOrgID?.trim()) throw new Error("An available organization is required to export backup metadata.");
+    return downloadScanInventoryCSV("/backups/inventory.csv", params, "constellation-backup-metadata.csv", shouldDownload, { "x-export-org-id": expectedOrgID, "x-export-scope": "matching_owned_backup_runs", "x-export-limit": "100000" });
+  },
   list: () => api.get<{ backups: BackupSummary[] }>("/backups").then((r) => r.data.backups),
   get: (id: string) => api.get<BackupSummary>(`/backups/${id}`).then((r) => r.data),
   create: (body: { sign_mode?: string }) =>
     api.post<{ id: string; status: string }>("/backups", body).then((r) => r.data),
   downloadURL: (id: string) => `/api/v1/backups/${id}/download`,
-  download: (id: string) => downloadAPIFile(`/backups/${id}/download`, `backup-${id}.tar.gz`),
+  download: (id: string, shouldDownload?: ScanInventoryDownloadGuard) => downloadAPIFile(`/backups/${id}/download`, `backup-${id}.tar.gz`, shouldDownload),
   verify: (file: File) =>
     api.post<BackupManifestDTO>("/backups/verify", file, {
       headers: { "Content-Type": "application/octet-stream" },
     }).then((r) => r.data),
-  restore: (file: File, opts: { on_conflict?: "skip" | "overwrite"; allow_unverified?: boolean }) =>
+  restore: (file: File, opts: { on_conflict?: "skip" | "overwrite" }) =>
     api.post(`/backups/restore`, file, {
       params: opts,
       headers: { "Content-Type": "application/octet-stream" },

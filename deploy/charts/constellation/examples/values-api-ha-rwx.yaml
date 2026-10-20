@@ -1,0 +1,31 @@
+# API high availability with durable packet evidence.
+#
+# validate.yaml rejects api.replicas > 1 with a ReadWriteOnce PCAP claim: the
+# captures are files, and two replicas writing one RWO volume is a data race.
+# This profile is the supported answer: a ReadWriteMany claim (NFS, CephFS,
+# Longhorn RWX, EFS, Azure Files, ...) shared by every replica. Create the PVC
+# first (it must be Bound), then install with this file on top of your values.
+#
+#   kubectl -n constellation-system apply -f - <<'PVC'
+#   apiVersion: v1
+#   kind: PersistentVolumeClaim
+#   metadata: { name: constellation-pcap }
+#   spec:
+#     accessModes: [ReadWriteMany]
+#     storageClassName: nfs-rwx        # any RWX-capable class
+#     resources: { requests: { storage: 50Gi } }
+#   PVC
+#
+# Without RWX storage keep api.replicas: 1 (pcapStorage RWO) or leave packet
+# evidence disabled (api.pcapStorage.enabled=false) and scale the API freely.
+highAvailability:
+  enabled: true
+api:
+  replicas: 3
+  leaderElection:
+    enabled: true
+  pcapStorage:
+    enabled: true
+    existingClaim: constellation-pcap
+    accessMode: ReadWriteMany
+    retentionEnabled: true

@@ -42,6 +42,7 @@ func podReviewWithUser(raw []byte, user string, groups []string) *admissionv1.Ad
 }
 
 func TestEvaluate_RuleMatchesByUser(t *testing.T) {
+	t.Parallel()
 	e := &PolicyEngine{Rules: []Rule{{
 		ID:    "block-ci-user",
 		Mode:  "enforce",
@@ -70,6 +71,7 @@ func TestEvaluate_RuleMatchesByUser(t *testing.T) {
 }
 
 func TestEvaluate_RuleMatchesByGroup(t *testing.T) {
+	t.Parallel()
 	e := &PolicyEngine{Rules: []Rule{{
 		ID:    "block-unauth-group",
 		Mode:  "enforce",
@@ -199,6 +201,7 @@ func riskyRBACFixture() RBACResolver {
 }
 
 func TestEvaluate_SABindRiskyRoleDenies(t *testing.T) {
+	t.Parallel()
 	yes := true
 	e := &PolicyEngine{
 		Rules: []Rule{{
@@ -238,6 +241,7 @@ func TestEvaluate_SABindRiskyRoleDenies(t *testing.T) {
 }
 
 func TestEvaluate_SABindRiskyRoleClusterRoleBinding(t *testing.T) {
+	t.Parallel()
 	yes := true
 	clusterRoles := []rbacv1.ClusterRole{{
 		ObjectMeta: metav1.ObjectMeta{Name: "secret-peeker"},
@@ -265,6 +269,7 @@ func TestEvaluate_SABindRiskyRoleClusterRoleBinding(t *testing.T) {
 }
 
 func TestEvaluate_SABindRiskyRoleNoResolverFailsOpen(t *testing.T) {
+	t.Parallel()
 	yes := true
 	e := &PolicyEngine{Rules: []Rule{{
 		ID: "rr", Mode: "enforce", Kinds: []string{"Pod"},
@@ -283,6 +288,7 @@ func TestEvaluate_SABindRiskyRoleNoResolverFailsOpen(t *testing.T) {
 // subjects, so this group binding granted effective cluster-admin while the rule
 // returned 0 flags and failed open.
 func TestEvaluate_SABindRiskyRole_ClusterGroupSubject(t *testing.T) {
+	t.Parallel()
 	yes := true
 	clusterRoles := []rbacv1.ClusterRole{{
 		ObjectMeta: metav1.ObjectMeta{Name: "cluster-admin"},
@@ -313,6 +319,7 @@ func TestEvaluate_SABindRiskyRole_ClusterGroupSubject(t *testing.T) {
 // C3: a RoleBinding to the namespace group system:serviceaccounts:<ns> reaches
 // every SA in that namespace, but NOT SAs in other namespaces.
 func TestEvaluate_SABindRiskyRole_NamespaceGroupSubject(t *testing.T) {
+	t.Parallel()
 	yes := true
 	clusterRoles := []rbacv1.ClusterRole{{
 		ObjectMeta: metav1.ObjectMeta{Name: "secret-peeker"},
@@ -343,6 +350,7 @@ func TestEvaluate_SABindRiskyRole_NamespaceGroupSubject(t *testing.T) {
 // C3: a malformed UserMatch/GroupMatch regex must be rejected at load time rather
 // than silently failing open at evaluation.
 func TestRuleFromYAML_InvalidIdentityRegexRejected(t *testing.T) {
+	t.Parallel()
 	for _, field := range []string{"userMatch", "groupMatch"} {
 		spec := "spec:\n  match:\n    kinds: [Pod]\n  identity:\n    " + field + ": \"([\"\n"
 		if _, _, err := RuleFromYAML("id", "title", "", "enforce", spec); err == nil {
@@ -352,6 +360,7 @@ func TestRuleFromYAML_InvalidIdentityRegexRejected(t *testing.T) {
 }
 
 func TestRuleFromYAML_Identity(t *testing.T) {
+	t.Parallel()
 	spec := `
 spec:
   match:

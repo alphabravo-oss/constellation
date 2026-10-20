@@ -17,7 +17,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
 	"time"
 
@@ -27,12 +26,12 @@ import (
 
 // ExportOptions configures Export.
 type ExportOptions struct {
-	OrgID         string
-	OrgName       string
-	Out           io.Writer
-	GeneratedBy   string
+	OrgID          string
+	OrgName        string
+	Out            io.Writer
+	GeneratedBy    string
 	SourceInstance string
-	Sign          SignerOptions
+	Sign           SignerOptions
 	// AuditRecentWindow caps the audit_events_recent export at the most recent N. Default
 	// 30 days. Set to 0 to disable the audit export entirely.
 	AuditRecentWindow time.Duration
@@ -40,10 +39,10 @@ type ExportOptions struct {
 
 // ExportResult summarizes what was written.
 type ExportResult struct {
-	Manifest Manifest
-	Bytes    int64
+	Manifest       Manifest
+	Bytes          int64
 	SignerIdentity string
-	SignMode SignMode
+	SignMode       SignMode
 }
 
 // Export streams a backup tarball for the org identified by opts.OrgID into opts.Out.
@@ -116,7 +115,7 @@ func Export(ctx context.Context, pool *pgxpool.Pool, opts ExportOptions) (*Expor
 	if err != nil {
 		return nil, fmt.Errorf("marshal manifest: %w", err)
 	}
-	sig, cert, identity, err := Sign(manifestBytes, opts.Sign)
+	sig, cert, identity, err := Sign(ctx, manifestBytes, opts.Sign)
 	if err != nil {
 		return nil, fmt.Errorf("sign manifest: %w", err)
 	}
@@ -126,7 +125,7 @@ func Export(ctx context.Context, pool *pgxpool.Pool, opts ExportOptions) (*Expor
 		manifest.SignerIdentity = identity
 		manifestBytes, _ = json.MarshalIndent(manifest, "", "  ")
 		// Re-sign to bind identity into the signed bytes.
-		sig, cert, identity, err = Sign(manifestBytes, opts.Sign)
+		sig, cert, identity, err = Sign(ctx, manifestBytes, opts.Sign)
 		if err != nil {
 			return nil, fmt.Errorf("re-sign manifest: %w", err)
 		}
@@ -176,7 +175,7 @@ func exportOne(ctx context.Context, pool *pgxpool.Pool, table, orgID string, aud
 	fd := rows.FieldDescriptions()
 	colNames := make([]string, len(fd))
 	for i, f := range fd {
-		colNames[i] = string(f.Name)
+		colNames[i] = f.Name
 	}
 
 	var buf bytes.Buffer
@@ -430,17 +429,9 @@ func (c *countingWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-// ExportToFile is a convenience that writes a backup to a local path. Closes the file
-// on return (via os.File.Close()) and returns the result.
+// ExportToFile atomically replaces an explicit local output with a private file.
+// Existing regular outputs may be overwritten; caller-owned parent permissions
+// are never changed. A failed producer preserves the previous complete output.
 func ExportToFile(ctx context.Context, pool *pgxpool.Pool, path string, opts ExportOptions) (*ExportResult, error) {
-	f, err := os.Create(path)
-	if err != nil {
-		return nil, err
-	}
-	opts.Out = f
-	res, err := Export(ctx, pool, opts)
-	if cerr := f.Close(); cerr != nil && err == nil {
-		err = cerr
-	}
-	return res, err
+	return exportArtifact(ctx, pool, path, false, opts)
 }

@@ -110,13 +110,14 @@ func slug(s string) string {
 	prev := false
 	for i := 0; i < len(s); i++ {
 		c := s[i]
-		if c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' {
+		switch {
+		case c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-':
 			out = append(out, c)
 			prev = false
-		} else if c >= 'A' && c <= 'Z' {
+		case c >= 'A' && c <= 'Z':
 			out = append(out, c+32)
 			prev = false
-		} else if !prev {
+		case !prev:
 			out = append(out, '-')
 			prev = true
 		}

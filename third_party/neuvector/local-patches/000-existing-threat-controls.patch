@@ -1,0 +1,69 @@
+From: Constellation maintainers
+Subject: [provenance only] Record existing threat controls in the vendor snapshot
+Upstream-base: 4247e24561a9cd225db73a7cfaf5c7b2c99ba0a5
+Recorded: 2026-10-17
+Existing-snapshot: 6a8057c2ff92914587c121a4557a5bc6260fba9d
+
+This patch records pre-existing vendored differences; it introduces no new
+behavior relative to the reviewed existing snapshot. The existing control IPC
+allows threat toggles; existing TCP_SMALL_MSS and SSL_VER_2OR3 defaults are off.
+The prior README/NOTICE assertion of a pristine upstream mirror was stale.
+Preserve these exact differences explicitly when refreshing the vendor source.
+
+--- a/dp/ctrl.c
++++ b/dp/ctrl.c
+@@ -1258,6 +1258,19 @@
+     }
+ 
+     g_sess_id_to_clear = 0;
++    return 0;
++}
++
++// Constellation: runtime toggle of a built-in DPI threat signature. threat_config[]
++// is global and dpi_threat_trigger() checks dpi_threat_status() before firing, so this
++// takes effect live on all data threads with no restart. Used to enable/disable noisy
++// weak-TLS version detections (SSLv3 etc) from the console.
++static int dp_ctrl_set_threat(json_t *msg)
++{
++    uint32_t idx = json_integer_value(json_object_get(msg, "threat"));
++    bool enable = json_is_true(json_object_get(msg, "enable"));
++    dpi_set_threat_status(idx, enable);
++    DEBUG_CTRL("set threat %u enable=%d\n", idx, enable);
+     return 0;
+ }
+ 
+@@ -2450,6 +2463,8 @@
+             ret = dp_ctrl_list_session(msg);
+         } else if (strcmp(key, "ctrl_clear_session") == 0) {
+             ret = dp_ctrl_clear_session(msg);
++        } else if (strcmp(key, "ctrl_set_threat") == 0) {
++            ret = dp_ctrl_set_threat(msg);
+         } else if (strcmp(key, "ctrl_list_meter") == 0) {
+             ret = dp_ctrl_list_meter(msg);
+         } else if (strcmp(key, "ctrl_set_debug") == 0) {
+--- a/dp/dpi/dpi_log.c
++++ b/dp/dpi/dpi_log.c
+@@ -86,13 +86,21 @@
+ [DPI_THRT_TCP_SPLIT_HDSHK] = {true, DPI_ACTION_ALLOW, },
+ [DPI_THRT_TCP_NODATA] = {false, DPI_ACTION_RESET, }, // FIXME: disabled because tap rx is prone to packet loss
+ [DPI_THRT_TCP_SMALL_WINDOW] = {false, DPI_ACTION_RESET, },
+-[DPI_THRT_TCP_SMALL_MSS] = {true, DPI_ACTION_DROP, },
++// Constellation: TCP_SMALL_MSS disabled by default — a small TCP MSS (<256) is common
++// on public ingress (VPNs, mobile carriers, PMTU) so it false-positives as a "threat" on
++// ordinary external traffic. Consistent with the other tap-mode-noisy TCP checks below
++// (TCP_NODATA/SMALL_WINDOW) that are also off.
++[DPI_THRT_TCP_SMALL_MSS] = {false, DPI_ACTION_ALLOW, },
+ [DPI_THRT_PING_DEATH] = {true, DPI_ACTION_DROP, },
+ [DPI_THRT_DNS_LOOP_PTR] = {true, DPI_ACTION_DROP, },
+ [DPI_THRT_SSH_VER_1] = {true, DPI_ACTION_ALLOW, },
+ [DPI_THRT_SSL_HEARTBLEED] = {true, DPI_ACTION_DROP, },
+ [DPI_THRT_SSL_CIPHER_OVF] = {true, DPI_ACTION_DROP, },
+-[DPI_THRT_SSL_VER_2OR3] = {true, DPI_ACTION_DROP, },
++// Constellation: SSLv3-version flagging disabled by default — in tap mode dp reads the
++// legacy ClientHello record version (0x0300), which modern TLS 1.2/1.3 clients set for
++// compatibility, so it false-positives on ordinary HTTPS (e.g. ingress traffic). Consistent
++// with TLS_1DOT0/1DOT1 below, which are also off unless explicitly enabled by config.
++[DPI_THRT_SSL_VER_2OR3] = {false, DPI_ACTION_ALLOW, },
+ [DPI_THRT_SSL_TLS_1DOT0] = {false, DPI_ACTION_ALLOW, },
+ [DPI_THRT_HTTP_NEG_LEN] = {true, DPI_ACTION_DROP, },
+ [DPI_THRT_HTTP_SMUGGLING] = {true, DPI_ACTION_DROP, },

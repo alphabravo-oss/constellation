@@ -1,3 +1,5 @@
+//go:build integration
+
 package findings
 
 import (
@@ -14,8 +16,9 @@ import (
 )
 
 func TestCVE_AffectedUsesCanonicalImageResults(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
-	defer d.Close()
+	t.Cleanup(d.Close)
 
 	ctx := context.Background()
 	pool := d.Pool()
@@ -82,7 +85,7 @@ INSERT INTO image_scan_findings (
 		t.Fatalf("image scan finding: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/cve/"+cveID+"/affected", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/cve/"+cveID+"/affected", nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", cveID)

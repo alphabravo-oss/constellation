@@ -1,3 +1,5 @@
+//go:build integration
+
 package handler
 
 import (
@@ -18,7 +20,7 @@ import (
 // optional chi {id} route param.
 func usersReqBody(t *testing.T, method, path, idParam, body string, h http.HandlerFunc, subj Subject) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), method, path, strings.NewReader(body))
 	rctx := chi.NewRouteContext()
 	if idParam != "" {
 		rctx.URLParams.Add("id", idParam)

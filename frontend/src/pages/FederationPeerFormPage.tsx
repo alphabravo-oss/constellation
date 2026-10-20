@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "@tanstack/react-router";
 
 import { federation } from "@/api/client";
 import { PageHeader } from "@/components/ui/page";
@@ -25,7 +25,7 @@ export function FederationPeerFormPage() {
     mutationFn: () => federation.transition("join", masterID, clusterName),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["fed-state"] });
-      navigate("/federation");
+      navigate({ href: "/federation" });
     },
   });
 
@@ -67,7 +67,7 @@ export function FederationPeerFormPage() {
             <Button type="submit" variant="primary" size="lg" disabled={!masterID || transit.isPending}>
               {transit.isPending ? "Joining…" : "Join federation"}
             </Button>
-            <Button type="button" variant="ghost" size="lg" onClick={() => navigate("/federation")}>Cancel</Button>
+            <Button type="button" variant="ghost" size="lg" onClick={() => navigate({ href: "/federation" })}>Cancel</Button>
           </div>
         </form>
       </Card>

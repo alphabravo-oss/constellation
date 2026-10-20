@@ -121,20 +121,20 @@ export function useHotkey(combo: string, handler: (e: KeyboardEvent) => void, op
 }
 
 export const HOTKEY_CATALOG: Array<{ combo: string; label: string; group: string }> = [
-  { combo: "g d", label: "Go to Dashboard",   group: "Navigation" },
-  { combo: "g f", label: "Go to Findings",    group: "Navigation" },
-  { combo: "g h", label: "Go to Nodes",       group: "Navigation" },
-  { combo: "g i", label: "Go to Images",      group: "Navigation" },
-  { combo: "g a", label: "Go to Assets",      group: "Navigation" },
-  { combo: "g c", label: "Go to Compliance",  group: "Navigation" },
-  { combo: "g n", label: "Go to Network Map", group: "Navigation" },
-  { combo: "g p", label: "Go to Policies",    group: "Navigation" },
-  { combo: "g r", label: "Go to Runtime",     group: "Navigation" },
-  { combo: "g v", label: "Go to CVE DB",      group: "Navigation" },
-  { combo: "Mod+k", label: "Open Command Palette", group: "General" },
-  { combo: "/",     label: "Focus search",         group: "General" },
-  { combo: "?",     label: "Show keyboard help",   group: "General" },
-  { combo: "Escape", label: "Close drawer / modal", group: "General" },
+  { combo: "g d", label: "Go to overview",     group: "Navigation" },
+  { combo: "g f", label: "Go to findings",     group: "Navigation" },
+  { combo: "g h", label: "Go to nodes",        group: "Navigation" },
+  { combo: "g i", label: "Go to images",       group: "Navigation" },
+  { combo: "g a", label: "Go to assets",       group: "Navigation" },
+  { combo: "g c", label: "Go to compliance",   group: "Navigation" },
+  { combo: "g n", label: "Go to network map",  group: "Navigation" },
+  { combo: "g p", label: "Go to policies",     group: "Navigation" },
+  { combo: "g r", label: "Go to runtime activity", group: "Navigation" },
+  { combo: "g v", label: "Go to CVE database", group: "Navigation" },
+  { combo: "Mod+k", label: "Open command palette", group: "General" },
+  { combo: "/",     label: "Search",               group: "General" },
+  { combo: "?",     label: "Show keyboard shortcuts", group: "General" },
+  { combo: "Escape", label: "Close dialog",        group: "General" },
 ];
 
 export function isMacOS(): boolean { return isMac; }

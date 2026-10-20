@@ -1,29 +1,24 @@
+//go:build integration
+
 package compliance
 
 import (
 	"context"
-	"os"
 	"testing"
+
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/alphabravocompany/constellation/internal/db"
 )
 
-// openTestDB mirrors the package-internal helper in internal/handler; each
-// sub-package owns its own copy so its tests are self-contained. Skips when no
-// test database is reachable.
+func TestMain(m *testing.M) { pgtest.Main(m) }
+
+// openTestDB returns a *db.DB on this test's private, migrated database.
 func openTestDB(t *testing.T) *db.DB {
 	t.Helper()
-	url := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-	if url == "" {
-		url = "postgres://test:test@localhost:15433/constellation_test?sslmode=disable"
-	}
-	d, err := db.Connect(context.Background(), url)
-	if err != nil {
-		t.Skipf("skipping: cannot reach test DB (%v)", err)
-	}
-	return d
+	return db.NewFromPool(pgtest.Pool(t))
 }
 
 // ensureNetworkPolicyLifecycleTables is a per-package test-helper copy (the

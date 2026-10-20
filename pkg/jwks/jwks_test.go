@@ -41,6 +41,7 @@ func ecJWK(t *testing.T, kid string, k *ecdsa.PublicKey) map[string]any {
 }
 
 func TestParseKey_RSA(t *testing.T) {
+	t.Parallel()
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -63,6 +64,7 @@ func TestParseKey_RSA(t *testing.T) {
 }
 
 func TestParseKey_EC(t *testing.T) {
+	t.Parallel()
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -85,6 +87,7 @@ func TestParseKey_EC(t *testing.T) {
 }
 
 func TestParseKey_Errors(t *testing.T) {
+	t.Parallel()
 	if _, _, err := ParseKey(map[string]any{"kty": "oct"}); err == nil {
 		t.Fatalf("expected error for unsupported kty")
 	}
@@ -94,6 +97,7 @@ func TestParseKey_Errors(t *testing.T) {
 }
 
 func TestClient_FetchesAndCaches(t *testing.T) {
+	t.Parallel()
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)

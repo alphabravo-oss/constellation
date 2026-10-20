@@ -7,6 +7,7 @@ import (
 )
 
 func TestAuthorizeOrgScope(t *testing.T) {
+	t.Parallel()
 	org := uuid.New()
 	other := uuid.New()
 	assignments := []RoleAssignment{{Role: RoleSecurityAdmin, Scope: Scope{OrgID: org}}}
@@ -23,6 +24,7 @@ func TestAuthorizeOrgScope(t *testing.T) {
 }
 
 func TestAuthorizeClusterScope(t *testing.T) {
+	t.Parallel()
 	org := uuid.New()
 	c1 := uuid.New()
 	c2 := uuid.New()
@@ -46,6 +48,7 @@ func TestAuthorizeClusterScope(t *testing.T) {
 // resource carrying the same namespace on the same cluster — it must never widen to the whole
 // cluster (the over-grant the materializer previously avoided by dropping namespace grants).
 func TestAuthorizeNamespaceScope(t *testing.T) {
+	t.Parallel()
 	org := uuid.New()
 	c1 := uuid.New()
 	c2 := uuid.New()
@@ -75,6 +78,7 @@ func TestAuthorizeNamespaceScope(t *testing.T) {
 }
 
 func TestRoleVerbsMonotonic(t *testing.T) {
+	t.Parallel()
 	// Each higher tier must include every verb of the prior tier.
 	tiers := []string{RoleAuditor, RoleAnalyst, RoleClusterAdmin, RoleSecurityAdmin, RoleGlobalAdmin}
 	for i := 1; i < len(tiers); i++ {
@@ -90,6 +94,7 @@ func TestRoleVerbsMonotonic(t *testing.T) {
 }
 
 func TestUnknownRolesGrantNoPermissions(t *testing.T) {
+	t.Parallel()
 	if IsRole("SuperAdmin") {
 		t.Fatalf("SuperAdmin must not be accepted as a current product role")
 	}

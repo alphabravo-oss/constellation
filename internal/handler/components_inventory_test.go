@@ -1,3 +1,5 @@
+//go:build integration
+
 package handler
 
 import (
@@ -71,7 +73,7 @@ INSERT INTO component_heartbeats (
 		t.Fatalf("heartbeats: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/components?cluster_id="+clusterID.String(), nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/components?cluster_id="+clusterID.String(), nil)
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	rec := httptest.NewRecorder()
 	NewComponentsInventory(d).List(rec, req)
@@ -132,7 +134,7 @@ INSERT INTO component_heartbeats (
 	router := chi.NewRouter()
 	router.Get("/api/v1/components/{id}", NewComponentsInventory(d).Get)
 	router.Get("/api/v1/components/{id}/diagnostics", NewComponentsInventory(d).Diagnostics)
-	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/components/"+scannerID.String(), nil)
+	getReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/components/"+scannerID.String(), nil)
 	getReq = getReq.WithContext(WithSubject(getReq.Context(), Subject{UserID: userID, OrgID: orgID}))
 	getRec := httptest.NewRecorder()
 	router.ServeHTTP(getRec, getReq)
@@ -149,7 +151,7 @@ INSERT INTO component_heartbeats (
 		t.Fatalf("detail = %+v", detail.Component)
 	}
 
-	diagReq := httptest.NewRequest(http.MethodGet, "/api/v1/components/"+scannerID.String()+"/diagnostics", nil)
+	diagReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/components/"+scannerID.String()+"/diagnostics", nil)
 	diagReq = diagReq.WithContext(WithSubject(diagReq.Context(), Subject{UserID: userID, OrgID: orgID}))
 	diagRec := httptest.NewRecorder()
 	router.ServeHTTP(diagRec, diagReq)
@@ -197,13 +199,217 @@ INSERT INTO component_heartbeats (
 		t.Fatalf("debug gates = %+v", diag.Debug)
 	}
 
-	missingReq := httptest.NewRequest(http.MethodGet, "/api/v1/components/"+uuid.NewString()+"/diagnostics", nil)
+	missingReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/components/"+uuid.NewString()+"/diagnostics", nil)
 	missingReq = missingReq.WithContext(WithSubject(missingReq.Context(), Subject{UserID: userID, OrgID: orgID}))
 	missingRec := httptest.NewRecorder()
 	router.ServeHTTP(missingRec, missingReq)
 	if missingRec.Code != http.StatusNotFound {
 		t.Fatalf("missing diagnostics status: %d body: %s", missingRec.Code, missingRec.Body.String())
 	}
+}
+
+func TestComponentsInventoryRequiredAndOptionalRoleRollups(t *testing.T) {
+	d := openTestDB(t)
+	t.Cleanup(d.Close)
+
+	ctx := context.Background()
+	pool := d.Pool()
+	var regclass string
+	if err := pool.QueryRow(ctx, `SELECT COALESCE(to_regclass('public.component_heartbeats')::text, '')`).Scan(&regclass); err != nil || regclass == "" {
+		t.Skipf("skipping: component_heartbeats migration not applied (%v)", err)
+	}
+
+	orgID, clusterID, emptyClusterID := uuid.New(), uuid.New(), uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, display_name) VALUES ($1, $2, $2)`, orgID, "inventory-roles-"+orgID.String()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgID); err != nil {
+			t.Errorf("delete inventory roles org: %v", err)
+		}
+	})
+	for _, cluster := range []uuid.UUID{clusterID, emptyClusterID} {
+		if _, err := pool.Exec(ctx, `INSERT INTO clusters (id, org_id, name) VALUES ($1, $2, $3)`, cluster, orgID, "inventory-roles-"+cluster.String()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scannerToken := "inventory-roles-scanner-" + uuid.NewString()
+	if _, err := pool.Exec(ctx, `INSERT INTO scanner_tokens (org_id, name, token_hash) VALUES ($1, $2, $3)`,
+		orgID, "inventory-roles-scanner", tokenHashForTest(scannerToken)); err != nil {
+		t.Fatal(err)
+	}
+
+	roles := []struct {
+		component string
+		role      string
+		scope     string
+		kind      string
+		required  bool
+	}{
+		{"api", "control-plane", "org", "deployment", false},
+		{"frontend", "control-plane", "org", "deployment", false},
+		{"operator", "controller", "cluster", "deployment", true},
+		{"scanner", "scanner", "cluster", "deployment", true},
+		{"vulndb-importer", "updater", "cluster", "cronjob", true},
+		{"admission", "policy-enforcement", "cluster", "deployment", true},
+		{"runtime-agent", "enforcer", "node", "daemonset", true},
+		{"discoverer", "discovery", "cluster", "deployment", true},
+		{"registry-walker", "registry-scanner", "org", "deployment", false},
+		{"network-policy-applier", "policy-enforcement", "cluster", "deployment", true},
+		{"k8s-compliance-collector", "compliance", "cluster", "cronjob", true},
+		{"compliance-scheduler", "compliance", "org", "deployment", false},
+		{"github-app", "integration", "org", "deployment", false},
+		{"audit-archiver", "audit", "org", "cronjob", false},
+		{"backup", "recovery", "org", "job", false},
+	}
+	subject := Subject{UserID: uuid.New(), OrgID: orgID}
+	inventory := NewComponentsInventory(d)
+	ingestHandler := AnyServiceTokenMiddleware(pool)(http.HandlerFunc(NewHeartbeats(d, nil).Ingest))
+	list := func(t *testing.T, cluster *uuid.UUID) struct {
+		Summary    componentInventorySummaryDTO  `json:"summary"`
+		Rollups    []componentInventoryRollupDTO `json:"rollups"`
+		Components []componentInstanceDTO        `json:"components"`
+	} {
+		t.Helper()
+		path := "/api/v1/components"
+		if cluster != nil {
+			path += "?cluster_id=" + cluster.String()
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+		req = req.WithContext(WithSubject(req.Context(), subject))
+		rec := httptest.NewRecorder()
+		inventory.List(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("list %s: status %d body %s", path, rec.Code, rec.Body.String())
+		}
+		var response struct {
+			Summary    componentInventorySummaryDTO  `json:"summary"`
+			Rollups    []componentInventoryRollupDTO `json:"rollups"`
+			Components []componentInstanceDTO        `json:"components"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		return response
+	}
+	assertInventory := func(t *testing.T, cluster *uuid.UUID, observed map[string]bool) {
+		t.Helper()
+		response := list(t, cluster)
+		rollups := make(map[string]componentInventoryRollupDTO, len(response.Rollups))
+		for _, rollup := range response.Rollups {
+			if _, duplicate := rollups[rollup.Component]; duplicate {
+				t.Fatalf("duplicate rollup %q", rollup.Component)
+			}
+			rollups[rollup.Component] = rollup
+		}
+		wantRollups, wantHealthy, wantMissing, wantInstances := 0, 0, 0, 0
+		for _, role := range roles {
+			if cluster != nil && role.scope == "org" {
+				if _, found := rollups[role.component]; found {
+					t.Errorf("org-scoped %q included in cluster rollups", role.component)
+				}
+				continue
+			}
+			wantRollups++
+			rollup, found := rollups[role.component]
+			if !found {
+				t.Errorf("missing rollup for %q", role.component)
+				continue
+			}
+			wantStatus := "not-observed"
+			wantMissingCount, wantInstanceCount := 0, 0
+			if role.required {
+				wantStatus = "missing"
+				wantMissing++
+				wantMissingCount = 1
+			}
+			if observed[role.component] {
+				wantStatus = "healthy"
+				wantHealthy++
+				wantInstances++
+				wantInstanceCount = 1
+				if role.required {
+					wantMissing--
+				}
+				wantMissingCount = 0
+			}
+			if rollup.Status != wantStatus || rollup.Expected != role.required || rollup.Missing != wantMissingCount ||
+				rollup.Instances != wantInstanceCount || rollup.Healthy != wantInstanceCount ||
+				rollup.Role != role.role || rollup.Scope != role.scope || rollup.Kind != role.kind {
+				t.Errorf("%q rollup = %+v; want status=%q expected=%t role=%q scope=%q kind=%q instances=%d missing=%d",
+					role.component, rollup, wantStatus, role.required, role.role, role.scope, role.kind, wantInstanceCount, wantMissingCount)
+			}
+		}
+		if len(rollups) != wantRollups || len(response.Components) != wantInstances || response.Summary.Components != wantRollups ||
+			response.Summary.TotalInstances != wantInstances || response.Summary.Healthy != wantHealthy || response.Summary.Missing != wantMissing ||
+			response.Summary.Degraded != 0 || response.Summary.Stale != 0 || response.Summary.Drift != 0 || response.Summary.Crashlooping != 0 {
+			t.Errorf("inventory rollups=%d instances=%d summary=%+v; want rollups=%d instances=%d healthy=%d missing=%d",
+				len(rollups), len(response.Components), response.Summary, wantRollups, wantInstances, wantHealthy, wantMissing)
+		}
+		for _, component := range response.Components {
+			if !observed[component.Component] || component.Status != "healthy" {
+				t.Errorf("unexpected component instance: %+v", component)
+			}
+			if component.Scope == "org" && component.ClusterID != nil || component.Scope != "org" && (component.ClusterID == nil || *component.ClusterID != clusterID) {
+				t.Errorf("component instance has incorrect scope: %+v", component)
+			}
+			if cluster != nil && (component.ClusterID == nil || *component.ClusterID != *cluster) {
+				t.Errorf("component outside requested cluster: %+v", component)
+			}
+		}
+	}
+	ingest := func(t *testing.T, component string, cluster *uuid.UUID) {
+		t.Helper()
+		body := heartbeatBody{Component: component, Version: "test", Commit: "abcdef123456", Hostname: component + "-fixture", UptimeSeconds: 60}
+		if cluster != nil {
+			body.ClusterID = cluster.String()
+		}
+		payload, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/heartbeats", strings.NewReader(string(payload)))
+		req.Header.Set("Authorization", "Bearer "+scannerToken)
+		rec := httptest.NewRecorder()
+		ingestHandler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("ingest %q: status %d body %s", component, rec.Code, rec.Body.String())
+		}
+	}
+
+	t.Run("not observed", func(t *testing.T) {
+		assertInventory(t, nil, nil)
+		assertInventory(t, &clusterID, nil)
+	})
+	ingest(t, "api", nil)
+	ingest(t, "operator", &clusterID)
+	t.Run("partially ingested", func(t *testing.T) {
+		assertInventory(t, nil, map[string]bool{"api": true, "operator": true})
+		assertInventory(t, &clusterID, map[string]bool{"operator": true})
+	})
+	for _, role := range roles {
+		if role.component == "api" || role.component == "operator" {
+			continue
+		}
+		if role.scope == "org" {
+			ingest(t, role.component, nil)
+		} else {
+			ingest(t, role.component, &clusterID)
+		}
+	}
+	allObserved := make(map[string]bool, len(roles))
+	clusterObserved := make(map[string]bool)
+	for _, role := range roles {
+		allObserved[role.component] = true
+		if role.scope != "org" {
+			clusterObserved[role.component] = true
+		}
+	}
+	t.Run("all roles healthy", func(t *testing.T) {
+		assertInventory(t, nil, allObserved)
+		assertInventory(t, &clusterID, clusterObserved)
+		assertInventory(t, &emptyClusterID, nil)
+	})
 }
 
 func TestComponentDiagnosticsForRuntimeAgentMetadata(t *testing.T) {
@@ -341,7 +547,7 @@ VALUES ($1, $2, $3, 'linux-node', 12, 1, 2, 3, '{"checks":[]}'::jsonb, $4)`,
 
 	router := chi.NewRouter()
 	router.Get("/api/v1/components/{id}/diagnostics", NewComponentsInventory(d).Diagnostics)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/components/"+heartbeatID.String()+"/diagnostics", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/components/"+heartbeatID.String()+"/diagnostics", nil)
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -380,4 +586,295 @@ VALUES ($1, $2, $3, 'linux-node', 12, 1, 2, 3, '{"checks":[]}'::jsonb, $4)`,
 	if strings.Contains(body, "containerd.sock") || strings.Contains(body, "systemd") || strings.Contains(body, "example/api:dev") {
 		t.Fatalf("diagnostics leaked raw node payload: %s", body)
 	}
+}
+
+func TestComponentsInventoryRoleDiagnosticsAPI(t *testing.T) {
+	d := openTestDB(t)
+	t.Cleanup(d.Close)
+	ctx := context.Background()
+	pool := d.Pool()
+	var regclass string
+	if err := pool.QueryRow(ctx, `SELECT COALESCE(to_regclass('public.component_heartbeats')::text, '')`).Scan(&regclass); err != nil || regclass == "" {
+		t.Skipf("skipping: component_heartbeats migration not applied (%v)", err)
+	}
+
+	orgID, foreignOrgID := uuid.New(), uuid.New()
+	clusterID := uuid.New()
+	for _, id := range []uuid.UUID{orgID, foreignOrgID} {
+		if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, display_name) VALUES ($1, $2, $2)`, id, "role-diagnostics-"+id.String()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		if _, err := pool.Exec(context.Background(), `DELETE FROM orgs WHERE id IN ($1, $2)`, orgID, foreignOrgID); err != nil {
+			t.Errorf("delete role diagnostics orgs: %v", err)
+		}
+	})
+	if _, err := pool.Exec(ctx, `INSERT INTO clusters (id, org_id, name) VALUES ($1, $2, 'role-diagnostics')`, clusterID, orgID); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC()
+	operatorID, agentID, scannerID, foreignID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	for _, row := range []struct {
+		id, orgID uuid.UUID
+		component string
+		metadata  string
+	}{
+		{operatorID, orgID, "operator", `{"leader_election":true}`},
+		{agentID, orgID, "runtime-agent", `{"enforcer":{"node":"node-a","dp_status":"ready","ebpf_status":"ready","probe_status":"ready","policy_mode":"monitor"},"token":"agent-secret"}`},
+		{scannerID, orgID, "scanner", `{"active_jobs":1,"idle_capacity":0,"max_concurrent":1,"vulndb":{"enabled":true,"ready":false,"status":"missing-store","error":"secret token leaked"},"token":"scanner-secret"}`},
+		{foreignID, foreignOrgID, "scanner", `{"vulndb":{"enabled":true,"ready":true}}`},
+	} {
+		var rowCluster any
+		if row.orgID == orgID {
+			rowCluster = clusterID
+		}
+		if _, err := pool.Exec(ctx, `
+INSERT INTO component_heartbeats
+    (id, org_id, cluster_id, component, version, commit, hostname, uptime_seconds, metadata, last_seen_at, first_seen_at)
+VALUES ($1, $2, $3, $4, 'test', 'current-commit', $5, 60, $6::jsonb, $7, $7)`,
+			row.id, row.orgID, rowCluster, row.component, row.component+"-"+row.id.String(), row.metadata, now); err != nil {
+			t.Fatalf("insert %s heartbeat: %v", row.component, err)
+		}
+	}
+
+	subject := Subject{UserID: uuid.New(), OrgID: orgID}
+	inventory := NewComponentsInventory(d)
+	router := chi.NewRouter()
+	router.Get("/api/v1/components", inventory.List)
+	router.Get("/api/v1/components/{id}", inventory.Get)
+	router.Get("/api/v1/components/{id}/diagnostics", inventory.Diagnostics)
+	request := func(path string, authenticated bool) *httptest.ResponseRecorder {
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+		if authenticated {
+			req = req.WithContext(WithSubject(req.Context(), subject))
+		}
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+	readDiagnostics := func(t *testing.T, id uuid.UUID) componentDiagnosticsDTO {
+		t.Helper()
+		rec := request("/api/v1/components/"+id.String()+"/diagnostics", true)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("diagnostics %s: status %d body %s", id, rec.Code, rec.Body.String())
+		}
+		var diagnostics componentDiagnosticsDTO
+		if err := json.Unmarshal(rec.Body.Bytes(), &diagnostics); err != nil {
+			t.Fatal(err)
+		}
+		if diagnostics.AdminGate != "manage-org" || diagnostics.Component.ID != id || !diagnostics.Debug.SupportBundleEnabled || diagnostics.Debug.LiveLogsEnabled || diagnostics.Debug.ProfilingEnabled {
+			t.Fatalf("diagnostics contract for %s: %+v", id, diagnostics)
+		}
+		if strings.Contains(rec.Body.String(), "agent-secret") || strings.Contains(rec.Body.String(), "scanner-secret") || strings.Contains(rec.Body.String(), "secret token leaked") {
+			t.Fatalf("diagnostics leaked secret: %s", rec.Body.String())
+		}
+		return diagnostics
+	}
+	checksFor := func(diagnostics componentDiagnosticsDTO) map[string]componentDiagnosticCheck {
+		checks := make(map[string]componentDiagnosticCheck, len(diagnostics.Diagnostics))
+		for _, check := range diagnostics.Diagnostics {
+			checks[check.Key] = check
+		}
+		return checks
+	}
+
+	list := request("/api/v1/components?cluster_id="+clusterID.String(), true)
+	if list.Code != http.StatusOK {
+		t.Fatalf("list status %d: %s", list.Code, list.Body.String())
+	}
+	var inventoryResponse struct {
+		Components []componentInstanceDTO        `json:"components"`
+		Rollups    []componentInventoryRollupDTO `json:"rollups"`
+	}
+	if err := json.Unmarshal(list.Body.Bytes(), &inventoryResponse); err != nil {
+		t.Fatal(err)
+	}
+	if len(inventoryResponse.Components) != 3 {
+		t.Fatalf("role instances = %+v", inventoryResponse.Components)
+	}
+	roles := map[string]string{"operator": "controller", "runtime-agent": "enforcer", "scanner": "scanner"}
+	for _, component := range inventoryResponse.Components {
+		if component.Role != roles[component.Component] || component.ClusterID == nil || *component.ClusterID != clusterID {
+			t.Errorf("role-alias instance = %+v", component)
+		}
+	}
+	for _, rollup := range inventoryResponse.Rollups {
+		if role, ok := roles[rollup.Component]; ok && (rollup.Role != role || rollup.Instances != 1) {
+			t.Errorf("role-alias rollup = %+v", rollup)
+		}
+	}
+
+	for _, role := range []struct {
+		id                                              uuid.UUID
+		component, alias, status, checkKey, checkStatus string
+	}{
+		{operatorID, "operator", "controller", "healthy", "operator_leader_election", "ready"},
+		{agentID, "runtime-agent", "enforcer", "healthy", "enforcer_dp_status", "ready"},
+		{scannerID, "scanner", "scanner", "degraded", "scanner_vulndb", "degraded"},
+	} {
+		t.Run(role.component, func(t *testing.T) {
+			diagnostics := readDiagnostics(t, role.id)
+			if diagnostics.Component.Component != role.component || diagnostics.Component.Role != role.alias || diagnostics.Status.State != role.status || diagnostics.Status.Degraded != (role.status == "degraded") {
+				t.Fatalf("role diagnostics = %+v", diagnostics)
+			}
+			checks := checksFor(diagnostics)
+			if checks[role.checkKey].Status != role.checkStatus {
+				t.Fatalf("role check %s = %+v", role.checkKey, checks[role.checkKey])
+			}
+		})
+	}
+	if checks := checksFor(readDiagnostics(t, agentID)); checks["enforcer_policy_mode"].Value != "monitor" || checks["node_host_facts"].Status != "missing" {
+		t.Fatalf("enforcer checks = %+v", checks)
+	}
+	if checks := checksFor(readDiagnostics(t, scannerID)); checks["scanner_capacity"].Status != "saturated" || checks["scanner_vulndb"].Reason != "redacted by diagnostics policy" {
+		t.Fatalf("scanner failure checks = %+v", checks)
+	}
+
+	if _, err := pool.Exec(ctx, `UPDATE component_heartbeats SET commit = 'old-commit', last_seen_at = $2 WHERE id = $1`, operatorID, now.Add(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE component_heartbeats SET last_seen_at = $2 WHERE id = $1`, agentID, now.Add(-6*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	controller := readDiagnostics(t, operatorID)
+	if controller.Status.State != "drift" || !controller.Status.Drift || checksFor(controller)["build"].Status != "drift" {
+		t.Fatalf("controller drift = %+v", controller)
+	}
+	enforcer := readDiagnostics(t, agentID)
+	if enforcer.Status.State != "stale" || !enforcer.Status.Stale || checksFor(enforcer)["heartbeat"].Status != "stale" {
+		t.Fatalf("enforcer stale = %+v", enforcer)
+	}
+
+	for _, failure := range []struct {
+		name, path    string
+		authenticated bool
+		wantStatus    int
+	}{
+		{"unauthenticated", "/api/v1/components/" + operatorID.String() + "/diagnostics", false, http.StatusUnauthorized},
+		{"invalid id", "/api/v1/components/not-a-uuid/diagnostics", true, http.StatusBadRequest},
+		{"unknown id", "/api/v1/components/" + uuid.NewString() + "/diagnostics", true, http.StatusNotFound},
+		{"foreign org diagnostics", "/api/v1/components/" + foreignID.String() + "/diagnostics", true, http.StatusNotFound},
+		{"foreign org get", "/api/v1/components/" + foreignID.String(), true, http.StatusNotFound},
+	} {
+		t.Run(failure.name, func(t *testing.T) {
+			rec := request(failure.path, failure.authenticated)
+			if rec.Code != failure.wantStatus {
+				t.Fatalf("status %d, want %d: %s", rec.Code, failure.wantStatus, rec.Body.String())
+			}
+			if strings.Contains(rec.Body.String(), foreignID.String()) || strings.Contains(rec.Body.String(), "scanner-secret") {
+				t.Fatalf("failure response leaked component data: %s", rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestComponentInstanceScoringPreservesRowsAndHealthCollapse(t *testing.T) {
+	now := time.Now().UTC()
+	clusterA, clusterB := uuid.New(), uuid.New()
+	rows := []HeartbeatRow{
+		{ID: uuid.New(), Component: "scanner", ClusterID: &clusterA, Hostname: "scanner-old", Commit: "old", LastSeenAt: now.Add(-10 * time.Minute)},
+		{ID: uuid.New(), Component: "operator", ClusterID: &clusterB, Hostname: "operator", Commit: "current", LastSeenAt: now.Add(-time.Minute)},
+		{ID: uuid.New(), Component: "scanner", ClusterID: &clusterA, Hostname: "scanner-current", Commit: "current", LastSeenAt: now},
+		{ID: uuid.New(), Component: "scanner", ClusterID: &clusterB, Hostname: "scanner-other-cluster", Commit: "current", LastSeenAt: now.Add(-time.Minute)},
+	}
+	names := map[uuid.UUID]string{clusterA: "alpha", clusterB: "beta"}
+	scores := scoreHeartbeatInstances(rows, names, nil)
+	if len(scores) != len(rows) {
+		t.Fatalf("instance scores=%d, rows=%d", len(scores), len(rows))
+	}
+	for i, hb := range rows {
+		instance := componentInstanceFromHeartbeat(hb, scores[i])
+		wantStatus := "healthy"
+		if i == 0 {
+			wantStatus = "stale"
+		}
+		if instance.ID != hb.ID || scores[i].Hostname != hb.Hostname || instance.Status != wantStatus || instance.ClusterName != names[*hb.ClusterID] {
+			t.Errorf("score association for row %d = %+v / %+v", i, instance, scores[i])
+		}
+	}
+	health := scoreHeartbeats(rows, names, nil)
+	if len(health) != 3 {
+		t.Fatalf("health must retain its collapsed view: %+v", health)
+	}
+	for _, score := range health {
+		if score.Hostname == "scanner-old" || score.Status != "healthy" {
+			t.Errorf("health included superseded instance or mismatched status: %+v", score)
+		}
+	}
+}
+
+func TestComponentsInventorySupersededInstanceListDetailAndBundle(t *testing.T) {
+	d := openTestDB(t)
+	t.Cleanup(d.Close)
+	ctx := t.Context()
+	orgID, userID := uuid.New(), uuid.New()
+	if _, err := d.Pool().Exec(ctx, `INSERT INTO orgs (id, name, display_name) VALUES ($1, $2, 'Superseded Inventory Test')`, orgID, "superseded-"+orgID.String()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = d.Pool().Exec(context.Background(), `DELETE FROM orgs WHERE id=$1`, orgID) })
+	oldID, currentID, operatorID := uuid.New(), uuid.New(), uuid.New()
+	now := time.Now().UTC()
+	if _, err := d.Pool().Exec(ctx, `
+INSERT INTO component_heartbeats (id, org_id, component, hostname, commit, last_seen_at, first_seen_at)
+VALUES ($1,$4,'scanner','scanner-a-old','old',$5,$5),
+       ($2,$4,'scanner','scanner-z-current','current',$6,$6),
+       ($3,$4,'operator','operator-current','current',$6,$6)`,
+		oldID, currentID, operatorID, orgID, now.Add(-10*time.Minute), now); err != nil {
+		t.Fatal(err)
+	}
+	handler := NewComponentsInventory(d)
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/v1/components", nil)
+	req = req.WithContext(WithSubject(req.Context(), Subject{OrgID: orgID, UserID: userID}))
+	rec := httptest.NewRecorder()
+	handler.List(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var listed struct {
+		Components []componentInstanceDTO `json:"components"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
+		t.Fatal(err)
+	}
+	assertInstances := func(instances []componentInstanceDTO) {
+		t.Helper()
+		if len(instances) != 3 {
+			t.Fatalf("instance count=%d, want 3", len(instances))
+		}
+		seen := map[uuid.UUID]string{}
+		for _, instance := range instances {
+			seen[instance.ID] = instance.Status
+		}
+		if seen[oldID] != "stale" || seen[currentID] != "healthy" || seen[operatorID] != "healthy" {
+			t.Errorf("instance statuses = %v", seen)
+		}
+	}
+	assertInstances(listed.Components)
+	router := chi.NewRouter()
+	router.Get("/api/v1/components/{id}", handler.Get)
+	router.Get("/api/v1/components/{id}/diagnostics", handler.Diagnostics)
+	for _, suffix := range []string{"", "/diagnostics"} {
+		for _, tc := range []struct {
+			id     uuid.UUID
+			status string
+		}{{oldID, "stale"}, {currentID, "healthy"}} {
+			detailReq := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/v1/components/"+tc.id.String()+suffix, nil)
+			detailReq = detailReq.WithContext(WithSubject(detailReq.Context(), Subject{OrgID: orgID, UserID: userID}))
+			detailRec := httptest.NewRecorder()
+			router.ServeHTTP(detailRec, detailReq)
+			var detail struct {
+				Component componentInstanceDTO `json:"component"`
+			}
+			if err := json.Unmarshal(detailRec.Body.Bytes(), &detail); err != nil || detailRec.Code != http.StatusOK || detail.Component.ID != tc.id || detail.Component.Status != tc.status {
+				t.Errorf("exact-ID detail %s%s status=%d body=%s err=%v", tc.id, suffix, detailRec.Code, detailRec.Body.String(), err)
+			}
+		}
+	}
+	bundle, err := NewSupportBundle(d, nil).collectComponentInventory(ctx, orgID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertInstances(bundle.(map[string]any)["components"].([]componentInstanceDTO))
 }

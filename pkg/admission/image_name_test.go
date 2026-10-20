@@ -6,10 +6,11 @@ import (
 )
 
 func TestParseReqImageName(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
-		in              string
-		registry, repo  string
-		tag, digest     string
+		in             string
+		registry, repo string
+		tag, digest    string
 	}{
 		{"ubuntu", "https://docker.io/", "library/ubuntu", "latest", ""},
 		{"ubuntu:24.04", "https://docker.io/", "library/ubuntu", "24.04", ""},
@@ -31,6 +32,7 @@ func TestParseReqImageName(t *testing.T) {
 }
 
 func TestAggregationCache_SuppressInsideWindow(t *testing.T) {
+	t.Parallel()
 	c := NewAggregationCache(8 * time.Minute)
 	now := time.Date(2026, 5, 12, 12, 0, 0, 0, time.UTC)
 	c.SetClock(func() time.Time { return now })
@@ -53,6 +55,7 @@ func TestAggregationCache_SuppressInsideWindow(t *testing.T) {
 }
 
 func TestAggregationCache_Sweep(t *testing.T) {
+	t.Parallel()
 	c := NewAggregationCache(time.Minute)
 	now := time.Date(2026, 5, 12, 12, 0, 0, 0, time.UTC)
 	c.SetClock(func() time.Time { return now })

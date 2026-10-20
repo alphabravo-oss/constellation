@@ -22,6 +22,7 @@ func reviewFor(pod *corev1.Pod) *admissionv1.AdmissionRequest {
 }
 
 func TestEvaluate_BlocksPrivileged(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	t1 := true
 	pod := &corev1.Pod{
@@ -43,6 +44,7 @@ func TestEvaluate_BlocksPrivileged(t *testing.T) {
 }
 
 func TestEvaluate_BlocksPrivilegedEphemeralContainer(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	t1 := true
 	pod := &corev1.Pod{
@@ -74,6 +76,7 @@ func TestEvaluate_BlocksPrivilegedEphemeralContainer(t *testing.T) {
 }
 
 func TestEvaluate_BlocksHostNetwork(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "hostnet"},
@@ -89,6 +92,7 @@ func TestEvaluate_BlocksHostNetwork(t *testing.T) {
 }
 
 func TestEvaluate_MonitorOnlyEmitsWarnings(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	// No signature annotation + no readOnlyRoot → both monitor-mode rules fire as warnings.
 	pod := &corev1.Pod{
@@ -107,6 +111,7 @@ func TestEvaluate_MonitorOnlyEmitsWarnings(t *testing.T) {
 }
 
 func TestEvaluate_AllowsCompliantPod(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	t1 := true
 	pod := &corev1.Pod{
@@ -131,6 +136,7 @@ func TestEvaluate_AllowsCompliantPod(t *testing.T) {
 }
 
 func TestImageInAllowlist_RegistryBoundary(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name      string
 		image     string

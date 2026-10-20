@@ -1,11 +1,14 @@
+//go:build integration
+
 package handler
 
 import (
 	"context"
 	"testing"
 
-	authpkg "github.com/alphabravocompany/constellation/internal/auth"
 	"github.com/google/uuid"
+
+	authpkg "github.com/alphabravocompany/constellation/internal/auth"
 )
 
 // TestReconcileJITRoles_MaterializesClusterScopedGrants exercises the A2/P0-10 seam: reconcileJITRoles

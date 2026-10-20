@@ -41,11 +41,11 @@ const (
 
 // Entry is one rule inside a profile.
 type Entry struct {
-	Name          string     `json:"name"`            // identifier
+	Name          string     `json:"name"`                 // identifier
 	NameRegex     string     `json:"name_regex,omitempty"` // CVE id regex, e.g. CVE-2024-.*
 	Images        []string   `json:"images,omitempty"`     // image-name globs
 	Action        ActionKind `json:"action"`
-	DaysToFix     int        `json:"days_to_fix,omitempty"` // 0 = no deadline
+	DaysToFix     int        `json:"days_to_fix,omitempty"`    // 0 = no deadline
 	SeverityFloor string     `json:"severity_floor,omitempty"` // low|medium|high|critical
 	ScoreFloor    float64    `json:"score_floor,omitempty"`    // CVSS base score floor
 	Reserved      string     `json:"reserved,omitempty"`       // "" | "_recent"
@@ -136,17 +136,8 @@ func (p *Profile) inScope(cv CVE) bool {
 // entryMatches returns (matched, reason).
 func entryMatches(e Entry, cv CVE) (bool, string) {
 	// Reserved: _recent — CVEs published within RecentDays.
-	if e.Reserved == "_recent" {
-		days := e.RecentDays
-		if days <= 0 {
-			days = 14
-		}
-		if cv.PublishedAt.IsZero() {
-			return false, ""
-		}
-		if Now().Sub(cv.PublishedAt) > time.Duration(days)*24*time.Hour {
-			return false, ""
-		}
+	if e.Reserved == "_recent" && !recentlyPublished(e, cv) {
+		return false, ""
 	}
 	if e.NameRegex != "" {
 		re, err := regexp.Compile(e.NameRegex)
@@ -154,17 +145,8 @@ func entryMatches(e Entry, cv CVE) (bool, string) {
 			return false, ""
 		}
 	}
-	if len(e.Images) > 0 {
-		matched := false
-		for _, glob := range e.Images {
-			if ok, _ := filepath.Match(glob, cv.Image); ok {
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			return false, ""
-		}
+	if len(e.Images) > 0 && !imageMatches(e.Images, cv.Image) {
+		return false, ""
 	}
 	if e.SeverityFloor != "" {
 		rank := map[string]int{"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
@@ -176,6 +158,28 @@ func entryMatches(e Entry, cv CVE) (bool, string) {
 		return false, ""
 	}
 	return true, e.Name
+}
+
+// recentlyPublished reports whether cv was published within the entry's RecentDays window (default 14).
+func recentlyPublished(e Entry, cv CVE) bool {
+	days := e.RecentDays
+	if days <= 0 {
+		days = 14
+	}
+	if cv.PublishedAt.IsZero() {
+		return false
+	}
+	return Now().Sub(cv.PublishedAt) <= time.Duration(days)*24*time.Hour
+}
+
+// imageMatches reports whether image matches any of the path-style globs.
+func imageMatches(globs []string, image string) bool {
+	for _, glob := range globs {
+		if ok, _ := filepath.Match(glob, image); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // Validate returns an error if the profile is malformed.

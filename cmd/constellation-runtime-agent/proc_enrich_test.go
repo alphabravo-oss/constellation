@@ -157,7 +157,7 @@ func mkFDDir(t *testing.T, pidDir string) {
 func linkSocket(t *testing.T, fdPath string) {
 	t.Helper()
 	sockPath := filepath.Join(t.TempDir(), "s.sock")
-	ln, err := net.Listen("unix", sockPath)
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "unix", sockPath)
 	if err != nil {
 		if err := os.Symlink("socket:[123456]", fdPath); err != nil {
 			t.Fatal(err)

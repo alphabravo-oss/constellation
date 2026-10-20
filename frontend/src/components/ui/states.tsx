@@ -1,68 +1,74 @@
-// Shared data-page states (C3).
-//
-// Three components every `useQuery` data page should render so loading / empty /
-// error look identical across the product instead of bespoke per-page spinners:
-//
-//   <LoadingState />  — query is pending
-//   <ErrorState  />   — query failed (pass the error)
-//   <EmptyState  />   — query succeeded but returned nothing (re-exported here)
-//
-// Keep these dumb and presentational. EmptyState already lived in empty-state.tsx;
-// it is re-exported so pages can import all three from one module.
+// Shared data-page states on the kit: skeletons for first load (never a
+// spinner), errors with retry + the request correlation id, empty states with
+// the one action that fixes them.
 import { type ReactNode } from "react";
-import { AlertTriangle, Loader2 } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 import { cn } from "@/lib/cn";
+import { LoadingState as KitLoadingState, StatePanel } from "@/ui";
+import { apiErrorMessage, apiRequestId } from "@/lib/api-error";
 
 export { EmptyState } from "./empty-state";
 
-/** Centered spinner + label for a pending query. */
 export function LoadingState({
-  label = "Loading…",
+  label = "Loading",
+  variant,
   className,
 }: {
   label?: string;
+  /** Skeleton shape; defaults to a table body for inventories. */
+  variant?: "panel" | "table" | "cards";
   className?: string;
 }) {
   return (
-    <div
-      className={cn("flex flex-col items-center justify-center px-6 py-10 text-center", className)}
-      role="status"
-      aria-busy="true"
-      data-testid="loading-state"
-    >
-      <Loader2 className="mb-2 h-4 w-4 animate-spin text-muted-foreground/70" aria-hidden />
-      <div className="text-xs text-muted-foreground">{label}</div>
+    <div data-testid="loading-state" className={className}>
+      <KitLoadingState title={label} variant={variant ?? "table"} rows={5} />
     </div>
   );
 }
 
-/** Centered error panel for a failed query, with an optional retry action. */
+/** Correlation id from an API error (`error.request_id` or X-Request-ID). */
+export const correlationIdOf = apiRequestId;
+
 export function ErrorState({
-  title = "Failed to load",
+  title = "Could not load this data",
   error,
   action,
+  onRetry,
+  correlationId: correlationIdProp,
   className,
 }: {
   title?: string;
+  /** Request failure: its server message is shown and its request id becomes the reference. */
   error?: unknown;
+  /** Show only the reference (no message), e.g. when server text must stay private. */
+  correlationId?: string | null;
   action?: ReactNode;
+  onRetry?: () => void;
   className?: string;
 }) {
-  const message =
-    error instanceof Error ? error.message : typeof error === "string" ? error : undefined;
+  const message = error === undefined ? undefined : apiErrorMessage(error) ?? (error instanceof Error ? error.message : typeof error === "string" ? error : undefined);
+  const correlationId = correlationIdProp ?? correlationIdOf(error);
   return (
-    <div
-      className={cn(
-        "flex flex-col items-center justify-center px-6 py-10 text-center",
-        className,
-      )}
-      role="alert"
-      data-testid="error-state"
-    >
-      <AlertTriangle className="mb-2 h-4 w-4 text-[color:var(--color-status-error)]" aria-hidden />
-      <div className="text-sm font-medium text-foreground">{title}</div>
-      {message && <p className="mt-1 max-w-sm text-xs text-muted-foreground">{message}</p>}
-      {action && <div className="mt-3">{action}</div>}
+    <div data-testid="error-state" className={className}>
+      <StatePanel
+        icon={AlertCircle}
+        tone="danger"
+        role="alert"
+        title={title}
+        description={message}
+        className="py-10"
+        action={onRetry && !action ? { label: "Retry", onClick: onRetry, intent: "default" } : undefined}
+        secondary={
+          <>
+            {action ? <div className={cn("flex flex-wrap items-center justify-center gap-2")}>{action}</div> : null}
+            {correlationId ? (
+              <p className="text-micro text-muted-foreground">
+                Reference <code className="font-mono text-foreground">{correlationId}</code>
+              </p>
+            ) : null}
+          </>
+        }
+      />
     </div>
   );
 }

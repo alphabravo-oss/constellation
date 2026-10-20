@@ -3,37 +3,39 @@ import type { Severity } from "@/api/client";
 import { cn } from "@/lib/cn";
 import { severityBg } from "@/lib/severity";
 
+const LABEL: Record<string, string> = { critical: "Critical", high: "High", medium: "Medium", low: "Low", info: "Info" };
+
 /**
- * Severity pill — used wherever a finding/event/exception severity appears.
- * Optional KEV crown overlay marks Known-Exploited entries inline so analysts
- * can scan a list and immediately see what's weaponized.
+ * Severity pill: Title case, 11 px semibold, severity color on a quiet wash.
+ * This is one of the few places severity color is allowed. KEV adds a crown.
  */
 export function SeverityBadge({
   severity,
   kev,
   size = "sm",
-  uppercase = true,
   className,
 }: {
   severity: Severity;
   kev?: boolean;
   size?: "xs" | "sm";
+  /** @deprecated severity is always Title case now. */
   uppercase?: boolean;
   className?: string;
 }) {
+  const label = LABEL[severity] ?? severity;
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded font-medium",
+        "inline-flex shrink-0 items-center gap-1 rounded-full font-semibold text-micro leading-none",
         severityBg[severity],
-        size === "xs" ? "h-4 px-1.5 text-[10px]" : "h-5 px-2 text-[11px]",
-        uppercase && "uppercase tracking-wider",
+        size === "xs" ? "h-[18px] px-1.5" : "h-5 px-2",
         className,
       )}
-      title={kev ? `${severity} · KEV listed` : severity}
+      title={kev ? `${label} · Known exploited (KEV)` : label}
+      data-severity={severity}
     >
-      {kev && <Crown className="h-3 w-3 fill-current" aria-label="Known Exploited Vulnerability" />}
-      {severity}
+      {kev && <Crown className="h-3 w-3 fill-current" aria-label="Known exploited vulnerability" />}
+      {label}
     </span>
   );
 }

@@ -9,8 +9,55 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+func TestAuditLogInTxSharesCallerTransaction(t *testing.T) {
+	t.Parallel()
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	logger := New(pool)
+	orgID := uuid.New()
+	for _, commit := range []bool{false, true} {
+		tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, _, err := logger.LogInTx(ctx, tx, Event{OrgID: &orgID, Action: "test.transactional_audit"})
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			t.Fatal(err)
+		}
+		if commit {
+			err = tx.Commit(ctx)
+		} else {
+			err = tx.Rollback(ctx)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		var exists bool
+		if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM audit_events WHERE id=$1)`, id).Scan(&exists); err != nil {
+			t.Fatal(err)
+		}
+		if exists != commit {
+			t.Fatalf("audit row exists=%t after commit=%t", exists, commit)
+		}
+	}
+	breakAt, err := VerifyChain(ctx, pool)
+	if err != nil || breakAt != nil {
+		t.Fatalf("chain broken after caller commit/rollback: break=%v err=%v", breakAt, err)
+	}
+}
 
 // TestAuditChainIntegration appends a batch of events to a real Postgres and verifies the
 // resulting chain. Run with:
@@ -19,6 +66,7 @@ import (
 //
 // Requires the migrations to be applied.
 func TestAuditChainIntegration(t *testing.T) {
+	t.Parallel()
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
 		t.Skip("DATABASE_URL not set")
@@ -76,6 +124,7 @@ func TestAuditChainIntegration(t *testing.T) {
 // producing a false `prev_hash mismatch` in VerifyChain. With the fixed-key pg_advisory_xact_lock
 // taken before the head read, every writer queues and reads the genuine committed head.
 func TestAuditChainConcurrentWritersIntact(t *testing.T) {
+	t.Parallel()
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
 		t.Skip("DATABASE_URL not set")

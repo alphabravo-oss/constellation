@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/alphabravocompany/constellation/internal/handler"
-	"github.com/alphabravocompany/constellation/internal/handler/httpx"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/handler"
+	"github.com/alphabravocompany/constellation/internal/handler/httpx"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -86,8 +87,12 @@ func (h *WorkloadPackagesHandler) Report(w http.ResponseWriter, r *http.Request)
 		body.ObservedAt = time.Now().UTC()
 	}
 
-	clusterID, err := h.resolveWorkloadCluster(r, tok.OrgID, body.ClusterID)
+	clusterID, err := h.resolveWorkloadCluster(r, tok, body.ClusterID)
 	if err != nil {
+		if errors.Is(err, handler.ErrAgentClusterScope) {
+			jsonError(w, http.StatusForbidden, "agent token cluster scope mismatch")
+			return
+		}
 		jsonError(w, http.StatusInternalServerError, "resolve cluster: "+err.Error())
 		return
 	}
@@ -203,31 +208,26 @@ VALUES ($1, $2, $3, 'pending')`, id, tok.OrgID, target.ID); err != nil {
 	})
 }
 
-func (h *WorkloadPackagesHandler) resolveWorkloadCluster(r *http.Request, orgID uuid.UUID, requested *uuid.UUID) (*uuid.UUID, error) {
+func (h *WorkloadPackagesHandler) resolveWorkloadCluster(r *http.Request, tok *handler.RuntimeAgentToken, requested *uuid.UUID) (*uuid.UUID, error) {
 	if requested != nil {
 		var exists bool
 		if err := h.db.Pool().QueryRow(r.Context(),
 			`SELECT EXISTS(SELECT 1 FROM clusters WHERE id = $1 AND org_id = $2)`,
-			*requested, orgID).Scan(&exists); err != nil {
+			*requested, tok.OrgID).Scan(&exists); err != nil {
 			return nil, err
 		}
 		if !exists {
 			return nil, nil
 		}
-		id := *requested
-		return &id, nil
 	}
-	var cid uuid.UUID
-	err := h.db.Pool().QueryRow(r.Context(),
-		`SELECT id FROM clusters WHERE org_id = $1 ORDER BY created_at LIMIT 1`,
-		orgID).Scan(&cid)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
+	bound, err := handler.ResolveAgentClusterID(r.Context(), h.db, tok)
 	if err != nil {
 		return nil, err
 	}
-	return &cid, nil
+	if bound == nil || (requested != nil && *requested != *bound) {
+		return nil, handler.ErrAgentClusterScope
+	}
+	return bound, nil
 }
 
 type runtimeImageEvidenceReport struct {
@@ -418,24 +418,6 @@ func firstResolvedWorkloadImageIdentity(ctx context.Context, tx pgx.Tx, orgID uu
 		}
 	}
 	return "", ""
-}
-
-func firstWorkloadImageRef(body WorkloadPackagesPayload) string {
-	for _, container := range body.Containers {
-		if ref := workloadContainerImageRef(container); ref != "" {
-			return ref
-		}
-	}
-	return ""
-}
-
-func firstWorkloadImageDigest(body WorkloadPackagesPayload) string {
-	for _, container := range body.Containers {
-		if digest := workloadContainerImageDigest(container); digest != "" {
-			return digest
-		}
-	}
-	return ""
 }
 
 func resolvedWorkloadContainerImageIdentity(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, clusterID *uuid.UUID, namespace string, container WorkloadPackageContainer) (string, string) {

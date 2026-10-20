@@ -1,8 +1,10 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { BUILD_INFO } from "@/lib/build-info";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import {
-  AlertTriangle,
-  CheckCircle2,
+  TriangleAlert,
+  CircleCheck,
   Clock,
   Download,
   RefreshCcw,
@@ -14,11 +16,12 @@ import { toast } from "sonner";
 import {
   supportBundles,
   systemHealth,
+  type SupportBundleJob,
   type SystemHealthClusterDrift,
   type SystemHealthHeartbeat,
   type SystemHealthLicense,
 } from "@/api/client";
-import { StatCard } from "@/components/ui/stat-card";
+import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { PageHeader } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
@@ -27,19 +30,21 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { componentDiagnosticsHref, nvRoleAlias } from "@/lib/component-roles";
 import { downloadJson } from "@/lib/download";
+import { ScannerDbCapacity } from "@/components/ScannerDbCapacity";
+import { StatusPill as KitStatusPill } from "@/components/ui/status-pill";
 
 const heartbeatColumns: Column<SystemHealthHeartbeat>[] = [
   {
     id: "component",
-    header: "Component",
+    header: "Component", kind: "name", wrap: true,
     className: "font-medium",
     exportValue: (hb) => hb.component,
     cell: (hb) => {
       const role = nvRoleAlias({ component: hb.component });
       return (
         <Link
-          to={componentDiagnosticsHref({ clusterId: hb.cluster_id, component: hb.component, role: role.id })}
-          className="hover:text-[color:var(--color-primary)]"
+          to="." href={componentDiagnosticsHref({ clusterId: hb.cluster_id, component: hb.component, role: role.id })}
+          className="hover:underline"
           data-testid={`system-health-component-link-${safeTestID(hb.component)}`}
           title={`Open ${role.label.toLowerCase()} diagnostics`}
         >
@@ -48,15 +53,15 @@ const heartbeatColumns: Column<SystemHealthHeartbeat>[] = [
       );
     },
   },
-  { id: "version", header: "Version", className: "font-mono", cell: (hb) => hb.version, exportValue: (hb) => hb.version },
-  { id: "commit", header: "Commit", className: "font-mono", cell: (hb) => <span title={hb.commit}>{hb.commit_short}</span>, exportValue: (hb) => hb.commit },
-  { id: "hostname", header: "Hostname", className: "font-mono", cell: (hb) => hb.hostname, exportValue: (hb) => hb.hostname },
-  { id: "cluster", header: "Cluster", cell: (hb) => hb.cluster_name ?? <span className="text-muted-foreground">(control-plane)</span>, exportValue: (hb) => hb.cluster_name ?? "control-plane" },
-  { id: "uptime", header: "Uptime", cell: (hb) => formatUptime(hb.uptime_seconds), exportValue: (hb) => formatUptime(hb.uptime_seconds) },
-  { id: "lastSeen", header: "Last seen", cell: (hb) => formatRelative(hb.last_seen_at), exportValue: (hb) => hb.last_seen_at },
-  { id: "restarts", header: "Restarts", cell: (hb) => hb.restart_count, exportValue: (hb) => hb.restart_count },
-  { id: "details", header: "Details", cell: (hb) => <HeartbeatDetails hb={hb} />, exportValue: (hb) => heartbeatDetailsText(hb) },
-  { id: "status", header: "Status", cell: (hb) => <StatusPill status={hb.status} reason={hb.drift_reason} />, exportValue: (hb) => hb.drift_reason ? `${hb.status}; ${hb.drift_reason}` : hb.status },
+  { id: "version", header: "Version", kind: "version", size: 160, minSize: 112, maxSize: 224, wrap: true, className: "font-mono", cell: (hb) => hb.version, exportValue: (hb) => hb.version },
+  { id: "commit", header: "Commit", kind: "id", size: 112, minSize: 104, maxSize: 144, className: "font-mono", cell: (hb) => <span title={hb.commit}>{hb.commit_short}</span>, exportValue: (hb) => hb.commit },
+  { id: "hostname", header: "Hostname", kind: "id", size: 176, minSize: 144, maxSize: 240, className: "font-mono", cell: (hb) => hb.hostname, exportValue: (hb) => hb.hostname },
+  { id: "cluster", header: "Cluster", kind: "text", wrap: true, size: 192, minSize: 152, maxSize: 240, cell: (hb) => hb.cluster_name ?? <span className="text-muted-foreground">(control-plane)</span>, exportValue: (hb) => hb.cluster_name ?? "control-plane" },
+  { id: "uptime", header: "Uptime", kind: "age", size: 128, minSize: 112, maxSize: 160, cell: (hb) => formatUptime(hb.uptime_seconds), exportValue: (hb) => formatUptime(hb.uptime_seconds) },
+  { id: "lastSeen", header: "Last seen", kind: "age", size: 160, minSize: 144, maxSize: 192, cell: (hb) => formatRelative(hb.last_seen_at), exportValue: (hb) => hb.last_seen_at },
+  { id: "restarts", header: "Restarts", kind: "count", cell: (hb) => hb.restart_count, exportValue: (hb) => hb.restart_count },
+  { id: "details", header: "Details", kind: "text", wrap: true, size: 264, minSize: 208, maxSize: 360, cell: (hb) => <HeartbeatDetails hb={hb} />, exportValue: (hb) => heartbeatDetailsText(hb) },
+  { id: "status", header: "Status", kind: "status", size: 192, minSize: 160, maxSize: 240, wrap: true, cell: (hb) => <StatusPill status={hb.status} reason={hb.drift_reason} />, exportValue: (hb) => hb.drift_reason ? `${hb.status}; ${hb.drift_reason}` : hb.status },
 ];
 
 /**
@@ -68,21 +73,38 @@ const heartbeatColumns: Column<SystemHealthHeartbeat>[] = [
  * signals + Catalog metrics" model was removed — it duplicated the live telemetry.
  */
 export function SystemHealthPage() {
+  const queryClient = useQueryClient();
+  const [tab, setTab] = useTabParam("tab", "clusters");
+  const [cursorStack, setCursorStack] = useState<string[]>([]);
+  const cursor = cursorStack.at(-1);
   const q = useQuery({
     queryKey: ["system-health"],
     queryFn: () => systemHealth.overview(),
     refetchInterval: 30_000,
   });
+  const jobs = useQuery({
+    queryKey: ["support-bundle-jobs", cursor],
+    queryFn: () => supportBundles.listJobs(cursor),
+    refetchInterval: (query) => query.state.data?.items.some((job) => job.status === "queued" || job.status === "running") ? 5_000 : false,
+  });
   const supportBundle = useMutation({
-    mutationFn: supportBundles.download,
+    mutationFn: supportBundles.createJob,
+    onSuccess: () => {
+      setCursorStack([]);
+      setTab("bundles");
+      void queryClient.invalidateQueries({ queryKey: ["support-bundle-jobs"] });
+      toast.success("Support bundle queued. Track it in Bundle jobs.");
+    },
+    onError: () => toast.error("Could not queue support bundle"),
+  });
+  const supportBundleDownload = useMutation({
+    mutationFn: supportBundles.downloadJob,
     onSuccess: (bundle) => {
       downloadJson(supportBundleFileName(bundle.generated_at), bundle);
       toast.success("Support bundle downloaded");
     },
-    onError: () => toast.error("Support bundle download failed"),
+    onError: () => toast.error("Support bundle download failed. Refresh jobs to check its status."),
   });
-
-  const [tab, setTab] = useTabParam("tab", "clusters");
 
   if (q.isPending) return <p className="text-sm text-muted-foreground">Loading system health...</p>;
   const data = q.data;
@@ -136,6 +158,7 @@ export function SystemHealthPage() {
             rows={heartbeats}
             columns={heartbeatColumns}
             rowKey={(hb) => `${hb.cluster_id ?? "control"}-${hb.component}@${hb.hostname}`}
+            preferencesKey="system-health-heartbeats"
             exportFileName="constellation-system-health-heartbeats"
             testId="system-health-heartbeats-table"
             emptyState={
@@ -176,8 +199,49 @@ export function SystemHealthPage() {
         ),
     },
     {
+      value: "bundles",
+      label: "Bundle jobs",
+      count: jobs.data?.items.length,
+      content: (
+        <Card title="Support bundle jobs" description="Redacted bundles are prepared asynchronously. Ready bundles can be downloaded until they expire." action={
+          <Button type="button" size="sm" variant="outline" onClick={() => void jobs.refetch()} disabled={jobs.isFetching}>Refresh</Button>
+        }>
+          <div data-testid="system-health-bundle-jobs" aria-live="polite" className="space-y-3">
+            {jobs.isPending && <p className="text-xs text-muted-foreground">Loading bundle jobs...</p>}
+            {jobs.isError && <p className="text-xs text-[color:var(--color-severity-critical)]">Could not load bundle jobs. Try Refresh.</p>}
+            {jobs.data?.items.length === 0 && <p className="text-xs text-muted-foreground">No support bundle jobs yet. Create one with the Bundle button.</p>}
+            {jobs.data?.items.map((job) => (
+              <article key={job.id} className="flex flex-wrap items-start justify-between gap-3 rounded-md border border-border p-3 text-xs" data-testid={`support-bundle-job-${job.id}`}>
+                <div className="min-w-0 space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-foreground">{job.id}</span>
+                    <Status value={job.status} />
+                  </div>
+                  <p className="text-muted-foreground">Created {formatBundleTime(job.created_at)}{job.started_at ? ` · started ${formatBundleTime(job.started_at)}` : ""}{job.finished_at ? ` · finished ${formatBundleTime(job.finished_at)}` : ""}</p>
+                  {job.bundle_id && <p className="font-mono text-muted-foreground">Bundle {job.bundle_id}</p>}
+                  {job.audit_event_id && <Link to="." href={`/audit?support_bundle_job_id=${job.id}`} className="text-link">Audit history</Link>}
+                  {job.status === "queued" && <p className="text-muted-foreground">Waiting for a worker. Status refreshes automatically.</p>}
+                  {job.status === "running" && <p className="text-muted-foreground">Preparing the redacted bundle. Status refreshes automatically.</p>}
+                  {job.status === "ready" && job.expires_at && <p className="text-muted-foreground">Download before {formatBundleTime(job.expires_at)}.</p>}
+                  {job.status === "failed" && <p className="text-[color:var(--color-severity-critical)]">Generation failed{job.error ? `: ${job.error}` : ". Create a new job to retry."}</p>}
+                  {job.status === "expired" && <p className="text-muted-foreground">This bundle has expired and cannot be downloaded. Create a new job.</p>}
+                </div>
+                {job.status === "ready" && <Button type="button" size="sm" variant="outline" onClick={() => supportBundleDownload.mutate(job.id)} disabled={supportBundleDownload.isPending} data-testid={`support-bundle-download-${job.id}`}>
+                  <Download className="h-3.5 w-3.5" aria-hidden /> Download
+                </Button>}
+              </article>
+            ))}
+            {(cursorStack.length > 0 || jobs.data?.next_cursor) && <div className="flex justify-end gap-2">
+              <Button type="button" size="sm" variant="outline" disabled={cursorStack.length === 0} onClick={() => setCursorStack((stack) => stack.slice(0, -1))}>Newer</Button>
+              <Button type="button" size="sm" variant="outline" disabled={!jobs.data?.next_cursor} onClick={() => { if (jobs.data?.next_cursor) setCursorStack((stack) => [...stack, jobs.data.next_cursor!]); }}>Older</Button>
+            </div>}
+          </div>
+        </Card>
+      ),
+    },
+    {
       value: "incidents",
-      label: "Incidents & Actions",
+      label: "Incidents & actions",
       count: incidents.length + actions.length,
       content: (
         <div className="grid gap-4 lg:grid-cols-2">
@@ -223,7 +287,7 @@ export function SystemHealthPage() {
       {license && license.banner_visible && <LicenseBanner license={license} />}
 
       <PageHeader
-        title="System Health"
+        title="System health"
         description="Fleet-wide build version, restart history, drift, and licensing for the control plane and every connected cluster."
         actions={
           <div className="flex flex-wrap items-center justify-end gap-2">
@@ -234,10 +298,10 @@ export function SystemHealthPage() {
               onClick={() => supportBundle.mutate()}
               disabled={supportBundle.isPending}
               data-testid="system-health-support-bundle"
-              title="Download redacted support bundle"
+              title="Queue redacted support bundle"
             >
-              <Download className="h-3.5 w-3.5" aria-hidden />
-              Bundle
+              <Clock className="h-3.5 w-3.5" aria-hidden />
+              {supportBundle.isPending ? "Queuing..." : "Create bundle"}
             </Button>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Sparkles className="h-4 w-4" />
@@ -252,21 +316,25 @@ export function SystemHealthPage() {
       {cp.commit_short && (
         <p className="text-xs text-muted-foreground">
           API build <span className="font-mono">{cp.commit_short}</span> · v{cp.version} · up {formatUptime(Number(cp.uptime_s || 0))}
+          {" · "}UI v{BUILD_INFO.version}{BUILD_INFO.commit ? <> (<span className="font-mono">{BUILD_INFO.commit.slice(0, 12)}</span>)</> : null}
         </p>
       )}
 
       {/* ------------- VERDICT ------------- */}
       <VerdictBanner status={verdictStatus} title={verdictTitle} detail={verdictDetail} />
 
+      <Card title="Scanner database and capacity" description="Scanner heartbeat capacity, host VulnDB bundles, and reported Trivy/Grype download and applied revisions.">
+        <ScannerDbCapacity heartbeats={heartbeats} />
+      </Card>
+
       {/* ------------- FLEET STAT TILES ------------- */}
-      <section
-        className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"
+      <StatGrid
         data-testid="system-health-fleet-tiles"
       >
         <StatCard
           label="Healthy components"
           value={data.summary.healthy ?? 0}
-          icon={<CheckCircle2 className="h-3.5 w-3.5" />}
+          icon={<CircleCheck className="h-3.5 w-3.5" />}
           tone={(data.summary.healthy ?? 0) > 0 ? "accent" : "neutral"}
           hint={`${heartbeats.length} reporting`}
         />
@@ -294,11 +362,11 @@ export function SystemHealthPage() {
         <StatCard
           label="Crashlooping"
           value={data.summary.crashlooping ?? 0}
-          icon={<AlertTriangle className="h-3.5 w-3.5" />}
+          icon={<TriangleAlert className="h-3.5 w-3.5" />}
           tone={(data.summary.crashlooping ?? 0) > 0 ? "critical" : "neutral"}
           hint=">3 restarts/hour"
         />
-      </section>
+      </StatGrid>
 
       {/* ------------- DETAIL TABS (progressive disclosure) ------------- */}
       <Tabs value={tab} onValueChange={setTab} items={tabs} />
@@ -309,6 +377,11 @@ export function SystemHealthPage() {
 function supportBundleFileName(generatedAt: string) {
   const stamp = generatedAt ? generatedAt.replace(/[^0-9A-Za-z]/g, "-") : new Date().toISOString().replace(/[^0-9A-Za-z]/g, "-");
   return `constellation-support-bundle-${stamp}.json`;
+}
+
+function formatBundleTime(value: SupportBundleJob["created_at"]) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
 // -----------------------------------------------------------------------------
@@ -331,7 +404,7 @@ function LicenseBanner({ license }: { license: SystemHealthLicense }) {
       <ShieldAlert className="h-4 w-4" />
       <div className="flex-1">
         <div className="font-medium">{license.message}</div>
-        <div className="text-[11px] opacity-80">
+        <div className="text-micro opacity-80">
           {license.kind} · expires {license.expires_at ?? "n/a"} · {license.days_to_expiry}d remaining
         </div>
       </div>
@@ -350,7 +423,7 @@ function ClusterCard({ cluster }: { cluster: SystemHealthClusterDrift }) {
       <div className="flex items-center justify-between gap-2">
         <div className="text-sm font-semibold">{cluster.cluster_name}</div>
         <span
-          className={`rounded-md px-2 py-0.5 text-[10px] ${
+          className={`rounded-md px-2 py-0.5 text-micro ${
             trouble === 0
               ? "bg-[color:var(--color-status-success)]/15 text-[color:var(--color-status-success)]"
               : "bg-[color:var(--color-severity-high)]/15 text-[color:var(--color-severity-high)]"
@@ -359,21 +432,21 @@ function ClusterCard({ cluster }: { cluster: SystemHealthClusterDrift }) {
           {trouble === 0 ? "in sync" : `${trouble} issue${trouble === 1 ? "" : "s"}`}
         </span>
       </div>
-      <div className="mt-2 grid grid-cols-5 gap-2 text-[10px]">
+      <div className="mt-2 grid grid-cols-5 gap-2 text-micro">
         <Stat label="healthy" value={cluster.healthy} tone="success" />
         <Stat label="degraded" value={degraded} tone="warning" />
         <Stat label="drift" value={cluster.drift} tone="warning" />
         <Stat label="stale" value={cluster.stale} tone="warning" />
         <Stat label="crash" value={cluster.crashlooping} tone="error" />
       </div>
-      <div className="mt-2 text-[10px] text-muted-foreground">
+      <div className="mt-2 text-micro text-muted-foreground">
         control build <span className="font-mono">{cluster.control_commit || "—"}</span>
       </div>
       <details className="mt-1">
-        <summary className="cursor-pointer text-[10px] text-muted-foreground hover:text-foreground">
+        <summary className="cursor-pointer text-micro text-muted-foreground hover:text-foreground">
           versions ({cluster.versions.length})
         </summary>
-        <ul className="mt-1 space-y-0.5 text-[10px] text-muted-foreground">
+        <ul className="mt-1 space-y-0.5 text-micro text-muted-foreground">
           {cluster.versions.map((v) => (
             <li key={`${v.component}-${v.commit}`} className="flex items-center justify-between gap-2">
               <span>{v.component}</span>
@@ -401,7 +474,7 @@ function StatusPill({ status, reason }: { status: SystemHealthHeartbeat["status"
       ? "bg-[color:var(--color-severity-critical)]/20 text-[color:var(--color-severity-critical)]"
       : "bg-muted text-muted-foreground";
   return (
-    <span className={`rounded-md px-2 py-0.5 text-[10px] ${cls}`} title={reason ?? undefined}>
+    <span className={`rounded-md px-2 py-0.5 text-micro ${cls}`} title={reason ?? undefined}>
       {status}
     </span>
   );
@@ -419,7 +492,7 @@ function HeartbeatDetails({ hb }: { hb: SystemHealthHeartbeat }) {
   const activeTargets = compactCountMap(hb.metadata.active_jobs_by_target_type);
   const targetCapacity = compactCountMap(hb.metadata.target_capacity);
   return (
-    <div className="max-w-[280px] truncate text-[11px] text-muted-foreground">
+    <div className="text-micro text-muted-foreground">
       <span className="font-mono text-foreground">{hb.metadata.active_jobs ?? 0}/{hb.metadata.max_concurrent ?? "?"}</span>
       <span> busy</span>
       <span> · idle </span>
@@ -479,20 +552,20 @@ function Stat({ label, value, tone }: { label: string; value: number; tone: "suc
       <div className="text-sm font-semibold tabular-nums" style={{ color: value > 0 ? color : undefined }}>
         {value}
       </div>
-      <div className="text-[9px] text-muted-foreground">{label}</div>
+      <div className="text-micro text-muted-foreground">{label}</div>
     </div>
   );
 }
 
 function Status({ value }: { value: string }) {
-  const cls = value === "healthy" || value === "done"
-    ? "bg-[color:var(--color-status-success)]/15 text-[color:var(--color-status-success)]"
-    : value === "warning" || value === "mitigating" || value === "in_progress" || value === "medium"
-      ? "bg-[color:var(--color-status-warning)]/15 text-[color:var(--color-status-warning)]"
-      : value === "degraded" || value === "critical" || value === "high"
-        ? "bg-[color:var(--color-status-error)]/15 text-[color:var(--color-status-error)]"
-        : "bg-muted text-muted-foreground";
-  return <span className={`rounded-md px-2 py-1 text-xs ${cls}`}>{value}</span>;
+  const tone: "success" | "warning" | "error" | "info" | "pending" | "neutral" = value === "healthy" || value === "done" || value === "ready"
+    ? "success"
+    : value === "warning" || value === "mitigating" || value === "in_progress" || value === "medium" || value === "queued" || value === "running"
+      ? "warning"
+      : value === "degraded" || value === "critical" || value === "high" || value === "failed"
+        ? "error"
+        : "neutral";
+  return <KitStatusPill label={value} tone={tone} />;
 }
 
 // -----------------------------------------------------------------------------

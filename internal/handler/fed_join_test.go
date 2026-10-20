@@ -1,3 +1,5 @@
+//go:build integration
+
 package handler
 
 import (
@@ -37,10 +39,13 @@ func TestPerformRemoteJoin_PersistsAndFlipsState(t *testing.T) {
 	// Mock master: assert the joint sent a well-formed join request, then return the
 	// issued credential exactly like fed_trust.go Join does with the D2 CA wired.
 	var gotReq fedJoinRequest
-	master := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	master := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/federation/join" {
 			http.Error(w, "unexpected "+r.Method+" "+r.URL.Path, http.StatusNotFound)
 			return
+		}
+		if r.Header.Get("X-Forwarded-Proto") != "" {
+			t.Error("join client forged transport proof")
 		}
 		_ = json.NewDecoder(r.Body).Decode(&gotReq)
 		_ = json.NewEncoder(w).Encode(fedMasterJoinResponse{
@@ -122,7 +127,7 @@ func TestPerformRemoteJoin_MasterError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	master := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	master := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid or expired join token"}`, http.StatusUnauthorized)
 	}))
 	defer master.Close()

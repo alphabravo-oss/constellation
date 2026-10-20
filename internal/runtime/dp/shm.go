@@ -35,7 +35,7 @@ func ensureSharedMemory() error {
 	if err != nil {
 		return fmt.Errorf("create %s: %w", dpShmPath, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if err := f.Truncate(dpShmSize); err != nil {
 		return fmt.Errorf("ftruncate %s to %d: %w", dpShmPath, dpShmSize, err)
 	}

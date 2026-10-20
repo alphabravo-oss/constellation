@@ -8,7 +8,14 @@ permissions:
   contents: read
 
 jobs:
+  security-and-quality:
+    permissions:
+      contents: read
+      security-events: write
+    uses: ./.github/workflows/ci.yml
+
   verify:
+    needs: security-and-quality
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -19,10 +26,11 @@ jobs:
       - uses: azure/setup-helm@bf6a7d304bc2fdb57e0331155b7ebf2c504acf0a # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 24
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - run: go test ./...
+      - run: make test
+      - run: make test-integration
       - run: go vet ./...
       - run: npm ci
         working-directory: frontend
@@ -52,9 +60,11 @@ jobs:
           - { role: frontend, dockerfile: deploy/docker/Dockerfile.frontend }
           - { role: runtime-agent, dockerfile: deploy/docker/Dockerfile.runtime-agent }
           - { role: admission, dockerfile: deploy/docker/Dockerfile.admission }
-          - { role: migrate, dockerfile: deploy/docker/Dockerfile.migrate }
+          - { role: kube-bench-runner, dockerfile: deploy/docker/Dockerfile.kube-bench-runner }
           - { role: bootstrap, dockerfile: deploy/docker/Dockerfile.bootstrap }
-          - { role: postgres, dockerfile: deploy/docker/Dockerfile.postgres, tag_prefix: "16.10-" }
+          - { role: compliance-scheduler, dockerfile: deploy/docker/Dockerfile.compliance-scheduler }
+          - { role: toolbox, dockerfile: deploy/docker/Dockerfile.toolbox }
+          - { role: postgres, dockerfile: deploy/docker/Dockerfile.postgres, tag_prefix: "16.14-" }
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
@@ -64,6 +74,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
+      - name: Read runtime pins
+        id: runtime
+        run: |
+          {
+            echo "node-version=$(cat .node-version)"
+            echo "go-version=$(awk '/^go /{print $2}' go.mod)"
+            echo "build-time=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >> "$GITHUB_OUTPUT"
+      - name: Install pinned image scanner
+        run: bash scripts/install-ci-tools.sh grype
       - id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
@@ -71,12 +91,37 @@ jobs:
           file: ${{ matrix.dockerfile }}
           platforms: linux/amd64
           push: true
-          tags: ghcr.io/alphabravo-oss/constellation/${{ matrix.role }}:${{ matrix.tag_prefix }}${{ github.ref_name }}
-          build-args: VERSION=${{ github.ref_name }}
+          tags: ghcr.io/alphabravo-oss/constellation/${{ matrix.role }}:candidate-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          build-args: |
+            GO_VERSION=${{ steps.runtime.outputs.go-version }}
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+            BUILD_TIME=${{ steps.runtime.outputs.build-time }}
+            NODE_VERSION=${{ steps.runtime.outputs.node-version }}
           provenance: mode=max
           sbom: true
           cache-from: type=gha,scope=${{ matrix.role }}
           cache-to: type=gha,mode=max,scope=${{ matrix.role }}
+      - name: Gate immutable candidate image
+        env:
+          IMAGE: ghcr.io/alphabravo-oss/constellation/${{ matrix.role }}@${{ steps.build.outputs.digest }}
+        run: |
+          go run ./cmd/tools/release-gate gate --image "$IMAGE" \
+            --report test-results/image-scan.json --receipt test-results/image-gate.json
+      - name: Retain image scan and gate evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-image-scan-${{ matrix.role }}
+          path: test-results/image-*.json
+          if-no-files-found: warn
+      - name: Promote gated release image
+        env:
+          IMAGE: ghcr.io/alphabravo-oss/constellation/${{ matrix.role }}@${{ steps.build.outputs.digest }}
+          RELEASE_TAG: ghcr.io/alphabravo-oss/constellation/${{ matrix.role }}:${{ matrix.tag_prefix }}${{ github.ref_name }}
+        run: |
+          go run ./cmd/tools/release-gate promote --image "$IMAGE" --tag "$RELEASE_TAG" \
+            --report test-results/image-scan.json --receipt test-results/image-gate.json
       - name: Sign immutable image digest
         env:
           COSIGN_EXPERIMENTAL: "1"
@@ -110,10 +155,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: printf '%s' "$GH_TOKEN" | helm registry login ghcr.io -u "${GITHUB_ACTOR}" --password-stdin
-      - name: Package and publish chart
+      # The packaged chart is stamped with the full tag (0.3.0-rc.1 for v0.3.0-rc.1)
+      # so _helpers.tpl renders exactly the image tags the images job promoted:
+      # <role>:v<appVersion> and postgres:16.14-v<appVersion>.
+      - name: Package chart at the release tag
         run: |
-          helm package deploy/charts/constellation --destination dist
-          helm push "dist/constellation-${GITHUB_REF_NAME#v}.tgz" oci://ghcr.io/alphabravo-oss/charts
+          version="${GITHUB_REF_NAME#v}"
+          helm package deploy/charts/constellation --version "$version" --app-version "$version" --destination dist
+      - name: Image-tag contract (every rendered image exists)
+        run: scripts/check-chart-images.sh "dist/constellation-${GITHUB_REF_NAME#v}.tgz"
+      - name: Publish chart
+        run: helm push "dist/constellation-${GITHUB_REF_NAME#v}.tgz" oci://ghcr.io/alphabravo-oss/charts
       - name: Sign chart
         env:
           COSIGN_EXPERIMENTAL: "1"

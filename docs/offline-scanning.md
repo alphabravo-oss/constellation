@@ -46,16 +46,38 @@ There are **two supported mechanisms** for getting data in:
 Trivy supports **both** (a) and (b). Grype has no OCI-mirror mode, so it always
 uses the file/archive path (b).
 
-> **Cache-dir caveat (important).** The scanner deployment
-> (`deploy/charts/constellation/templates/scanner-deployment.yaml`) points both
-> cache dirs at an **ephemeral `emptyDir`**:
->
-> - `TRIVY_CACHE_DIR=/tmp/trivy`
-> - `GRYPE_DB_CACHE_DIR=/tmp/grype/db`
->
-> The `emptyDir` is **wiped on every pod restart**. So for offline mode you must
-> either persist these dirs (PVC) or re-load the DB on each start (baked image or
-> init job). See [section 5](#5-getting-dbs-into-the-air-gapped-scanner-pods).
+The chart mounts caches under `/var/lib/scanner-cache`: Grype at
+`grype/db`, Trivy at `trivy`, and Syft at `syft`. By default
+`scanner.cache.persistent: true` uses a PVC for a single replica with autoscaling
+disabled. Multiple replicas, autoscaling, or disabling persistence switches to
+`emptyDir`; that cache is lost when the pod is replaced (not merely when its
+container restarts). Offline deployments must preserve or reload the database
+for every new pod. See [section 5](#5-getting-dbs-into-the-air-gapped-scanner-pods).
+
+### Online refresh validation and recovery
+
+The refresh loop skips disabled engines and remains a no-op offline. A successful
+command exit alone does not produce a success log: the installed revision must
+validate first. Grype checksum validation has a one-minute deadline to accommodate
+multi-GB databases; command cancellation or unreadable output reports unavailable.
+Trivy revision validation reads its bounded metadata file; it is not a complete
+integrity check of the Trivy SQLite database.
+
+When `grype db update` leaves an invalid database, the worker can reimport the
+archive recorded in Grype's status. Automatic recovery requires an HTTPS URL with
+one valid SHA-256 checksum. Grype verifies the imported archive and the worker
+rechecks database validity before recording success. It does not delete the active
+cache before downloading a replacement. Missing/unsafe provenance, failed import,
+or invalid post-import status remains a failure. Recovery can restore the recorded
+revision; it does not prove that revision is the latest upstream release. Offline
+operators still import a verified archive themselves.
+
+On shared development nodes, allow space for the active database, downloaded
+archive and expanded replacement, plus compiler/build caches. Check kubelet
+`evictionHard`, `evictionMinimumReclaim` and its pressure-transition interval:
+freeing just enough to cross the initial eviction threshold may not restore
+scheduling. Retain evidence logs but remove owned disposable test caches after
+acceptance; do not run broad volume pruning against application or backup data.
 
 ---
 
@@ -395,3 +417,33 @@ Trivy/Grype publish DBs). For each refresh:
 > Staleness is the main offline risk: an old DB silently misses new CVEs. Track
 > the DB build date (`grype db status` "Built", Trivy DB metadata) and alert if
 > it exceeds your refresh SLA.
+
+## Private registry job credentials
+
+Queue workers receive a configured registry ID with each claimed image job.
+The scanner credential endpoint requires both `registry_id` and `job_id`, and
+only releases credentials while that job is running with an unexpired lease
+owned by the scanner token and instance that claimed it. The target, job and
+registry must belong to the same organization. Each successful release requires
+a redacted audit receipt and returns `Cache-Control: no-store`.
+
+The worker writes a mode-600 Docker config in a mode-700 directory for that job.
+Syft, Trivy, Grype and cosign use it; normal completion, failure and cancellation
+remove it. Configured anonymous registries receive an empty isolated config.
+Digest, layer, file-risk and config-check reads use the same scoped credentials.
+
+For a one-shot scan using a stored registry credential, claim the job first and
+supply `--registry-id`, `--job-id`, `--control-plane`, and the scanner token through
+`CONSTELLATION_SCANNER_TOKEN`. Use the same `--instance-id` as the claim's
+`X-Constellation-Scanner-Instance` header. The one-shot command writes its report;
+it does not claim, renew or complete the job. Queue mode manages those steps.
+Upgrade scanners before enabling this API contract: older workers omit `job_id`
+and their configured-registry scans will fail credential authorization.
+
+For standalone `constellation-scanner` output, use `--ref` with `--json`,
+`--sarif`, or both. SARIF uses the shared SARIF 2.1.0 exporter. Output directories
+must already exist, and the two formats must use different destinations.
+Completed files are published atomically with 0600 permissions; destination
+symlinks and nonregular files are rejected. Encoding, writing or cancellation
+failures return a nonzero exit without logging scan completion. Publication is
+atomic per file: if the second output fails, the first completed report remains.

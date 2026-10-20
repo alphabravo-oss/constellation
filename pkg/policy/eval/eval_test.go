@@ -8,6 +8,7 @@ import (
 )
 
 func TestMatchAndOr(t *testing.T) {
+	t.Parallel()
 	p := dsl.Policy{
 		Name:            "deny-priv-and-unsigned",
 		Severity:        "high",
@@ -32,6 +33,7 @@ func TestMatchAndOr(t *testing.T) {
 }
 
 func TestMatchOperators(t *testing.T) {
+	t.Parallel()
 	p := dsl.Policy{
 		Name: "a", Severity: "low", LifecycleStages: []dsl.LifecycleStage{dsl.StageBuild},
 		Group: dsl.PolicyGroup{Operator: dsl.OpOr, Criteria: []dsl.Criterion{
@@ -48,6 +50,7 @@ func TestMatchOperators(t *testing.T) {
 }
 
 func TestScopeAndExclusion(t *testing.T) {
+	t.Parallel()
 	p := dsl.Policy{
 		Name: "scoped", Severity: "low", LifecycleStages: []dsl.LifecycleStage{dsl.StageDeploy},
 		Scopes:     []dsl.Scope{{Namespace: "prod"}},

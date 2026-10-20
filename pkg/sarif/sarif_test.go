@@ -10,6 +10,7 @@ import (
 )
 
 func TestFromScanResult(t *testing.T) {
+	t.Parallel()
 	res := &scanner.ScanResult{
 		ImageRef:  "ghcr.io/test/image:v1",
 		StartedAt: time.Now(),

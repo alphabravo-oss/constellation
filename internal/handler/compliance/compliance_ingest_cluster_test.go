@@ -1,3 +1,5 @@
+//go:build integration
+
 package compliance
 
 import (
@@ -9,8 +11,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
-	compliancepkg "github.com/alphabravocompany/constellation/pkg/compliance"
 	"github.com/alphabravocompany/constellation/pkg/audit"
+	compliancepkg "github.com/alphabravocompany/constellation/pkg/compliance"
 )
 
 // kbClusterSampleJSON is a minimal kube-bench report: one FAIL control the
@@ -55,7 +57,7 @@ func TestComplianceIngest_PerClusterNoClobber(t *testing.T) {
 
 	ingest := func(clusterID uuid.UUID) {
 		t.Helper()
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/compliance/ingest?profile=kube-bench&cluster_id="+clusterID.String(), bytes.NewReader([]byte(kbClusterSampleJSON)))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/compliance/ingest?profile=kube-bench&cluster_id="+clusterID.String(), bytes.NewReader([]byte(kbClusterSampleJSON)))
 		req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 		resp := httptest.NewRecorder()
 		h.Ingest(resp, req)

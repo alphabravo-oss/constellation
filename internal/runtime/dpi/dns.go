@@ -105,6 +105,20 @@ func parseDNSAnswers(buf []byte, off, count int) []DNSAnswer {
 	return out
 }
 
+// dnsPointer decodes the compression pointer at off, rejecting truncation and
+// pointer loops.
+func dnsPointer(buf []byte, off int, visited map[int]bool) (int, bool) {
+	if off+1 >= len(buf) {
+		return 0, false
+	}
+	ptr := int(binary.BigEndian.Uint16(buf[off:off+2]) & 0x3FFF)
+	if visited[ptr] {
+		return 0, false
+	}
+	visited[ptr] = true
+	return ptr, true
+}
+
 // readDNSName decodes a DNS name with pointer-compression support. Returns the
 // dotted form and the new offset.
 func readDNSName(buf []byte, off int) (string, int, bool) {
@@ -125,14 +139,10 @@ func readDNSName(buf []byte, off int) (string, int, bool) {
 			return strings.Join(parts, "."), end, true
 		}
 		if l&0xC0 == 0xC0 {
-			if off+1 >= len(buf) {
+			ptr, ok := dnsPointer(buf, off, visited)
+			if !ok {
 				return "", 0, false
 			}
-			ptr := int(binary.BigEndian.Uint16(buf[off:off+2]) & 0x3FFF)
-			if visited[ptr] {
-				return "", 0, false
-			}
-			visited[ptr] = true
 			if !jumped {
 				end = off + 2
 				jumped = true

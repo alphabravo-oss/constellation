@@ -583,34 +583,9 @@ func applyDLPOps(pats, ops []string) []string {
 // push. Deterministic ordering (sorted MACs, sorted groups) keeps the wire
 // output and the change signature stable across syncs.
 func planDLPPushes(rules []dlpRuleWire, tapMACs []string, enforceEnabled bool) []dlpPush {
-	// Normalise the scope of each rule to lowercase for matching.
-	type prepared struct {
-		rule  *dp.DLPRule
-		scope map[string]struct{} // nil ⇒ applies everywhere
-	}
-	prep := make([]prepared, 0, len(rules))
-	for _, r := range rules {
-		// dp rejects sig ids outside 20000-49999 and names with spaces
-		// (dpi_sig.c). Our dp_rule_id sequence starts at 9000, so map it into
-		// dp's user range; sanitize the name defensively.
-		dr := &dp.DLPRule{
-			Name: dp.SanitizeSigName(r.Name),
-			ID:   dp.DLPSigID(uint32(r.DPRuleID)),
-			// NET-40: apply each pattern's op (negation) and carry its context
-			// through so dp scans it in the authored buffer instead of the
-			// forced "body" default. applyDLPOp is a no-op for legacy rows.
-			Patterns: applyDLPOps(r.Patterns, r.Ops),
-			Contexts: r.Contexts,
-			Mode:     effectiveDLPMode(r.Mode, enforceEnabled),
-		}
-		var scope map[string]struct{}
-		if len(r.ScopeMACs) > 0 {
-			scope = make(map[string]struct{}, len(r.ScopeMACs))
-			for _, m := range r.ScopeMACs {
-				scope[strings.ToLower(strings.TrimSpace(m))] = struct{}{}
-			}
-		}
-		prep = append(prep, prepared{rule: dr, scope: scope})
+	prep, err := prepareDLPRules(rules, enforceEnabled)
+	if err != nil {
+		return nil
 	}
 
 	// For each MAC, collect the ordered list of applicable rule indices and
@@ -651,6 +626,46 @@ func planDLPPushes(rules []dlpRuleWire, tapMACs []string, enforceEnabled bool) [
 	return out
 }
 
+type preparedDLPRule struct {
+	rule  *dp.DLPRule
+	scope map[string]struct{} // nil ⇒ applies everywhere
+}
+
+// prepareDLPRules validates all identities before publishing any push plan and
+// normalizes each rule scope for case-insensitive matching.
+func prepareDLPRules(rules []dlpRuleWire, enforceEnabled bool) ([]preparedDLPRule, error) {
+	prep := make([]preparedDLPRule, 0, len(rules))
+	for _, r := range rules {
+		wireID, err := signatureWireID(r.DPRuleID)
+		if err != nil {
+			return nil, err
+		}
+		// dp rejects sig ids outside 20000-49999 and names with spaces
+		// (dpi_sig.c). Our dp_rule_id sequence starts at 9000, so map it into
+		// dp's user range; sanitize the name defensively.
+		dr := &dp.DLPRule{
+			Name: dp.SanitizeSigName(r.Name),
+			ID:   dp.DLPSigID(wireID),
+			// NET-40: apply each pattern's op (negation) and carry its context
+			// through so dp scans it in the authored buffer instead of the
+			// forced "body" default. applyDLPOp is a no-op for legacy rows.
+			Patterns: applyDLPOps(r.Patterns, r.Ops),
+			Contexts: r.Contexts,
+			Mode:     effectiveDLPMode(r.Mode, enforceEnabled),
+		}
+		var scope map[string]struct{}
+		if len(r.ScopeMACs) > 0 {
+			scope = make(map[string]struct{}, len(r.ScopeMACs))
+			for _, m := range r.ScopeMACs {
+				scope[strings.ToLower(strings.TrimSpace(m))] = struct{}{}
+			}
+		}
+		prep = append(prep, preparedDLPRule{rule: dr, scope: scope})
+	}
+
+	return prep, nil
+}
+
 // splitDLPWAFRules partitions fetched bundle rows by category (NET-42): rows
 // whose Category is "waf" go to the WAF path, everything else ("dlp",
 // "signature", or "" from an older server) stays on the DLP path. Order within
@@ -684,6 +699,10 @@ func splitDLPWAFRules(rules []dlpRuleWire) (dlp, waf []dlpRuleWire) {
 func userWAFRules(rules []dlpRuleWire, enforceEnabled bool) []*dp.WAFRule {
 	out := make([]*dp.WAFRule, 0, len(rules))
 	for _, r := range rules {
+		wireID, err := signatureWireID(r.DPRuleID)
+		if err != nil {
+			return nil
+		}
 		pats := make([]dp.WAFPattern, 0, len(r.Patterns)*3)
 		for i, p := range r.Patterns {
 			if strings.TrimSpace(p) == "" {
@@ -710,7 +729,7 @@ func userWAFRules(rules []dlpRuleWire, enforceEnabled bool) []*dp.WAFRule {
 		}
 		out = append(out, &dp.WAFRule{
 			Name:     dp.SanitizeSigName(r.Name),
-			ID:       dp.UserWAFSigID(uint32(r.DPRuleID)),
+			ID:       dp.UserWAFSigID(wireID),
 			Patterns: pats,
 			Mode:     effectiveDLPMode(r.Mode, enforceEnabled),
 		})
@@ -758,6 +777,9 @@ func (w *DLPSyncWorker) fetch(ctx context.Context) (dlpBundle, error) {
 	var out dlpListResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return dlpBundle{}, fmt.Errorf("decode: %w", err)
+	}
+	if err := validateSignatureWireIDs(out.Rules); err != nil {
+		return dlpBundle{}, err
 	}
 	return dlpBundle{rules: out.Rules, bindings: out.Bindings, groups: out.Groups}, nil
 }

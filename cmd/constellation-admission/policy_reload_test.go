@@ -1,12 +1,18 @@
 package main
 
 import (
+	"context"
+	"io"
+	"log/slog"
 	"testing"
+
+	admissionv1 "k8s.io/api/admission/v1"
 
 	"github.com/alphabravocompany/constellation/pkg/admission"
 )
 
 func TestAdmissionPolicyRowsToRulesParsesSupportedRows(t *testing.T) {
+	t.Parallel()
 	profile, ok := admission.BuiltInAdmissionProfile("strict-hardening")
 	if !ok {
 		t.Fatal("strict-hardening profile missing")
@@ -33,6 +39,7 @@ func TestAdmissionPolicyRowsToRulesParsesSupportedRows(t *testing.T) {
 }
 
 func TestAdmissionPolicyRowsToRulesParsesEvidenceBackedRows(t *testing.T) {
+	t.Parallel()
 	profile, ok := admission.BuiltInAdmissionProfile("critical-vulnerabilities-blocked")
 	if !ok {
 		t.Fatal("critical profile missing")
@@ -55,6 +62,7 @@ func TestAdmissionPolicyRowsToRulesParsesEvidenceBackedRows(t *testing.T) {
 }
 
 func TestAdmissionPolicyRowsToRulesRejectsInvalidYAML(t *testing.T) {
+	t.Parallel()
 	_, err := admissionPolicyRowsToRules([]admissionPolicyRow{{
 		Name:     "bad",
 		Mode:     "enforce",
@@ -62,5 +70,21 @@ func TestAdmissionPolicyRowsToRulesRejectsInvalidYAML(t *testing.T) {
 	}})
 	if err == nil {
 		t.Fatal("expected invalid YAML error")
+	}
+}
+
+func TestCELPolicyParseErrorRemainsFailClosed(t *testing.T) {
+	t.Parallel()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	rules := celPolicyRowsToRules([]admissionPolicyRow{{Name: "broken", Mode: "enforce", SpecYAML: "spec: ["}}, logger)
+	if len(rules) != 1 {
+		t.Fatalf("rules=%d, want malformed rule retained", len(rules))
+	}
+	engine, diagnostics, err := admission.NewCELEngine(rules)
+	if err != nil || diagnostics["broken"] == nil {
+		t.Fatalf("compile diagnostic missing: %v %v", err, diagnostics)
+	}
+	if resp := engine.Evaluate(context.Background(), &admissionv1.AdmissionRequest{}); resp.Allowed {
+		t.Fatal("malformed enforce YAML must deny rather than disappear")
 	}
 }

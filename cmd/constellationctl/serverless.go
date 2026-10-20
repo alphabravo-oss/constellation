@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -62,7 +63,7 @@ func serverlessAWSLambdaSyncCmd(serverFlag *string, email *string) *cobra.Comman
 downloads ZIP deployment packages and layers, catalogs packages with Syft, and
 posts package evidence to /api/v1/serverless-packages:report.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cli, err := resolveClient(*serverFlag, *email)
+			cli, err := resolveClient(cmd.Context(), *serverFlag, *email)
 			if err != nil {
 				return err
 			}
@@ -104,25 +105,7 @@ posts package evidence to /api/v1/serverless-packages:report.`,
 				awsLambdaPackageReporter{client: cli},
 				opts,
 			)
-			if jsonOut {
-				raw, _ := json.MarshalIndent(map[string]any{
-					"discovered":     summary.Discovered,
-					"reported":       summary.Reported,
-					"skipped":        summary.Skipped,
-					"failed":         summary.Failed,
-					"package_count":  summary.PackageCount,
-					"function_names": summary.FunctionNames,
-					"errors":         summary.Errors,
-				}, "", "  ")
-				fmt.Fprintln(cmd.OutOrStdout(), string(raw))
-			} else {
-				fmt.Fprintf(cmd.OutOrStdout(), "discovered=%d reported=%d skipped=%d failed=%d packages=%d\n",
-					summary.Discovered, summary.Reported, summary.Skipped, summary.Failed, summary.PackageCount)
-				for _, errText := range summary.Errors {
-					fmt.Fprintf(cmd.ErrOrStderr(), "error: %s\n", errText)
-				}
-			}
-			return collectErr
+			return writeServerlessSummary(cmd, summary, jsonOut, collectErr)
 		},
 	}
 	cmd.Flags().StringVar(&region, "region", "", "AWS region; defaults to AWS SDK configuration")
@@ -146,13 +129,44 @@ type awsLambdaPackageReporter struct {
 	client *authedClient
 }
 
-func (r awsLambdaPackageReporter) Report(_ context.Context, payload awslambda.PackageReport) (awslambda.ReportResponse, error) {
+func (r awsLambdaPackageReporter) Report(ctx context.Context, payload awslambda.PackageReport) (awslambda.ReportResponse, error) {
 	var out awslambda.ReportResponse
 	if r.client == nil {
 		return out, fmt.Errorf("constellation client required")
 	}
-	if err := r.client.postJSON("/api/v1/serverless-packages:report", payload, &out); err != nil {
+	if err := r.client.postJSON(ctx, "/api/v1/serverless-packages:report", payload, &out); err != nil {
 		return out, err
 	}
 	return out, nil
+}
+
+func writeServerlessSummary(cmd *cobra.Command, summary awslambda.Summary, jsonOut bool, collectErr error) error {
+	output := &commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
+	if jsonOut {
+		raw, err := json.MarshalIndent(map[string]any{
+			"discovered":     summary.Discovered,
+			"reported":       summary.Reported,
+			"skipped":        summary.Skipped,
+			"failed":         summary.Failed,
+			"package_count":  summary.PackageCount,
+			"function_names": summary.FunctionNames,
+			"errors":         summary.Errors,
+		}, "", "  ")
+		if err != nil {
+			return errors.Join(collectErr, err)
+		}
+		output.println(string(raw))
+	} else {
+		output.printf("discovered=%d reported=%d skipped=%d failed=%d packages=%d\n",
+			summary.Discovered, summary.Reported, summary.Skipped, summary.Failed, summary.PackageCount)
+		if err := output.result(); err != nil {
+			return errors.Join(collectErr, err)
+		}
+		diagnostics := &commandOutput{ctx: cmd.Context(), writer: cmd.ErrOrStderr()}
+		for _, errText := range summary.Errors {
+			diagnostics.printf("error: %s\n", errText)
+		}
+		return errors.Join(collectErr, diagnostics.result())
+	}
+	return errors.Join(collectErr, output.result())
 }

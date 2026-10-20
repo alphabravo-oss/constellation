@@ -362,12 +362,12 @@ func TestHTTPClient_ProxyAndTLS(t *testing.T) {
 	c.EgressProxy = EgressProxy{HTTPSProxy: "http://egress:3128", NoProxy: "internal.svc"}
 	cl = c.HTTPClient(0)
 	tr = cl.Transport.(*http.Transport)
-	reqProxied, _ := http.NewRequest(http.MethodGet, "https://registry.example.com/v2/", nil)
+	reqProxied, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://registry.example.com/v2/", nil)
 	u, _ := tr.Proxy(reqProxied)
 	if u == nil || u.Host != "egress:3128" {
 		t.Fatalf("proxied request should route via egress, got %v", u)
 	}
-	reqBypass, _ := http.NewRequest(http.MethodGet, "https://internal.svc/x", nil)
+	reqBypass, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "https://internal.svc/x", nil)
 	if u, _ := tr.Proxy(reqBypass); u != nil {
 		t.Fatalf("no_proxy host should bypass proxy, got %v", u)
 	}
@@ -382,7 +382,11 @@ func TestHTTPClient_ProxyAndTLS(t *testing.T) {
 	c = Default()
 	c.EgressProxy = EgressProxy{HTTPSProxy: proxy.URL}
 	cl = c.HTTPClient(2 * time.Second)
-	resp, err := cl.Get("http://example.invalid/whatever")
+	httpRequest, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.invalid/whatever", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := cl.Do(httpRequest)
 	if err == nil {
 		_ = resp.Body.Close()
 	}
@@ -411,6 +415,38 @@ func TestSyslogSenderAccessor(t *testing.T) {
 	}
 	if sender.Addr != "siem.local:514" || sender.Network != "udp" {
 		t.Fatalf("sender target = %s/%s, want siem.local:514/udp", sender.Network, sender.Addr)
+	}
+}
+
+func TestSyslogTLSMaterialRequiresTLSTransport(t *testing.T) {
+	ca := testCACert(t)
+	for _, tc := range []struct {
+		name     string
+		target   SyslogTarget
+		wantFail bool
+	}{
+		{"plaintext CA", SyslogTarget{Host: "siem.local", Port: 514, Protocol: "tcp", CACert: ca}, true},
+		{"plaintext client keypair", SyslogTarget{Host: "siem.local", Port: 514, Protocol: "udp", ClientCert: "cert", ClientKey: "key"}, true},
+		{"TLS protocol", SyslogTarget{Host: "siem.local", Port: 6514, Protocol: "tls", CACert: ca}, false},
+		{"TLS toggle", SyslogTarget{Host: "siem.local", Port: 6514, Protocol: "tcp", TLS: true, CACert: ca}, false},
+		{"legacy plaintext", SyslogTarget{Host: "siem.local", Port: 514, Protocol: "udp"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Default()
+			cfg.SyslogSIEM = tc.target
+			err := cfg.Validate()
+			if tc.wantFail {
+				validation := requireSafeValidation(t, err, "")
+				for _, field := range validation.Fields {
+					if field.Field == "syslog_siem_target.tls" {
+						return
+					}
+				}
+				t.Fatalf("Validate() fields = %v, want syslog_siem_target.tls", validation.Fields)
+			} else if err != nil {
+				t.Fatalf("Validate() = %v, want success", err)
+			}
+		})
 	}
 }
 

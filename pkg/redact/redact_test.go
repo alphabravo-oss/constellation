@@ -7,6 +7,7 @@ import (
 )
 
 func TestString_RedactsAllPatterns(t *testing.T) {
+	t.Parallel()
 	r := NewDefault()
 	cases := []struct {
 		in, want string
@@ -25,6 +26,7 @@ func TestString_RedactsAllPatterns(t *testing.T) {
 }
 
 func TestJSON_RedactsNestedStrings(t *testing.T) {
+	t.Parallel()
 	r := NewDefault()
 	in := json.RawMessage(`{"email":"alice@example.com","tags":["safe","bob@example.com"],"meta":{"ip":"10.0.0.5","ok":true,"n":42}}`)
 	out, err := r.JSON(in)
@@ -53,6 +55,7 @@ func TestJSON_RedactsNestedStrings(t *testing.T) {
 }
 
 func TestCompose_AppliesCustomAfterDefault(t *testing.T) {
+	t.Parallel()
 	r, errs := Compose(map[string]string{"GITHUB_TOKEN": `ghp_[A-Za-z0-9]{20,}`})
 	if len(errs) > 0 {
 		t.Fatal(errs[0])
@@ -64,6 +67,7 @@ func TestCompose_AppliesCustomAfterDefault(t *testing.T) {
 }
 
 func TestCompile_RejectsBadRegex(t *testing.T) {
+	t.Parallel()
 	_, errs := Compile(map[string]string{"bad": "(*"})
 	if len(errs) != 1 {
 		t.Fatalf("expected 1 error, got %d", len(errs))

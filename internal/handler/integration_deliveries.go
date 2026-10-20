@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -8,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -179,11 +182,11 @@ func (h *IntegrationDeliveries) TestPreview(w http.ResponseWriter, r *http.Reque
 		id = integrationIDFromRequestPath(r)
 	}
 	if id == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "integration id required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "integration id required")
 		return
 	}
 	if h.db == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "integration not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "integration not found")
 		return
 	}
 	subj, ok := SubjectFrom(r.Context())
@@ -193,14 +196,14 @@ func (h *IntegrationDeliveries) TestPreview(w http.ResponseWriter, r *http.Reque
 	}
 	receiverID, err := uuid.Parse(id)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "integration id must be a receiver UUID"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "integration id must be a receiver UUID")
 		return
 	}
 
 	receiver, err := h.loadReceiver(r, subj.OrgID, receiverID)
 	if err != nil {
-		if err == pgx.ErrNoRows {
-			writeJSON(w, http.StatusNotFound, map[string]string{"error": "integration not found"})
+		if errors.Is(err, pgx.ErrNoRows) {
+			apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "integration not found")
 			return
 		}
 		jsonError(w, http.StatusInternalServerError, err.Error())
@@ -213,7 +216,7 @@ func (h *IntegrationDeliveries) TestPreview(w http.ResponseWriter, r *http.Reque
 	}
 	action, ok := integrationPreviewAction(actionID, []string{receiver.ID})
 	if !ok {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "action not available for integration"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "action not available for integration")
 		return
 	}
 
@@ -354,7 +357,7 @@ func (h *IntegrationDeliveries) loadRoutingRules(r *http.Request, orgID uuid.UUI
 	err := h.db.Pool().QueryRow(r.Context(),
 		`SELECT yaml, revision, updated_at FROM routing_configs WHERE org_id = $1`, orgID).
 		Scan(&yamlStr, &revision, &updatedAt)
-	if err == pgx.ErrNoRows || strings.TrimSpace(yamlStr) == "" {
+	if errors.Is(err, pgx.ErrNoRows) || strings.TrimSpace(yamlStr) == "" {
 		return []integrationRoutingRuleDTO{}, nil
 	}
 	if err != nil {

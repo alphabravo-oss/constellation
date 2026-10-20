@@ -31,6 +31,7 @@ const sampleRules = `
 `
 
 func TestParse_RulesMacrosLists(t *testing.T) {
+	t.Parallel()
 	doc, err := Parse([]byte(sampleRules))
 	if err != nil {
 		t.Fatal(err)
@@ -58,6 +59,7 @@ func TestParse_RulesMacrosLists(t *testing.T) {
 }
 
 func TestEvaluator_TerminalShellInContainerMatches(t *testing.T) {
+	t.Parallel()
 	doc, err := Parse([]byte(sampleRules))
 	if err != nil {
 		t.Fatal(err)
@@ -79,6 +81,7 @@ func TestEvaluator_TerminalShellInContainerMatches(t *testing.T) {
 }
 
 func TestEvaluator_NoMatchOutsideContainer(t *testing.T) {
+	t.Parallel()
 	doc, err := Parse([]byte(sampleRules))
 	if err != nil {
 		t.Fatal(err)

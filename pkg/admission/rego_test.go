@@ -22,6 +22,7 @@ deny[msg] {
 `
 
 func TestRegoEngine_DeniesHostNetworkPod(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e, errs, err := NewRegoEngine(ctx,
 		map[string]string{"block-host-network": blockHostNetworkRego},
@@ -46,6 +47,7 @@ func TestRegoEngine_DeniesHostNetworkPod(t *testing.T) {
 }
 
 func TestRegoEngine_AllowsCompliantPod(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e, _, _ := NewRegoEngine(ctx,
 		map[string]string{"block-host-network": blockHostNetworkRego},
@@ -63,6 +65,7 @@ func TestRegoEngine_AllowsCompliantPod(t *testing.T) {
 }
 
 func TestRegoEngine_MonitorEmitsWarnings(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	e, _, _ := NewRegoEngine(ctx,
 		map[string]string{"block-host-network": blockHostNetworkRego},
@@ -101,6 +104,7 @@ deny[msg] {
 // DENY (fail closed), not warn-and-admit. The same error under monitor mode
 // must keep warning so a faulty policy can't start blocking on an error.
 func TestRegoEngine_EnforceEvalErrorFailsClosed(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "n"},
@@ -128,6 +132,7 @@ func TestRegoEngine_EnforceEvalErrorFailsClosed(t *testing.T) {
 }
 
 func TestRegoEngine_CompileErrorIsolated(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	_, errs, _ := NewRegoEngine(ctx,
 		map[string]string{
@@ -141,5 +146,26 @@ func TestRegoEngine_CompileErrorIsolated(t *testing.T) {
 	}
 	if _, ok := errs["good"]; ok {
 		t.Fatalf("good policy should compile cleanly")
+	}
+}
+
+func TestRegoEngine_CompileErrorFailsClosedOnlyInEnforceMode(t *testing.T) {
+	ctx := context.Background()
+	req := &admissionv1.AdmissionRequest{UID: "compile-error"}
+	for _, mode := range []string{"enforce", "monitor"} {
+		t.Run(mode, func(t *testing.T) {
+			engine, errs, err := NewRegoEngine(ctx, map[string]string{"broken": "not actually rego"}, map[string]string{"broken": mode})
+			if err != nil || errs["broken"] == nil {
+				t.Fatalf("expected compile diagnostic: %v %v", err, errs)
+			}
+			resp, ruleID := engine.evaluate(ctx, req)
+			if mode == "enforce" {
+				if resp.Allowed || ruleID != "broken" || resp.Result == nil {
+					t.Fatalf("broken enforce rule must deny with attribution: %+v %q", resp, ruleID)
+				}
+			} else if !resp.Allowed || len(resp.Warnings) == 0 {
+				t.Fatalf("broken monitor rule must warn: %+v", resp)
+			}
+		})
 	}
 }

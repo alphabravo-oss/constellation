@@ -416,8 +416,8 @@ func collectBPF() BPFInfo {
 	if err := syscall.Statfs("/sys/fs/bpf", &stfs); err == nil {
 		// BPF_FS_MAGIC = 0xCAFE4A11. Literal because the syscall pkg
 		// doesn't export it on all architectures.
-		const bpfFSMagic int64 = 0xCAFE4A11
-		if int64(stfs.Type) == bpfFSMagic {
+		const bpfFSMagic = 0xCAFE4A11
+		if stfs.Type == bpfFSMagic {
 			b.FSMounted = true
 		}
 	}
@@ -492,7 +492,7 @@ func collectCapabilities() []string {
 	if err != nil {
 		return nil
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		line := sc.Text()
@@ -556,7 +556,7 @@ func readKeyValueFile(path string) (map[string]string, bool) {
 	if err != nil {
 		return nil, false
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	out := make(map[string]string)
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {

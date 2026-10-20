@@ -1,0 +1,74 @@
+From: Constellation maintainers
+Subject: [local correctness backport] Use checked wall time for connection observations
+Upstream-base: 4247e24561a9cd225db73a7cfaf5c7b2c99ba0a5
+Recorded: 2026-10-17
+
+The startup-relative sleep-incremented clock may trail a wall-second boundary.
+Actual directed-packet evidence recorded a post-cursor new-session allow report
+with FirstSeenAt one second before its wall-clock probe start. Derive connection
+observation timestamps from wall time minus existing coarse Idle instead.
+Nonzero Idle remains an approximation, not an exact historical packet clock.
+Reject invalid or unrepresentable time before aggregate/rate-counter mutation.
+Timers, Idle, rate-limit/debug clocks, aggregate identity/counters and existing
+first/latest action semantics are unchanged. This is not an upstream release.
+
+--- a/dp/ctrl.c
++++ b/dp/ctrl.c
+@@ -1,5 +1,6 @@
+ #include <stddef.h>
+ #include <stdint.h>
++#include <time.h>
+ #include <stdio.h>
+ #include <errno.h>
+ #include <stdlib.h>
+@@ -2645,6 +2646,19 @@
+ }
+ 
+ #define TUNNEL_THRESHOLD 800
++// Idle remains a coarse session-clock duration, so nonzero-idle timestamps
++// approximate last activity. Fresh zero-idle reports must use wall time rather
++// than the startup-relative timer, whose tick can trail a wall-second boundary.
++static bool dp_ctrl_connect_timestamp(uint16_t idle, uint32_t *timestamp)
++{
++    time_t now = time(NULL);
++    if (now < 0 || (uintmax_t)now > UINT32_MAX || (uintmax_t)now < idle) {
++        return false;
++    }
++    *timestamp = (uint32_t)now - idle;
++    return true;
++}
++
+ int dp_ctrl_connect_report(DPMsgSession *log, DPMonitorMetric *metric, int count_session, int count_violate)
+ {
+     dp_thread_data_t *th_data = &g_dp_thread_data[THREAD_ID];
+@@ -2659,6 +2673,13 @@
+                      DBG_IPV4_TUPLE(log->ServerIP),log->ServerPort,
+                      log->Application, log->PolicyId, log->PolicyAction,
+                      count_session, count_violate, log->ThreatID, log->Severity);
++
++        uint32_t last_seen;
++        // Reject an unusable wall clock before mutating any aggregate or rate
++        // counter. The start-log caller already retries a rejected report.
++        if (!dp_ctrl_connect_timestamp(log->Idle, &last_seen)) {
++            return -1;
++        }
+ 
+         // host: IP is on host subnet
+         // unkpeer: IP is not on host or container subnets
+@@ -2705,7 +2726,6 @@
+         conn_node_t *n = rcu_map_lookup(conn4_map, &key);
+         if (n != NULL) {
+             DPMsgConnect *conn = &n->conn;
+-            uint32_t last_seen = get_current_time() - log->Idle;
+             conn->Bytes += log->ClientBytes + log->ServerBytes;
+             conn->Sessions += count_session;
+             conn->Violates += count_violate;
+@@ -2776,7 +2796,7 @@
+                 FLAGS_SET(conn->Flags, DPCONN_FLAG_NBE_SNS);
+             }
+ 
+-            conn->FirstSeenAt = conn->LastSeenAt = get_current_time() - log->Idle;
++            conn->FirstSeenAt = conn->LastSeenAt = last_seen;
+             conn->Bytes = log->ClientBytes + log->ServerBytes;
+             conn->Sessions = count_session;
+             conn->Violates = count_violate;

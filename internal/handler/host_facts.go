@@ -34,9 +34,9 @@ import (
 // untouched, so adding fields on the agent side doesn't require an
 // API change.
 type HostFacts struct {
-	Node         string          `json:"node"`
-	ObservedAt   time.Time       `json:"observed_at"`
-	AgentVersion string          `json:"agent_version,omitempty"`
+	Node         string    `json:"node"`
+	ObservedAt   time.Time `json:"observed_at"`
+	AgentVersion string    `json:"agent_version,omitempty"`
 
 	OS       hostFactsOS       `json:"os,omitempty"`
 	Kernel   hostFactsKernel   `json:"kernel,omitempty"`
@@ -150,6 +150,10 @@ func (h *HostFactsHandler) Report(w http.ResponseWriter, r *http.Request) {
 	// mapping; the NULL-safe upsert below then dedups on (org_id, node).
 	clusterID, err := ResolveAgentClusterID(r.Context(), h.db, tok)
 	if err != nil {
+		if errors.Is(err, ErrAgentClusterScope) {
+			jsonError(w, http.StatusForbidden, "agent token cluster scope mismatch")
+			return
+		}
 		jsonError(w, http.StatusInternalServerError, "resolve cluster: "+err.Error())
 		return
 	}
@@ -194,6 +198,8 @@ ON CONFLICT (org_id, COALESCE(cluster_id, '00000000-0000-0000-0000-000000000000'
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+var ErrAgentClusterScope = errors.New("agent token cluster does not belong to its org")
+
 // ResolveAgentClusterID returns the cluster_id that a runtime-agent token was
 // minted for, by following the cluster init-bundle that issued it
 // (cluster_init_bundles.runtime_agent_token_id, whose cluster_id is NOT NULL).
@@ -211,14 +217,34 @@ ON CONFLICT (org_id, COALESCE(cluster_id, '00000000-0000-0000-0000-000000000000'
 // unique index (migration 111) so a NULL cluster_id dedups on (org_id, node)
 // instead of inserting unbounded duplicates.
 func ResolveAgentClusterID(ctx context.Context, d *db.DB, tok *RuntimeAgentToken) (*uuid.UUID, error) {
-	var cid uuid.UUID
-	err := d.Pool().QueryRow(ctx, `
-SELECT cluster_id
-  FROM cluster_init_bundles
- WHERE runtime_agent_token_id = $1
- ORDER BY created_at DESC
- LIMIT 1`, tok.ID).Scan(&cid)
-	if errors.Is(err, pgx.ErrNoRows) {
+	rows, err := d.Pool().Query(ctx, `
+SELECT b.cluster_id, b.org_id, c.org_id
+  FROM cluster_init_bundles b
+  LEFT JOIN clusters c ON c.id = b.cluster_id
+ WHERE b.runtime_agent_token_id = $1`, tok.ID)
+	if err != nil {
+		return nil, err
+	}
+	var bound *uuid.UUID
+	for rows.Next() {
+		var cid, bundleOrgID uuid.UUID
+		var clusterOrgID *uuid.UUID
+		if err := rows.Scan(&cid, &bundleOrgID, &clusterOrgID); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if bundleOrgID != tok.OrgID || clusterOrgID == nil || *clusterOrgID != tok.OrgID || (bound != nil && *bound != cid) {
+			rows.Close()
+			return nil, ErrAgentClusterScope
+		}
+		bound = &cid
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+	if bound == nil {
 		// No init-bundle mapping — e.g. the bundle was lost in a repave, so agent
 		// reports would otherwise land with a NULL cluster_id and never show up on the
 		// cluster's node pages. Fall back to the org's cluster ONLY when the org has
@@ -228,15 +254,15 @@ SELECT cluster_id
 		var single uuid.UUID
 		if e2 := d.Pool().QueryRow(ctx,
 			`SELECT count(*), COALESCE((array_agg(id ORDER BY created_at))[1], '00000000-0000-0000-0000-000000000000'::uuid) FROM clusters WHERE org_id = $1`,
-			tok.OrgID).Scan(&n, &single); e2 == nil && n == 1 {
+			tok.OrgID).Scan(&n, &single); e2 != nil {
+			return nil, e2
+		}
+		if n == 1 {
 			return &single, nil
 		}
 		return nil, nil
 	}
-	if err != nil {
-		return nil, err
-	}
-	return &cid, nil
+	return bound, nil
 }
 
 // HostFactsRow is one row in the GET /api/v1/host-facts response.

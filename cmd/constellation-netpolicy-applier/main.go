@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"k8s.io/client-go/dynamic"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/alphabravocompany/constellation/internal/netpolicyapply"
 	"github.com/alphabravocompany/constellation/internal/obslog"
+	"github.com/alphabravocompany/constellation/internal/telemetry"
 	"github.com/alphabravocompany/constellation/pkg/version"
 )
 
@@ -80,6 +82,18 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+	tel, err := telemetry.Init(ctx, telemetry.ConfigFromEnv("constellation-netpolicy-applier"))
+	if err != nil {
+		logger.Error("telemetry init", slog.String("err", err.Error()))
+		os.Exit(1)
+	}
+	defer func() {
+		sctx, c := context.WithTimeout(context.Background(), 5*time.Second)
+		defer c()
+		_ = tel.Shutdown(sctx)
+	}()
+	// Liveness/readiness/metrics for the Deployment probes and Prometheus (guide ch.05).
+	telemetry.StartAdmin(ctx, telemetry.AdminAddrFromEnv(), tel.AdminHandler(telemetry.AdminOptions{}), logger)
 
 	pool, err := pgxpool.New(ctx, cfg.databaseURL)
 	if err != nil {
@@ -102,7 +116,12 @@ func main() {
 		logger.Error("dynamic client", slog.String("err", err.Error()))
 		os.Exit(1)
 	}
-	client := netpolicyapply.KubernetesResourceClient{Client: dyn, FieldManager: "constellation-netpolicy-applier"}
+	protection, err := netpolicyapply.NewProtection(os.Getenv("CONSTELLATION_POD_NAMESPACE"), strings.Split(os.Getenv("CONSTELLATION_ENFORCEMENT_PROTECTED_NAMESPACES"), ","))
+	if err != nil {
+		logger.Error("network policy protection", slog.String("err", err.Error()))
+		os.Exit(2)
+	}
+	client := netpolicyapply.KubernetesResourceClient{Client: dyn, FieldManager: "constellation-netpolicy-applier", Protection: protection}
 
 	logger.Info("network policy applier starting",
 		slog.String("cluster_id", cfg.clusterID),
@@ -174,11 +193,12 @@ func runOnce(ctx context.Context, pool *pgxpool.Pool, client netpolicyapply.Reso
 		return err
 	}
 	for _, state := range states {
-		result := netpolicyapply.ReconcileState(ctx, client, state, cfg.flavor)
-		if err := recordStatus(ctx, pool, state, cfg.flavor, result); err != nil {
-			logger.Warn("record apply status failed",
+		result, err := reconcileLifecycleState(ctx, pool, client, state, cfg.flavor)
+		if err != nil {
+			logger.Warn("policy reconcile failed",
 				slog.String("workload", state.Workload),
 				slog.String("err", err.Error()))
+			continue
 		}
 		attrs := []any{
 			slog.String("workload", state.Workload),
@@ -225,35 +245,65 @@ SELECT id::text, manifest_flavor, manifest, state
 	}
 
 	for _, a := range actions {
-		resource, manifestJSON, perr := netpolicyapply.ParseManifest(netpolicyapply.Flavor(a.flavor), a.manifest)
-		if perr != nil {
-			updateEnforcementStatus(ctx, pool, a.id, "error", perr.Error(), "")
-			logger.Warn("enforcement parse failed", slog.String("id", a.id), slog.String("err", perr.Error()))
-			continue
+		if err := reconcileEnforcementAction(ctx, pool, client, a.id, a.flavor, a.manifest, a.state); err != nil {
+			logger.Warn("enforcement reconcile failed", slog.String("id", a.id), slog.String("err", err.Error()))
 		}
-		if a.state == "lifting" {
-			if derr := client.Delete(ctx, resource); derr != nil {
-				updateEnforcementStatus(ctx, pool, a.id, "error", derr.Error(), "")
-				continue
-			}
-			updateEnforcementStatus(ctx, pool, a.id, "ok", "", "removed")
-			logger.Info("enforcement removed", slog.String("id", a.id), slog.String("resource", resource.Ref()))
-			continue
-		}
-		if aerr := client.Apply(ctx, resource, manifestJSON); aerr != nil {
-			updateEnforcementStatus(ctx, pool, a.id, "error", aerr.Error(), "")
-			continue
-		}
-		updateEnforcementStatus(ctx, pool, a.id, "ok", "", "")
-		logger.Info("enforcement applied", slog.String("id", a.id), slog.String("resource", resource.Ref()))
 	}
 	return nil
 }
 
+// Lock the intent across the Kubernetes operation and its report. A lift waits
+// for an in-flight apply, and another applier must recheck state after acquiring
+// the lock, preventing stale snapshots from recreating a removed policy.
+func reconcileEnforcementAction(ctx context.Context, pool *pgxpool.Pool, client netpolicyapply.ResourceClient, id, flavor, manifest, expectedState string) error {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var current string
+	err = tx.QueryRow(ctx, `SELECT state FROM network_enforcement_actions WHERE id=$1 FOR UPDATE`, id).Scan(&current)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if current != expectedState || (current != "active" && current != "lifting") {
+		return nil
+	}
+	resource, manifestJSON, operationErr := netpolicyapply.ParseManifest(netpolicyapply.Flavor(flavor), manifest)
+	newState := ""
+	if operationErr == nil {
+		if current == "lifting" {
+			operationErr = client.Delete(ctx, resource)
+			if operationErr == nil {
+				newState = "removed"
+			}
+		} else {
+			operationErr = client.Apply(ctx, resource, manifestJSON)
+		}
+	}
+	status, message := "ok", ""
+	if operationErr != nil {
+		status, message = "error", operationErr.Error()
+	}
+	if err := updateEnforcementStatus(ctx, tx, id, current, status, message, newState); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+type enforcementStatusWriter interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}
+
 // updateEnforcementStatus records the reconcile outcome; newState (when non-empty)
 // transitions the row (e.g. lifting -> removed after a successful delete).
-func updateEnforcementStatus(ctx context.Context, pool *pgxpool.Pool, id, status, errMsg, newState string) {
-	_, _ = pool.Exec(ctx, `
+func updateEnforcementStatus(ctx context.Context, pool enforcementStatusWriter, id, expectedState, status, errMsg, newState string) error {
+	_, err := pool.Exec(ctx, `
 UPDATE network_enforcement_actions
    SET last_status = $2,
        last_error = $3,
@@ -261,7 +311,8 @@ UPDATE network_enforcement_actions
        last_applied_at = CASE WHEN $2 = 'ok' AND $4 = '' THEN NOW() ELSE last_applied_at END,
        last_deleted_at = CASE WHEN $2 = 'ok' AND $4 = 'removed' THEN NOW() ELSE last_deleted_at END,
        updated_at = NOW()
- WHERE id = $1`, id, status, errMsg, newState)
+ WHERE id = $1 AND state = $5`, id, status, errMsg, newState, expectedState)
+	return err
 }
 
 func resolveClusterID(ctx context.Context, pool *pgxpool.Pool, cfg config) (string, error) {
@@ -313,7 +364,44 @@ SELECT org_id::text, cluster_id::text, workload, namespace, current_mode, approv
 	return states, rows.Err()
 }
 
-func recordStatus(ctx context.Context, pool *pgxpool.Pool, state netpolicyapply.LifecycleState, flavor netpolicyapply.Flavor, result netpolicyapply.Result) error {
+// Re-read intent under its row lock rather than executing the polling snapshot.
+// Demotion, rollback, candidate replacement and concurrent appliers serialize with
+// the Kubernetes operation and its status write.
+func reconcileLifecycleState(ctx context.Context, pool *pgxpool.Pool, client netpolicyapply.ResourceClient, key netpolicyapply.LifecycleState, flavor netpolicyapply.Flavor) (netpolicyapply.Result, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	skipped := netpolicyapply.Result{Action: netpolicyapply.ActionSkip, Status: netpolicyapply.StatusSkipped}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return skipped, err
+	}
+	defer tx.Rollback(ctx)
+	var state netpolicyapply.LifecycleState
+	var raw []byte
+	err = tx.QueryRow(ctx, `SELECT org_id::text,cluster_id::text,workload,namespace,current_mode,approval_status,
+ COALESCE(candidate_hash,''),COALESCE(applied_ref,''),COALESCE(rollback_ref,''),preview_manifests
+ FROM network_policy_lifecycle_states WHERE org_id=$1 AND cluster_id=$2 AND workload=$3 FOR UPDATE`, key.OrgID, key.ClusterID, key.Workload).Scan(
+		&state.OrgID, &state.ClusterID, &state.Workload, &state.Namespace, &state.CurrentMode, &state.ApprovalStatus, &state.CandidateHash, &state.AppliedRef, &state.RollbackRef, &raw)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return skipped, nil
+	}
+	if err != nil {
+		return skipped, err
+	}
+	if netpolicyapply.DesiredAction(state) == netpolicyapply.ActionSkip {
+		return skipped, nil
+	}
+	if err := json.Unmarshal(raw, &state.Manifests); err != nil {
+		return skipped, fmt.Errorf("decode current policy manifests: %w", err)
+	}
+	result := netpolicyapply.ReconcileState(ctx, client, state, flavor)
+	if err := recordStatus(ctx, tx, state, flavor, result); err != nil {
+		return result, err
+	}
+	return result, tx.Commit(ctx)
+}
+
+func recordStatus(ctx context.Context, pool enforcementStatusWriter, state netpolicyapply.LifecycleState, flavor netpolicyapply.Flavor, result netpolicyapply.Result) error {
 	_, err := pool.Exec(ctx, `
 INSERT INTO network_policy_apply_status (
     org_id, cluster_id, workload, namespace, flavor, resource_ref, desired_mode, approval_status,

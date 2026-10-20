@@ -1,7 +1,7 @@
 // Routes: /settings/attestation-trust/new (create) and /settings/attestation-trust/:id (edit).
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { ArrowLeft, Save, ShieldCheck } from "lucide-react";
 
@@ -15,6 +15,7 @@ import { Collapse } from "@/components/ui/collapse";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Field, TextInput, Textarea, Select, Switch } from "@/components/ui/form";
+import { apiErrorText } from "@/lib/api-error";
 
 type PolicyFormState = {
   name: string;
@@ -72,7 +73,7 @@ const BACK_LINK = "/settings/attestation-trust";
 export function AttestationPolicyFormPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const { id } = useParams<{ id: string }>();
+  const { id } = useParams({ strict: false });
   const isEdit = Boolean(id);
 
   const [form, setForm] = useState<PolicyFormState>(DEFAULT_FORM);
@@ -105,7 +106,7 @@ export function AttestationPolicyFormPage() {
       toast.success(editing ? "Trust policy updated" : "Trust policy created");
       void qc.invalidateQueries({ queryKey: ["attestation-trust-policies"] });
       void qc.invalidateQueries({ queryKey: ["repository-scans"] });
-      navigate(BACK_LINK);
+      navigate({ href: BACK_LINK });
     },
     onError: (err: unknown) => toast.error(`Save failed: ${errorMessage(err)}`),
   });
@@ -119,7 +120,7 @@ export function AttestationPolicyFormPage() {
     <div className="space-y-6">
       <PageHeader
         backLink={
-          <Link to={BACK_LINK} className="inline-flex items-center gap-1 hover:text-foreground">
+          <Link to="." href={BACK_LINK} className="inline-flex items-center gap-1 hover:text-foreground">
             <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Attestation trust
           </Link>
         }
@@ -139,7 +140,7 @@ export function AttestationPolicyFormPage() {
       ) : notFound ? (
         <Card title="Policy">
           <div className="p-2 text-sm text-destructive">Trust policy not found.</div>
-          <Button variant="outline" size="lg" className="mt-3" onClick={() => navigate(BACK_LINK)}>
+          <Button variant="outline" size="lg" className="mt-3" onClick={() => navigate({ href: BACK_LINK })}>
             Back to policies
           </Button>
         </Card>
@@ -153,7 +154,7 @@ export function AttestationPolicyFormPage() {
             }}
           >
             {editing ? (
-              <div className="mb-3 break-all font-mono text-[10px] text-muted-foreground">{editing.id}</div>
+              <div className="mb-3 break-all font-mono text-micro text-muted-foreground">{editing.id}</div>
             ) : null}
 
             <div className="space-y-5">
@@ -264,7 +265,7 @@ export function AttestationPolicyFormPage() {
                   <Save className="h-4 w-4" aria-hidden />
                   {savePolicy.isPending ? "Saving…" : "Save policy"}
                 </Button>
-                <Button type="button" variant="ghost" size="lg" onClick={() => navigate(BACK_LINK)}>
+                <Button type="button" variant="ghost" size="lg" onClick={() => navigate({ href: BACK_LINK })}>
                   Cancel
                 </Button>
               </div>
@@ -360,6 +361,5 @@ function uniqueList(values: string[]): string[] {
 }
 
 function errorMessage(err: unknown): string {
-  const typed = err as { response?: { data?: unknown }; message?: string };
-  return String(typed.response?.data ?? typed.message ?? err);
+  return apiErrorText(err, String(err));
 }

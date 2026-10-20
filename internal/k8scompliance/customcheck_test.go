@@ -15,6 +15,7 @@ import (
 // collected objects and produce Custom-framework compliance rows. Without the custom-check
 // wiring in Collect this returns zero custom evidence and the test fails.
 func TestCollect_CustomChecks_PassAndFail(t *testing.T) {
+	t.Parallel()
 	client := fake.NewSimpleClientset(
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default"}},
 		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "good", Namespace: "default"}},
@@ -70,6 +71,7 @@ func TestCollect_CustomChecks_PassAndFail(t *testing.T) {
 // TestEvaluateCustomChecks_FailsClosedOnError ensures a CEL expression that errors at runtime
 // (e.g. referencing an absent key) is scored as a violation rather than silently passing.
 func TestEvaluateCustomChecks_FailsClosedOnError(t *testing.T) {
+	t.Parallel()
 	targets := []customTarget{{
 		kind:   "Deployment",
 		name:   "api",
@@ -87,6 +89,7 @@ func TestEvaluateCustomChecks_FailsClosedOnError(t *testing.T) {
 }
 
 func TestValidateExpression(t *testing.T) {
+	t.Parallel()
 	if err := ValidateExpression(`object.metadata.name == "x"`); err != nil {
 		t.Fatalf("valid expression rejected: %v", err)
 	}

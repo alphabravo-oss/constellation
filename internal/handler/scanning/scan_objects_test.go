@@ -1,3 +1,5 @@
+//go:build integration
+
 package scanning
 
 import (
@@ -16,6 +18,7 @@ import (
 )
 
 func TestScanObjects_TriggerQueuesEvidenceBackedTargets(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -38,7 +41,7 @@ func TestScanObjects_TriggerQueuesEvidenceBackedTargets(t *testing.T) {
 	h := NewScanJobs(d, nil)
 	subj := authctx.Subject{UserID: userID, OrgID: orgID}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/scan/host/"+hostRef+"?cluster_id="+clusterID.String(), nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan/host/"+hostRef+"?cluster_id="+clusterID.String(), nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), subj))
 	req = withRouteParam(req, "id", hostRef)
 	rec := httptest.NewRecorder()
@@ -54,7 +57,7 @@ func TestScanObjects_TriggerQueuesEvidenceBackedTargets(t *testing.T) {
 		t.Fatalf("host trigger = %+v target=%s evidence=%s", hostOut, hostTargetID, hostEvidenceID)
 	}
 
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/scan/host/"+hostRef+"?cluster_id="+clusterID.String(), nil)
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan/host/"+hostRef+"?cluster_id="+clusterID.String(), nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), subj))
 	req = withRouteParam(req, "id", hostRef)
 	rec = httptest.NewRecorder()
@@ -78,7 +81,7 @@ SELECT COUNT(*)::int FROM scan_jobs WHERE org_id = $1 AND target_id = $2 AND sta
 		t.Fatalf("pending host jobs = %d, want 1", pending)
 	}
 
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/scan/workload/"+workloadRef+"?cluster_id="+clusterID.String(), nil)
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan/workload/"+workloadRef+"?cluster_id="+clusterID.String(), nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), subj))
 	req = withRouteParam(req, "id", workloadRef)
 	rec = httptest.NewRecorder()
@@ -94,7 +97,7 @@ SELECT COUNT(*)::int FROM scan_jobs WHERE org_id = $1 AND target_id = $2 AND sta
 		t.Fatalf("workload trigger = %+v target=%s", workloadOut, workloadTargetID)
 	}
 
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/scan/platform/platform", nil)
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan/platform/platform", nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), subj))
 	rec = httptest.NewRecorder()
 	h.TriggerPlatform(rec, req)
@@ -111,6 +114,7 @@ SELECT COUNT(*)::int FROM scan_jobs WHERE org_id = $1 AND target_id = $2 AND sta
 }
 
 func TestScanObjects_ReportAndPlatformSummary(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -160,7 +164,7 @@ INSERT INTO findings (
 	}
 
 	h := NewScanJobs(d, nil)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/scan/host/"+hostRef+"?cluster_id="+clusterID.String(), nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scan/host/"+hostRef+"?cluster_id="+clusterID.String(), nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	req = withRouteParam(req, "id", hostRef)
 	rec := httptest.NewRecorder()
@@ -184,7 +188,7 @@ INSERT INTO findings (
 	}
 
 	missingRef := "payments/pod/missing-" + uuid.NewString()
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/scan/workload/"+missingRef, nil)
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scan/workload/"+missingRef, nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	req = withRouteParam(req, "id", missingRef)
 	rec = httptest.NewRecorder()
@@ -217,7 +221,7 @@ INSERT INTO scan_jobs (id, org_id, target_id, status, package_count, finding_cou
 VALUES ($1, $2, $3, 'completed', 4, 0, $4)`, uuid.New(), orgID, platformTargetID, now); err != nil {
 		t.Fatal(err)
 	}
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/scan/platform", nil)
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scan/platform", nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rec = httptest.NewRecorder()
 	h.PlatformSummary(rec, req)
@@ -230,6 +234,97 @@ VALUES ($1, $2, $3, 'completed', 4, 0, $4)`, uuid.New(), orgID, platformTargetID
 	}
 	if len(summary.Platforms) != 1 || summary.Platforms[0].K8sVersion != "v1.30.1+k3s1" || summary.Platforms[0].Status != "finished" {
 		t.Fatalf("platform summary = %+v", summary)
+	}
+}
+
+func TestScanObjects_IgnoreRowsLinkedToForeignOrgTarget(t *testing.T) {
+	t.Parallel()
+	database := openTestDB(t)
+	defer database.Close()
+
+	ctx := context.Background()
+	pool := database.Pool()
+	ensureScanObjectTables(t, ctx, pool)
+
+	orgID, userID, clusterID := createScanObjectOrg(t, ctx, pool, "linked-row")
+	foreignOrgID, _, foreignClusterID := createScanObjectOrg(t, ctx, pool, "foreign-target")
+	var findingID uuid.UUID
+	defer func() {
+		if findingID != uuid.Nil {
+			_, _ = pool.Exec(context.Background(), `DELETE FROM findings WHERE id = $1`, findingID)
+		}
+		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id IN ($1, $2)`, orgID, foreignOrgID)
+	}()
+
+	foreignRef := "node-" + uuid.NewString()
+	foreignTargetID, _ := insertScanObjectTarget(t, ctx, pool, foreignOrgID, foreignClusterID, "host", foreignRef, "host", `{}`)
+	inventoryHash := "sha256:" + uuid.NewString()
+	if _, err := pool.Exec(ctx, `
+INSERT INTO scan_evidence (
+    org_id, scan_target_id, cluster_id, target_type, target_ref, source_type,
+    evidence_type, inventory_hash, package_count, payload, observed_at
+) VALUES (
+    $1, $2, $3, 'host', $4, 'host', 'package-inventory', $5, 1,
+    '{"packages":[{"name":"openssl","version":"3.0.13"}]}'::jsonb, NOW()
+)`, orgID, foreignTargetID, clusterID, foreignRef, inventoryHash); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+INSERT INTO scan_jobs (org_id, target_id, status, package_count, finding_count, finished_at)
+VALUES ($1, $2, 'completed', 1, 1, NOW())`, orgID, foreignTargetID); err != nil {
+		t.Fatal(err)
+	}
+	assetID := uuid.New()
+	if _, err := pool.Exec(ctx, `
+INSERT INTO assets (id, org_id, cluster_id, kind, name, labels, criticality)
+VALUES ($1, $2, $3, 'host', $4, '{}'::jsonb, 'medium')`, assetID, orgID, clusterID, foreignRef); err != nil {
+		t.Fatal(err)
+	}
+	findingID = uuid.New()
+	if _, err := pool.Exec(ctx, `
+INSERT INTO findings (
+    id, org_id, cluster_id, asset_id, kind, external_id, title, severity,
+    scan_target_id, target_type, target_ref, target_cluster_id, source_type
+) VALUES (
+    $1, $2, $3, $4, 'vulnerability', 'CVE-2099-1001', 'foreign target link', 'critical',
+    $5, 'host', $6, $3, 'host'
+)`, findingID, orgID, clusterID, assetID, foreignTargetID, foreignRef); err != nil {
+		t.Fatal(err)
+	}
+
+	h := NewScanJobs(database, nil)
+	evidence, err := h.scanObjectEvidence(ctx, orgID, foreignTargetID, inventoryHash)
+	if err != nil || evidence != nil {
+		t.Fatalf("foreign-linked evidence = %+v, err = %v", evidence, err)
+	}
+	job, err := h.latestScanObjectJob(ctx, orgID, foreignTargetID)
+	if err != nil || job != nil {
+		t.Fatalf("foreign-linked job = %+v, err = %v", job, err)
+	}
+	counts, err := h.scanObjectCounts(ctx, orgID, foreignTargetID)
+	if err != nil || counts != (scanObjectCounts{}) {
+		t.Fatalf("foreign-linked counts = %+v, err = %v", counts, err)
+	}
+	foreignTarget := &handler.ScanTarget{ID: foreignTargetID}
+	vulnerabilities, err := h.scanObjectVulnerabilities(ctx, orgID, foreignTarget)
+	if err != nil || len(vulnerabilities) != 0 {
+		t.Fatalf("foreign-linked vulnerabilities = %+v, err = %v", vulnerabilities, err)
+	}
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan/host/"+foreignRef+"?cluster_id="+clusterID.String(), nil)
+	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
+	req = withRouteParam(req, "id", foreignRef)
+	rec := httptest.NewRecorder()
+	h.TriggerHost(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("foreign-linked host trigger status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	var queued int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*)::int FROM scan_jobs WHERE org_id = $1 AND target_id = $2 AND status = 'pending'`, orgID, foreignTargetID).Scan(&queued); err != nil {
+		t.Fatal(err)
+	}
+	if queued != 0 {
+		t.Fatalf("queued jobs for foreign target = %d", queued)
 	}
 }
 

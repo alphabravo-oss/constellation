@@ -1,3 +1,5 @@
+//go:build integration
+
 package handler
 
 import (
@@ -9,9 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	authpkg "github.com/alphabravocompany/constellation/internal/auth"
 	"github.com/alphabravocompany/constellation/pkg/audit"
-	"github.com/google/uuid"
 )
 
 func TestAuth_LoginWithoutOrgUsesUniqueActiveUser(t *testing.T) {
@@ -142,7 +145,7 @@ func loginStatusForTest(t *testing.T, h *Auth, body map[string]string, want int)
 	if err != nil {
 		t.Fatalf("marshal body: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(payload))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/auth/login", bytes.NewReader(payload))
 	rec := httptest.NewRecorder()
 	h.Login(rec, req)
 	if rec.Code != want {

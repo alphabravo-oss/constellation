@@ -1,3 +1,5 @@
+//go:build integration
+
 package handler
 
 import (
@@ -87,7 +89,11 @@ ON CONFLICT (org_id) DO UPDATE SET state='master'`, orgID); err != nil {
 	defer srv.Close()
 
 	var env syncResponse
-	resp, err := http.Get(srv.URL + "/api/v1/federation/sync?since=0")
+	httpRequest, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+"/api/v1/federation/sync?since=0", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(httpRequest)
 	if err != nil {
 		t.Fatal(err)
 	}

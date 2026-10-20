@@ -1,3 +1,5 @@
+//go:build integration
+
 package findings
 
 import (
@@ -15,6 +17,7 @@ import (
 )
 
 func TestFindings_ListReturnsLifecycleCountsForKind(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -44,7 +47,7 @@ VALUES ($1, $2, 'vulnerability', $3, $4, $4, 'high', 70, $5)`,
 		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgID)
 	})
 
-	req := httptest.NewRequest("GET", "/api/v1/findings?kind=vulnerability&lifecycle=open", nil)
+	req := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/findings?kind=vulnerability&lifecycle=open", nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	NewFindings(d, nil, nil).List(w, req)
@@ -64,6 +67,7 @@ VALUES ($1, $2, 'vulnerability', $3, $4, $4, 'high', 70, $5)`,
 }
 
 func TestFindings_ExposesScannerProvenanceAndReconciliation(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -138,7 +142,7 @@ VALUES ($1, $2, $3, 'vulnerability', 'CVE-2099-0001', 'provenance finding',
 	}
 
 	h := NewFindings(d, nil, nil)
-	req := httptest.NewRequest("GET", "/api/v1/findings?kind=vulnerability&q=canonical_engine:vulndb%20disagreement:true%20package:openssl", nil)
+	req := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/findings?kind=vulnerability&q=canonical_engine:vulndb%20disagreement:true%20package:openssl", nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	h.List(w, req)
@@ -174,7 +178,7 @@ VALUES ($1, $2, $3, 'vulnerability', 'CVE-2099-0001', 'provenance finding',
 		t.Fatalf("list vulnerability enrichment = %+v", got)
 	}
 
-	req = httptest.NewRequest("GET", "/api/v1/findings/"+findingID.String(), nil)
+	req = httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/findings/"+findingID.String(), nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", findingID.String())
@@ -200,9 +204,14 @@ VALUES ($1, $2, $3, 'vulnerability', 'CVE-2099-0001', 'provenance finding',
 		CVSSVector       string                         `json:"cvss_vector"`
 		KEV              bool                           `json:"kev"`
 		EPSS             float64                        `json:"epss"`
+		AssetName        string                         `json:"asset_name"`
+		AssetKind        string                         `json:"asset_kind"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&detailGot); err != nil {
 		t.Fatalf("decode get: %v", err)
+	}
+	if detailGot.AssetName != "ghcr.io/test/provenance" || detailGot.AssetKind != "image" {
+		t.Fatalf("detail asset display name = %q/%q", detailGot.AssetName, detailGot.AssetKind)
 	}
 	if detailGot.CanonicalEngine != "vulndb" ||
 		len(detailGot.Reconciliation) != 1 ||
@@ -224,6 +233,7 @@ VALUES ($1, $2, $3, 'vulnerability', 'CVE-2099-0001', 'provenance finding',
 }
 
 func TestFindings_ByCVEExposesCVSSBaseAndVector(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -254,7 +264,7 @@ VALUES
 		t.Fatalf("findings: %v", err)
 	}
 
-	req := httptest.NewRequest("GET", "/api/v1/findings/by-cve?lifecycle=open", nil)
+	req := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/findings/by-cve?lifecycle=open", nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	NewFindings(d, nil, nil).ByCVE(w, req)

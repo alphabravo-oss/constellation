@@ -12,11 +12,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/name"
+
 	"github.com/alphabravocompany/constellation/internal/imageid"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/pager"
 )
 
 const defaultRuntimeTokenFile = "/var/run/constellation/runtime-agent-token/token"
@@ -55,7 +59,12 @@ func (r *reconciler) reportPlatformFacts(ctx context.Context) error {
 		return fmt.Errorf("server version: %w", err)
 	}
 
-	nodeCount, kubeletVersions, provider := r.nodePlatformFacts(ctx)
+	ctx, cancelCollection := context.WithTimeout(ctx, 20*time.Second)
+	defer cancelCollection()
+	nodeCount, kubeletVersions, provider, err := r.nodePlatformFacts(ctx)
+	if err != nil {
+		return err
+	}
 	components := []platformReportComponent{{
 		Name:      "kubernetes",
 		Version:   serverVersion.GitVersion,
@@ -73,7 +82,11 @@ func (r *reconciler) reportPlatformFacts(ctx context.Context) error {
 			Namespace: "k3s",
 		})
 	}
-	components = append(components, r.knownPlatformComponents(ctx)...)
+	known, err := r.knownPlatformComponents(ctx)
+	if err != nil {
+		return err
+	}
+	components = append(components, known...)
 
 	body := platformFactsReportBody{
 		ClusterID:            r.clusterID.String(),
@@ -114,27 +127,31 @@ func (r *reconciler) reportPlatformFacts(ctx context.Context) error {
 	return nil
 }
 
-func (r *reconciler) nodePlatformFacts(ctx context.Context) (int, map[string]int, string) {
-	nodes, err := r.cs.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
-	if err != nil {
-		r.log.Warn("platform nodes", slog.String("err", err.Error()))
-		return 0, map[string]int{}, ""
-	}
+func (r *reconciler) nodePlatformFacts(ctx context.Context) (int, map[string]int, string, error) {
 	kubeletVersions := map[string]int{}
 	providers := map[string]int{}
-	for i := range nodes.Items {
-		node := &nodes.Items[i]
+	count := 0
+	pages := pager.New(func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
+		return r.cs.CoreV1().Nodes().List(ctx, options)
+	})
+	err := pages.EachListItem(ctx, metav1.ListOptions{}, func(obj runtime.Object) error {
+		node := obj.(*corev1.Node)
+		count++
 		if version := strings.TrimSpace(node.Status.NodeInfo.KubeletVersion); version != "" {
 			kubeletVersions[version]++
 		}
 		if provider := providerFromNode(*node); provider != "" {
 			providers[provider]++
 		}
+		return nil
+	})
+	if err != nil {
+		return 0, nil, "", fmt.Errorf("platform nodes: %w", err)
 	}
-	return len(nodes.Items), kubeletVersions, dominantProvider(providers)
+	return count, kubeletVersions, dominantProvider(providers), nil
 }
 
-func (r *reconciler) knownPlatformComponents(ctx context.Context) []platformReportComponent {
+func (r *reconciler) knownPlatformComponents(ctx context.Context) ([]platformReportComponent, error) {
 	seen := map[string]bool{}
 	out := []platformReportComponent{}
 	add := func(component platformReportComponent) {
@@ -155,25 +172,30 @@ func (r *reconciler) knownPlatformComponents(ctx context.Context) []platformRepo
 		out = append(out, component)
 	}
 
-	if deployments, err := r.cs.AppsV1().Deployments("").List(ctx, metav1.ListOptions{}); err == nil {
-		for i := range deployments.Items {
-			for _, component := range componentsFromPodSpec(deployments.Items[i].Namespace, deployments.Items[i].Name, deployments.Items[i].Spec.Template.Spec, "deployment") {
-				add(component)
-			}
+	deployments := pager.New(func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
+		return r.cs.AppsV1().Deployments("").List(ctx, options)
+	})
+	if err := deployments.EachListItem(ctx, metav1.ListOptions{}, func(obj runtime.Object) error {
+		deployment := obj.(*appsv1.Deployment)
+		for _, component := range componentsFromPodSpec(deployment.Namespace, deployment.Name, deployment.Spec.Template.Spec, "deployment") {
+			add(component)
 		}
-	} else {
-		r.log.Warn("platform deployments", slog.String("err", err.Error()))
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("platform deployments: %w", err)
 	}
-	if daemonSets, err := r.cs.AppsV1().DaemonSets("").List(ctx, metav1.ListOptions{}); err == nil {
-		for i := range daemonSets.Items {
-			for _, component := range componentsFromDaemonSet(daemonSets.Items[i]) {
-				add(component)
-			}
+	daemonSets := pager.New(func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
+		return r.cs.AppsV1().DaemonSets("").List(ctx, options)
+	})
+	if err := daemonSets.EachListItem(ctx, metav1.ListOptions{}, func(obj runtime.Object) error {
+		for _, component := range componentsFromDaemonSet(*obj.(*appsv1.DaemonSet)) {
+			add(component)
 		}
-	} else {
-		r.log.Warn("platform daemonsets", slog.String("err", err.Error()))
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("platform daemonsets: %w", err)
 	}
-	return out
+	return out, nil
 }
 
 func componentsFromDaemonSet(ds appsv1.DaemonSet) []platformReportComponent {
@@ -183,7 +205,7 @@ func componentsFromDaemonSet(ds appsv1.DaemonSet) []platformReportComponent {
 func componentsFromPodSpec(namespace, workloadName string, spec corev1.PodSpec, kind string) []platformReportComponent {
 	out := []platformReportComponent{}
 	for _, image := range podSpecImages(spec) {
-		name := platformComponentName(namespace, workloadName, image)
+		name := platformComponentName(image)
 		if name == "" {
 			continue
 		}
@@ -202,28 +224,35 @@ func componentsFromPodSpec(namespace, workloadName string, spec corev1.PodSpec, 
 	return out
 }
 
-func platformComponentName(namespace, workloadName, image string) string {
-	value := strings.ToLower(namespace + "/" + workloadName + " " + image)
-	switch {
-	case strings.Contains(value, "coredns"):
+// Platform identity must come from the container image, never the workload or
+// namespace name: helpers and sidecars often share a product's workload name.
+// Keep repository matches exact. Unknown mirrors still receive image scanning,
+// but need explicit mapping before supplying product-specific platform evidence.
+func platformComponentName(image string) string {
+	ref, err := name.ParseReference(image)
+	if err != nil {
+		return ""
+	}
+	switch ref.Context().Name() {
+	case "index.docker.io/coredns/coredns", "registry.k8s.io/coredns/coredns", "index.docker.io/rancher/mirrored-coredns-coredns":
 		return "coredns"
-	case strings.Contains(value, "ingress-nginx") || strings.Contains(value, "nginx-ingress"):
+	case "registry.k8s.io/ingress-nginx/controller", "k8s.gcr.io/ingress-nginx/controller", "quay.io/kubernetes-ingress-controller/nginx-ingress-controller":
 		return "ingress-nginx"
-	case strings.Contains(value, "cert-manager-cainjector"):
-		return "cert-manager-cainjector"
-	case strings.Contains(value, "cert-manager-webhook"):
-		return "cert-manager-webhook"
-	case strings.Contains(value, "cert-manager"):
+	case "quay.io/jetstack/cert-manager-controller":
 		return "cert-manager"
-	case strings.Contains(value, "metrics-server"):
+	case "quay.io/jetstack/cert-manager-cainjector":
+		return "cert-manager-cainjector"
+	case "quay.io/jetstack/cert-manager-webhook":
+		return "cert-manager-webhook"
+	case "registry.k8s.io/metrics-server/metrics-server", "k8s.gcr.io/metrics-server/metrics-server", "index.docker.io/rancher/mirrored-metrics-server":
 		return "metrics-server"
-	case strings.Contains(value, "cilium"):
+	case "quay.io/cilium/cilium", "index.docker.io/cilium/cilium":
 		return "cilium"
-	case strings.Contains(value, "calico"):
+	case "index.docker.io/calico/node", "quay.io/calico/node":
 		return "calico"
-	case strings.Contains(value, "flannel"):
+	case "quay.io/coreos/flannel", "index.docker.io/flannel/flannel", "ghcr.io/flannel-io/flannel":
 		return "flannel"
-	case strings.Contains(value, "traefik"):
+	case "index.docker.io/library/traefik":
 		return "traefik"
 	default:
 		return ""

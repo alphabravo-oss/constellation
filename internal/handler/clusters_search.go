@@ -14,11 +14,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/db"
+	"github.com/alphabravocompany/constellation/internal/handler/platformrole"
+	"github.com/alphabravocompany/constellation/internal/inventorypresence"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 )
 
@@ -43,7 +47,19 @@ func NewClusters(d *db.DB, a ...*audit.Logger) *Clusters {
 // (no N+1 fan-out per cluster card).
 func (h *Clusters) List(w http.ResponseWriter, r *http.Request) {
 	subj, _ := SubjectFrom(r.Context())
-	rows, err := h.db.Pool().Query(r.Context(), `
+	scope := r.URL.Query().Get("workload_scope")
+	findingScope, err := platformrole.ScopeSQL(scope, platformrole.ConstellationFindingSQL("f"))
+	if err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
+		return
+	}
+	deploymentScope, _ := platformrole.ScopeSQL(scope, platformrole.ConstellationDeploymentSQL("d"))
+	exposures, err := inventorypresence.ReadAllScoped(r.Context(), h.db.Pool(), subj.OrgID, scope)
+	if err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "read current finding exposure")
+		return
+	}
+	query := `
 SELECT c.id, c.name, c.distro, COALESCE(c.cloud_provider,''), COALESCE(c.region,''),
        c.state, COALESCE(c.agent_version, ''),
        -- Every correlated subquery is scoped by org_id so the composite
@@ -74,9 +90,14 @@ SELECT c.id, c.name, c.distro, COALESCE(c.cloud_provider,''), COALESCE(c.region,
   LEFT JOIN cluster_platform_facts cpf
     ON cpf.org_id = c.org_id AND cpf.cluster_id = c.id
  WHERE c.org_id = $1
- ORDER BY c.name`, subj.OrgID, expectedClusterComponents)
+ ORDER BY c.name`
+	// These are fixed SQL fragments, never request expressions. Scope every
+	// finding/workload rollup while keeping cluster health and connectivity intact.
+	query = strings.ReplaceAll(query, "f.org_id = c.org_id AND f.cluster_id = c.id", "f.org_id = c.org_id AND f.cluster_id = c.id AND ("+findingScope+")")
+	query = strings.ReplaceAll(query, "d.org_id = c.org_id AND d.cluster_id = c.id", "d.org_id = c.org_id AND d.cluster_id = c.id AND ("+deploymentScope+") AND ("+inventorypresence.WorkloadStatusSQL("d")+")<>'absent'")
+	rows, err := h.db.Pool().Query(r.Context(), query, subj.OrgID, expectedClusterComponents)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()
@@ -125,6 +146,7 @@ SELECT c.id, c.name, c.distro, COALESCE(c.cloud_provider,''), COALESCE(c.region,
 				"open_findings":  openFindings,
 				"total_findings": totalFindings,
 			},
+			"exposure":     exposures[uuid.MustParse(id)],
 			"last_flow_at": lastFlowOut,
 			"platform": map[string]any{
 				"kubernetes_git_version": kubernetesVersion,
@@ -156,12 +178,12 @@ SELECT c.id, c.name, c.distro, COALESCE(c.cloud_provider,''), COALESCE(c.region,
 func (h *Clusters) GetOne(w http.ResponseWriter, r *http.Request) {
 	clusterID := chi.URLParam(r, "id")
 	if clusterID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cluster id required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "cluster id required")
 		return
 	}
 	cid, err := uuid.Parse(clusterID)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid cluster id")
 		return
 	}
 	subj, _ := SubjectFrom(r.Context())
@@ -176,7 +198,7 @@ SELECT c.id::text, c.name, c.distro, COALESCE(c.cloud_provider,''), COALESCE(c.r
  WHERE c.org_id = $1 AND c.id = $2`, subj.OrgID, cid).
 		Scan(&id, &name, &distro, &cloud, &region, &state, &agentVer, &hb)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "cluster not found")
 		return
 	}
 	var heartbeat any
@@ -208,17 +230,17 @@ func clusterSensorStatus(connected, expected int) string {
 func (h *Clusters) Health(w http.ResponseWriter, r *http.Request) {
 	clusterIDRaw := chi.URLParam(r, "id")
 	if clusterIDRaw == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cluster id required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "cluster id required")
 		return
 	}
 	clusterID, err := uuid.Parse(clusterIDRaw)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid cluster id")
 		return
 	}
 	subj, ok := SubjectFrom(r.Context())
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "no subject"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "no subject")
 		return
 	}
 
@@ -232,18 +254,18 @@ SELECT name, state, COALESCE(agent_version,''), last_heartbeat_at
  WHERE org_id = $1 AND id = $2`, subj.OrgID, clusterID).
 		Scan(&clusterName, &state, &agentVersion, &clusterHeartbeat)
 	if errors.Is(err, pgx.ErrNoRows) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "cluster not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "cluster not found")
 		return
 	}
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	now := time.Now().UTC()
 	components, connected, lastCheckIn, err := h.clusterComponentHealth(r, subj.OrgID, clusterID, now)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if clusterHeartbeat != nil && (lastCheckIn == nil || clusterHeartbeat.After(*lastCheckIn)) {

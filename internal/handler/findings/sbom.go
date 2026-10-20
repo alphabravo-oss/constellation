@@ -14,6 +14,8 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -85,7 +87,7 @@ func (h *SBOM) MBOM(w http.ResponseWriter, r *http.Request) {
 func (h *SBOM) loadAsset(w http.ResponseWriter, r *http.Request) (uuid.UUID, uuid.UUID, string, bool) {
 	assetID, err := uuid.Parse(chi.URLParam(r, "asset_id"))
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad asset id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad asset id")
 		return uuid.Nil, uuid.Nil, "", false
 	}
 	subj, _ := authctx.SubjectFrom(r.Context())
@@ -94,7 +96,7 @@ func (h *SBOM) loadAsset(w http.ResponseWriter, r *http.Request) (uuid.UUID, uui
 	err = h.db.Pool().QueryRow(r.Context(),
 		`SELECT name FROM assets WHERE id = $1 AND org_id = $2`, assetID, subj.OrgID).Scan(&assetName)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "asset not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "asset not found")
 		return uuid.Nil, uuid.Nil, "", false
 	}
 	return assetID, subj.OrgID, assetName, true
@@ -118,7 +120,7 @@ SELECT a.payload
 		return false
 	}
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return true
 	}
 	httpx.WriteRawSBOM(w, raw, fname)
@@ -154,7 +156,7 @@ SELECT r.image_ref, COALESCE(a.payload, '{}'::jsonb)
 		return result, true
 	}
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return nil, false
 	}
 	result.Packages = packagesFromInventory(raw)

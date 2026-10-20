@@ -47,7 +47,7 @@ spec:
           port: 8080
 {{ end }}
 {{ end }}
-{{ if and .Values.api.enabled (or .Values.frontend.enabled .Values.scanner.enabled .Values.runtimeAgent.enabled .Values.discoverer.enabled .Values.operator.enabled .Values.admission.enabled .Values.networkPolicyApplier.enabled .Values.kubernetesComplianceCollector.enabled .Values.auditArchiver.enabled (gt (len .Values.networkPolicies.apiIngressCIDRs) 0)) }}
+{{ if .Values.api.enabled }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -63,6 +63,30 @@ spec:
   policyTypes:
     - Ingress
   ingress:
+    # Admin listener (/metrics, pprof): any pod in the release namespace, plus
+    # the namespaces selected by api.metrics.allowFrom (e.g. monitoring).
+    # Kubelet readiness/liveness probes originate from the node, not a pod, and
+    # are not subject to this policy on any supported CNI.
+    - from:
+        - podSelector: {}
+{{- with .Values.api.metrics.allowFrom }}
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml . | nindent 14 }}
+{{- end }}
+      ports:
+        - protocol: TCP
+          port: 9090
+{{ if or .Values.ingress.enabled .Values.gateway.enabled }}
+{{ range .Values.networkPolicies.frontendIngressCIDRs }}
+    - from:
+        - ipBlock:
+            cidr: {{ . | quote }}
+      ports:
+        - protocol: TCP
+          port: 8080
+{{ end }}
+{{ end }}
 {{ if .Values.frontend.enabled }}
     - from:
         - podSelector:
@@ -255,6 +279,8 @@ spec:
     - Egress
   egress:
 {{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
+{{- /* RBAC snapshot (saBindRiskyRole) and namespace-label resolver watch the API server. */}}
+{{ include "constellation.networkPolicyKubeAPIEgress" . | nindent 4 }}
 {{ if .Values.api.enabled }}
     - to:
         - podSelector:
@@ -411,16 +437,6 @@ spec:
         - protocol: TCP
           port: 5432
 {{ end }}
-{{ if .Values.migrate.enabled }}
-    - from:
-        - podSelector:
-            matchLabels:
-              app.kubernetes.io/name: {{ include "constellation.name" . }}
-              app.kubernetes.io/component: migrate
-      ports:
-        - protocol: TCP
-          port: 5432
-{{ end }}
 {{ if and .Values.bootstrap.enabled (not .Values.initBundle.secretName) }}
     - from:
         - podSelector:
@@ -494,9 +510,9 @@ spec:
 {{ end }}
 {{ if eq (include "constellation.postgresMode" .) "cnpg" }}
 ---
-# CNPG instance pods must initiate egress (replicas → primary on 5432, and the
-# instance manager → kube API). The legacy StatefulSet was a passive server and
-# needed no egress policy, so default-deny would otherwise break CNPG HA.
+# CNPG instance pods must initiate egress (replicas → primary on 5432, the
+# instance manager → kube API, and the Barman sidecar → the object store), so
+# default-deny would otherwise break CNPG HA and WAL archiving.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -513,8 +529,18 @@ spec:
   egress:
 {{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
 {{ include "constellation.networkPolicyKubeAPIEgress" . | nindent 4 }}
-{{ if .Values.postgres.cloudnativepg.backup }}
+{{ if or .Values.postgres.cloudnativepg.backup (and .Values.postgres.cloudnativepg.barmanCloud.enabled (not .Values.backup.objectStore.enabled)) }}
 {{ include "constellation.networkPolicyExternalHTTPEgress" . | nindent 4 }}
+{{ end }}
+{{ if .Values.backup.objectStore.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: object-store
+      ports:
+        - protocol: TCP
+          port: 9000
 {{ end }}
     - to:
         - podSelector:
@@ -525,24 +551,63 @@ spec:
         - protocol: TCP
           port: 5432
 {{ end }}
-{{ if .Values.migrate.enabled }}
+{{ if .Values.backup.objectStore.enabled }}
 ---
+# In-cluster object store: only CNPG instance pods (Barman sidecar) and the
+# bucket-creation Job may talk to it; it needs no egress beyond DNS.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: {{ include "constellation.fullname" . }}-migrate-egress
+  name: {{ include "constellation.fullname" . }}-object-store
   labels: {{- include "constellation.labels" . | nindent 4 }}
-    app.kubernetes.io/component: migrate
+    app.kubernetes.io/component: object-store
 spec:
   podSelector:
     matchLabels:
       app.kubernetes.io/name: {{ include "constellation.name" . }}
-      app.kubernetes.io/component: migrate
+      app.kubernetes.io/component: object-store
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: postgres
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: object-store-bucket
+      ports:
+        - protocol: TCP
+          port: 9000
+  egress:
+{{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-object-store-bucket-egress
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: object-store-bucket
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: object-store-bucket
   policyTypes:
     - Egress
   egress:
 {{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
-{{ include "constellation.networkPolicyPostgresEgress" . | nindent 4 }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: object-store
+      ports:
+        - protocol: TCP
+          port: 9000
 {{ end }}
 {{ if and .Values.bootstrap.enabled (not .Values.initBundle.secretName) }}
 ---
@@ -727,6 +792,38 @@ spec:
 {{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
 {{ include "constellation.networkPolicyPostgresEgress" . | nindent 4 }}
 {{ include "constellation.networkPolicyKubeAPIEgress" . | nindent 4 }}
+{{ if .Values.api.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: api
+      ports:
+        - protocol: TCP
+          port: 8080
+{{ end }}
+{{ end }}
+{{ if .Values.complianceScheduler.enabled }}
+---
+# compliance-scheduler: DB (report schedules), API heartbeat, and HTTPS for
+# signature transparency (Rekor) when externalHTTP is enabled.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-compliance-scheduler-egress
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: compliance-scheduler
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: compliance-scheduler
+  policyTypes:
+    - Egress
+  egress:
+{{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
+{{ include "constellation.networkPolicyPostgresEgress" . | nindent 4 }}
+{{ include "constellation.networkPolicyExternalHTTPEgress" . | nindent 4 }}
 {{ if .Values.api.enabled }}
     - to:
         - podSelector:

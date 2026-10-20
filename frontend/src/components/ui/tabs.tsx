@@ -1,6 +1,7 @@
 import { type ReactNode } from "react";
 import * as RadixTabs from "@radix-ui/react-tabs";
-import { useSearchParams } from "react-router-dom";
+
+import { useRouteSearchParams } from "@/lib/route-search";
 import { cn } from "@/lib/cn";
 
 /**
@@ -10,13 +11,14 @@ import { cn } from "@/lib/cn";
  */
 // eslint-disable-next-line react-refresh/only-export-components
 export function useTabParam(key: string, defaultValue: string): [string, (v: string) => void] {
-  const [params, setParams] = useSearchParams();
+  const [params, setParams] = useRouteSearchParams();
   const value = params.get(key) ?? defaultValue;
   const setValue = (v: string) => {
-    const next = new URLSearchParams(params);
-    if (v === defaultValue) next.delete(key);
-    else next.set(key, v);
-    setParams(next, { replace: true });
+    setParams(current => {
+      if (v === defaultValue) current.delete(key);
+      else current.set(key, v);
+      return current;
+    });
   };
   return [value, setValue];
 }
@@ -40,21 +42,21 @@ export function Tabs({
 }) {
   return (
     <RadixTabs.Root value={value} onValueChange={onValueChange} className={className}>
-      <div className="flex items-center justify-between border-b border-border">
-        <RadixTabs.List className="flex flex-wrap">
+      <div className="flex items-center justify-between gap-4 border-b border-border">
+        <RadixTabs.List className="flex gap-6 overflow-x-auto">
           {items.map((it) => (
             <RadixTabs.Trigger
               key={it.value}
               value={it.value}
               className={cn(
-                "relative -mb-px flex items-center gap-1.5 px-3 py-2 text-sm text-muted-foreground border-b-2 border-transparent transition-colors",
-                "hover:text-foreground",
-                "data-[state=active]:text-foreground data-[state=active]:border-[color:var(--color-primary)]",
+                "relative -mb-px flex shrink-0 items-center gap-2 whitespace-nowrap border-b-2 border-transparent pb-3 pt-1 text-sm font-medium text-muted-foreground transition-colors",
+                "hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                "data-[state=active]:border-foreground data-[state=active]:text-foreground",
               )}
             >
               {it.label}
               {it.count != null && (
-                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-mono text-muted-foreground data-[state=active]:text-foreground">
+                <span className="tabular-nums text-muted-foreground">
                   {it.count}
                 </span>
               )}
@@ -64,7 +66,7 @@ export function Tabs({
         {rightSlot && <div className="pr-1">{rightSlot}</div>}
       </div>
       {items.map((it) => (
-        <RadixTabs.Content key={it.value} value={it.value} className="mt-4 outline-none focus-visible:outline-none">
+        <RadixTabs.Content key={it.value} value={it.value} className="mt-(--gap-section) outline-none focus-visible:outline-none">
           {it.content}
         </RadixTabs.Content>
       ))}

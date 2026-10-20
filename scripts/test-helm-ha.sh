@@ -17,11 +17,11 @@ grep -q 'constellation.dev.alphabravo.io' "$rendered"
 grep -q '^kind: Cluster$' "$rendered"
 grep -q 'instances: 3' "$rendered"
 grep -q 'storageClass: longhorn' "$rendered"
-grep -q 'imageName: ghcr.io/alphabravo-oss/constellation/postgres:16.10-v0.2.0' "$rendered"
+grep -q 'imageName: ghcr.io/alphabravo-oss/constellation/postgres:16.14-v0.3.0' "$rendered"
 grep -q 'CREATE EXTENSION IF NOT EXISTS vector' "$rendered"
 grep -q 'port: 8000' "$rendered"
-grep -q 'name: constellation-migrate-1' "$rendered"
-grep -q 'name: wait-for-migrations' "$rendered"
+# migrations run in-process (embedded goose): no schema-wait init container
+if grep -q "name: wait-for-migrations" "$rendered"; then echo "unexpected wait-for-migrations init container" >&2; exit 1; fi
 grep -q 'name: constellation-bootstrap-1' "$rendered"
 grep -A5 'name: CONSTELLATION_SCANNER_TOKEN$' "$rendered" | grep -q 'secretKeyRef:'
 if grep -A8 'name: CONSTELLATION_SCANNER_TOKEN$' "$rendered" | grep -q 'optional: true'; then
@@ -43,11 +43,13 @@ api_policy="$(sed -n '/name: constellation-api-egress$/,/^---$/p' "$rendered")"
 grep -q 'port: 443' <<<"$api_policy"
 grep -q 'port: 6443' <<<"$api_policy"
 
-if helm template constellation "$chart" --set highAvailability.enabled=true >"$error_output" 2>&1; then
+# A single-instance CNPG cluster must not pass as "HA".
+if helm template constellation "$chart" --set highAvailability.enabled=true \
+  --set postgres.cloudnativepg.instances=1 >"$error_output" 2>&1; then
   echo "unsafe HA values unexpectedly rendered" >&2
   exit 1
 fi
-grep -q 'requires postgres.mode=cnpg or postgres.mode=external' "$error_output"
+grep -q 'HA CloudNativePG requires postgres.cloudnativepg.instances>=3' "$error_output"
 
 if helm template constellation "$chart" --set gateway.enabled=true --set ingress.enabled=true >"$error_output" 2>&1; then
   echo "simultaneous Gateway and Ingress unexpectedly rendered" >&2

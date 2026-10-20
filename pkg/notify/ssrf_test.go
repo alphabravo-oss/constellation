@@ -13,6 +13,7 @@ import (
 // TestIsBlockedIP covers the destination classifier used by both the create/patch-time
 // guard and the dial-time Control hook.
 func TestIsBlockedIP(t *testing.T) {
+	t.Parallel()
 	blocked := []string{
 		"127.0.0.1", "::1", // loopback
 		"169.254.169.254", "169.254.0.1", // link-local incl. cloud metadata
@@ -44,6 +45,7 @@ func TestIsBlockedIP(t *testing.T) {
 
 // TestPublicURLAllowed covers the create/patch-time endpoint validation.
 func TestPublicURLAllowed(t *testing.T) {
+	t.Parallel()
 	bad := map[string]string{
 		"http (not https)": "http://example.com/hook",
 		"ftp scheme":       "ftp://example.com",
@@ -70,6 +72,7 @@ func TestPublicURLAllowed(t *testing.T) {
 // backstop), not merely at create time: even handed a live loopback server URL, the
 // production default client refuses to connect.
 func TestGuardedClientBlocksLoopbackDial(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
 	}))

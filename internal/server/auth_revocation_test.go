@@ -1,3 +1,5 @@
+//go:build integration
+
 package server
 
 import (
@@ -8,16 +10,17 @@ import (
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/alphabravocompany/constellation/internal/auth"
 	"github.com/alphabravocompany/constellation/internal/db"
-	"github.com/alphabravocompany/constellation/pkg/observability"
+	"github.com/alphabravocompany/constellation/internal/telemetry"
 )
 
 // mintTestPAT returns (rawToken, sha256hex(rawToken)) using the same shape the production
@@ -39,11 +42,9 @@ func mintTestPAT(t *testing.T) (string, string) {
 // though the JWT itself is still cryptographically valid and unexpired. These exercise the
 // DB-backed revocation primitive (users.disabled + users.session_epoch) wired into
 // authMiddleware. They run against the shared test DB and skip when it is unreachable.
-func testDBURL() string {
-	if u := os.Getenv("CONSTELLATION_TEST_DATABASE_URL"); u != "" {
-		return u
-	}
-	return "postgres://test:test@localhost:15433/constellation_test?sslmode=disable"
+func testDBURL(t *testing.T) string {
+	t.Helper()
+	return pgtest.URL(t)
 }
 
 // newAuthTestServer boots a Server against the test DB and returns it plus a seeded,
@@ -52,7 +53,7 @@ func newAuthTestServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, *auth.Sig
 	t.Helper()
 	t.Setenv("CONSTELLATION_ALLOW_HS256_JWT", "true") // tests sign with a symmetric JWTKeys secret
 	ctx := context.Background()
-	url := testDBURL()
+	url := testDBURL(t)
 
 	pool, err := pgxpool.New(ctx, url)
 	if err != nil {
@@ -98,7 +99,7 @@ VALUES ($1, $2, $3, 'Revoke Admin', 0)`, userID, orgID, email); err != nil {
 	}
 	t.Cleanup(dbHandle.Close)
 
-	tel, _ := observability.Init(ctx, "test")
+	tel, _ := telemetry.Init(ctx, telemetry.ConfigFromEnv("test"))
 	cfg := Config{
 		ListenAddr:  ":0",
 		DatabaseURL: url,
@@ -124,7 +125,7 @@ VALUES ($1, $2, $3, 'Revoke Admin', 0)`, userID, orgID, email); err != nil {
 // getMe issues GET /api/v1/auth/me with the bearer and returns the status code.
 func getMe(t *testing.T, baseURL, bearer string) int {
 	t.Helper()
-	req, err := http.NewRequest(http.MethodGet, baseURL+"/api/v1/auth/me", nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, baseURL+"/api/v1/auth/me", nil)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
@@ -189,7 +190,7 @@ func TestAuthMiddleware_LogoutInvalidatesJWT(t *testing.T) {
 
 	tok := issueFor(t, signer, userID, orgID, 0)
 	// Logout with the token bumps the epoch server-side.
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/auth/logout", nil)
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, ts.URL+"/api/v1/auth/logout", nil)
 	req.Header.Set("Authorization", "Bearer "+tok)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

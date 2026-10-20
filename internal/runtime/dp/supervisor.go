@@ -9,6 +9,8 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -114,9 +116,8 @@ type Supervisor struct {
 	fqdnMu     sync.Mutex
 	fqdnPushed map[string][]net.IP
 
-	mu     sync.Mutex
-	cmd    *exec.Cmd
-	stopCh chan struct{}
+	mu  sync.Mutex
+	cmd *exec.Cmd
 
 	// State counters surfaced via Stats(). dp lifecycle counters; the
 	// IPC byte counters live on ipcServer and are merged in Stats().
@@ -133,7 +134,8 @@ type Supervisor struct {
 	// keepalive. Set (lock-free) on every successful keepalive reply via the
 	// client's onReply hook. Ready() compares it against generation: a restart
 	// bumps generation and leaves Ready() false until the fresh dp replies.
-	readyGen atomic.Uint64
+	readyGen  atomic.Uint64
+	activeGen atomic.Uint64
 }
 
 // New returns a configured Supervisor. Start runs it.
@@ -259,6 +261,100 @@ func (s *Supervisor) EnforceMACs() []string {
 	return s.enforce.allMACs()
 }
 
+// PolicyEndpoint identifies the current pod generation behind a registered MAC.
+// Missing pod identity remains unknown; it cannot authorize a workload policy.
+type PolicyEndpoint struct {
+	MAC          string
+	Namespace    string
+	PodName      string
+	PodUID       string
+	Registration uint64
+	IPs          []string
+}
+
+var endpointRegistration atomic.Uint64
+
+func (s *Supervisor) PolicyEndpoints() []PolicyEndpoint {
+	if s == nil {
+		return nil
+	}
+	var out []PolicyEndpoint
+	if s.taps != nil {
+		s.taps.mu.Lock()
+		for _, target := range s.taps.current {
+			if s.taps.generation != nil && s.taps.currentGeneration != s.Generation() {
+				continue
+			}
+			out = append(out, PolicyEndpoint{MAC: target.EPMAC, Namespace: target.Namespace, PodName: target.PodName, PodUID: target.PodUID, Registration: target.Registration, IPs: append([]string(nil), target.PIPS...)})
+		}
+		s.taps.mu.Unlock()
+	}
+	if s.enforce != nil {
+		s.enforce.mu.Lock()
+		for _, target := range s.enforce.current {
+			if s.enforce.generation != nil && s.enforce.currentGeneration != s.Generation() {
+				continue
+			}
+			out = append(out, PolicyEndpoint{MAC: target.EPMAC, Namespace: target.Namespace, PodName: target.PodName, PodUID: target.PodUID, Registration: target.Registration, IPs: append([]string(nil), target.PIPS...)})
+		}
+		s.enforce.mu.Unlock()
+	}
+	return out
+}
+
+// PushEndpointPolicy fences discovery changes against the entire native transfer.
+// A nil expected endpoint permits deletion only while the MAC is unregistered.
+func (s *Supervisor) PushEndpointPolicy(policy *WorkloadPolicy, cmd uint, expected *PolicyEndpoint, generation uint64) error {
+	if s == nil || s.client == nil || policy == nil || len(policy.MACs) != 1 {
+		return fmt.Errorf("dp policy: invalid scoped submission")
+	}
+	s.client.policyMu.Lock()
+	defer s.client.policyMu.Unlock()
+	if !s.Ready() || s.Generation() != generation {
+		return fmt.Errorf("dp policy: lifecycle changed")
+	}
+	var found *PolicyEndpoint
+	for _, endpoint := range s.PolicyEndpoints() {
+		if !strings.EqualFold(endpoint.MAC, policy.MACs[0]) {
+			continue
+		}
+		if found != nil {
+			return fmt.Errorf("dp policy: ambiguous endpoint")
+		}
+		copy := endpoint
+		found = &copy
+	}
+	if expected == nil {
+		if found != nil || cmd != CmdDelete {
+			return fmt.Errorf("dp policy: endpoint registration changed")
+		}
+	} else if found == nil || !SamePolicyEndpoint(*found, *expected) {
+		return fmt.Errorf("dp policy: endpoint registration changed")
+	}
+	return s.client.pushPolicyLocked(policy, cmd)
+}
+
+// SamePolicyEndpoint compares a captured registration including its local IPs.
+func SamePolicyEndpoint(a, b PolicyEndpoint) bool {
+	return strings.EqualFold(a.MAC, b.MAC) && a.Namespace == b.Namespace && a.PodName == b.PodName && a.PodUID == b.PodUID && a.Registration == b.Registration && slices.Equal(a.IPs, b.IPs)
+}
+
+// Caller holds policyMu before a manager current-map lock.
+func (c *dpClient) clearEndpointPolicy(mac string) error {
+	if mac == "" {
+		return nil
+	}
+	return c.pushPolicyLocked(&WorkloadPolicy{MACs: []string{mac}}, CmdDelete)
+}
+
+// A reply qualifies only the native epoch for which its probe began. An old
+// buffered reply cannot make a replacement or exited process ready.
+func (s *Supervisor) noteReady(generation uint64) {
+	if generation != 0 && s.Generation() == generation && s.activeGen.Load() == generation {
+		s.readyGen.Store(generation)
+	}
+}
+
 // Generation returns the current dp lifecycle generation: it equals the number
 // of times dp has been (re)started and is bumped atomically each time a new dp
 // instance is launched. Consumers compare it against a cached value to detect a
@@ -273,7 +369,7 @@ func (s *Supervisor) Generation() uint64 {
 // startup race where a push lands before dp finishes initializing. Lock-free.
 func (s *Supervisor) Ready() bool {
 	gen := s.generation.Load()
-	return gen > 0 && s.readyGen.Load() == gen
+	return gen > 0 && s.activeGen.Load() == gen && s.readyGen.Load() == gen
 }
 
 // Events returns the channel emitting decoded notifications from dp. The
@@ -317,7 +413,8 @@ func (s *Supervisor) Start(ctx context.Context) error {
 	// Readiness hook: every successful keepalive reply advances readyGen to the
 	// current generation. Set before keepAliveLoop is launched below, so the
 	// hot path only ever reads an immutable func pointer (no mutex, no race).
-	s.client.onReply = func() { s.readyGen.Store(s.generation.Load()) }
+	s.client.probeGeneration = s.Generation
+	s.client.onReply = s.noteReady
 	// Session dumps arrive on the request socket (dp sends them to g_client_addr,
 	// not the notification socket), so the keepalive reader demuxes them and hands
 	// each complete snapshot here → the live-session cache.
@@ -329,6 +426,7 @@ func (s *Supervisor) Start(ctx context.Context) error {
 	// to which interfaces to watch).
 	if s.opt.TapProvider != nil {
 		s.taps = newTapManager(s.client, s.opt.TapProvider, s.logger, s.opt.TapReconcileInterval)
+		s.taps.ready, s.taps.generation = s.Ready, s.Generation
 	}
 	// Enforce manager — Wave A3. Same shape as the tap manager but for the
 	// NFQUEUE inline path. Allocates its own QnumAllocator + iptables runner.
@@ -336,6 +434,7 @@ func (s *Supervisor) Start(ctx context.Context) error {
 		qnums := NewQnumAllocator(s.opt.QnumBase, s.opt.QnumCapacity)
 		s.enforce = newEnforceManager(s.client, s.opt.EnforceProvider, s.logger,
 			s.opt.TapReconcileInterval, newIPT(), qnums)
+		s.enforce.ready, s.enforce.generation = s.Ready, s.Generation
 	}
 	// Let the tap reconciler defer to the enforce path: a MAC that is an active
 	// inline enforce target must never be tapped (that would send tap=true and
@@ -454,12 +553,20 @@ func (s *Supervisor) spawnLoop(ctx context.Context) error {
 	}
 }
 
+func (s *Supervisor) lockPolicyLifecycle() func() {
+	if s.client == nil {
+		return func() {}
+	}
+	s.client.policyMu.Lock()
+	return s.client.policyMu.Unlock
+}
+
 // runOnce launches dp once and waits for it to exit. Returns true if dp
 // exited cleanly (signal-based shutdown counts as clean — that's the
 // happy path on ctx cancel).
 func (s *Supervisor) runOnce(ctx context.Context) bool {
 	args := s.dpArgs()
-	cmd := exec.CommandContext(ctx, s.opt.Binary, args...)
+	cmd := exec.CommandContext(ctx, s.opt.Binary, args...) //nolint:gosec // G204: Binary is the operator-configured dp path; args come from dpArgs
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		// Put dp in its own process group so a signal to the agent doesn't
 		// race with dp's own signal handler. We kill explicitly on ctx cancel
@@ -472,11 +579,14 @@ func (s *Supervisor) runOnce(ctx context.Context) bool {
 	stderr, _ := cmd.StderrPipe()
 	stdout, _ := cmd.StdoutPipe()
 
+	unlockPolicy := s.lockPolicyLifecycle()
 	s.mu.Lock()
 	s.cmd = cmd
 	s.startCount++
+	s.activeGen.Store(0)
 	s.generation.Store(s.startCount)
 	s.mu.Unlock()
+	unlockPolicy()
 	s.logger.Info("dp: starting",
 		slog.String("binary", s.opt.Binary),
 		slog.Any("args", args))
@@ -489,10 +599,18 @@ func (s *Supervisor) runOnce(ctx context.Context) bool {
 		return false
 	}
 
-	go pipeToLogger(stderr, s.logger, slog.LevelInfo, "dp.stderr")
-	go pipeToLogger(stdout, s.logger, slog.LevelInfo, "dp.stdout")
+	unlockPolicy = s.lockPolicyLifecycle()
+	s.activeGen.Store(s.generation.Load())
+	unlockPolicy()
+
+	go pipeToLogger(ctx, stderr, s.logger, slog.LevelInfo, "dp.stderr")
+	go pipeToLogger(ctx, stdout, s.logger, slog.LevelInfo, "dp.stdout")
 
 	err := cmd.Wait()
+	unlockPolicy = s.lockPolicyLifecycle()
+	s.activeGen.Store(0)
+	s.readyGen.Store(0)
+	unlockPolicy()
 	s.mu.Lock()
 	s.exitCount++
 	s.cmd = nil
@@ -597,8 +715,8 @@ func errStr(err error) string {
 // pipeToLogger consumes one of dp's pipes line by line and forwards each line
 // through the supplied slog handler. Done as a goroutine; returns when the
 // pipe closes (which happens when dp exits).
-func pipeToLogger(r io.ReadCloser, logger *slog.Logger, lvl slog.Level, stream string) {
-	defer r.Close()
+func pipeToLogger(ctx context.Context, r io.ReadCloser, logger *slog.Logger, lvl slog.Level, stream string) {
+	defer func() { _ = r.Close() }()
 	buf := make([]byte, 4096)
 	var leftover []byte
 	for {
@@ -615,12 +733,12 @@ func pipeToLogger(r io.ReadCloser, logger *slog.Logger, lvl slog.Level, stream s
 				if line == "" {
 					continue
 				}
-				logger.Log(nil, lvl, line, slog.String("stream", stream))
+				logger.Log(ctx, lvl, line, slog.String("stream", stream))
 			}
 		}
 		if err != nil {
 			if len(leftover) > 0 {
-				logger.Log(nil, lvl, string(leftover), slog.String("stream", stream))
+				logger.Log(ctx, lvl, string(leftover), slog.String("stream", stream))
 			}
 			return
 		}

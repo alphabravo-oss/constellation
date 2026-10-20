@@ -12,17 +12,34 @@
 #
 # To pin every role to a specific build, set `image.tag` here. To override a
 # single role (e.g. canary a new scanner) set `<role>.image.repository` and/or
-# `<role>.image.tag`.
+# `<role>.image.tag`. For immutable deployments use `<role>.image.digest`
+# (sha256 plus 64 lowercase hex characters); it takes precedence over tags.
+# Digests are per-role because each role is a separate image.
+# ---------------------------------------------------------------------------
+# Air-gap: cluster-local registry every image is pulled from (guide ch.09).
+# `constellationctl bundle load --registry <host:port> --values-out values-bundle.yaml`
+# pushes every bundled image there and writes a values file pinning each role to
+# its digest; pass both files to helm. Empty = pull from image.registry.
+# ---------------------------------------------------------------------------
+global:
+  imageRegistry: ""
+
 image:
   registry: ghcr.io/alphabravo-oss/constellation
   pullPolicy: IfNotPresent
-  # Empty -> falls back to .Chart.appVersion (currently "0.2.0"). Use immutable
+  # Empty -> uses v-prefixed .Chart.appVersion (currently "v0.3.0"). Use immutable
   # release tags or digest-qualified role overrides in production.
   tag: ""
   # Optional list of imagePullSecrets applied to every Deployment / DaemonSet /
-  # CronJob / Job rendered by this chart.
+  # CronJob / Job and CNPG Cluster rendered by this chart.
   pullSecrets: []
   # - name: ghcr-pull-secret
+
+# Add trusted dependency namespaces to admission, runtime, and network-policy
+# protection together. Own/core namespaces are mandatory. Namespace-wide scope
+# also exempts unrelated workloads there; use dedicated dependency namespaces.
+systemProtection:
+  protectedNamespaces: []
 
 # Keep rollout history short so repeated local/edge upgrades do not leave
 # zero-replica ReplicaSets pinned to stale role image tags.
@@ -47,9 +64,9 @@ highAvailability:
 # Default pod/container security posture
 # ---------------------------------------------------------------------------
 # Applied to non-privileged Constellation application workloads. Hook helper
-# containers and embedded Postgres render their own non-root restricted
-# contexts, while the runtime agent keeps an explicit privileged context because
-# BPF/TC/NFQUEUE need host privileges.
+# containers and the in-cluster object store render their own non-root
+# restricted contexts (CNPG manages its own pods), while the runtime agent keeps
+# an explicit privileged context because BPF/TC/NFQUEUE need host privileges.
 security:
   podSecurityContext:
     enabled: true
@@ -93,12 +110,36 @@ networkPolicies:
     namespace: cnpg-system
     podLabels:
       app.kubernetes.io/name: cloudnative-pg
+  # Allowed ingress/Gateway sources; also used for its direct /api route.
+  # Set api.env.CONSTELLATION_TRUSTED_PROXIES to the actual proxy peers.
   frontendIngressCIDRs: ["0.0.0.0/0"]
   admissionIngressCIDRs: ["0.0.0.0/0"]
   # Required when NetworkPolicy and the host-network runtime agent are both
   # enabled: include the Kubernetes node/private-network CIDRs so node-sourced
   # inventory and telemetry can reach the API Service.
   apiIngressCIDRs: []
+  # Node/private CIDRs admitted to in-cluster Postgres, the object store and the
+  # metrics ports (kubelet probes and host-network pods originate here).
+  nodeCIDRs: []
+  # Prometheus scrapes: ingress from this namespace to every metrics port.
+  monitoring:
+    enabled: true
+    namespace: monitoring
+    ports: [8080, 8081, 8082, 8090, 8443, 9090, 9187, 9404]
+  # In-cluster CNPG (postgres.mode=cnpg, or external mode pointing at a CNPG
+  # cluster in this namespace): policies for the instance pods, the object
+  # store, the backup/sync jobs and optional exporters.
+  cnpg:
+    enabled: true
+    clusterName: ""            # empty = <fullname>-postgres
+    exporterLabels: [postgres-exporter, prometheus-postgres-exporter]
+    # extra namespaces that may reach the object store (recovery drills)
+    objectStoreClientNamespaces: []
+    # Pod labels of an object store not rendered by this chart (e.g. a
+    # hand-deployed RustFS labelled app: rustfs); empty = backup.objectStore.
+    objectStoreSelector: {}
+  # Off-host endpoints the backup/sync jobs may reach (CIDR, TCP 9000 unless :port given).
+  offhostCIDRs: []
 
 # ---------------------------------------------------------------------------
 # Cluster registration
@@ -136,6 +177,10 @@ controlPlane:
 # /clusters/<id> views instead of only an empty registered cluster row.
 discoverer:
   enabled: true
+  # Existing Secret with key "token", issued for this cluster by an init bundle.
+  # Empty shares runtimeAgent.tokenSecret; an unbound bootstrap token cannot
+  # submit platform facts. A dedicated secret permits independent enrollment.
+  tokenSecret: ""
   replicas: 1
   image: {}
   args: []
@@ -151,31 +196,107 @@ discoverer:
     requests: { cpu: 50m,  memory: 64Mi }
 
 # ---------------------------------------------------------------------------
-# Schema migrations
+# Column encryption (guide ch.06): age X25519 key set for registry credentials,
+# git PATs, federation keys and init bundles. Exactly one of:
+#   crypto.ageKey         - identities (AGE-SECRET-KEY-1..., current first, one per
+#                           line) written into Secret <release>-age-key by the chart
+#   crypto.existingSecret - operator-managed Secret with key `age-key`
+#   neither               - a pre-install hook mints one with age-keygen (toolbox
+#                           image) and keeps it across upgrades
+# Rotate: put the new identity first, roll the API, run
+# `constellationctl admin rotate-keys`, drop the old identity.
 # ---------------------------------------------------------------------------
-# One-shot revision-scoped Job that runs `goose up` against DATABASE_URL. API
-# init containers wait for its schema marker before starting.
-migrate:
-  enabled: true
-  # Postgres client image used by the wait-for-postgres init container.
-  psqlImage: postgres:16.10-alpine3.22@sha256:029660641a0cfc575b14f336ba448fb8a75fd595d42e1fa316b9fb4378742297
+crypto:
+  ageKey: ""
+  existingSecret: ""
+
+# Operator toolbox image (age + kubectl + rclone, non-root): age-key bootstrap
+# hook and the secrets-backup CronJob.
+toolbox:
   image: {}
-    # repository: ghcr.io/alphabravo-oss/constellation/migrate
-    # tag: v0.1.0
+    # repository: ghcr.io/alphabravo-oss/constellation/toolbox
+    # tag: v0.3.0
+
+# ---------------------------------------------------------------------------
+# Monitoring (Prometheus Operator). Off by default: the monitoring.coreos.com
+# CRDs are not bundled. Component heartbeat age, scanner engine-DB age (incl.
+# Trivy java-db) and CVE-feed age are first-class API metrics, so no
+# postgres-exporter is required; metrics.postgresRole still renders a read-only
+# role for an optional exporter.
+# ---------------------------------------------------------------------------
+metrics:
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}          # e.g. { release: kube-prometheus-stack }
+    namespace: ""       # empty = release namespace
+  prometheusRule:
+    enabled: false
+    namespace: ""
+    labels: {}
+    includeClusterRules: true   # node/pod/PVC generic alerts
+    thresholds:
+      heartbeatStaleSeconds: 120
+      engineDBStaleSeconds: 172800
+      cveFeedStaleSeconds: 172800
+  # Read-only Postgres role for an external exporter (CNPG managed.roles +
+  # migration-owned grants on component_heartbeats / cve_feed_checkpoints).
+  postgresRole:
+    enabled: false
+    name: constellation_metrics
 
 # ---------------------------------------------------------------------------
 # Control plane API
 # ---------------------------------------------------------------------------
 api:
+  # Bounded hourly ANALYZE of partitioned parents; disable when managed externally.
+  partitionStatisticsMaintenanceEnabled: true
   enabled: true
   replicas: 2
   image: {}
     # repository: ghcr.io/alphabravo-oss/constellation/api
-    # tag: v0.2.0
+    # tag: v0.3.0
   args: []
+  # Durable packet evidence is opt-in and always uses an operator-owned PVC.
+  # Single-replica RWO uses Recreate; multiple replicas require shared RWX.
+  # The claim must be Bound and writable by the configured API UID/fsGroup.
+  # No ephemeral fallback: disabled keeps the existing storage configuration.
+  pcapStorage:
+    enabled: false
+    existingClaim: ""
+    accessMode: ReadWriteOnce
+    # Expire DB-backed captures only after this same durable claim is verified.
+    retentionEnabled: false
   service:
     type: ClusterIP
     port: 8080
+  # Observability. The API serves /metrics (and pprof when enabled) on a
+  # separate admin listener (ADMIN_LISTEN_ADDR=:9090, container/Service port
+  # `admin`), never on the API port, so metrics are not reachable through the
+  # Ingress/Gateway /api route.
+  metrics:
+    # prometheus.io/scrape|port|path pod annotations for annotation-based
+    # discovery (kube-prometheus-stack's additionalScrapeConfigs, Grafana
+    # Alloy, Datadog, …).
+    annotations: true
+    # monitoring.coreos.com/v1 ServiceMonitor targeting the `admin` port.
+    # Requires the Prometheus Operator CRDs; off by default so a cluster
+    # without them still installs.
+    serviceMonitor:
+      enabled: false
+      interval: 30s
+      scrapeTimeout: 10s
+      # Extra labels so a Prometheus `serviceMonitorSelector` picks it up,
+      # e.g. { release: kube-prometheus-stack }.
+      labels: {}
+      # Namespace to create the ServiceMonitor in; empty = release namespace.
+      namespace: ""
+    # With networkPolicies.enabled, ingress to the admin port is allowed from
+    # pods in the release namespace only. Set a namespaceSelector (label map)
+    # to also admit a monitoring namespace, e.g.
+    #   allowFrom: { kubernetes.io/metadata.name: monitoring }
+    allowFrom: {}
   resources:
     limits:   { cpu: 1,    memory: 1Gi }
     requests: { cpu: 200m, memory: 256Mi }
@@ -183,9 +304,7 @@ api:
     OTEL_EXPORTER_OTLP_ENDPOINT: ""
     JWT_ISSUER: constellation
     JWT_AUDIENCE: constellation-api
-    # Absolute session lifetime. 24h matches the live deploy; keeping it here stops a
-    # helm redeploy from regressing sessions back to hourly logouts.
-    JWT_TTL: 24h
+    JWT_TTL: 15m
     # Concurrent live JWT sessions per user before the oldest is evicted (default 5 in
     # code). Raised so shared automation logins can't evict a human user's session.
     MAX_CONCURRENT_SESSIONS: "25"
@@ -196,6 +315,10 @@ api:
   # own key: a PEM RSA/EC private key (RS256/ES256), or — only with
   # CONSTELLATION_ALLOW_HS256_JWT=true on the api — a 32+ byte HS256 secret.
   jwtKeysSecret: ""
+  # Optional existing Secret containing the support-bundle Ed25519 private key.
+  # The key is mounted read-only; this chart never creates private key material.
+  supportBundleSigningKeySecret: ""
+  supportBundleSigningKeySecretKey: private-key.pem
   # Refuse API startup if JWT_KEYS is absent. Now false by default: the absent
   # JWT_KEYS is the intended RS256 DB-backed path. Set true only when you supply
   # jwtKeysSecret and want startup to hard-fail if it goes missing.
@@ -236,9 +359,16 @@ federation:
 operator:
   enabled: true
   replicas: 1
+  # Leader election is on by default so scaling replicas up never runs two
+  # reconcilers; the chart renders the Lease/Event RBAC (operator-workloads
+  # Role/ClusterRole). Disabling is only for single-replica debugging.
   leaderElection:
-    enabled: false
+    enabled: true
   image: {}
+  # Extra args. The chart always passes --leader-elect and the four managed
+  # image flags (--agent-image/--runtime-agent-image/--scanner-image/
+  # --admission-image) derived from the role images, so the operator has no
+  # `:latest` fallback.
   args: []
   resources:
     limits:   { cpu: 500m, memory: 512Mi }
@@ -251,6 +381,8 @@ operator:
 # applies/deletes the selected Kubernetes policy flavor in this cluster.
 networkPolicyApplier:
   enabled: true
+  # Additive only: own namespace and Kubernetes system namespaces are mandatory.
+  protectedNamespaces: []
   # native | cilium | calico. Native works on any CNI that enforces Kubernetes
   # NetworkPolicy; Cilium and Calico require their CRDs to be installed.
   flavor: native
@@ -349,6 +481,35 @@ dockerBenchRunner:
     requests: { cpu: 50m,  memory: 64Mi }
 
 # ---------------------------------------------------------------------------
+# Durable benchmark worker (opt-in)
+# ---------------------------------------------------------------------------
+# Durable on-demand execution is separate from scheduled benchmark CronJobs.
+# One worker inspects its assigned node; it does not establish fleet coverage.
+kubeBenchWorker:
+  enabled: false
+  image:
+    repository: ""
+    tag: ""
+  interval: "30s"
+  benchmark: ""
+  args: ""
+  clusterId: ""
+  state:
+    # Required: a durable PVC, exclusive to this worker (never emptyDir).
+    existingClaim: ""
+  nodeSelector: {}
+  tolerations: []
+  hostVolumes: []
+  hostVolumeMounts: []
+  resources:
+    limits: { cpu: 200m, memory: 256Mi }
+    requests: { cpu: 50m, memory: 64Mi }
+# No qualified image currently bundles docker-bench-security plus configuration.
+# Enabling this explicitly fails chart rendering instead of creating a fake job.
+dockerBenchWorker:
+  enabled: false
+
+# ---------------------------------------------------------------------------
 # Admission webhook
 # ---------------------------------------------------------------------------
 # The admission Deployment serves /validate over HTTPS. TLS material is
@@ -366,6 +527,12 @@ admission:
     type: ClusterIP
     port: 443        # ValidatingWebhookConfiguration always calls 443
     targetPort: 8443 # The pod listens on 8443 TLS
+  # Built-in rules (block-privileged/host-network/host-pid) are skipped for these
+  # namespaces and for any namespace labelled
+  # constellation.alphabravo.io/admission=ignore — node-exporter, CNI, ingress
+  # controllers and the operator stack legitimately use hostNetwork.
+  exemptNamespaces: [kube-system, kube-public, kube-node-lease, cnpg-system, cert-manager, ingress-nginx, monitoring]
+  exemptNamespaceLabel: constellation.alphabravo.io/admission
   # ValidatingWebhookConfiguration tuning. failurePolicy=Ignore is the safe
   # default so a degraded webhook never blocks pod admission cluster-wide.
   webhook:
@@ -387,7 +554,7 @@ admission:
       - apiGroups: [""]
         apiVersions: ["v1"]
         operations: ["CREATE", "UPDATE"]
-        resources: ["pods", "replicationcontrollers", "persistentvolumeclaims"]
+        resources: ["pods", "pods/ephemeralcontainers", "replicationcontrollers", "persistentvolumeclaims"]
         scope: "Namespaced"
       - apiGroups: ["apps"]
         apiVersions: ["v1"]
@@ -444,6 +611,9 @@ admission:
 # Scanner (image / SBOM scanning worker)
 # ---------------------------------------------------------------------------
 scanner:
+  # Registry hosts (host[:port]) the scanner reaches over plain HTTP — the air-gap
+  # cluster-local registry. Empty = TLS everywhere.
+  insecureRegistries: []
   enabled: true
   replicas: 2
   image: {}
@@ -487,7 +657,8 @@ scanner:
   # optionally pointing Trivy at an internal OCI mirror via trivyDBRepository.
   vulnDB:
     refreshInterval: 6h
-    offline: false
+    # Air-gap first (guide ch.08/09): scanners never fetch DBs unless this is false.
+    offline: true
     trivyDBRepository: ""
     trivyJavaDBRepository: ""
   signatures:
@@ -526,8 +697,17 @@ scanner:
 #     of inspected traffic in TAP mode; bump for higher-throughput nodes.
 runtimeAgent:
   enabled: true
+  # Persistent event/flow queues, each bounded independently. Survives pod
+  # replacement on the same node; node/disk loss requires external replication.
+  telemetrySpool:
+    hostPath: /var/lib/constellation/telemetry
+    bytesPerStream: 268435456
   image: {}
   args: []
+  # Optional execution-enforcer dry-run override. Omission keeps the agent's
+  # existing default; explicit true prevents executable enforcement effects.
+  # Explicit false is supported and does not arm the other enforcement gates.
+  # execDryRun: true
   resources:
     limits:   { cpu: "1",    memory: 1Gi }
     requests: { cpu: 200m,   memory: 256Mi }
@@ -676,57 +856,27 @@ gateway:
     source: externalGateway # externalGateway is currently the supported mode
 
 # ---------------------------------------------------------------------------
-# Postgres (embedded pgvector or external DSN)
+# Postgres (CloudNativePG in-cluster, or an external DSN)
 # ---------------------------------------------------------------------------
 postgres:
-  # Canonical Postgres mode (D5). One of:
-  #   statefulset — single-replica pgvector StatefulSet + PVC (default; dev).
-  #   cnpg        — HA Postgres managed by the CloudNativePG operator (prod).
-  #   external    — point the app DSN at an external Postgres (RDS, Cloud SQL…).
-  # When empty, the mode is derived from the legacy toggles below
-  # (cloudnativepg.enabled → cnpg, else embedded → statefulset, else external)
-  # so existing values files keep working unchanged. Set `mode` explicitly in
-  # new installs; an explicit mode wins over the legacy toggles.
-  # MUST default empty: a non-empty default here would override the legacy
-  # toggles and silently flip existing cnpg/external users to a StatefulSet.
-  mode: ""
-  # --- Legacy toggles (kept for back-compat; prefer `mode` above) ----------
-  # When true, the chart deploys a single-replica pgvector StatefulSet with a
-  # PVC. Use external in production (RDS, Cloud SQL, Crunchy, etc.).
-  embedded: true
+  # Canonical Postgres mode. One of:
+  #   cnpg     — HA Postgres managed by the CloudNativePG operator (default;
+  #              the production path, see ADR 0007).
+  #   external — point the app DSN at an external Postgres (RDS, Cloud SQL,
+  #              a CNPG cluster managed outside this release…); dev/test.
+  # When empty the mode is derived from `cloudnativepg.enabled`. An explicit
+  # mode wins. The former embedded single-replica StatefulSet mode was removed;
+  # there is no in-chart Postgres other than CNPG.
+  mode: cnpg
   # Set for external mode. Either supply a DSN string here OR reference an
   # existing Secret with key `url`.
   dsn: ""
   existingSecret: ""        # if set, takes precedence over `dsn`
   existingSecretKey: url
-  embeddedConfig:
-    image: pgvector/pgvector:pg16@sha256:00ba258a66dac104fd5171074a0084462a64a1369d8513f3d0a634e2f24d15bc
-    storage: 20Gi
-    storageClass: ""        # empty = cluster default
-    podSecurityContext:
-      fsGroup: 999
-      fsGroupChangePolicy: OnRootMismatch
-      seccompProfile:
-        type: RuntimeDefault
-    containerSecurityContext:
-      allowPrivilegeEscalation: false
-      capabilities:
-        drop: ["ALL"]
-      runAsGroup: 999
-      runAsNonRoot: true
-      runAsUser: 999
-    resources:
-      limits:   { cpu: 2,   memory: 2Gi }
-      requests: { cpu: 200m, memory: 256Mi }
-    database: constellation
-    username: constellation
-    # Password generated at install time if blank.
-    password: ""
 
   # -------------------------------------------------------------------------
   # CloudNativePG (CNPG) mode — production HA Postgres managed by the CNPG
-  # operator. This is a THIRD, mutually-exclusive alternative to `embedded`
-  # and the external `dsn`/`existingSecret` paths.
+  # operator.
   #
   # PREREQUISITE: the CloudNativePG operator MUST already be installed in the
   # cluster (it is NOT bundled by this chart). Install it once, cluster-wide,
@@ -735,34 +885,25 @@ postgres:
   #     https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.24/releases/cnpg-1.24.1.yaml
   # (or `helm install cnpg cnpg/cloudnative-pg -n cnpg-system --create-namespace`).
   # Docs: https://cloudnative-pg.io/documentation/current/installation_upgrade/
-  # A ready-made opt-in profile lives at examples/values-cnpg.yaml.
+  # A ready-made profile lives at examples/values-cnpg.yaml.
   #
-  # To use: set `postgres.embedded=false` and `postgres.cloudnativepg.enabled=true`.
   # CNPG auto-creates the services <fullname>-postgres-rw (primary/read-write),
   # -ro (replicas) and -r (any); the chart points DATABASE_URL at the -rw one.
   # -------------------------------------------------------------------------
   cloudnativepg:
-    enabled: false
+    # Only consulted when `postgres.mode` is empty.
+    enabled: true
     # 1 = dev/single instance, 3 = HA (1 primary + 2 replicas). Use 3 in prod.
     instances: 3
     # CRITICAL: this image MUST include the pgvector extension — the schema uses
     # `embedding vector(1536)` in the findings table. The default CNPG image
-    # (ghcr.io/cloudnative-pg/postgresql) does NOT include pgvector. Supply a
-    # pgvector-enabled, CNPG-compatible image. The placeholder default below
-    # MUST be overridden in real installs — otherwise migrations that create the
-    # vector column will fail.
+    # (ghcr.io/cloudnative-pg/postgresql) does NOT include pgvector.
     #
-    # Two ways to get a pgvector-enabled operand image:
-    #   1. Build one FROM the CNPG base + pgvector (few lines; keeps CNPG
-    #      compatibility): FROM ghcr.io/cloudnative-pg/postgresql:16 then
-    #      `apt-get install -y postgresql-16-pgvector`.
-    #   2. Use a community image that bundles pgvector and follows the CNPG
-    #      operand contract (verify `CREATE EXTENSION vector;` works).
-    #
-    # NOTES.txt emits an install-time WARNING when mode=cnpg and this value does
-    # not look pgvector-enabled (no "pgvector" in the ref) — a heuristic guard,
-    # not a hard gate. See examples/values-cnpg.yaml for a worked profile.
-    imageName: ghcr.io/alphabravo-oss/constellation/postgres:16.10-v0.2.0
+    # Empty -> <image.registry>/postgres:16.14-v<Chart.appVersion>, the chart's
+    # own CNPG-compatible pgvector build (deploy/docker/Dockerfile.postgres).
+    # Independent of image.tag; use a version-bearing tag@digest override to pin.
+    # NOTES.txt warns when a CUSTOM imageName does not contain "pgvector".
+    imageName: ""
     storage: 20Gi
     storageClass: ""        # empty = cluster default
     resources:
@@ -774,8 +915,8 @@ postgres:
       enabled: true
       topologyKey: kubernetes.io/hostname
       podAntiAffinityType: required
-    # Optional raw CNPG backup spec. Production should configure WAL archiving
-    # and object-store backups (or a CNPG backup plugin) and test PITR.
+    # Optional raw CNPG backup spec (legacy in-core barmanObjectStore). Prefer
+    # barmanCloud below (CNPG-I plugin); the two are mutually exclusive.
     # Example:
     # backup:
     #   barmanObjectStore:
@@ -786,16 +927,128 @@ postgres:
     #       secretAccessKey: { name: cnpg-backup, key: SECRET_ACCESS_KEY }
     #   retentionPolicy: "30d"
     backup: {}
+    # CNPG-I Barman Cloud plugin. The plugin itself is installed separately
+    # (https://github.com/cloudnative-pg/plugin-barman-cloud). The ObjectStore
+    # CR it archives to is either supplied by the infrastructure operator
+    # (objectStoreName) or rendered by this chart from backup.objectStore
+    # (objectStoreName left empty + backup.objectStore.enabled=true).
+    barmanCloud:
+      enabled: false
+      pluginName: barman-cloud.cloudnative-pg.io
+      objectStoreName: ""
+      recovery:
+        enabled: false
+        # Recovery initializes a NEW cluster; never enable on the live cluster.
+        sourceName: origin
+        objectStoreName: ""
+        serverName: ""
+        targetTime: "" # empty replays to the latest available WAL
     scheduledBackup:
       enabled: false
       # Six-field cron syntax used by CNPG (seconds first): daily at 02:00 UTC.
       schedule: "0 0 2 * * *"
       immediate: true
       backupOwnerReference: self
+    # CNPG instance-manager exporter (:9187, pg_* + barman-cloud plugin metrics):
+    # render a PodMonitor and the CNPG alert group when metrics.serviceMonitor /
+    # metrics.prometheusRule are enabled.
+    monitoring:
+      enablePodMonitor: true
     database: constellation
     username: constellation
-    # Password generated at install time if blank (same idempotent logic as embedded).
+    # Password generated at install time if blank (idempotent across upgrades:
+    # the existing Secret is looked up and re-used).
     password: ""
+
+# ---------------------------------------------------------------------------
+# Backup object store (opt-in, cnpg mode only)
+# ---------------------------------------------------------------------------
+# Renders an in-cluster S3-compatible object store (RustFS, single replica on
+# one PVC), a Barman Cloud `ObjectStore` CR pointing at it, and a one-shot Job
+# that creates the bucket. This replaces the hand-applied manifests formerly in
+# deploy/dev/cnpg-rustfs/. It gives a turnkey WAL archive + base backup target
+# for development and small installs; it is NOT an off-host recovery target
+# (same cluster, same failure domain). Production should point
+# postgres.cloudnativepg.barmanCloud.objectStoreName at an ObjectStore backed by
+# external, replicated storage instead.
+#
+# Typical opt-in:
+#   backup.objectStore.enabled=true
+#   postgres.cloudnativepg.barmanCloud.enabled=true   (objectStoreName stays "")
+#   postgres.cloudnativepg.scheduledBackup.enabled=true
+backup:
+  objectStore:
+    enabled: false
+    # RustFS server image, pinned by multi-arch index digest.
+    # Refresh with: docker buildx imagetools inspect rustfs/rustfs:<ver>
+    image: rustfs/rustfs:1.0.3@sha256:9ca9559533b537d10482fe923288b676ad08f92a7069d9a17327fbae3cab688b
+    # Image for the bucket-creation Job (needs /bin/sh + the `aws` CLI).
+    # minio/mc is no longer published on a public registry, so amazon/aws-cli
+    # is used; pinned by index digest.
+    # Refresh with: docker buildx imagetools inspect amazon/aws-cli:<ver>
+    bucketJobImage: amazon/aws-cli:2.32.6@sha256:79e492dfe333fe420d41990fa958c673671b44e30877d65a2aed3391033f37dd
+    storage: 8Gi
+    storageClass: ""        # empty = cluster default
+    # Existing Secret with keys ACCESS_KEY_ID and SECRET_ACCESS_KEY. Empty = the
+    # chart generates <fullname>-object-store-credentials with random keys and
+    # re-uses them on upgrade (lookup-idempotent, resource-policy keep).
+    credentialsSecret: ""
+    bucket: constellation-recovery
+    # Barman Cloud retention for base backups + WAL in this store.
+    retentionPolicy: 7d
+    # SigV4 signing region advertised to the Barman sidecar / bucket Job.
+    region: us-east-1
+    resources:
+      limits:   { cpu: 1,    memory: 1Gi }
+      requests: { cpu: 100m, memory: 256Mi }
+  # Off-host copy of the archive (a second failure domain). Renders a second
+  # Barman ObjectStore at endpointURL, an rclone CronJob mirroring the local
+  # bucket to it every sync.schedule, and (recovery.enabled) a recovery
+  # ObjectStore for PITR drills. Credentials: Secret with ACCESS_KEY_ID and
+  # SECRET_ACCESS_KEY. docs/cnpg-recovery.md: switch WAL twice before a drill.
+  offhost:
+    enabled: false
+    endpointURL: ""             # e.g. http://backup-host:9000
+    bucket: constellation-recovery-offhost
+    credentialsSecret: ""
+    region: us-east-1
+    retentionPolicy: 7d
+    sync:
+      enabled: true
+      schedule: "*/15 * * * *"
+      transfers: 4
+      checkers: 8
+      # Source store to mirror. Empty = the chart-rendered backup.objectStore and
+      # server <fullname>-postgres. Set for a store/cluster managed outside this
+      # release (postgres.mode=external with an adopted CNPG cluster).
+      source:
+        endpointURL: ""         # e.g. http://rustfs:9000
+        credentialsSecret: ""   # keys ACCESS_KEY_ID, SECRET_ACCESS_KEY
+        bucket: ""              # empty = backup.objectStore.bucket
+        region: ""
+        serverName: ""          # CNPG serverName prefix in the bucket
+      resources:
+        limits:   { cpu: 1,    memory: 512Mi }
+        requests: { cpu: 100m, memory: 128Mi }
+    recovery:
+      enabled: true
+      namespace: ""             # empty = release namespace
+  # Daily age-encrypted backup of the namespace's Secrets to an S3 remote
+  # (toolbox image: age + kubectl + rclone, non-root).
+  secrets:
+    enabled: false
+    schedule: "15 4 * * *"
+    ageRecipient: ""            # age1... public key; keep the identity off-cluster
+    namespaces: []              # empty = release namespace
+    retentionDays: 30
+    remote:
+      endpointURL: ""
+      bucket: constellation-recovery-offhost
+      credentialsSecret: ""
+      region: us-east-1
+    resources:
+      limits:   { cpu: 500m, memory: 256Mi }
+      requests: { cpu: 50m,  memory: 64Mi }
 
 # ---------------------------------------------------------------------------
 # TLS bootstrap for the admission webhook
@@ -972,3 +1225,18 @@ fips:
 # because the CRD itself is cluster-scoped. Set false for cluster-wide workload
 # reconciliation.
 namespaced: true
+
+# Scheduled compliance reports. Provision durable shared storage and a Cosign key
+# Secret before enabling. The API mounts reports read-only; only the scheduler
+# receives the private signing key. ReadWriteOnce colocates the scheduler with API.
+complianceScheduler:
+  enabled: false
+  image: {}
+  interval: 30s
+  storage:
+    existingClaim: ""
+    accessMode: ReadWriteOnce
+  signingSecret: "" # keys: cosign.key and password
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: "1", memory: 512Mi}

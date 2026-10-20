@@ -16,13 +16,14 @@ import (
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 
 	"github.com/alphabravocompany/constellation/internal/auth"
+	colcrypto "github.com/alphabravocompany/constellation/internal/crypto"
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/findings"
 	"github.com/alphabravocompany/constellation/internal/handler/network"
 	"github.com/alphabravocompany/constellation/internal/handler/runtime"
+	"github.com/alphabravocompany/constellation/internal/lifecycle"
 	"github.com/alphabravocompany/constellation/internal/syscfg"
 	"github.com/alphabravocompany/constellation/pkg/backup"
-	regsecrets "github.com/alphabravocompany/constellation/pkg/registry/secrets"
 )
 
 // startBackgroundWork starts the singleton background loops, optionally gated
@@ -45,6 +46,10 @@ func (s *Server) startBackgroundWork(ctx context.Context) {
 // already exits when its context is canceled, so a single ctx governs all of
 // them. This is the set of loops that must NOT be duplicated across replicas.
 func (s *Server) startSingletonLoops(ctx context.Context) {
+	go lifecycle.RunSessionCleanup(ctx, s.db.Pool(), s.tel.Logger, s.sessionCleanupMetrics)
+	if envBool("PARTITION_STATISTICS_MAINTENANCE_ENABLED", true) {
+		go lifecycle.RunPartitionStatistics(ctx, s.db.Pool(), s.tel.Logger, s.partitionStatsMetrics)
+	}
 	// Live CVE-intelligence: CISA KEV + FIRST EPSS straight from the public feeds
 	// (the live replacement for the dropped vulndb bundle). Fills cve_records with
 	// known-exploited flags + exploit-probability scores; NVD base catalog is a
@@ -62,19 +67,14 @@ func (s *Server) startSingletonLoops(ctx context.Context) {
 	// presents its per-joint client cert (mutual auth). A cipher failure leaves the
 	// poller on the D1 bearer-only path (nil sealer) rather than blocking startup.
 	var fedSealer auth.Sealer
-	if cipher, cerr := regsecrets.Default(ctx, s.db.Pool(), s.tel.Logger); cerr == nil {
+	if cipher, cerr := colcrypto.Default(); cerr == nil {
 		fedSealer = cipher
 	}
 	go handler.ReconcileFedSyncLoop(ctx, s.db.Pool(), fedSealer,
 		strings.TrimSpace(os.Getenv("CONSTELLATION_FED_MASTER_URL")),
 		strings.TrimSpace(os.Getenv("CONSTELLATION_FED_MASTER_TOKEN")), 0, s.tel.Logger)
 
-	// Wave A5: auto-rollback watcher. Demotes enforce-mode runtime_policies
-	// back to monitor when their deny-rate spikes past threshold.
-	rollbackStore := runtime.NewRuntimePolicyStore(s.db, s.auditLog)
-	rollbackWatcher := runtime.NewPolicyRollbackWatcher(rollbackStore,
-		runtime.DefaultRollbackConfig(), s.tel.Logger)
-	go rollbackWatcher.Run(ctx)
+	s.startRuntimeMaintenance(ctx)
 
 	// P2-1: ATMO auto mode-elevation worker. Leader-gated background driver that
 	// periodically re-evaluates the discover→monitor→protect candidates and
@@ -95,47 +95,31 @@ func (s *Server) startSingletonLoops(ctx context.Context) {
 	learnedGroupWorker := runtime.NewLearnedGroupWorker(s.db, runtime.LearnedGroupWorkerConfigFromEnv(), s.tel.Logger)
 	go learnedGroupWorker.Run(ctx)
 
-	// P0-06: live group-membership reconcile (NeuVector groupWorkloadJoin/Leave
-	// parity). Recomputes groups.members from current deployments and re-expands
-	// group→group edges whose membership changed, so a rule authored against a
-	// group follows future pod replicas instead of going stale until the next
-	// group write. Singleton (deployment ingest lands out-of-band via the
-	// discoverer); on by default. Re-expansion honors each edge's authored mode, so
-	// a protect-mode edge produces ENFORCING default-deny policies for newly-joined
-	// members by design (see edgePolicyPosture); gate off with
+	// P0-06: live group-membership reconcile. Cluster-scoped groups with only
+	// group-edge references transition cached members, profile modes and expanded
+	// policies in one transaction; other referenced groups remain fail-closed.
+	// Singleton (deployment ingest lands out-of-band via the discoverer); on by
+	// default. Re-expansion honors each edge's authored mode; gate off with
 	// CONSTELLATION_GROUP_MEMBERSHIP_RECONCILE=false.
 	membershipReconciler := runtime.NewGroupMembershipReconciler(s.db,
 		runtime.NewRuntimePolicyStore(s.db, s.auditLog), s.tel.Logger)
 	go membershipReconciler.Run(ctx)
 
-	// Retention horizons resolved LIVE from system config (primary org) each pass, so
-	// an admin can set them from the Settings UI without a restart. 0 days = disabled
-	// (falls back to any env default). Bounds the two biggest storage sinks.
-	retentionResolver := func(pick func(syscfg.Config) int) func(context.Context) time.Duration {
-		return func(rctx context.Context) time.Duration {
-			if s.syscfg == nil {
-				return 0
-			}
-			var orgID uuid.UUID
-			if err := s.db.Pool().QueryRow(rctx, `SELECT id FROM orgs ORDER BY created_at LIMIT 1`).Scan(&orgID); err != nil {
-				return 0
-			}
-			return time.Duration(pick(s.syscfg.Get(rctx, orgID))) * 24 * time.Hour
-		}
-	}
-	// Day-count variant of the same resolver, for the partition manager (which drops
-	// whole daily partitions past the horizon rather than DELETE-ing rows).
+	// Shared workers honor every org: the longest live window wins and any zero
+	// disables expiry. Read failures retain data rather than substituting defaults.
 	retentionDaysResolver := func(pick func(syscfg.Config) int) func(context.Context) int {
 		return func(rctx context.Context) int {
-			if s.syscfg == nil {
+			days, err := syscfg.EffectiveRetentionDays(rctx, s.db.Pool(), pick)
+			if err != nil {
+				s.tel.Logger.Warn("retention configuration unavailable; expiry skipped")
 				return 0
 			}
-			var orgID uuid.UUID
-			if err := s.db.Pool().QueryRow(rctx, `SELECT id FROM orgs ORDER BY created_at LIMIT 1`).Scan(&orgID); err != nil {
-				return 0
-			}
-			return pick(s.syscfg.Get(rctx, orgID))
+			return days
 		}
+	}
+	retentionResolver := func(pick func(syscfg.Config) int) func(context.Context) time.Duration {
+		days := retentionDaysResolver(pick)
+		return func(rctx context.Context) time.Duration { return time.Duration(days(rctx)) * 24 * time.Hour }
 	}
 
 	// Auto-scan running workloads (NeuVector enable_auto_scan_workload): the discoverer
@@ -153,7 +137,16 @@ func (s *Server) startSingletonLoops(ctx context.Context) {
 			}
 			return !s.syscfg.Get(rctx, orgID).AutoScanDisabled
 		},
-		retentionDaysResolver(func(c syscfg.Config) int { return c.AutoScanRescanHours }),
+		func(rctx context.Context) int {
+			if s.syscfg == nil {
+				return 0
+			}
+			var orgID uuid.UUID
+			if err := s.db.Pool().QueryRow(rctx, `SELECT id FROM orgs ORDER BY created_at LIMIT 1`).Scan(&orgID); err != nil {
+				return 0
+			}
+			return s.syscfg.Get(rctx, orgID).AutoScanRescanHours
+		},
 		s.tel.Logger)
 
 	// Partition manager: pre-create daily partitions for events + network_flows and DROP
@@ -189,17 +182,17 @@ func (s *Server) startSingletonLoops(ctx context.Context) {
 	go handler.RunOrphanImageScanResultMonitor(ctx, s.db.Pool(), s.tel.Logger)
 
 	// Phase B: retroactively re-resolve flows stamped "cluster/<ip>" at ingest,
-	// now that pod_ips retains history and the resolver is time-aware. Shares the
-	// rollup refresher so it can refold the buckets its rewrites disturb. Leader-
-	// gated (derives from ctx) so replicas don't race each other or the watermark.
-	network.NewFlowBackfiller(s.db, rollupRefresher).Start(ctx)
+	// now that pod_ips retains history and the resolver is time-aware. Relabels and
+	// rebuilds complete raw-history buckets in one transaction under the rollup
+	// lock. Leader-gated (derives from ctx) so only one backfiller runs.
+	network.NewFlowBackfiller(s.db).Start(ctx)
 
 	// A9: scheduled-backup executor + retention. Leader-gated cron runner for the
 	// per-org backup_schedules an operator created via the /backups/schedule API. With
 	// no schedules it is a pure no-op; it never enables/deletes/enforces anything on live
 	// workloads, only reading org data into a tarball and pruning its own old artifacts.
 	go backup.RunScheduleExecutor(ctx, s.db.Pool(), backup.ScheduleExecutorConfig{
-		BackupDir:   env("CONSTELLATION_BACKUP_DIR", "/var/lib/constellation/backups"),
+		BackupDir:   os.Getenv("CONSTELLATION_BACKUP_DIR"),
 		SignKeyPath: os.Getenv("CONSTELLATION_BACKUP_SIGN_KEY"),
 	}, s.tel.Logger)
 

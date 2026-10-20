@@ -3,13 +3,14 @@ package gitops
 import "testing"
 
 func TestDetectDrift_FindsModifiedAndOrphanedResources(t *testing.T) {
+	t.Parallel()
 	declared := []Resource{
 		{Kind: "RoleBinding", Name: "rb-1", Namespace: "default", Spec: map[string]any{"subjects": []any{"alice"}}},
 		{Kind: "NetworkPolicy", Name: "np-1", Namespace: "default", Spec: map[string]any{"podSelector": map[string]any{"matchLabels": map[string]any{"app": "x"}}}},
 	}
 	live := []Resource{
 		{Kind: "RoleBinding", Name: "rb-1", Namespace: "default", Spec: map[string]any{"subjects": []any{"alice", "EVIL"}}}, // tampered
-		{Kind: "RoleBinding", Name: "rb-2", Namespace: "default", Spec: map[string]any{"subjects": []any{"bob"}}},          // out-of-band addition
+		{Kind: "RoleBinding", Name: "rb-2", Namespace: "default", Spec: map[string]any{"subjects": []any{"bob"}}},           // out-of-band addition
 		// np-1 missing → declared-but-not-in-cluster
 	}
 	drift := DetectDrift("argocd", "demo-app", declared, live)
@@ -32,6 +33,7 @@ func TestDetectDrift_FindsModifiedAndOrphanedResources(t *testing.T) {
 }
 
 func TestIsSensitive(t *testing.T) {
+	t.Parallel()
 	for _, k := range []string{"RoleBinding", "NetworkPolicy", "Secret"} {
 		if !IsSensitive(k) {
 			t.Fatalf("%s should be sensitive", k)

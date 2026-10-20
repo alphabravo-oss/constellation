@@ -21,6 +21,7 @@ import (
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
+	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/notify"
 	"github.com/alphabravocompany/constellation/pkg/response"
 	"github.com/alphabravocompany/constellation/pkg/responserule"
@@ -50,7 +51,7 @@ type HostCISHandler struct {
 }
 
 func NewHostCIS(d *db.DB) *HostCISHandler {
-	return &HostCISHandler{db: d}
+	return &HostCISHandler{db: d, alerts: complianceResponder{audit: audit.New(d.Pool())}}
 }
 
 // WithResponseAlerts wires the RT-2 response hook, the E1 declarative evaluator, and
@@ -61,7 +62,9 @@ func (h *HostCISHandler) WithResponseAlerts(
 	eval func(ctx context.Context, orgID uuid.UUID, ev *responserule.Event) ([]responserule.Action, error),
 	dispatcher *notify.Dispatcher,
 ) *HostCISHandler {
-	h.alerts = complianceResponder{respond: respond, evalRules: eval, dispatcher: dispatcher}
+	h.alerts.respond = respond
+	h.alerts.evalRules = eval
+	h.alerts.dispatcher = dispatcher
 	return h
 }
 
@@ -96,6 +99,10 @@ func (h *HostCISHandler) Report(w http.ResponseWriter, r *http.Request) {
 	// bundle mapping; the upsert stays NULL-safe (dedups on (org_id, node)).
 	clusterID, err := handler.ResolveAgentClusterID(r.Context(), h.db, tok)
 	if err != nil {
+		if errors.Is(err, handler.ErrAgentClusterScope) {
+			jsonError(w, http.StatusForbidden, "agent token cluster scope mismatch")
+			return
+		}
 		jsonError(w, http.StatusInternalServerError, "resolve cluster: "+err.Error())
 		return
 	}

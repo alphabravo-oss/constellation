@@ -10,6 +10,7 @@ import (
 )
 
 func TestRegistry_RegisterAndList(t *testing.T) {
+	t.Parallel()
 	r := NewRegistry()
 	r.Register(Tool{Name: "list_findings", Side: "read",
 		Handler: func(_ context.Context, _ map[string]interface{}, _ Subject) (interface{}, error) {
@@ -29,6 +30,7 @@ func TestRegistry_RegisterAndList(t *testing.T) {
 }
 
 func TestRegistry_RBACEnforcement(t *testing.T) {
+	t.Parallel()
 	r := NewRegistry()
 	r.Register(Tool{Name: "suppress", Side: "write", RBACVerb: "suppress-findings",
 		Handler: func(_ context.Context, _ map[string]interface{}, _ Subject) (interface{}, error) {
@@ -50,6 +52,7 @@ func TestRegistry_RBACEnforcement(t *testing.T) {
 }
 
 func TestClient_DisabledWhenServiceURLEmpty(t *testing.T) {
+	t.Parallel()
 	c := NewClient("")
 	_, err := c.Query(context.Background(), QueryRequest{Prompt: "hi", OrgAIEnabled: true})
 	if !errors.Is(err, ErrServiceUnreachable) {
@@ -58,6 +61,7 @@ func TestClient_DisabledWhenServiceURLEmpty(t *testing.T) {
 }
 
 func TestClient_RejectsDisabledOrg(t *testing.T) {
+	t.Parallel()
 	c := NewClient("https://abbot.example/test")
 	_, err := c.Query(context.Background(), QueryRequest{Prompt: "hi", OrgAIEnabled: false})
 	if !errors.Is(err, ErrDisabled) {
@@ -66,6 +70,7 @@ func TestClient_RejectsDisabledOrg(t *testing.T) {
 }
 
 func TestClient_QueryPostsEnvelope(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/chat" {
 			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
@@ -101,6 +106,7 @@ func TestClient_QueryPostsEnvelope(t *testing.T) {
 }
 
 func TestClient_QueryUnavailableDegrades(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "offline", http.StatusServiceUnavailable)
 	}))
@@ -115,6 +121,7 @@ func TestClient_QueryUnavailableDegrades(t *testing.T) {
 }
 
 func TestRegistry_MarshalCatalog(t *testing.T) {
+	t.Parallel()
 	r := NewRegistry()
 	r.Register(Tool{Name: "x", Side: "read"})
 	b, err := r.MarshalCatalog()

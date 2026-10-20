@@ -1,26 +1,19 @@
+//go:build integration
+
 package handler
 
 import (
-	"context"
-	"os"
 	"testing"
 
 	"github.com/alphabravocompany/constellation/internal/db"
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
 )
 
-// openTestDB formerly lived in scanjobs_test.go (now relocated to the
-// handler/scanning sub-package). It is restored here so the remaining
-// package-handler tests keep their shared DB-connection helper. Skips when no
-// test database is reachable.
+func TestMain(m *testing.M) { pgtest.Main(m) }
+
+// openTestDB returns a *db.DB on this test's private, migrated database
+// (internal/testutil/pgtest: one container per process, one clone per test).
 func openTestDB(t *testing.T) *db.DB {
 	t.Helper()
-	url := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-	if url == "" {
-		url = "postgres://test:test@localhost:15433/constellation_test?sslmode=disable"
-	}
-	d, err := db.Connect(context.Background(), url)
-	if err != nil {
-		t.Skipf("skipping: cannot reach test DB (%v)", err)
-	}
-	return d
+	return db.NewFromPool(pgtest.Pool(t))
 }

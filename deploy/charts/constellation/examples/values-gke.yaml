@@ -1,10 +1,10 @@
-# Sample values for Google Kubernetes Engine.
+# Sample values for Google Kubernetes Engine with Cloud SQL (external mode).
 
 image:
-  tag: v0.2.0
+  tag: v0.3.0
 
 postgres:
-  embedded: false
+  mode: external
   existingSecret: constellation-cloudsql-credentials
   existingSecretKey: url
 

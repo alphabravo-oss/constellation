@@ -17,7 +17,8 @@ import (
 	"github.com/alphabravocompany/constellation/internal/auth"
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/server"
-	"github.com/alphabravocompany/constellation/pkg/observability"
+	migrations "github.com/alphabravocompany/constellation/internal/server/database"
+	"github.com/alphabravocompany/constellation/internal/telemetry"
 	"github.com/alphabravocompany/constellation/pkg/version"
 )
 
@@ -25,12 +26,18 @@ func main() {
 	listenAddr := flag.String("listen", env("LISTEN_ADDR", ":8080"), "HTTP listen address")
 	rotateJWT := flag.Bool("rotate-jwt-key", false,
 		"A5: mint a new RS256 session-signing keypair, demote the previous to verify-only, then exit")
+	checkSchemaOnly := flag.Bool("check-schema", false, "verify the required database migration, then exit without starting services")
+	migrateOnly := flag.Bool("migrate-only", false, "apply pending schema migrations under the advisory lock, then exit")
 	flag.Parse()
 
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
 		slog.Error("DATABASE_URL required")
 		os.Exit(2)
+	}
+
+	if *checkSchemaOnly {
+		os.Exit(checkSchema(context.Background(), databaseURL))
 	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
@@ -40,7 +47,8 @@ func main() {
 		os.Exit(rotateJWTKey(ctx, databaseURL))
 	}
 
-	tel, err := observability.Init(ctx, "constellation-api")
+	telCfg := telemetry.ConfigFromEnv("constellation-api")
+	tel, err := telemetry.Init(ctx, telCfg)
 	if err != nil {
 		slog.Error("observability init", slog.String("err", err.Error()))
 		os.Exit(1)
@@ -48,26 +56,54 @@ func main() {
 	// Wave N6: every binary logs its build triplet once on startup so kubectl
 	// logs / journalctl operators can immediately see "what is running."
 	version.LogStartup(tel.Logger, "api")
+	// Air-gap first (guide ch.08/09): one line naming every endpoint outside the
+	// cluster this process may contact; all are opt-in through configuration.
+	telemetry.NewEgress().
+		Add("otlp", telCfg.Endpoint).
+		Add("oidc_issuer", os.Getenv("OIDC_ISSUER_URL")).
+		Add("astronomer_jwks", os.Getenv("ASTRONOMER_JWKS_URL")).
+		Add("ldap", os.Getenv("LDAP_URL")).
+		Add("fed_master", os.Getenv("CONSTELLATION_FED_MASTER_URL")).
+		Log(tel.Logger)
 	defer func() {
 		shutdownCtx, c := context.WithTimeout(context.Background(), 5*time.Second)
 		defer c()
 		_ = tel.Shutdown(shutdownCtx)
 	}()
 
-	database, err := db.Connect(ctx, databaseURL)
+	database, err := connectWithRetry(ctx, databaseURL, envDuration("DB_CONNECT_TIMEOUT", 5*time.Minute), tel.Logger, db.WithTracer(tel.PgxTracer()))
 	if err != nil {
 		tel.Logger.Error("db connect", slog.String("err", err.Error()))
 		os.Exit(1)
 	}
 	defer database.Close()
+	tel.ObservePool(database.Pool())
+	// Component heartbeat / scanner engine-DB / CVE-feed ages as first-class metrics
+	// (no postgres-exporter needed); queried on scrape, cached 15s.
+	tel.ObserveDBHealth(database.Pool(), 15*time.Second)
+
+	// Guide ch.02: the binary ships its migrations and applies them under a
+	// session-level advisory lock before it accepts traffic; a failed migration
+	// is a failed boot. Replicas starting together serialise on the lock.
+	if _, err := migrations.MigratePool(ctx, database.Pool(), tel.Logger); err != nil {
+		tel.Logger.Error("migrate", slog.String("err", err.Error()))
+		os.Exit(1)
+	}
+	if *migrateOnly {
+		return
+	}
 
 	cfg := server.Config{
 		ListenAddr:           *listenAddr,
+		AdminListenAddr:      env("ADMIN_LISTEN_ADDR", ":9090"),
+		RequestTimeout:       envDuration("REQUEST_TIMEOUT", 60*time.Second),
+		MaxBodyBytes:         int64(envInt("MAX_BODY_BYTES", 64<<20)),
+		EnablePprof:          envBool("CONSTELLATION_ENABLE_PPROF", false),
 		DatabaseURL:          databaseURL,
 		JWTKeys:              loadJWTKeys(envBool("CONSTELLATION_REQUIRE_JWT_KEYS", false)),
 		JWTIssuer:            env("JWT_ISSUER", "constellation"),
 		JWTAudience:          env("JWT_AUDIENCE", "constellation-api"),
-		JWTTTL:               envDuration("JWT_TTL", time.Hour),
+		JWTTTL:               envDuration("JWT_TTL", 15*time.Minute),
 		SessionIdleTimeout:   envDuration("SESSION_IDLE_TIMEOUT", 30*time.Minute),
 		PATMaxLifetime:       envDuration("PAT_MAX_LIFETIME", 90*24*time.Hour),
 		CORSOrigins:          strings.Split(env("CORS_ORIGINS", "http://localhost:5173"), ","),
@@ -127,6 +163,7 @@ func main() {
 		MetadataFn: func() any {
 			return map[string]any{
 				"listen_addr":                       *listenAddr,
+				"admin_listen_addr":                 cfg.AdminListenAddr,
 				"jwt_keys_configured":               len(cfg.JWTKeys) > 0,
 				"oidc_enabled":                      cfg.OIDC != nil,
 				"saml_enabled":                      cfg.SAML != nil,
@@ -156,6 +193,28 @@ func apiHeartbeatURL(listenAddr string) string {
 		port = listenAddr[idx+1:]
 	}
 	return "http://127.0.0.1:" + port
+}
+
+// connectWithRetry waits for the database to accept connections (Postgres may
+// still be starting on a fresh install) instead of relying on an init
+// container; it gives up after timeout so a misconfigured DSN still fails fast.
+func connectWithRetry(ctx context.Context, databaseURL string, timeout time.Duration, logger *slog.Logger, opts ...db.Option) (*db.DB, error) {
+	deadline := time.Now().Add(timeout)
+	for attempt := 1; ; attempt++ {
+		database, err := db.Connect(ctx, databaseURL, opts...)
+		if err == nil {
+			return database, nil
+		}
+		if ctx.Err() != nil || time.Now().After(deadline) {
+			return nil, err
+		}
+		logger.Warn("database not ready; retrying", slog.Int("attempt", attempt), slog.String("err", err.Error()))
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
 }
 
 func env(key, def string) string {
@@ -294,4 +353,23 @@ func parseJWTKeys(raw string) ([][]byte, error) {
 		return nil, fmt.Errorf("no key is at least 32 bytes")
 	}
 	return out, nil
+}
+
+// checkSchema is also the Helm init-container gate. It uses the API image's own
+// requirement, so an old table or a mismatched chart cannot admit a new binary.
+func checkSchema(ctx context.Context, databaseURL string) int {
+	bounded, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	database, err := db.Connect(bounded, databaseURL)
+	if err != nil {
+		slog.Error("schema check connection failed", "error", err)
+		return 1
+	}
+	defer database.Close()
+	if err := database.RequireSchema(bounded); err != nil {
+		slog.Error("schema check failed", "error", err)
+		return 1
+	}
+	slog.Info("database schema ready", "required_version", db.RequiredSchemaVersion)
+	return 0
 }

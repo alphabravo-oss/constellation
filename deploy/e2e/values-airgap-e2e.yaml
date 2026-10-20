@@ -1,0 +1,61 @@
+# Air-gap e2e profile (scripts/e2e-airgap.sh): one release in a scratch namespace
+# next to a live install, every cluster-scoped object release-prefixed, the
+# admission webhook confined to namespaces labelled
+# constellation.alphabravo.io/enforce=true, all egress except DNS/kube-API/Postgres
+# denied, images from the loaded bundle only (pullPolicy Never).
+highAvailability: { enabled: false }
+clusterRegistration:
+  enabled: false
+  clusterId: 6c2b8a52-9e1f-4f0e-9d7c-0a1b2c3d4e5f
+  name: airgap-e2e
+  distro: k3s
+api:
+  replicas: 1
+  leaderElection: { enabled: false }
+frontend: { enabled: false }
+operator: { enabled: false }
+runtimeAgent: { enabled: false }
+discoverer: { enabled: false }
+networkPolicyApplier: { enabled: false }
+kubernetesComplianceCollector: { enabled: false }
+kubeBenchRunner: { enabled: false }
+dockerBenchRunner: { enabled: false }
+kubeBenchWorker: { enabled: false }
+dockerBenchWorker: { enabled: false }
+auditArchiver: { enabled: false }
+complianceScheduler: { enabled: false }
+ingress: { enabled: false }
+postgres:
+  mode: cnpg
+  cloudnativepg:
+    instances: 1
+    storage: 2Gi
+    affinity: { enabled: false }
+admission:
+  replicas: 1
+  webhook:
+    failurePolicy: Fail
+    namespaceSelector:
+      matchLabels: { constellation.alphabravo.io/enforce: "true" }
+  policies:
+    enabled: true
+    clusterId: 6c2b8a52-9e1f-4f0e-9d7c-0a1b2c3d4e5f
+    refresh: 5s
+scanner:
+  replicas: 1
+  insecureRegistries: ["airgap-registry.airgap-e2e.svc:5000"]
+bootstrap:
+  admin:
+    enabled: true
+    email: admin@airgap.test
+    password: "Airgap-e2e-Passw0rd!"
+networkPolicies:
+  enabled: true
+  dns: { enabled: true, cidrs: ["10.43.0.10/32", "10.42.0.0/16"] }
+  externalHTTP: { enabled: false }
+  kubeAPI: { cidrs: ["10.43.0.1/32", "5.78.190.70/32"], ports: [443, 6443] }
+  externalPostgres: { cidrs: ["10.42.0.0/16"], ports: [5432] }
+  apiIngressCIDRs: ["10.42.0.0/16", "5.78.190.70/32"]
+  admissionIngressCIDRs: ["10.42.0.0/16", "5.78.190.70/32"]
+  nodeCIDRs: ["10.42.0.0/16", "5.78.190.70/32"]
+  monitoring: { enabled: false }

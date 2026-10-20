@@ -8,6 +8,7 @@ import (
 )
 
 func TestSnapshotAggregatesAndScopes(t *testing.T) {
+	t.Parallel()
 	s := New(Config{TTL: time.Hour})
 	org := uuid.New()
 	c1, c2 := uuid.New(), uuid.New()
@@ -49,6 +50,7 @@ func TestSnapshotAggregatesAndScopes(t *testing.T) {
 }
 
 func TestSnapshotEvictsExpired(t *testing.T) {
+	t.Parallel()
 	s := New(Config{TTL: 10 * time.Millisecond})
 	org := uuid.New()
 	s.Publish(Flow{OrgID: org, ClusterID: uuid.New(), SrcWorkload: "a", DstWorkload: "b", Protocol: "tcp", At: time.Now().Add(-time.Hour)})
@@ -58,6 +60,7 @@ func TestSnapshotEvictsExpired(t *testing.T) {
 }
 
 func TestMaxEdgesCapBoundsStore(t *testing.T) {
+	t.Parallel()
 	s := New(Config{TTL: time.Hour, MaxEdgesPer: 3})
 	org := uuid.New()
 	cl := uuid.New()
@@ -71,6 +74,7 @@ func TestMaxEdgesCapBoundsStore(t *testing.T) {
 }
 
 func TestPublishFanout(t *testing.T) {
+	t.Parallel()
 	s := New(Config{TTL: time.Hour, SubscriberBuf: 4})
 	org := uuid.New()
 	ch, cancel := s.Subscribe(org)
@@ -96,6 +100,7 @@ func TestPublishFanout(t *testing.T) {
 }
 
 func TestNilStorePublishSafe(t *testing.T) {
+	t.Parallel()
 	var s *Store
 	s.Publish(Flow{OrgID: uuid.New()}) // must not panic
 }

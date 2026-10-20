@@ -1,0 +1,150 @@
+{{- /*
+Column-encryption key (guide ch.06). The API seals registry credentials, git PATs,
+federation keys and init bundles with an age X25519 key set read from
+CONSTELLATION_AGE_KEY (Secret <release>-age-key, key `age-key`). The key MUST come
+from a file/env, never the database, so:
+  - crypto.ageKey (values)         -> the chart writes it into the Secret;
+  - crypto.existingSecret (values) -> an operator-managed Secret is referenced;
+  - neither                        -> a pre-install/pre-upgrade hook Job mints one
+                                      with age-keygen (toolbox image) and keeps it
+                                      across upgrades (lookup-idempotent).
+Rotation: append the new identity first in the Secret, roll the API, run
+`constellationctl admin rotate-keys`, then drop the retired identity.
+*/ -}}
+{{- $name := include "constellation.cryptoSecretName" . -}}
+{{- if .Values.crypto.ageKey }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  age-key: {{ .Values.crypto.ageKey | quote }}
+{{- else if not .Values.crypto.existingSecret }}
+{{- if .Values.networkPolicies.enabled }}
+# Hook-scoped egress for the key Job: on upgrade it runs before the release's
+# regular NetworkPolicies are applied, and the namespace is already default-deny.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-age-key-egress
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: age-key-bootstrap
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-11"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: age-key-bootstrap
+  policyTypes: [Egress]
+  egress:
+{{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
+{{ include "constellation.networkPolicyKubeAPIEgress" . | nindent 4 }}
+---
+{{- end }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "constellation.fullname" . }}-age-key
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "constellation.fullname" . }}-age-key
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: [{{ $name | quote }}]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "constellation.fullname" . }}-age-key
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "constellation.fullname" . }}-age-key
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "constellation.fullname" . }}-age-key
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "constellation.fullname" . }}-age-key-{{ .Release.Revision }}
+  namespace: {{ .Release.Namespace }}
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: age-key-bootstrap
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-9"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels: {{- include "constellation.labels" . | nindent 8 }}
+        app.kubernetes.io/component: age-key-bootstrap
+    spec:
+      {{- include "constellation.pullSecrets" . | nindent 6 }}
+      {{- include "constellation.podSecurityContext" . | nindent 6 }}
+      serviceAccountName: {{ include "constellation.fullname" . }}-age-key
+      restartPolicy: OnFailure
+      containers:
+        - name: age-keygen
+          image: {{ include "constellation.roleImage" (dict "ctx" . "role" "toolbox") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- include "constellation.containerSecurityContext" . | nindent 10 }}
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              if kubectl -n "$NAMESPACE" get secret "$SECRET" >/dev/null 2>&1; then
+                echo "secret $SECRET exists; keeping the current key set"; exit 0
+              fi
+              age-keygen 2>/dev/null | grep '^AGE-SECRET-KEY-1' > /tmp/age.key
+              kubectl -n "$NAMESPACE" create secret generic "$SECRET" --from-file=age-key=/tmp/age.key
+              echo "created $SECRET (key_id $(age-keygen -y /tmp/age.key))"
+          env:
+            - name: NAMESPACE
+              value: {{ .Release.Namespace }}
+            - name: SECRET
+              value: {{ $name }}
+            - name: HOME
+              value: /tmp
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}

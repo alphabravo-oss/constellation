@@ -21,6 +21,7 @@ const newCDX = `{
 }`
 
 func TestCompare_DetectsAddedRemovedChanged(t *testing.T) {
+	t.Parallel()
 	d, err := Compare([]byte(oldCDX), []byte(newCDX))
 	if err != nil {
 		t.Fatal(err)
@@ -55,6 +56,7 @@ const spdxB = `{
 }`
 
 func TestCompare_SPDXShape(t *testing.T) {
+	t.Parallel()
 	d, err := Compare([]byte(spdxA), []byte(spdxB))
 	if err != nil {
 		t.Fatal(err)

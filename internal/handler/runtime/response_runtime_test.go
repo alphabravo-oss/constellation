@@ -1,3 +1,5 @@
+//go:build integration
+
 package runtime
 
 import (
@@ -42,7 +44,7 @@ func TestEventsIngest_DispatchResponseHook(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("expected 1 response dispatch, got %d", len(got))
 	}
-	if got[0].Severity != "critical" || got[0].Type != response.EventRuntime {
+	if got[0].Severity != "critical" || got[0].Type != response.EventIncident {
 		t.Fatalf("unexpected response event: %+v", got[0])
 	}
 	if got[0].Workload != "default/api" || got[0].Cluster != clusterID.String() {
@@ -57,12 +59,41 @@ func TestEventsIngest_DispatchResponseHook(t *testing.T) {
 	NewEventsIngest(nil, nil, nil).WithResponseEngine(nil)
 }
 
+func TestResponseEventForIngestCategories(t *testing.T) {
+	clusterID := uuid.New()
+	cases := []struct {
+		name           string
+		event          IngestEvent
+		classification eventClassification
+		want           response.EventType
+	}{
+		{"generic process", IngestEvent{Kind: "process_exec"}, eventClassification{Severity: "high"}, response.EventRuntime},
+		{"process incident", IngestEvent{Kind: "process_exec"}, eventClassification{Severity: "high", Reason: "suspicious-binary"}, response.EventIncident},
+		{"setuid incident", IngestEvent{Kind: "uid_change"}, eventClassification{Severity: "high", Reason: "setuid-without-exec"}, response.EventIncident},
+		{"file profile violation", IngestEvent{Kind: "file_open"}, eventClassification{Severity: "high", FileRule: &fileProfileRuleMatch{}}, response.EventViolation},
+		{"blocked file violation", IngestEvent{Kind: "file_open", Blocked: true}, eventClassification{Severity: "high"}, response.EventViolation},
+		{"fim incident", IngestEvent{Kind: "file_open"}, eventClassification{Severity: "high", FIM: &fimWatch{}}, response.EventIncident},
+		{"generic network", IngestEvent{Kind: "tcp_connect"}, eventClassification{Severity: "high"}, response.EventRuntime},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			got := responseEventForIngest(clusterID, &testCase.event, testCase.classification)
+			if got.Type != testCase.want {
+				t.Fatalf("type=%q want %q", got.Type, testCase.want)
+			}
+			if !response.EventTypeMatches(response.EventRuntime, got.Type) || !response.EventTypeMatches(response.EventSecurity, got.Type) {
+				t.Fatalf("runtime/security aliases do not match %q", got.Type)
+			}
+		})
+	}
+}
+
 // RT-2 end-to-end: a critical runtime event flowing through Bulk fires a response rule
 // whose quarantine action records an origin='auto' quarantine_entries row. Auto-skips
 // when no DB is reachable.
 func TestEventsIngest_AutoQuarantineFromCriticalEvent(t *testing.T) {
 	d := openTestDB(t)
-	defer d.Close()
+	t.Cleanup(d.Close)
 
 	ctx := context.Background()
 	pool := d.Pool()
@@ -92,10 +123,7 @@ VALUES ($1, $2, $3, '', true, 'runtime', $4, $5, $6) RETURNING id`,
 		t.Fatalf("insert rule: %v", err)
 	}
 
-	raw, _, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
-	if err != nil {
-		t.Fatalf("issue token: %v", err)
-	}
+	raw := issueBoundRuntimeEventToken(t, pool, orgID, clusterID, tokenName)
 
 	// nc exec -> suspicious-binary -> high regardless of baseline.
 	batch := []IngestEvent{{
@@ -111,7 +139,7 @@ VALUES ($1, $2, $3, '', true, 'runtime', $4, $5, $6) RETURNING id`,
 	h := NewEventsIngest(d, audit.New(pool), bf).
 		WithResponseEngine(NewResponseDispatch(d, nil))
 
-	req := httptest.NewRequest("POST", "/api/v1/events:bulk?cluster_id="+clusterID.String(), bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/events:bulk?cluster_id="+clusterID.String(), bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+raw)
 	w := httptest.NewRecorder()
 	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(w, req)
@@ -139,7 +167,7 @@ SELECT count(*) FROM quarantine_entries
 
 func TestEventsIngest_V2SuppressLogSkipsRuntimeEventRow(t *testing.T) {
 	d := openTestDB(t)
-	defer d.Close()
+	t.Cleanup(d.Close)
 
 	ctx := context.Background()
 	pool := d.Pool()
@@ -168,10 +196,7 @@ VALUES ($1, $2, $3, '', true, 'runtime', $4, $5, $6) RETURNING id`,
 		t.Fatalf("insert rule: %v", err)
 	}
 
-	raw, _, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
-	if err != nil {
-		t.Fatalf("issue token: %v", err)
-	}
+	raw := issueBoundRuntimeEventToken(t, pool, orgID, clusterID, tokenName)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM events WHERE org_id=$1 AND workload_id=$2`, orgID, workloadID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM audit_events WHERE org_id=$1 AND target_id=$2`, orgID, workloadID)
@@ -192,7 +217,7 @@ VALUES ($1, $2, $3, '', true, 'runtime', $4, $5, $6) RETURNING id`,
 		WithResponseEngine(NewResponseDispatch(d, nil)).
 		WithResponseDecision(NewResponseDecision(d))
 
-	req := httptest.NewRequest("POST", "/api/v1/events:bulk?cluster_id="+clusterID.String(), bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/events:bulk?cluster_id="+clusterID.String(), bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+raw)
 	w := httptest.NewRecorder()
 	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(w, req)
@@ -230,7 +255,7 @@ SELECT COALESCE(after->>'enforced','')
 
 func TestEventsIngest_V2GroupSelectorUsesCachedMembersAndPodOwnerLinks(t *testing.T) {
 	d := openTestDB(t)
-	defer d.Close()
+	t.Cleanup(d.Close)
 
 	ctx := context.Background()
 	pool := d.Pool()
@@ -280,10 +305,7 @@ VALUES ($1, $2, $3, '', true, 'runtime', $4, $5, $6) RETURNING id`,
 		t.Fatalf("insert rule: %v", err)
 	}
 
-	raw, _, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
-	if err != nil {
-		t.Fatalf("issue token: %v", err)
-	}
+	raw := issueBoundRuntimeEventToken(t, pool, orgID, clusterID, tokenName)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM events WHERE org_id=$1 AND workload_id=$2`, orgID, podWorkloadID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM audit_events WHERE org_id=$1 AND target_id=$2`, orgID, podWorkloadID)
@@ -306,7 +328,7 @@ VALUES ($1, $2, $3, '', true, 'runtime', $4, $5, $6) RETURNING id`,
 		WithResponseEngine(NewResponseDispatch(d, nil)).
 		WithResponseDecision(NewResponseDecision(d))
 
-	req := httptest.NewRequest("POST", "/api/v1/events:bulk?cluster_id="+clusterID.String(), bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/events:bulk?cluster_id="+clusterID.String(), bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+raw)
 	w := httptest.NewRecorder()
 	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(w, req)

@@ -27,10 +27,10 @@ type Process struct {
 	PID       int32  `json:"pid"`
 	PPID      int32  `json:"ppid"`
 	UID       int32  `json:"uid"`
-	Comm      string `json:"comm"`               // /proc/[pid]/comm
-	Cmdline   string `json:"cmdline,omitempty"`  // NUL-joined to spaces
-	StartTime int64  `json:"start_time"`         // unix seconds since boot of pid 1
-	State     string `json:"state,omitempty"`    // R/S/D/Z/T from /proc/[pid]/stat
+	Comm      string `json:"comm"`              // /proc/[pid]/comm
+	Cmdline   string `json:"cmdline,omitempty"` // NUL-joined to spaces
+	StartTime int64  `json:"start_time"`        // unix seconds since boot of pid 1
+	State     string `json:"state,omitempty"`   // R/S/D/Z/T from /proc/[pid]/stat
 }
 
 // Processes is the wire shape POSTed by the agent.
@@ -148,7 +148,7 @@ func readProcess(procDir string, pid int32, opts ProcessOptions) (Process, bool)
 	if err != nil {
 		return Process{}, false
 	}
-	defer statusF.Close()
+	defer func() { _ = statusF.Close() }()
 
 	var (
 		ppid int32

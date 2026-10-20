@@ -2,7 +2,7 @@
 # Prerequisites: Gateway API/controller, platform-gateway/public with an HTTPS
 # listener for this hostname, cert-manager, CloudNativePG, and Longhorn default.
 image:
-  tag: v0.2.0
+  tag: v0.3.0
 
 clusterRegistration:
   name: astro-const-dev-k3s
@@ -61,18 +61,18 @@ tls:
 
 postgres:
   mode: cnpg
-  embedded: false
   cloudnativepg:
     enabled: true
     instances: 3
-    imageName: ghcr.io/alphabravo-oss/constellation/postgres:16.10-v0.2.0
+    imageName: ghcr.io/alphabravo-oss/constellation/postgres:16.14-v0.3.0
     storage: 50Gi
     storageClass: longhorn
     affinity:
       enabled: true
       topologyKey: kubernetes.io/hostname
       podAntiAffinityType: required
-    # Backups remain disabled until S3 credentials and a bucket are supplied.
+    # Backups remain disabled until an ObjectStore is supplied (either
+    # barmanCloud.objectStoreName or the chart-rendered backup.objectStore).
     # Production readiness requires enabling ScheduledBackup and testing PITR.
 
 ingress:

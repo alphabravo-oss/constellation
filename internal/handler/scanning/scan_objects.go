@@ -222,6 +222,20 @@ func (h *ScanJobs) triggerScanObjectWithCluster(w http.ResponseWriter, r *http.R
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
+	var lockedTarget int
+	err = tx.QueryRow(r.Context(), `
+SELECT 1
+  FROM scan_targets
+ WHERE id = $1 AND org_id = $2
+ FOR SHARE`, target.ID, subj.OrgID).Scan(&lockedTarget)
+	if errors.Is(err, pgx.ErrNoRows) {
+		jsonError(w, http.StatusNotFound, "scan target not found")
+		return
+	}
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "scan target: "+err.Error())
+		return
+	}
 	jobID, err := handler.EnqueueScanJobIfIdle(r.Context(), tx, subj.OrgID, target.ID, &subj.UserID)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, "scan job: "+err.Error())
@@ -313,13 +327,14 @@ type scanObjectEvidenceDTO struct {
 func (h *ScanJobs) scanObjectEvidence(ctx context.Context, orgID, targetID uuid.UUID, inventoryHash string) (*scanObjectEvidenceDTO, error) {
 	var out scanObjectEvidenceDTO
 	err := h.db.Pool().QueryRow(ctx, `
-SELECT id, COALESCE(inventory_hash, ''), COALESCE(package_count, 0)
-  FROM scan_evidence
- WHERE org_id = $1
-   AND scan_target_id = $2
-   AND evidence_type = $3
-   AND ($4 = '' OR inventory_hash = $4)
- ORDER BY observed_at DESC
+SELECT ev.id, COALESCE(ev.inventory_hash, ''), COALESCE(ev.package_count, 0)
+  FROM scan_evidence ev
+  JOIN scan_targets st ON st.id = ev.scan_target_id AND st.org_id = ev.org_id
+ WHERE ev.org_id = $1
+   AND ev.scan_target_id = $2
+   AND ev.evidence_type = $3
+   AND ($4 = '' OR ev.inventory_hash = $4)
+ ORDER BY ev.observed_at DESC
  LIMIT 1`, orgID, targetID, handler.PackageInventoryEvidence, inventoryHash).Scan(&out.ID, &out.InventoryHash, &out.PackageCount)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -440,11 +455,12 @@ func (h *ScanJobs) scanObjectBrief(ctx context.Context, orgID uuid.UUID, target 
 func (h *ScanJobs) latestScanObjectJob(ctx context.Context, orgID, targetID uuid.UUID) (*scanObjectJobState, error) {
 	var out scanObjectJobState
 	err := h.db.Pool().QueryRow(ctx, `
-SELECT status, COALESCE(error, ''), COALESCE(package_count, 0), COALESCE(finding_count, 0),
-       COALESCE(bundle_metadata, '{}'::jsonb), requested_at, claimed_at, finished_at
-  FROM scan_jobs
- WHERE org_id = $1 AND target_id = $2
- ORDER BY requested_at DESC
+SELECT sj.status, COALESCE(sj.error, ''), COALESCE(sj.package_count, 0), COALESCE(sj.finding_count, 0),
+       COALESCE(sj.bundle_metadata, '{}'::jsonb), sj.requested_at, sj.claimed_at, sj.finished_at
+  FROM scan_jobs sj
+  JOIN scan_targets st ON st.id = sj.target_id AND st.org_id = sj.org_id
+ WHERE sj.org_id = $1 AND sj.target_id = $2
+ ORDER BY sj.requested_at DESC
  LIMIT 1`, orgID, targetID).Scan(&out.Status, &out.Error, &out.PackageCount, &out.FindingCount, &out.BundleMetadata,
 		&out.RequestedAt, &out.ClaimedAt, &out.FinishedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -456,14 +472,15 @@ SELECT status, COALESCE(error, ''), COALESCE(package_count, 0), COALESCE(finding
 func (h *ScanJobs) scanObjectCounts(ctx context.Context, orgID, targetID uuid.UUID) (scanObjectCounts, error) {
 	var out scanObjectCounts
 	err := h.db.Pool().QueryRow(ctx, `
-SELECT COUNT(*) FILTER (WHERE severity = 'critical')::int,
-       COUNT(*) FILTER (WHERE severity = 'high')::int,
-       COUNT(*) FILTER (WHERE severity = 'medium')::int
-  FROM findings
- WHERE org_id = $1
-   AND scan_target_id = $2
-   AND kind = 'vulnerability'
-   AND lifecycle = 'open'`, orgID, targetID).Scan(&out.Critical, &out.High, &out.Medium)
+SELECT COUNT(*) FILTER (WHERE f.severity = 'critical')::int,
+       COUNT(*) FILTER (WHERE f.severity = 'high')::int,
+       COUNT(*) FILTER (WHERE f.severity = 'medium')::int
+  FROM findings f
+  JOIN scan_targets st ON st.id = f.scan_target_id AND st.org_id = f.org_id
+ WHERE f.org_id = $1
+   AND f.scan_target_id = $2
+   AND f.kind = 'vulnerability'
+   AND f.lifecycle = 'open'`, orgID, targetID).Scan(&out.Critical, &out.High, &out.Medium)
 	return out, err
 }
 
@@ -472,25 +489,26 @@ func (h *ScanJobs) scanObjectVulnerabilities(ctx context.Context, orgID uuid.UUI
 		return []scanObjectVulnerabilityDTO{}, nil
 	}
 	rows, err := h.db.Pool().Query(ctx, `
-SELECT COALESCE(external_id, ''),
-       COALESCE(severity, ''),
-       COALESCE(NULLIF(description, ''), title, ''),
-       COALESCE(detail_json->'package'->>'name', ''),
-       COALESCE(detail_json->'package'->>'version', ''),
-       COALESCE(detail_json->>'fixed', detail_json->>'fixed_version', ''),
+SELECT COALESCE(f.external_id, ''),
+       COALESCE(f.severity, ''),
+       COALESCE(NULLIF(f.description, ''), f.title, ''),
+       COALESCE(f.detail_json->'package'->>'name', ''),
+       COALESCE(f.detail_json->'package'->>'version', ''),
+       COALESCE(f.detail_json->>'fixed', f.detail_json->>'fixed_version', ''),
        CASE
-         WHEN COALESCE(detail_json->>'cvss_base', '') ~ '^[0-9]+(\.[0-9]+)?$'
-         THEN (detail_json->>'cvss_base')::float
+         WHEN COALESCE(f.detail_json->>'cvss_base', '') ~ '^[0-9]+(\.[0-9]+)?$'
+         THEN (f.detail_json->>'cvss_base')::float
          ELSE 0
        END,
-       COALESCE(detail_json->>'cvss_vector', ''),
-       COALESCE(detail_json->'references'->>0, '')
-  FROM findings
- WHERE org_id = $1
-   AND scan_target_id = $2
-   AND kind = 'vulnerability'
-   AND lifecycle = 'open'
- ORDER BY risk_score DESC NULLS LAST, last_seen_at DESC
+       COALESCE(f.detail_json->>'cvss_vector', ''),
+       COALESCE(f.detail_json->'references'->>0, '')
+  FROM findings f
+  JOIN scan_targets st ON st.id = f.scan_target_id AND st.org_id = f.org_id
+ WHERE f.org_id = $1
+   AND f.scan_target_id = $2
+   AND f.kind = 'vulnerability'
+   AND f.lifecycle = 'open'
+ ORDER BY f.risk_score DESC NULLS LAST, f.last_seen_at DESC
  LIMIT 2000`, orgID, target.ID)
 	if err != nil {
 		return nil, err

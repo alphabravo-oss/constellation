@@ -1,3 +1,5 @@
+//go:build integration
+
 package netpolicy
 
 import (
@@ -68,7 +70,7 @@ VALUES ($1, $2, 'default/api', 'external', '93.184.216.34', 'api.github.com', 't
 	h := NewNetworkPolicies(d)
 	r.Get("/api/v1/network/policies/lifecycle", h.List)
 
-	req := httptest.NewRequest("GET", "/api/v1/network/policies/lifecycle?cluster_id="+clusterID.String(), nil)
+	req := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/network/policies/lifecycle?cluster_id="+clusterID.String(), nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)

@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -74,7 +76,7 @@ func (h *Federation) WithFedCA(ca *auth.FedCA) *Federation {
 // federation membership mutations).
 func (h *Federation) MintJoinToken(w http.ResponseWriter, r *http.Request) {
 	if h.fedSigner == nil {
-		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "federation signing not configured"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotImplemented, "federation signing not configured")
 		return
 	}
 	subj, _ := SubjectFrom(r.Context())
@@ -83,11 +85,11 @@ func (h *Federation) MintJoinToken(w http.ResponseWriter, r *http.Request) {
 	err := h.db.Pool().QueryRow(r.Context(),
 		`SELECT state FROM federation_state WHERE org_id=$1`, subj.OrgID).Scan(&state)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if state != string(federation.StateMaster) {
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "federation: only a master can mint join tokens"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusConflict, "federation: only a master can mint join tokens")
 		return
 	}
 
@@ -109,7 +111,7 @@ func (h *Federation) MintJoinToken(w http.ResponseWriter, r *http.Request) {
 
 	token, jti, err := h.fedSigner.IssueJoinTokenWithJTI(subj.OrgID, ttl)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	// D1-2: persist the jti so the token is single-use — the first successful Join
@@ -120,7 +122,7 @@ func (h *Federation) MintJoinToken(w http.ResponseWriter, r *http.Request) {
 		if _, derr := h.db.Pool().Exec(r.Context(),
 			`INSERT INTO fed_join_tokens (jti, org_id, expires_at) VALUES ($1,$2,$3)`,
 			id, subj.OrgID, time.Now().Add(ttl)); derr != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": derr.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, derr.Error())
 			return
 		}
 	}
@@ -150,24 +152,24 @@ type fedJoinRequest struct {
 // previous ticket.
 func (h *Federation) Join(w http.ResponseWriter, r *http.Request) {
 	if h.fedSigner == nil {
-		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "federation signing not configured"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotImplemented, "federation signing not configured")
 		return
 	}
 	var req fedJoinRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad request")
 		return
 	}
 	req.ClusterID = strings.TrimSpace(req.ClusterID)
 	req.ClusterName = strings.TrimSpace(req.ClusterName)
 	if req.ClusterID == "" || req.ClusterName == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cluster_id and cluster_name are required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "cluster_id and cluster_name are required")
 		return
 	}
 
 	ja, ok := h.authenticateJoinToken(req.JoinToken)
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid or expired join token"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "invalid or expired join token")
 		return
 	}
 	orgID := ja.orgID
@@ -177,7 +179,7 @@ func (h *Federation) Join(w http.ResponseWriter, r *http.Request) {
 	// wire in cleartext. Behind an ingress terminator the request reaches the app as
 	// plain HTTP with X-Forwarded-Proto=https; an in-process TLS listener sets r.TLS.
 	if h.fedCA != nil && !fedJoinOverTLS(r) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "federation: mTLS join requires a TLS-terminated connection"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "federation: mTLS join requires a TLS-terminated connection")
 		return
 	}
 
@@ -190,11 +192,11 @@ func (h *Federation) Join(w http.ResponseWriter, r *http.Request) {
 	if ja.signed && ja.jti != "" {
 		consumed, known, createdAt, cerr := h.consumeJoinToken(r.Context(), ja.jti)
 		if cerr != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": cerr.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, cerr.Error())
 			return
 		}
 		if known && !consumed {
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "federation: join token already used"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "federation: join token already used")
 			return
 		}
 		mintedAt = createdAt
@@ -223,7 +225,7 @@ func (h *Federation) Join(w http.ResponseWriter, r *http.Request) {
 		}
 		readmit := ja.signed && kickedAt != nil && !freshAt.IsZero() && freshAt.After(*kickedAt)
 		if !readmit {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "federation: cluster has been kicked; re-admission requires a join token minted after the kick"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusForbidden, "federation: cluster has been kicked; re-admission requires a join token minted after the kick")
 			return
 		}
 	}
@@ -237,13 +239,13 @@ VALUES ($1, $2, '', 0, $3)
 ON CONFLICT (org_id, cluster_id) DO UPDATE
    SET epoch = fed_credentials.epoch + 1, revoked_at = NULL, expires_at = EXCLUDED.expires_at
 RETURNING epoch`, orgID, req.ClusterID, fedSecretExpiry(h.joinCfg.SecretTTL)).Scan(&epoch); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	ticket, err := h.fedSigner.IssueSyncTicket(orgID, req.ClusterID, epoch, h.joinCfg.SecretTTL)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -257,12 +259,12 @@ RETURNING epoch`, orgID, req.ClusterID, fedSecretExpiry(h.joinCfg.SecretTTL)).Sc
 	if h.fedCA != nil {
 		certPEM, keyPEM, cerr := h.fedCA.IssueClientCert(req.ClusterID, h.joinCfg.SecretTTL)
 		if cerr != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": cerr.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, cerr.Error())
 			return
 		}
 		fp, ferr := fedCertFingerprintPEM(certPEM)
 		if ferr != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": ferr.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, ferr.Error())
 			return
 		}
 		clientCertPEM, clientKeyPEM, fingerprint = certPEM, keyPEM, fp
@@ -271,7 +273,7 @@ RETURNING epoch`, orgID, req.ClusterID, fedSecretExpiry(h.joinCfg.SecretTTL)).Sc
 	if _, err := h.db.Pool().Exec(r.Context(),
 		`UPDATE fed_credentials SET secret_hash=$3, cert_fingerprint=$4 WHERE org_id=$1 AND cluster_id=$2`,
 		orgID, req.ClusterID, hashFedSecret(ticket), fingerprint); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -285,7 +287,7 @@ ON CONFLICT (org_id, cluster_id) DO UPDATE
        status=CASE WHEN fed_members.status='kicked' THEN 'pending' ELSE fed_members.status END,
        kicked_at=CASE WHEN fed_members.status='kicked' THEN NULL ELSE fed_members.kicked_at END`,
 		orgID, req.ClusterID, req.ClusterName, req.Endpoint); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -352,18 +354,20 @@ func fedClientCert(r *http.Request, header string) *x509.Certificate {
 
 // fedForwardedClientCert parses the client certificate the trusted terminator placed in the
 // configured header (ingress-nginx's ssl-client-cert is URL-encoded PEM). Returns nil when the
-// header is unconfigured, absent, or unparseable.
+// header is unconfigured, absent, unparseable, or not from a verified proxy peer.
 func fedForwardedClientCert(r *http.Request, header string) *x509.Certificate {
 	header = strings.TrimSpace(header)
-	if header == "" {
+	if header == "" || !authctx.TrustedProxyFrom(r.Context()) {
 		return nil
 	}
 	v := r.Header.Get(header)
 	if v == "" {
 		return nil
 	}
-	if dec, err := neturl.QueryUnescape(v); err == nil {
-		v = dec
+	if !strings.HasPrefix(strings.TrimSpace(v), "-----BEGIN CERTIFICATE-----") {
+		if dec, err := neturl.QueryUnescape(v); err == nil {
+			v = dec
+		}
 	}
 	block, _ := pem.Decode([]byte(v))
 	if block == nil {
@@ -383,7 +387,7 @@ func fedJoinOverTLS(r *http.Request) bool {
 	if r.TLS != nil {
 		return true
 	}
-	return strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
+	return authctx.TrustedProxyFrom(r.Context()) && strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
 }
 
 // fedCertFingerprintPEM parses a PEM-encoded certificate and returns its sha256(DER)

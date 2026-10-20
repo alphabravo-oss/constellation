@@ -1,11 +1,15 @@
+//go:build integration
+
 package network
 
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -15,6 +19,7 @@ import (
 )
 
 func TestNetwork_KillSessionQueuesRequestAndAuditsTarget(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -53,7 +58,7 @@ VALUES
 		t.Fatalf("session: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/network/sessions/777?cluster_id="+clusterID.String()+"&node="+node, nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/api/v1/network/sessions/777?cluster_id="+clusterID.String()+"&node="+node, nil)
 	req.RemoteAddr = "127.0.0.1:34812"
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rctx := chi.NewRouteContext()
@@ -74,6 +79,7 @@ VALUES
 		ClusterID   string `json:"cluster_id"`
 		AuditID     int64  `json:"audit_id"`
 		RequestedAt string `json:"requested_at"`
+		ExpiresAt   string `json:"expires_at"`
 		Target      struct {
 			WorkloadID  string `json:"workload_id"`
 			Application string `json:"application"`
@@ -91,6 +97,11 @@ VALUES
 	}
 	if !got.OK || !got.Queued || got.SessionID != sessionID || got.Node != node || got.ClusterID != clusterID.String() || got.AuditID == 0 || got.RequestedAt == "" {
 		t.Fatalf("unexpected response: %+v", got)
+	}
+	requested, requestErr := time.Parse(time.RFC3339Nano, got.RequestedAt)
+	expires, expireErr := time.Parse(time.RFC3339Nano, got.ExpiresAt)
+	if requestErr != nil || expireErr != nil || expires.Sub(requested) != 5*time.Minute {
+		t.Fatalf("invalid kill expiry: %s", got.ExpiresAt)
 	}
 	if got.Target.WorkloadID != "payments/frontend" || got.Target.Application != "HTTPS" || got.Target.IPProto != "TCP" ||
 		got.Target.ClientIP != "10.42.0.10" || got.Target.ClientPort != 44120 || got.Target.ServerIP != "3.18.12.8" || got.Target.ServerPort != 443 ||
@@ -128,6 +139,7 @@ SELECT count(*)::int
 }
 
 func TestNetwork_SessionsReturnsTruncationMetadata(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -163,7 +175,7 @@ VALUES
 		}
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/network/sessions?cluster_id="+clusterID.String()+"&limit=2", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/network/sessions?cluster_id="+clusterID.String()+"&limit=2", nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rec := httptest.NewRecorder()
 	NewNetwork(d).Sessions(rec, req)
@@ -186,7 +198,77 @@ VALUES
 	}
 }
 
+func TestNetwork_SessionsPlatformRoleScopedToOwnedDeployment(t *testing.T) {
+	t.Parallel()
+	database := openTestDB(t)
+	t.Cleanup(database.Close)
+	ctx := context.Background()
+	pool := database.Pool()
+	orgID, foreignOrgID, clusterID, otherClusterID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, display_name) VALUES ($1, $2, $2)`, orgID, "session-role-"+orgID.String()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, display_name) VALUES ($1, $2, $2)`, foreignOrgID, "session-role-"+foreignOrgID.String()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id IN ($1, $2)`, orgID, foreignOrgID)
+	})
+	if _, err := pool.Exec(ctx, `INSERT INTO clusters (id, org_id, name) VALUES ($1, $3, 'first'), ($2, $3, 'second')`, clusterID, otherClusterID, orgID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO deployments (org_id, cluster_id, namespace, name, kind, labels) VALUES
+		($1, $2, 'operations', 'houston', 'Deployment', '{"app.kubernetes.io/part-of":"astronomer"}'::jsonb),
+		($1, $3, 'operations', 'houston', 'Deployment', '{}'::jsonb),
+		($4, $3, 'operations', 'houston', 'Deployment', '{"app.kubernetes.io/part-of":"astronomer"}'::jsonb)`, orgID, clusterID, otherClusterID, foreignOrgID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO network_sessions (org_id, cluster_id, node, id, workload_id, client_bytes, updated_at) VALUES
+		($1, $2, 'node', 1, 'operations/houston', 400, NOW()),
+		($1, $2, 'node', 2, 'kube-system/coredns', 300, NOW()),
+		($1, $2, 'node', 3, 'payments/api', 200, NOW()),
+		($1, $3, 'node', 4, 'operations/houston', 100, NOW())`, orgID, clusterID, otherClusterID); err != nil {
+		t.Fatal(err)
+	}
+	get := func(cluster uuid.UUID, limit int) struct {
+		Sessions []sessionDTO `json:"sessions"`
+		Total    int          `json:"total"`
+		HasMore  bool         `json:"has_more"`
+	} {
+		t.Helper()
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/api/v1/network/sessions?cluster_id=%s&limit=%d", cluster, limit), nil)
+		request = request.WithContext(authctx.WithSubject(request.Context(), authctx.Subject{OrgID: orgID, UserID: uuid.New()}))
+		response := httptest.NewRecorder()
+		NewNetwork(database).Sessions(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status %d: %s", response.Code, response.Body.String())
+		}
+		var body struct {
+			Sessions []sessionDTO `json:"sessions"`
+			Total    int          `json:"total"`
+			HasMore  bool         `json:"has_more"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		return body
+	}
+	first := get(clusterID, 2)
+	if first.Total != 3 || !first.HasMore || len(first.Sessions) != 2 || first.Sessions[0].PlatformRole != "core" || first.Sessions[1].PlatformRole != "core" {
+		t.Fatalf("first cluster page: %+v", first)
+	}
+	full := get(clusterID, 10)
+	if len(full.Sessions) != 3 || full.Sessions[2].PlatformRole != "" {
+		t.Fatalf("first cluster full list: %+v", full)
+	}
+	second := get(otherClusterID, 10)
+	if second.Total != 1 || len(second.Sessions) != 1 || second.Sessions[0].PlatformRole != "" {
+		t.Fatalf("second cluster: %+v", second)
+	}
+}
+
 func TestNetwork_SessionsAppliesServerSideFilters(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -229,7 +311,7 @@ VALUES
 	seed(2, "node-a", "payments/frontend", 17, "10.42.0.10", 53000, "10.96.0.10", 53)
 	seed(3, "node-b", "inventory/api", 6, "10.42.1.20", 43120, "10.42.2.30", 8080)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/network/sessions?cluster_id="+clusterID.String()+"&protocol=tcp&application=https&port=443&peer=3.18&workload=payments&node=node-a", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/network/sessions?cluster_id="+clusterID.String()+"&protocol=tcp&application=https&port=443&peer=3.18&workload=payments&node=node-a", nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rec := httptest.NewRecorder()
 	NewNetwork(d).Sessions(rec, req)
@@ -248,7 +330,7 @@ VALUES
 		t.Fatalf("unexpected filtered sessions: %+v", got)
 	}
 
-	groupReq := httptest.NewRequest(http.MethodGet, "/api/v1/network/sessions?cluster_id="+clusterID.String()+"&group=payments-tier", nil)
+	groupReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/network/sessions?cluster_id="+clusterID.String()+"&group=payments-tier", nil)
 	groupReq = groupReq.WithContext(authctx.WithSubject(groupReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	groupRec := httptest.NewRecorder()
 	NewNetwork(d).Sessions(groupRec, groupReq)
@@ -268,7 +350,7 @@ VALUES
 		t.Fatalf("unexpected group-filtered sessions: %+v", grouped)
 	}
 
-	bad := httptest.NewRequest(http.MethodGet, "/api/v1/network/sessions?cluster_id="+clusterID.String()+"&protocol=bad", nil)
+	bad := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/network/sessions?cluster_id="+clusterID.String()+"&protocol=bad", nil)
 	bad = bad.WithContext(authctx.WithSubject(bad.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	badRec := httptest.NewRecorder()
 	NewNetwork(d).Sessions(badRec, bad)

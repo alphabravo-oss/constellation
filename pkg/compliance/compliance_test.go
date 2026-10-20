@@ -3,6 +3,7 @@ package compliance
 import "testing"
 
 func TestAllFrameworks_HasExpectedEntries(t *testing.T) {
+	t.Parallel()
 	fws := AllFrameworks()
 	wantIDs := map[string]bool{
 		FrameworkCISK8s: true, FrameworkNIST80053: true, FrameworkPCIDSS4: true,
@@ -20,6 +21,7 @@ func TestAllFrameworks_HasExpectedEntries(t *testing.T) {
 }
 
 func TestExpandInternal_FansOutToFrameworks(t *testing.T) {
+	t.Parallel()
 	out := ExpandInternal("k8s.api.audit-logging", "pass", "audit log = /var/log/audit.log")
 	if len(out) < 4 {
 		t.Fatalf("expected >= 4 cross-framework rows for audit-logging, got %d", len(out))
@@ -35,6 +37,7 @@ func TestExpandInternal_FansOutToFrameworks(t *testing.T) {
 }
 
 func TestControlIDsByFramework(t *testing.T) {
+	t.Parallel()
 	cis := ControlIDsByFramework(FrameworkCISK8s)
 	if len(cis) == 0 {
 		t.Fatal("expected at least one CIS K8s control mapped")
@@ -60,6 +63,7 @@ const kbSampleJSON = `
 }`
 
 func TestIngestKubeBench(t *testing.T) {
+	t.Parallel()
 	checks, err := IngestKubeBench([]byte(kbSampleJSON))
 	if err != nil {
 		t.Fatal(err)
@@ -105,6 +109,7 @@ const kbCMP4JSON = `
 }`
 
 func TestIngestKubeBench_DataDrivenCISMapping(t *testing.T) {
+	t.Parallel()
 	checks, err := IngestKubeBench([]byte(kbCMP4JSON))
 	if err != nil {
 		t.Fatal(err)
@@ -152,6 +157,7 @@ const kbEKSJSON = `
 }`
 
 func TestIngestKubeBench_TagsBenchmarkVersionFromReport(t *testing.T) {
+	t.Parallel()
 	checks, err := IngestKubeBench([]byte(kbEKSJSON))
 	if err != nil {
 		t.Fatal(err)

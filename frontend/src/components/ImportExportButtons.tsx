@@ -52,10 +52,10 @@ export function ImportExportButtons({
     <>
       <input ref={fileRef} type="file" accept=".yaml,.yml,application/x-yaml,text/yaml" className="hidden"
         onChange={(e) => { const f = e.target.files?.[0]; if (f) doImport(f); e.target.value = ""; }} />
-      <button type="button" onClick={() => fileRef.current?.click()} className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium hover:bg-accent">
+      <button type="button" onClick={() => fileRef.current?.click()} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-meta font-medium hover:bg-accent">
         <Upload className="h-3.5 w-3.5" /> Import
       </button>
-      <button type="button" onClick={doExport} className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium hover:bg-accent">
+      <button type="button" onClick={doExport} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-meta font-medium hover:bg-accent">
         <Download className="h-3.5 w-3.5" /> Export
       </button>
     </>

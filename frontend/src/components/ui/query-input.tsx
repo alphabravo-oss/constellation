@@ -1,83 +1,118 @@
 import { Search, X } from "lucide-react";
-import { type InputHTMLAttributes, forwardRef, useRef, useEffect } from "react";
+import { type InputHTMLAttributes, forwardRef, useId, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
-import { Kbd } from "./kbd";
 
 /**
- * QueryInput — search input with DSL hint chips inline below.
- * Inspired by StackRox's Search query DSL.
- *
- * Layout: [icon] [free-text input] [/ kbd hint] [clear x]
- * Hints rail shown below if `hints` provided.
+ * QueryInput — the table search field (kit TableSearch geometry) with the
+ * query-DSL hints in a dropdown under the field instead of a "Try" chip rail.
+ * `/` belongs to the command palette, so the field registers no global key.
  */
+export interface QuerySuggestion {
+  label: string;
+  /** Text appended to the query when chosen (e.g. "severity:critical"). */
+  value: string;
+  description?: string;
+}
+
 export interface QueryInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, "size"> {
+  /** @deprecated `/` opens the command palette. */
   showShortcut?: boolean;
   onClear?: () => void;
   size?: "sm" | "md";
+  /** @deprecated `/` opens the command palette. */
   registerFocusKey?: boolean;
+  suggestions?: QuerySuggestion[];
+  onSuggestion?: (suggestion: QuerySuggestion) => void;
 }
 
 export const QueryInput = forwardRef<HTMLInputElement, QueryInputProps>(function QueryInput(
-  { className, showShortcut = true, onClear, value, size = "md", registerFocusKey = true, ...rest },
+  { className, showShortcut: _showShortcut, onClear, value, size = "md", registerFocusKey: _registerFocusKey, suggestions, onSuggestion, onFocus, onBlur, onKeyDown, ...rest },
   ref,
 ) {
-  const localRef = useRef<HTMLInputElement | null>(null);
-  // Combine refs
-  const setRef = (n: HTMLInputElement | null) => {
-    localRef.current = n;
-    if (typeof ref === "function") ref(n);
-    else if (ref) (ref as React.MutableRefObject<HTMLInputElement | null>).current = n;
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const listId = useId();
+  const blurTimer = useRef<number | null>(null);
+  const hasSuggestions = !!suggestions?.length && !!onSuggestion;
+  const showList = hasSuggestions && open;
+  const choose = (suggestion: QuerySuggestion) => {
+    onSuggestion?.(suggestion);
+    setOpen(false);
   };
-
-  useEffect(() => {
-    if (!registerFocusKey) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "/" && !e.metaKey && !e.ctrlKey) {
-        const tag = (e.target as HTMLElement | null)?.tagName;
-        if (tag === "INPUT" || tag === "TEXTAREA") return;
-        const editable = (e.target as HTMLElement | null)?.isContentEditable;
-        if (editable) return;
-        e.preventDefault();
-        localRef.current?.focus();
-        localRef.current?.select();
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [registerFocusKey]);
-
   return (
-    <div
-      className={cn(
-        "relative flex items-center w-full rounded-md border border-input bg-card focus-within:border-[color:var(--color-primary)] focus-within:ring-1 focus-within:ring-[color:var(--color-primary)] transition-colors",
-        size === "sm" ? "h-8" : "h-9",
-        className,
-      )}
-    >
-      <Search className={cn("absolute left-2.5 text-muted-foreground pointer-events-none", size === "sm" ? "h-3.5 w-3.5" : "h-4 w-4")} />
-      <input
-        ref={setRef}
-        type="text"
-        value={value}
-        className={cn(
-          "w-full bg-transparent outline-none placeholder:text-muted-foreground/70 text-mono",
-          size === "sm" ? "h-8 pl-8 pr-16 text-xs" : "h-9 pl-9 pr-20 text-sm",
-        )}
-        {...rest}
-      />
-      <div className="absolute right-1.5 flex items-center gap-1">
-        {value && onClear && (
+    <div className={cn("relative w-full", className)}>
+      <div className={cn("relative flex w-full items-center rounded-md border border-input bg-background transition-colors focus-within:ring-2 focus-within:ring-ring", size === "sm" ? "h-8" : "h-9")}>
+        <Search className={cn("pointer-events-none absolute left-3 text-muted-foreground", size === "sm" ? "h-3.5 w-3.5" : "h-4 w-4")} />
+        <input
+          ref={ref}
+          type="text"
+          value={value}
+          role={hasSuggestions ? "combobox" : undefined}
+          aria-expanded={hasSuggestions ? showList : undefined}
+          aria-controls={hasSuggestions ? listId : undefined}
+          aria-autocomplete={hasSuggestions ? "list" : undefined}
+          className={cn(
+            "w-full bg-transparent font-mono outline-none placeholder:font-sans placeholder:text-muted-foreground",
+            size === "sm" ? "h-8 pl-8 pr-8 text-meta" : "h-9 pl-9 pr-9 text-sm",
+          )}
+          onFocus={(event) => {
+            if (blurTimer.current) window.clearTimeout(blurTimer.current);
+            setOpen(true);
+            onFocus?.(event);
+          }}
+          onBlur={(event) => {
+            blurTimer.current = window.setTimeout(() => setOpen(false), 120);
+            onBlur?.(event);
+          }}
+          onKeyDown={(event) => {
+            if (showList && suggestions) {
+              if (event.key === "ArrowDown") { event.preventDefault(); setActive((index) => (index + 1) % suggestions.length); return; }
+              if (event.key === "ArrowUp") { event.preventDefault(); setActive((index) => (index - 1 + suggestions.length) % suggestions.length); return; }
+              if (event.key === "Escape") { setOpen(false); return; }
+              if (event.key === "Tab" && !event.shiftKey && suggestions[active]) { event.preventDefault(); choose(suggestions[active]); return; }
+            }
+            onKeyDown?.(event);
+          }}
+          {...rest}
+        />
+        {value && onClear ? (
           <button
             type="button"
             onClick={onClear}
             aria-label="Clear search"
-            className="rounded hover:bg-muted p-1 text-muted-foreground hover:text-foreground transition-colors"
+            className="absolute right-2 rounded-sm p-1 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
           >
-            <X className="h-3 w-3" />
+            <X className="h-3.5 w-3.5" />
           </button>
-        )}
-        {showShortcut && !value && <Kbd combo="/" />}
+        ) : null}
       </div>
+      {showList ? (
+        <div
+          id={listId}
+          role="listbox"
+          aria-label="Search suggestions"
+          className="absolute left-0 right-0 top-full z-popover mt-1 overflow-hidden rounded-md border border-border bg-popover p-1 shadow-elev-popover"
+          onMouseDown={(event) => event.preventDefault()}
+          data-testid="query-suggestions"
+        >
+          <p className="px-2.5 py-1.5 text-meta font-semibold text-muted-foreground">Try a filter</p>
+          {suggestions!.map((suggestion, index) => (
+            <button
+              key={suggestion.value}
+              type="button"
+              role="option"
+              aria-selected={index === active}
+              onMouseEnter={() => setActive(index)}
+              onClick={() => choose(suggestion)}
+              className={cn("flex w-full items-center justify-between gap-3 rounded-sm px-2.5 py-1.5 text-left text-sm", index === active && "bg-accent")}
+            >
+              <span className="font-mono text-13 text-foreground">{suggestion.value}</span>
+              {suggestion.description ? <span className="truncate text-meta text-muted-foreground">{suggestion.description}</span> : null}
+            </button>
+          ))}
+          <p className="border-t border-border px-2.5 py-1.5 text-micro text-muted-foreground">Tab inserts the highlighted filter · Esc closes</p>
+        </div>
+      ) : null}
     </div>
   );
 });

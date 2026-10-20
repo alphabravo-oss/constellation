@@ -4,6 +4,16 @@
   "type": "object",
   "additionalProperties": true,
   "properties": {
+    "systemProtection": {
+      "type": "object",
+      "properties": {
+        "protectedNamespaces": {
+          "type": "array",
+          "items": { "type": "string", "maxLength": 63, "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" },
+          "uniqueItems": true
+        }
+      }
+    },
     "highAvailability": {
       "title": "High availability",
       "description": "Spread replicated control-plane workloads across nodes and protect them with disruption budgets.",
@@ -29,6 +39,78 @@
       "additionalProperties": true,
       "properties": {
         "replicas": { "type": "integer", "title": "API replicas", "minimum": 1, "maximum": 20, "default": 2 },
+        "partitionStatisticsMaintenanceEnabled": { "type": "boolean", "title": "Maintain partitioned parent statistics", "default": true },
+        "supportBundleSigningKeySecret": { "type": "string", "title": "Existing support-bundle signing key Secret", "default": "" },
+        "supportBundleSigningKeySecretKey": { "type": "string", "title": "Signing key field in Secret", "minLength": 1, "default": "private-key.pem" },
+        "pcapStorage": {
+          "type": "object",
+          "title": "Durable packet capture storage",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "retentionEnabled": {
+              "type": "boolean",
+              "default": false,
+              "description": "Enable bounded expiry only on this verified single-RWO or shared-RWX claim"
+            },
+            "existingClaim": {
+              "type": "string",
+              "maxLength": 253,
+              "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$",
+              "default": ""
+            },
+            "accessMode": {
+              "type": "string",
+              "enum": [
+                "ReadWriteOnce",
+                "ReadWriteMany"
+              ],
+              "default": "ReadWriteOnce"
+            }
+          },
+          "required": [
+            "enabled",
+            "existingClaim",
+            "accessMode"
+          ]
+        },
+        "leaderElection": {
+          "type": "object",
+          "title": "Leader election",
+          "additionalProperties": true,
+          "properties": { "enabled": { "type": "boolean", "title": "Enable leader election", "default": true } }
+        },
+        "metrics": {
+          "type": "object",
+          "title": "Metrics exposure (admin listener :9090)",
+          "additionalProperties": false,
+          "properties": {
+            "annotations": { "type": "boolean", "title": "Add prometheus.io/* pod annotations", "default": true },
+            "serviceMonitor": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": { "type": "boolean", "title": "Render a Prometheus Operator ServiceMonitor", "default": false },
+                "interval": { "type": "string", "default": "30s" },
+                "scrapeTimeout": { "type": "string", "default": "10s" },
+                "labels": { "type": "object", "additionalProperties": { "type": "string" } },
+                "namespace": { "type": "string", "default": "" }
+              }
+            },
+            "allowFrom": { "type": "object", "title": "namespaceSelector labels admitted to the admin port by NetworkPolicy", "additionalProperties": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "operator": {
+      "title": "Operator",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "replicas": { "type": "integer", "title": "Operator replicas", "minimum": 1, "maximum": 5, "default": 1 },
         "leaderElection": {
           "type": "object",
           "title": "Leader election",
@@ -72,6 +154,11 @@
       "type": "object",
       "additionalProperties": true,
       "properties": {
+        "execDryRun": {
+          "type": "boolean",
+          "title": "Execution enforcer dry run",
+          "description": "Optional override. When omitted, preserve the agent default. Explicit true and false are both supported."
+        },
         "enabled": { "type": "boolean", "title": "Enable the runtime agent", "default": true },
         "enforcement": {
           "type": "object",
@@ -139,28 +226,39 @@
       "type": "object",
       "additionalProperties": true,
       "properties": {
-        "mode": { "type": "string", "title": "Database mode", "enum": ["", "statefulset", "cnpg", "external"], "default": "" },
+        "mode": { "type": "string", "title": "Database mode", "description": "cnpg (CloudNativePG in-cluster, default) or external (operator-supplied DSN). Empty derives from cloudnativepg.enabled.", "enum": ["", "cnpg", "external"], "default": "cnpg" },
         "dsn": { "type": "string", "title": "External database URL", "description": "Prefer an existing Secret for production credentials.", "default": "" },
         "existingSecret": { "type": "string", "title": "External database Secret", "default": "" },
-        "embeddedConfig": {
-          "type": "object",
-          "title": "Single-node database",
-          "additionalProperties": true,
-          "properties": {
-            "storage": { "type": "string", "title": "Database volume size", "default": "20Gi", "pattern": "^[0-9]+(Mi|Gi|Ti)$" },
-            "storageClass": { "type": "string", "title": "Storage class", "default": "" }
-          }
-        },
         "cloudnativepg": {
           "type": "object",
           "title": "CloudNativePG",
           "additionalProperties": true,
           "properties": {
-            "enabled": { "type": "boolean", "title": "Enable CloudNativePG", "default": false },
+            "enabled": { "type": "boolean", "title": "Enable CloudNativePG", "description": "Only consulted when postgres.mode is empty.", "default": true },
             "instances": { "type": "integer", "title": "PostgreSQL instances", "minimum": 1, "maximum": 9, "default": 3 },
-            "imageName": { "type": "string", "title": "pgvector-enabled operand image", "default": "ghcr.io/alphabravo-oss/constellation/postgres:16.10-v0.2.0" },
+            "imageName": { "type": "string", "title": "pgvector-enabled operand image", "default": "ghcr.io/alphabravo-oss/constellation/postgres:16.14-v0.3.0" },
             "storage": { "type": "string", "title": "Volume size per instance", "default": "20Gi", "pattern": "^[0-9]+(Mi|Gi|Ti)$" },
             "storageClass": { "type": "string", "title": "Storage class", "default": "" },
+            "barmanCloud": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "pluginName": { "type": "string", "minLength": 1 },
+                "objectStoreName": { "type": "string" },
+                "recovery": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "enabled": { "type": "boolean" },
+                    "sourceName": { "type": "string", "minLength": 1 },
+                    "objectStoreName": { "type": "string" },
+                    "serverName": { "type": "string" },
+                    "targetTime": { "type": "string" }
+                  }
+                }
+              }
+            },
             "scheduledBackup": {
               "type": "object",
               "title": "Scheduled backup",
@@ -170,6 +268,30 @@
                 "schedule": { "type": "string", "title": "CNPG six-field cron schedule", "default": "0 0 2 * * *" }
               }
             }
+          }
+        }
+      }
+    },
+    "backup": {
+      "title": "Backup",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "objectStore": {
+          "type": "object",
+          "title": "In-cluster backup object store (RustFS + Barman Cloud ObjectStore)",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean", "title": "Render the in-cluster object store", "description": "Requires postgres.mode=cnpg.", "default": false },
+            "image": { "type": "string", "title": "RustFS image (digest-pinned)", "minLength": 1 },
+            "bucketJobImage": { "type": "string", "title": "Bucket-creation Job image (aws CLI, digest-pinned)", "minLength": 1 },
+            "storage": { "type": "string", "title": "Object store volume size", "default": "8Gi", "pattern": "^[0-9]+(Mi|Gi|Ti)$" },
+            "storageClass": { "type": "string", "title": "Storage class", "default": "" },
+            "credentialsSecret": { "type": "string", "title": "Existing credentials Secret (ACCESS_KEY_ID, SECRET_ACCESS_KEY)", "description": "Empty generates one with random keys, re-used on upgrade.", "default": "" },
+            "bucket": { "type": "string", "title": "Bucket", "pattern": "^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$", "default": "constellation-recovery" },
+            "retentionPolicy": { "type": "string", "title": "Barman retention policy", "pattern": "^[1-9][0-9]*[dwm]$", "default": "7d" },
+            "region": { "type": "string", "title": "SigV4 region", "minLength": 1, "default": "us-east-1" },
+            "resources": { "type": "object", "title": "Object store container resources", "additionalProperties": true }
           }
         }
       }

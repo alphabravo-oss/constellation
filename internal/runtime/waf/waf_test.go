@@ -20,6 +20,7 @@ func mkHTTP(method, path, query string, headers map[string][]string) dpi.L7Event
 }
 
 func TestSQLi(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	if err := e.AddSensor(BuiltinCRS()); err != nil {
 		t.Fatalf("AddSensor: %v", err)
@@ -41,6 +42,7 @@ func TestSQLi(t *testing.T) {
 }
 
 func TestXSS(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	_ = e.AddSensor(BuiltinCRS())
 	e.SetMode("default/app", baseline.ModeEnforce)
@@ -51,6 +53,7 @@ func TestXSS(t *testing.T) {
 }
 
 func TestPathTraversal(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	_ = e.AddSensor(BuiltinCRS())
 	e.SetMode("default/app", baseline.ModeEnforce)
@@ -61,6 +64,7 @@ func TestPathTraversal(t *testing.T) {
 }
 
 func TestCmdInjection(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	_ = e.AddSensor(BuiltinCRS())
 	e.SetMode("default/app", baseline.ModeEnforce)
@@ -71,6 +75,7 @@ func TestCmdInjection(t *testing.T) {
 }
 
 func TestSuspiciousUA(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	_ = e.AddSensor(BuiltinCRS())
 	e.SetMode("default/app", baseline.ModeEnforce)
@@ -83,6 +88,7 @@ func TestSuspiciousUA(t *testing.T) {
 }
 
 func TestLearnModeSilent(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	_ = e.AddSensor(BuiltinCRS())
 	e.SetMode("default/app", baseline.ModeLearn)
@@ -93,6 +99,7 @@ func TestLearnModeSilent(t *testing.T) {
 }
 
 func TestMonitorAlerts(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	_ = e.AddSensor(BuiltinCRS())
 	e.SetMode("default/app", baseline.ModeMonitor)
@@ -103,9 +110,10 @@ func TestMonitorAlerts(t *testing.T) {
 }
 
 func TestUnknownOperatorRejected(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	err := e.AddSensor(Sensor{
-		Name: "bad",
+		Name:  "bad",
 		Rules: []Rule{{ID: 1, Operator: Operator{Type: "nope", Value: "x"}, Target: "ARGS"}},
 	})
 	if err == nil {
@@ -114,6 +122,7 @@ func TestUnknownOperatorRejected(t *testing.T) {
 }
 
 func TestCleanRequestAllowed(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	_ = e.AddSensor(BuiltinCRS())
 	e.SetMode("default/app", baseline.ModeEnforce)

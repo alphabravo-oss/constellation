@@ -4,9 +4,9 @@
 // Dedicated form page (the Astronomer add/edit-as-a-page pattern, replacing the
 // old drawer). Guided builder for a response rule: match incoming events to
 // automatic actions (notify / ticket / quarantine / isolate).
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import { ArrowLeft, Save, Trash2 } from "lucide-react";
 
 import {
@@ -22,7 +22,11 @@ import {
 import { useCluster } from "@/hooks/useCluster";
 import { PageHeader } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
+import { Collapse } from "@/components/ui/collapse";
+import { ErrorState, LoadingState } from "@/components/ui/states";
+import { Button } from "@/components/ui/button";
 import { GroupPicker } from "@/components/GroupPicker";
+import { Select, Checkbox } from "@/components/ui/form";
 
 const FALLBACK_COND_TYPES: Array<RRV2CatalogItem & { id: RRV2CondType }> = [
   { id: "name", label: "Event name", help: "Regex against event name or title" },
@@ -38,7 +42,7 @@ const FALLBACK_COND_TYPES: Array<RRV2CatalogItem & { id: RRV2CondType }> = [
 
 const FALLBACK_ACTION_KINDS: Array<RRV2CatalogItem & { id: RRV2ActionKind }> = [
   { id: "notify", label: "Notify receiver", help: "Send via pkg/notify (slack/jira/pagerduty/etc)" },
-  { id: "webhook", label: "Webhook receiver", help: "NeuVector-compatible receiver action" },
+  { id: "webhook", label: "Webhook receiver", help: "Generic webhook receiver action" },
   { id: "ticket", label: "Open ticket", help: "Notify via ITSM destination (Jira/SNOW)" },
   { id: "suppress-log", label: "Suppress log", help: "Suppress matching runtime security-event logs" },
   { id: "quarantine", label: "Quarantine workload", help: "Runtime action (requires data plane)" },
@@ -97,25 +101,36 @@ function cleanSelector(selector: RuleDraft["workload_match"]): RuleDraft["worklo
 }
 
 export function ResponseRuleFormPage() {
+  const { clusterId, isLoading } = useCluster();
+  const { ruleId } = useParams({ strict: false });
+  const backTo = clusterId ? `/clusters/${clusterId}/response-rules` : "/clusters";
+  const q = useQuery({
+    queryKey: ["response-rule-editor", clusterId, ruleId],
+    queryFn: () => responseRulesV2.list({ cluster_id: clusterId }),
+    enabled: !!clusterId && !!ruleId,
+    gcTime: 0,
+  });
+  const loaded = q.data?.rules.find((r) => r.id === ruleId);
+  return <div className="space-y-6" data-testid="response-rules-page">
+    <PageHeader title={ruleId ? "Edit response rule" : "New response rule"}
+      description="Choose which events trigger an automatic response and which workloads it applies to."
+      backLink={<Link to="." href={backTo} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Response Rules</Link>} />
+    {isLoading || (clusterId && ruleId && q.isPending) ? <LoadingState label="Loading rule…" />
+      : !clusterId ? <ErrorState title="Select a cluster to author response rules." />
+      : ruleId && !loaded ? <ErrorState title="This response rule could not be loaded for the selected cluster."
+          action={<Button onClick={() => void q.refetch()}>Retry</Button>} />
+      : <>
+        {q.isError && <p role="alert" className="text-sm text-status-error">Could not refresh this rule. Your draft is preserved.</p>}
+        <ResponseRuleEditor key={`${clusterId}:${ruleId ?? "new"}`} clusterId={clusterId} initial={loaded} backTo={backTo} />
+      </>}
+  </div>;
+}
+
+function ResponseRuleEditor({ clusterId, initial, backTo }: { clusterId: string; initial?: ResponseRuleV2; backTo: string }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
-  // Cluster-scoped config: rules created in cluster mode are tagged with the
-  // cluster_id on the server. cluster_id comes from the /clusters/:id parent route.
-  const { clusterId, isLoading: clusterLoading } = useCluster();
-  const { ruleId } = useParams<{ ruleId: string }>();
-  const isEdit = Boolean(ruleId);
-  const backTo = `/clusters/${clusterId ?? ""}/response-rules`;
-
-  const [rule, setRule] = useState<RuleDraft>(emptyRule());
-  const [error, setError] = useState<string | null>(null);
-
-  // No single-rule endpoint — load the list and find the one being edited.
-  const q = useQuery({
-    queryKey: ["response-rules-v2", clusterId],
-    queryFn: () => responseRulesV2.list({ cluster_id: clusterId }),
-    enabled: isEdit,
-  });
-  const loaded = q.data?.rules.find((r) => r.id === ruleId) ?? null;
+  const [rule, setRule] = useState<RuleDraft>(() => initial ? { ...initial } : emptyRule());
+  const ruleId = initial?.id;
   const optionsQ = useQuery({
     queryKey: ["response-rules-v2-options"],
     queryFn: () => responseRulesV2.options(),
@@ -136,15 +151,9 @@ export function ResponseRuleFormPage() {
     return actionCatalog.filter((ak) => allowed.has(ak.id as RRV2ActionKind) || current.has(ak.id as RRV2ActionKind));
   }, [actionCatalog, rule.actions, selectedEvent?.actions]);
 
-  useEffect(() => {
-    if (isEdit && loaded) setRule({ ...loaded });
-  }, [isEdit, loaded]);
-
   const saveMut = useMutation({
     mutationFn: async () => {
-      setError(null);
-      const body = { ...rule, workload_match: cleanSelector(rule.workload_match) };
-      delete (body as { id?: string }).id;
+      const body = { name: rule.name.trim(), description: rule.description, enabled: rule.enabled, event_type: rule.event_type, conditions: rule.conditions, actions: rule.actions, workload_match: cleanSelector(rule.workload_match) };
       if (ruleId) {
         await responseRulesV2.update(ruleId, body);
       } else {
@@ -153,9 +162,8 @@ export function ResponseRuleFormPage() {
     },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["response-rules-v2", clusterId] });
-      navigate(backTo);
+      navigate({ href: backTo });
     },
-    onError: (err: Error) => setError(err.message),
   });
 
   const onChange = (r: RuleDraft) => setRule(r);
@@ -179,29 +187,11 @@ export function ResponseRuleFormPage() {
     onChange({ ...rule, workload_match: next });
   };
 
-  const notFound = isEdit && !clusterLoading && !q.isLoading && !q.error && !loaded;
+  const valid = !!rule.name.trim() && rule.actions.length > 0 &&
+    rule.conditions.every((c) => !!c.value.trim()) &&
+    rule.actions.every((a) => !["notify", "ticket", "webhook"].includes(a.kind) || !!a.target?.trim());
 
   return (
-    <div className="space-y-6" data-testid="response-rules-page">
-      <PageHeader
-        backLink={
-          <Link to={backTo} className="inline-flex items-center gap-1 hover:text-foreground">
-            <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Response Rules
-          </Link>
-        }
-        title={isEdit ? "Edit rule" : "New rule"}
-        description="Match incoming events to automatic actions — notify a channel, open a ticket, or quarantine/isolate a workload — when the conditions you define all hold."
-      />
-
-      {isEdit && (clusterLoading || q.isLoading) ? (
-        <Card title="Rule">
-          <div className="text-sm text-muted-foreground">Loading rule…</div>
-        </Card>
-      ) : notFound ? (
-        <Card title="Rule">
-          <div className="text-sm text-destructive">Response rule not found.</div>
-        </Card>
-      ) : (
         <Card
           title="Rule"
           description="Guided builder for the response condition catalog."
@@ -210,21 +200,24 @@ export function ResponseRuleFormPage() {
             className="space-y-4"
             onSubmit={(e) => {
               e.preventDefault();
-              saveMut.mutate();
+              if (valid && !saveMut.isPending && !optionsQ.isError && !optionsQ.isPending) saveMut.mutate();
             }}
           >
+            {optionsQ.isError && <ErrorState title="Could not load response options. your draft is preserved." action={<Button onClick={() => void optionsQ.refetch()}>Retry</Button>} />}
+            <fieldset disabled={saveMut.isPending} className="space-y-4">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className="text-xs">
                 <div className="mb-1 text-muted-foreground">Name</div>
                 <input
                   className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                  required
                   value={rule.name}
                   onChange={(e) => onChange({ ...rule, name: e.target.value })}
                 />
               </label>
               <label className="text-xs">
                 <div className="mb-1 text-muted-foreground">Event type</div>
-                <select
+                <Select
                   className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
                   value={rule.event_type}
                   onChange={(e) => onChange({ ...rule, event_type: e.target.value as RRV2EventType })}
@@ -232,7 +225,7 @@ export function ResponseRuleFormPage() {
                   {eventTypes.map((t) => (
                     <option key={t.id} value={t.id}>{t.label}</option>
                   ))}
-                </select>
+                </Select>
               </label>
               <label className="col-span-full text-xs">
                 <div className="mb-1 text-muted-foreground">Description</div>
@@ -244,9 +237,7 @@ export function ResponseRuleFormPage() {
               </label>
               <label className="text-xs">
                 <div className="mb-1 text-muted-foreground">Enabled</div>
-                <input
-                  type="checkbox"
-                  className="h-4 w-4"
+                <Checkbox
                   checked={rule.enabled}
                   onChange={(e) => onChange({ ...rule, enabled: e.target.checked })}
                 />
@@ -254,20 +245,23 @@ export function ResponseRuleFormPage() {
             </div>
 
             <fieldset className="space-y-2 rounded-md border border-border p-3">
-              <legend className="px-1 text-xs font-medium uppercase text-muted-foreground">Conditions (AND)</legend>
+              <legend className="px-1 text-xs font-medium  text-muted-foreground">Conditions (AND)</legend>
               {rule.conditions.map((c, i) => (
                 <div key={i} className="flex gap-2">
-                  <select
+                  <Select
                     className="w-44 rounded-md border border-border bg-background px-2 py-1.5 text-xs"
+                    aria-label={`Condition ${i + 1} type`}
                     value={c.type}
                     onChange={(e) => setCond(i, { ...c, type: e.target.value as RRV2CondType })}
                   >
                     {conditionOptions.map((ct) => (
                       <option key={ct.id} value={ct.id}>{ct.label}</option>
                     ))}
-                  </select>
+                  </Select>
                   <input
                     className="flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-xs font-mono"
+                    aria-label={`Condition ${i + 1} value`}
+                    required
                     value={c.value}
                     placeholder={conditionCatalog.find((ct) => ct.id === c.type)?.help}
                     onChange={(e) => setCond(i, { ...c, value: e.target.value })}
@@ -292,23 +286,26 @@ export function ResponseRuleFormPage() {
             </fieldset>
 
             <fieldset className="space-y-2 rounded-md border border-border p-3">
-              <legend className="px-1 text-xs font-medium uppercase text-muted-foreground">Actions</legend>
+              <legend className="px-1 text-xs font-medium  text-muted-foreground">Actions</legend>
               {rule.actions.map((a, i) => (
                 <div key={i} className="flex gap-2">
-                  <select
+                  <Select
                     className="w-44 rounded-md border border-border bg-background px-2 py-1.5 text-xs"
+                    aria-label={`Action ${i + 1} type`}
                     value={a.kind}
                     onChange={(e) => setAct(i, { ...a, kind: e.target.value as RRV2ActionKind })}
                   >
                     {actionOptions.map((ak) => (
                       <option key={ak.id} value={ak.id}>{ak.label}</option>
                     ))}
-                  </select>
+                  </Select>
                   {(a.kind === "notify" || a.kind === "ticket" || a.kind === "webhook") && (
                     receiverOptions.length > 0 ? (
-                      <select
+                      <Select
                         className="flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-xs"
-                        value={a.target ?? ""}
+                        aria-label={`Action ${i + 1} receiver`}
+                      required
+                      value={a.target ?? ""}
                         onChange={(e) => setAct(i, { ...a, target: e.target.value })}
                       >
                         {!a.target && <option value="">Select receiver</option>}
@@ -318,11 +315,13 @@ export function ResponseRuleFormPage() {
                         {receiverOptions.map((r) => (
                           <option key={r.id} value={r.name}>{r.name} ({r.kind})</option>
                         ))}
-                      </select>
+                      </Select>
                     ) : (
                     <input
                       className="flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-xs"
                       placeholder="receiver name (e.g. slack, pagerduty, jira)"
+                      aria-label={`Action ${i + 1} receiver`}
+                      required
                       value={a.target ?? ""}
                       onChange={(e) => setAct(i, { ...a, target: e.target.value })}
                     />
@@ -347,8 +346,9 @@ export function ResponseRuleFormPage() {
               </button>
             </fieldset>
 
+            <Collapse label="Advanced workload selector">
             <fieldset className="space-y-2 rounded-md border border-border p-3">
-              <legend className="px-1 text-xs font-medium uppercase text-muted-foreground">Workload selector</legend>
+              <legend className="px-1 text-xs font-medium  text-muted-foreground">Workload selector</legend>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <label className="text-xs">
                   <div className="mb-1 text-muted-foreground">Group</div>
@@ -382,27 +382,28 @@ export function ResponseRuleFormPage() {
               </div>
             </fieldset>
 
-            {error && <p className="text-xs text-status-error">{error}</p>}
+            </Collapse>
+            {saveMut.isError && <p role="alert" className="text-sm text-status-error">Could not save this response rule. Your draft is preserved. Try again.</p>}
+            {rule.actions.length === 0 && <p role="alert" className="text-sm text-status-error">Add at least one action.</p>}
 
             <div className="flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => navigate(backTo)}
+                onClick={() => navigate({ href: backTo })}
                 className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-accent"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                disabled={saveMut.isPending || !rule.name}
-                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50"
+                disabled={saveMut.isPending || !valid || optionsQ.isError || optionsQ.isPending}
+                className="inline-flex h-8 items-center gap-1.5 rounded-md bg-brand px-3 text-meta font-medium text-brand-foreground transition-colors hover:bg-brand/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 disabled:opacity-50"
               >
                 <Save className="h-3.5 w-3.5" /> {saveMut.isPending ? "Saving…" : "Save"}
               </button>
             </div>
+            </fieldset>
           </form>
         </Card>
-      )}
-    </div>
   );
 }

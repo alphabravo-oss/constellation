@@ -1,3 +1,5 @@
+//go:build integration
+
 package scanning
 
 import (
@@ -19,6 +21,7 @@ import (
 )
 
 func TestScannerPackagesFromServerlessPackagesDefaultsEcosystem(t *testing.T) {
+	t.Parallel()
 	got := scannerPackagesFromServerlessPackages(ServerlessPackagesPayload{
 		Runtime:      "python3.11",
 		Architecture: "arm64",
@@ -42,6 +45,7 @@ func TestScannerPackagesFromServerlessPackagesDefaultsEcosystem(t *testing.T) {
 }
 
 func TestServerlessPackagesReportQueuesScanEvidence(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -100,7 +104,7 @@ INSERT INTO users (id, org_id, email, display_name) VALUES ($1, $2, $3, 'Serverl
 			Purl:    "pkg:pypi/django@4.2.0",
 		}},
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/serverless-packages:report", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/serverless-packages:report", bytes.NewReader(body))
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rec := httptest.NewRecorder()
 	NewServerlessPackages(d).Report(rec, req)
@@ -204,7 +208,7 @@ SELECT a.kind, a.name, f.kind, COALESCE(f.external_id, ''), f.severity, f.risk_s
 			Purl:    "pkg:pypi/django@4.2.0",
 		}},
 	})
-	cleanReq := httptest.NewRequest(http.MethodPost, "/api/v1/serverless-packages:report", bytes.NewReader(cleanBody))
+	cleanReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/serverless-packages:report", bytes.NewReader(cleanBody))
 	cleanReq = cleanReq.WithContext(authctx.WithSubject(cleanReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	cleanRec := httptest.NewRecorder()
 	NewServerlessPackages(d).Report(cleanRec, cleanReq)
@@ -236,10 +240,10 @@ SELECT target_type, package_count
 		t.Fatalf("evidence = %s packages=%d", evidenceTargetType, evidencePackages)
 	}
 
-	claimReq := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/claim", nil)
+	claimReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/claim", nil)
 	claimReq.Header.Set("Authorization", "Bearer "+rawToken)
 	claimRec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(NewScanJobs(d, audit.New(pool)).Claim)).ServeHTTP(claimRec, claimReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(NewScanJobs(d, audit.New(pool)).Claim)).ServeHTTP(claimRec, currentScanLeaseRequest(t, pool, claimReq))
 	if claimRec.Code != http.StatusOK {
 		t.Fatalf("claim status: %d body: %s", claimRec.Code, claimRec.Body.String())
 	}

@@ -24,9 +24,8 @@ package runtime
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -38,11 +37,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
+	"github.com/alphabravocompany/constellation/internal/securefiles"
 )
 
 // PcapCaptureStatus mirrors the CHECK constraint.
@@ -77,6 +78,7 @@ const (
 
 // PcapCapture is one row in runtime_pcap_captures.
 type PcapCapture struct {
+	PlatformRole  string            `json:"platform_role"`
 	ID            uuid.UUID         `json:"id"`
 	OrgID         uuid.UUID         `json:"org_id"`
 	ClusterID     uuid.UUID         `json:"cluster_id"`
@@ -122,7 +124,8 @@ func pcapFilePath(id uuid.UUID) string {
 
 // PcapHTTP wraps the DB + the on-disk store with HTTP handlers.
 type PcapHTTP struct {
-	db *db.DB
+	db        *db.DB
+	retention pcapRetentionCursor
 }
 
 func NewPcapHTTP(d *db.DB) *PcapHTTP { return &PcapHTTP{db: d} }
@@ -171,23 +174,35 @@ func (h *PcapHTTP) Start(w http.ResponseWriter, r *http.Request) {
 	if ns == "" {
 		ns = namespaceOf(req.Workload)
 	}
-	var id uuid.UUID
-	err = h.db.Pool().QueryRow(r.Context(), `
+	tx, err := h.db.Pool().Begin(r.Context())
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	got, err := scanPcap(tx.QueryRow(r.Context(), `
 INSERT INTO runtime_pcap_captures
   (org_id, cluster_id, workload, namespace, requested_by, duration_s,
    src_ip, dst_ip, dst_port, protocol, bpf_filter, capture_interface, file_count, file_size_mb)
 VALUES ($1,$2,$3,$4,$5,$6,
         NULLIF($7,'')::inet, NULLIF($8,'')::inet, NULLIF($9,0), NULLIF($10,''),
         NULLIF($11,''), NULLIF($12,''), NULLIF($13,0), NULLIF($14,0))
-RETURNING id`,
-		sub.OrgID, req.ClusterID, req.Workload, ns, sub.UserID, int16(req.DurationS),
+RETURNING `+pcapCols,
+		sub.OrgID, req.ClusterID, req.Workload, ns, sub.UserID, req.DurationS,
 		req.SrcIP, req.DstIP, req.DstPort, req.Protocol,
-		req.BPFFilter, req.Interface, req.FileCount, req.FileSizeMB).Scan(&id)
+		req.BPFFilter, req.Interface, req.FileCount, req.FileSizeMB))
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	got, _ := h.getByID(r.Context(), sub.OrgID, id)
+	if err := capturePlatformRolesWith(r.Context(), tx, sub.OrgID, []*PcapCapture{got}); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	httpx.WriteJSON(w, http.StatusCreated, got)
 }
 
@@ -267,6 +282,15 @@ SELECT `+pcapCols+` FROM runtime_pcap_captures
 		}
 		out = append(out, c)
 	}
+	if err := rows.Err(); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	rows.Close()
+	if err := h.capturePlatformRoles(r.Context(), sub.OrgID, out); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	response := map[string]any{"captures": out}
 	if groupActive {
 		response["selected_group"] = groupName
@@ -296,7 +320,30 @@ func (h *PcapHTTP) Get(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if err := h.capturePlatformRoles(r.Context(), sub.OrgID, []*PcapCapture{got}); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	httpx.WriteJSON(w, http.StatusOK, got)
+}
+
+func (h *PcapHTTP) capturePlatformRoles(ctx context.Context, orgID uuid.UUID, captures []*PcapCapture) error {
+	return capturePlatformRolesWith(ctx, h.db.Pool(), orgID, captures)
+}
+
+func capturePlatformRolesWith(ctx context.Context, query handler.PlatformRoleQuerier, orgID uuid.UUID, captures []*PcapCapture) error {
+	identities := make([]handler.PlatformWorkloadIdentity, len(captures))
+	for i, capture := range captures {
+		identities[i] = handler.PlatformWorkloadIdentity{ClusterID: capture.ClusterID, Workload: capture.Workload, Namespace: capture.Namespace}
+	}
+	roles, err := handler.EvidencePlatformRoles(ctx, query, orgID, identities)
+	if err != nil {
+		return err
+	}
+	for i := range captures {
+		captures[i].PlatformRole = roles[i]
+	}
+	return nil
 }
 
 // Download streams the .pcap file. The caller's browser tags it with the
@@ -327,12 +374,18 @@ func (h *PcapHTTP) Download(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusConflict, "capture not completed yet (status="+string(got.Status)+")")
 		return
 	}
-	f, err := os.Open(pcapFilePath(id))
+	root, err := securefiles.OpenPrivateDir(pcapDataDir())
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, "pcap file missing on server: "+err.Error())
+		jsonError(w, http.StatusInternalServerError, "pcap store unavailable")
 		return
 	}
-	defer f.Close()
+	defer func() { _ = root.Close() }()
+	f, err := openVerifiedPcap(root, got)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "pcap file unavailable on server")
+		return
+	}
+	defer func() { _ = f.Close() }()
 	w.Header().Set("Content-Type", "application/vnd.tcpdump.pcap")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+id.String()+`.pcap"`)
 	if got.FileSizeBytes > 0 {
@@ -364,7 +417,7 @@ func (h *PcapHTTP) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Best-effort file removal — log if it fails, don't break the row delete.
-	if rmErr := os.Remove(pcapFilePath(id)); rmErr != nil && !os.IsNotExist(rmErr) {
+	if rmErr := removePcapFile(id); rmErr != nil && !os.IsNotExist(rmErr) {
 		slog.Default().Warn("pcap file remove",
 			slog.String("id", id.String()), slog.String("err", rmErr.Error()))
 	}
@@ -372,6 +425,23 @@ func (h *PcapHTTP) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 // ----- agent endpoints -------------------------------------------------------
+
+func (h *PcapHTTP) agentCluster(w http.ResponseWriter, r *http.Request, tok *handler.RuntimeAgentToken) (uuid.UUID, bool) {
+	clusterID, err := handler.ResolveAgentClusterID(r.Context(), h.db, tok)
+	if err != nil {
+		if errors.Is(err, handler.ErrAgentClusterScope) {
+			jsonError(w, http.StatusForbidden, "agent token cluster scope mismatch")
+			return uuid.Nil, false
+		}
+		jsonError(w, http.StatusInternalServerError, "resolve cluster failed")
+		return uuid.Nil, false
+	}
+	if clusterID == nil {
+		jsonError(w, http.StatusForbidden, "agent token cluster scope is ambiguous")
+		return uuid.Nil, false
+	}
+	return *clusterID, true
+}
 
 // Claim handles GET /api/v1/runtime-pcap/claim?cluster_id=... — the agent
 // asks for the next pending capture in its cluster, atomically marks it
@@ -389,6 +459,14 @@ func (h *PcapHTTP) Claim(w http.ResponseWriter, r *http.Request) {
 	clusterID, err := uuid.Parse(strings.TrimSpace(r.URL.Query().Get("cluster_id")))
 	if err != nil {
 		jsonError(w, http.StatusBadRequest, "cluster_id required")
+		return
+	}
+	boundCluster, ok := h.agentCluster(w, r, tok)
+	if !ok {
+		return
+	}
+	if clusterID != boundCluster {
+		jsonError(w, http.StatusForbidden, "agent token cluster scope mismatch")
 		return
 	}
 	node := strings.TrimSpace(r.URL.Query().Get("node"))
@@ -421,11 +499,16 @@ SELECT id FROM runtime_pcap_captures
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if _, err := tx.Exec(r.Context(), `
+	got, err := scanPcap(tx.QueryRow(r.Context(), `
 UPDATE runtime_pcap_captures
    SET status = 'running', claimed_by_node = $1, claimed_at = NOW()
- WHERE id = $2`,
-		node, id); err != nil {
+ WHERE id = $2 RETURNING `+pcapCols,
+		node, id))
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := capturePlatformRolesWith(r.Context(), tx, tok.OrgID, []*PcapCapture{got}); err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -433,13 +516,15 @@ UPDATE runtime_pcap_captures
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	got, _ := h.getByID(r.Context(), tok.OrgID, id)
 	httpx.WriteJSON(w, http.StatusOK, got)
 }
 
 // Upload accepts the multipart .pcap body from the runtime-agent. Caps at
 // maxPcapBytes via http.MaxBytesReader; writes to <DataDir>/pcaps/<id>.pcap
-// atomically (write to <id>.pcap.partial, then rename).
+// privately and atomically beneath the configured store. The exact running row
+// stays locked until publication and receipt commit, serializing concurrent
+// uploads/deletes. Filesystem and database commits cannot be one transaction;
+// a failed/unknown commit retains complete private bytes for reconciliation.
 func (h *PcapHTTP) Upload(w http.ResponseWriter, r *http.Request) {
 	tok, ok := handler.RuntimeAgentTokenFrom(r.Context())
 	if !ok {
@@ -456,67 +541,18 @@ func (h *PcapHTTP) Upload(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
+	boundCluster, ok := h.agentCluster(w, r, tok)
+	if !ok {
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxPcapBytes+1024)
 
-	// Verify the capture belongs to this org + is in running state.
-	got, err := h.getByID(r.Context(), tok.OrgID, id)
-	if err != nil || got == nil {
-		jsonError(w, http.StatusNotFound, "not found")
-		return
-	}
-	if got.Status != PcapStatusRunning {
-		jsonError(w, http.StatusConflict,
-			"capture not running (status="+string(got.Status)+")")
+	got, failure := h.uploadCapture(r.Context(), id, tok.OrgID, boundCluster, r.Body)
+	if failure != nil {
+		jsonError(w, failure.status, failure.message)
 		return
 	}
 
-	if err := os.MkdirAll(pcapDataDir(), 0o755); err != nil {
-		jsonError(w, http.StatusInternalServerError, "mkdir: "+err.Error())
-		return
-	}
-	path := pcapFilePath(id)
-	tmp := path + ".partial"
-	f, err := os.Create(tmp)
-	if err != nil {
-		jsonError(w, http.StatusInternalServerError, "create: "+err.Error())
-		return
-	}
-	hasher := sha256.New()
-	mw := io.MultiWriter(f, hasher)
-	written, copyErr := io.Copy(mw, r.Body)
-	_ = f.Close()
-	if copyErr != nil {
-		_ = os.Remove(tmp)
-		jsonError(w, http.StatusBadRequest, "upload: "+copyErr.Error())
-		return
-	}
-	if written > maxPcapBytes {
-		_ = os.Remove(tmp)
-		jsonError(w, http.StatusRequestEntityTooLarge,
-			fmt.Sprintf("pcap %d bytes > limit %d", written, maxPcapBytes))
-		return
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-		jsonError(w, http.StatusInternalServerError, "rename: "+err.Error())
-		return
-	}
-	sum := hex.EncodeToString(hasher.Sum(nil))
-
-	// Stamp the row.
-	if _, err := h.db.Pool().Exec(r.Context(), `
-UPDATE runtime_pcap_captures
-   SET status = 'completed',
-       file_path = $1,
-       file_size_bytes = $2,
-       sha256 = $3,
-       completed_at = NOW()
- WHERE id = $4 AND org_id = $5`,
-		path, written, sum, id, tok.OrgID); err != nil {
-		jsonError(w, http.StatusInternalServerError, "update: "+err.Error())
-		return
-	}
-	got, _ = h.getByID(r.Context(), tok.OrgID, id)
 	httpx.WriteJSON(w, http.StatusOK, got)
 }
 
@@ -546,6 +582,10 @@ func (h *PcapHTTP) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
+	boundCluster, ok := h.agentCluster(w, r, tok)
+	if !ok {
+		return
+	}
 	var req AgentStatusUpdate
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -553,26 +593,35 @@ func (h *PcapHTTP) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch req.Status {
-	case PcapStatusRunning, PcapStatusFailed, PcapStatusCompleted:
-		// fine — note completed-via-status is rare (upload sets it
-		// automatically); we allow it for agents that complete with zero bytes.
+	case PcapStatusRunning, PcapStatusFailed:
+	case PcapStatusCompleted:
+		jsonError(w, http.StatusConflict, "capture completion requires a verified upload")
+		return
+	case PcapStatusPending, PcapStatusExpired:
+		jsonError(w, http.StatusBadRequest, "invalid agent status")
+		return
 	default:
-		jsonError(w, http.StatusBadRequest, "invalid status: "+string(req.Status))
+		jsonError(w, http.StatusBadRequest, "invalid agent status")
 		return
 	}
-	completedAtClause := ""
-	if req.Status == PcapStatusCompleted || req.Status == PcapStatusFailed {
-		completedAtClause = ", completed_at = NOW()"
-	}
-	if _, err := h.db.Pool().Exec(r.Context(), `
-UPDATE runtime_pcap_captures
-   SET status = $1, error_message = $2, packet_count = COALESCE(NULLIF($3,0::bigint), packet_count)`+completedAtClause+`
- WHERE id = $4 AND org_id = $5`,
-		string(req.Status), req.ErrorMessage, req.PacketCount, id, tok.OrgID); err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+	if req.PacketCount < 0 {
+		jsonError(w, http.StatusBadRequest, "packet_count must not be negative")
 		return
 	}
-	got, _ := h.getByID(r.Context(), tok.OrgID, id)
+	got, err := h.setPcapStatus(r.Context(), tok.OrgID, boundCluster, id, req)
+	if errors.Is(err, pgx.ErrNoRows) {
+		jsonError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if errors.Is(err, errPcapTerminalStatus) {
+		jsonError(w, http.StatusConflict, "capture is terminal; refresh its receipt")
+		return
+	}
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "capture status unavailable")
+		return
+	}
+
 	httpx.WriteJSON(w, http.StatusOK, got)
 }
 
@@ -623,41 +672,6 @@ func (h *PcapHTTP) getByID(ctx context.Context, orgID, id uuid.UUID) (*PcapCaptu
 		`SELECT `+pcapCols+` FROM runtime_pcap_captures WHERE id = $1 AND org_id = $2`,
 		id, orgID)
 	return scanPcap(row)
-}
-
-// SweepExpired removes captures past their expires_at + the on-disk file.
-// Called by the server's background reaper (set up next to the rollback
-// watcher). Errors logged + counted; one bad row doesn't stop the sweep.
-func (h *PcapHTTP) SweepExpired(ctx context.Context, logger *slog.Logger) (int, error) {
-	rows, err := h.db.Pool().Query(ctx, `
-SELECT id FROM runtime_pcap_captures WHERE expires_at < NOW()`)
-	if err != nil {
-		return 0, err
-	}
-	defer rows.Close()
-	ids := []uuid.UUID{}
-	for rows.Next() {
-		var id uuid.UUID
-		if err := rows.Scan(&id); err == nil {
-			ids = append(ids, id)
-		}
-	}
-	rows.Close()
-	for _, id := range ids {
-		_ = os.Remove(pcapFilePath(id))
-	}
-	if len(ids) == 0 {
-		return 0, nil
-	}
-	if _, err := h.db.Pool().Exec(ctx,
-		`DELETE FROM runtime_pcap_captures WHERE id = ANY($1::uuid[])`,
-		ids); err != nil {
-		return 0, err
-	}
-	if logger != nil {
-		logger.Info("pcap sweep", slog.Int("removed", len(ids)))
-	}
-	return len(ids), nil
 }
 
 func normalizeStartCaptureRequest(req StartCaptureRequest) (StartCaptureRequest, error) {

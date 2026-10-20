@@ -71,12 +71,12 @@ func (h *RuntimeSignaturesHTTP) List(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := h.store.ListForCluster(r.Context(), sub.OrgID, clusterID, CategorySignature)
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		writeDLPError(w, err)
 		return
 	}
 	wafRows, err := h.store.ListForCluster(r.Context(), sub.OrgID, clusterID, CategoryWAF)
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		writeDLPError(w, err)
 		return
 	}
 	rows = append(rows, wafRows...)
@@ -108,7 +108,7 @@ func (h *RuntimeSignaturesHTTP) Get(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, http.StatusNotFound, "not found")
 			return
 		}
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		writeDLPError(w, err)
 		return
 	}
 	if got.Category != CategorySignature && got.Category != CategoryWAF {
@@ -135,15 +135,12 @@ func (h *RuntimeSignaturesHTTP) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	// Force the category even if the caller passed something else.
 	req.Category = CategorySignature
-	mode := DLPModeMonitor
-	switch req.Mode {
-	case DLPModeMonitor, DLPModeDisabled, "":
-		if req.Mode != "" {
-			mode = req.Mode
-		}
-	default:
-		jsonError(w, http.StatusBadRequest,
-			"new signatures must start in monitor or disabled mode; promote separately")
+	mode := req.Mode
+	if mode == "" {
+		mode = DLPModeMonitor
+	}
+	if mode != DLPModeMonitor && mode != DLPModeDisabled {
+		jsonError(w, http.StatusBadRequest, "new signatures must start in monitor or disabled mode; promote separately")
 		return
 	}
 	rule := &DLPRule{
@@ -153,90 +150,30 @@ func (h *RuntimeSignaturesHTTP) Create(w http.ResponseWriter, r *http.Request) {
 		Patterns: req.Patterns, ScopeMACs: req.ScopeMACs, Description: req.Description,
 		CreatedBy: &sub.UserID,
 	}
-	id, err := h.store.Insert(r.Context(), rule, requestIDFrom(r))
+	got, err := h.store.insertDLPRule(r.Context(), rule, requestIDFrom(r))
 	if err != nil {
-		if strings.Contains(err.Error(), "duplicate") {
-			jsonError(w, http.StatusConflict, "signature with this name already exists")
-			return
-		}
-		jsonError(w, http.StatusBadRequest, err.Error())
+		writeDLPError(w, err)
 		return
 	}
-	got, _ := h.store.Get(r.Context(), sub.OrgID, id)
 	httpx.WriteJSON(w, http.StatusCreated, got)
 }
 
-// Update / Promote / Demote / Disable / Delete delegate straight to the
-// DLP handlers' identical implementations — we built one HTTP layer that
-// services both categories, gated by a 404 if the caller hits the wrong
-// surface for the row's actual category.
-
+// Category authorization runs against the locked row in the mutation transaction.
+func (h *RuntimeSignaturesHTTP) mutationHTTP() *RuntimeDLPHTTP {
+	return &RuntimeDLPHTTP{store: h.store, categories: []DLPCategory{CategorySignature, CategoryWAF}}
+}
 func (h *RuntimeSignaturesHTTP) Update(w http.ResponseWriter, r *http.Request) {
-	if !h.requireSignatureRow(w, r) {
-		return
-	}
-	(&RuntimeDLPHTTP{store: h.store}).Update(w, r)
+	h.mutationHTTP().Update(w, r)
 }
 func (h *RuntimeSignaturesHTTP) Promote(w http.ResponseWriter, r *http.Request) {
-	if !h.requireSignatureRow(w, r) {
-		return
-	}
-	(&RuntimeDLPHTTP{store: h.store}).Promote(w, r)
+	h.mutationHTTP().Promote(w, r)
 }
 func (h *RuntimeSignaturesHTTP) Demote(w http.ResponseWriter, r *http.Request) {
-	if !h.requireSignatureRow(w, r) {
-		return
-	}
-	(&RuntimeDLPHTTP{store: h.store}).Demote(w, r)
+	h.mutationHTTP().Demote(w, r)
 }
 func (h *RuntimeSignaturesHTTP) Disable(w http.ResponseWriter, r *http.Request) {
-	if !h.requireSignatureRow(w, r) {
-		return
-	}
-	(&RuntimeDLPHTTP{store: h.store}).Disable(w, r)
+	h.mutationHTTP().Disable(w, r)
 }
 func (h *RuntimeSignaturesHTTP) Delete(w http.ResponseWriter, r *http.Request) {
-	if !h.requireSignatureRow(w, r) {
-		return
-	}
-	(&RuntimeDLPHTTP{store: h.store}).Delete(w, r)
-}
-
-// requireSignatureRow checks the row's category before delegating to the
-// shared mutator. Without this, a /runtime-signatures/{id}/promote on a
-// plain DLP row would silently promote the DLP rule. WAF rows are accepted
-// because this page is also the user-facing home for imported WAF sensors.
-func (h *RuntimeSignaturesHTTP) requireSignatureRow(w http.ResponseWriter, r *http.Request) bool {
-	sub, ok := authctx.SubjectFrom(r.Context())
-	if !ok {
-		jsonError(w, http.StatusUnauthorized, "auth required")
-		return false
-	}
-	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	if len(parts) < 2 {
-		jsonError(w, http.StatusBadRequest, "invalid path")
-		return false
-	}
-	// id is either the tail or the second-to-last segment (for /promote etc).
-	idStr := parts[len(parts)-1]
-	if !looksLikeUUID(idStr) && len(parts) >= 2 {
-		idStr = parts[len(parts)-2]
-	}
-	id, err := uuid.Parse(idStr)
-	if err != nil {
-		jsonError(w, http.StatusBadRequest, "invalid id")
-		return false
-	}
-	got, err := h.store.Get(r.Context(), sub.OrgID, id)
-	if err != nil || got == nil || (got.Category != CategorySignature && got.Category != CategoryWAF) {
-		jsonError(w, http.StatusNotFound, "not found")
-		return false
-	}
-	return true
-}
-
-// looksLikeUUID is a cheap heuristic — 36 chars with dashes at the right
-// positions. Doesn't fully validate; uuid.Parse does that after.
-func looksLikeUUID(s string) bool {
-	return len(s) == 36 && s[8] == '-' && s[13] == '-' && s[18] == '-' && s[23] == '-'
+	h.mutationHTTP().Delete(w, r)
 }

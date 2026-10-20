@@ -12,6 +12,7 @@ import (
 // different kernels), but it asserts the collector NEVER panics, fills
 // in the structural fields, and stamps observed_at + node.
 func TestCollect_BestEffort(t *testing.T) {
+	t.Parallel()
 	f := Collect(context.Background(), Options{NodeName: "test-node", AgentVersion: "0.0.0-test"})
 	if f.Node != "test-node" {
 		t.Errorf("Node = %q, want test-node", f.Node)
@@ -32,6 +33,7 @@ func TestCollect_BestEffort(t *testing.T) {
 }
 
 func TestReadKeyValueFile_OSRelease(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "os-release")
 	body := `NAME="Ubuntu"
@@ -78,6 +80,7 @@ func TestOptionsHostPath(t *testing.T) {
 }
 
 func TestCollectOS_UsesHostRoot(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "etc"), 0o755); err != nil {
 		t.Fatal(err)
@@ -181,6 +184,7 @@ func TestCollectOS_DistroFixtures(t *testing.T) {
 }
 
 func TestCollectOS_EmptyWhenHostRootHasNoOSRelease(t *testing.T) {
+	t.Parallel()
 	got := collectOS(Options{HostRoot: t.TempDir()})
 	if got.ID != "" || got.VersionID != "" {
 		t.Fatalf("collectOS with empty HostRoot = ID %q version %q, want empty", got.ID, got.VersionID)
@@ -188,6 +192,7 @@ func TestCollectOS_EmptyWhenHostRootHasNoOSRelease(t *testing.T) {
 }
 
 func TestDecodeCaps(t *testing.T) {
+	t.Parallel()
 	// All-zero -> empty.
 	if got := decodeCaps(0); len(got) != 0 {
 		t.Errorf("decodeCaps(0) = %v", got)

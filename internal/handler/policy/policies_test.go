@@ -1,3 +1,5 @@
+//go:build integration
+
 package policy
 
 import (
@@ -17,10 +19,11 @@ import (
 )
 
 func TestPolicies_SimulateWithoutStorageUsesNoSynthesizedPolicies(t *testing.T) {
+	t.Parallel()
 	body := []byte(`{"manifest":"apiVersion: v1\nkind: Pod\nmetadata:\n  name: privileged-debug\n  namespace: default\nspec:\n  containers:\n    - name: shell\n      image: busybox:latest\n      securityContext:\n        privileged: true\n        runAsUser: 0\n"}`)
 	w := httptest.NewRecorder()
 
-	NewPolicies(nil, nil, nil).Simulate(w, httptest.NewRequest(http.MethodPost, "/api/v1/policies/simulate", bytes.NewReader(body)))
+	NewPolicies(nil, nil, nil).Simulate(w, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/policies/simulate", bytes.NewReader(body)))
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
@@ -50,16 +53,18 @@ func TestPolicies_SimulateWithoutStorageUsesNoSynthesizedPolicies(t *testing.T) 
 }
 
 func TestPolicies_SimulateRejectsClusterResourceSamplesWithoutManifest(t *testing.T) {
+	t.Parallel()
 	body := []byte(`{"cluster_resource_id":"missing-resource"}`)
 	w := httptest.NewRecorder()
 
-	NewPolicies(nil, nil, nil).Simulate(w, httptest.NewRequest(http.MethodPost, "/api/v1/policies/simulate", bytes.NewReader(body)))
+	NewPolicies(nil, nil, nil).Simulate(w, httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/policies/simulate", bytes.NewReader(body)))
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
 }
 
 func TestPolicies_SimulateEvaluatesStoredCriticalVulnerabilityEvidence(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -157,7 +162,7 @@ spec:
     - name: app
       image: ` + imageRef + `
 `})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/policies/simulate?cluster_id="+clusterID.String(), bytes.NewReader(rawBody))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/policies/simulate?cluster_id="+clusterID.String(), bytes.NewReader(rawBody))
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rec := httptest.NewRecorder()
 
@@ -210,9 +215,10 @@ spec:
 }
 
 func TestPolicies_AdmissionProfilesListAndExport(t *testing.T) {
+	t.Parallel()
 	h := NewPolicies(nil, nil, nil)
 	list := httptest.NewRecorder()
-	h.AdmissionProfiles(list, httptest.NewRequest(http.MethodGet, "/api/v1/policies/admission-profiles", nil))
+	h.AdmissionProfiles(list, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/policies/admission-profiles", nil))
 	if list.Code != http.StatusOK {
 		t.Fatalf("list status=%d body=%s", list.Code, list.Body.String())
 	}
@@ -228,7 +234,7 @@ func TestPolicies_AdmissionProfilesListAndExport(t *testing.T) {
 		t.Fatalf("profile count=%d want 10", len(listed.Profiles))
 	}
 
-	exportReq := httptest.NewRequest(http.MethodGet, "/api/v1/policies/admission-profiles/strict-hardening/export", nil)
+	exportReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/policies/admission-profiles/strict-hardening/export", nil)
 	routeCtx := chi.NewRouteContext()
 	routeCtx.URLParams.Add("profile", "strict-hardening")
 	exportReq = exportReq.WithContext(context.WithValue(exportReq.Context(), chi.RouteCtxKey, routeCtx))
@@ -252,8 +258,9 @@ func TestPolicies_AdmissionProfilesListAndExport(t *testing.T) {
 }
 
 func TestPolicies_ImportAdmissionProfileDryRun(t *testing.T) {
+	t.Parallel()
 	body := []byte(`{"profile_id":"strict-hardening","mode":"monitor","enabled":false,"dry_run":true}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/policies/admission-profiles:import", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/policies/admission-profiles:import", bytes.NewReader(body))
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: uuid.New(), OrgID: uuid.New()}))
 	w := httptest.NewRecorder()
 
@@ -279,8 +286,9 @@ func TestPolicies_ImportAdmissionProfileDryRun(t *testing.T) {
 }
 
 func TestPolicies_ImportAdmissionProfileRejectsUnknownProfile(t *testing.T) {
+	t.Parallel()
 	body := []byte(`{"profile_id":"missing","dry_run":true}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/policies/admission-profiles:import", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/policies/admission-profiles:import", bytes.NewReader(body))
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: uuid.New(), OrgID: uuid.New()}))
 	w := httptest.NewRecorder()
 
@@ -291,6 +299,7 @@ func TestPolicies_ImportAdmissionProfileRejectsUnknownProfile(t *testing.T) {
 }
 
 func TestAdmissionProfileImportAcceptsDirectBundle(t *testing.T) {
+	t.Parallel()
 	profile, ok := admission.BuiltInAdmissionProfile("basic-hardening")
 	if !ok {
 		t.Fatal("basic-hardening profile missing")
@@ -313,6 +322,7 @@ func TestAdmissionProfileImportAcceptsDirectBundle(t *testing.T) {
 }
 
 func TestAdmissionProfileImportRejectsOversizedRuleSet(t *testing.T) {
+	t.Parallel()
 	profile, ok := admission.BuiltInAdmissionProfile("basic-hardening")
 	if !ok {
 		t.Fatal("basic-hardening profile missing")
@@ -330,6 +340,7 @@ func TestAdmissionProfileImportRejectsOversizedRuleSet(t *testing.T) {
 }
 
 func TestParseAdmissionWorkloadIncludesEphemeralContainers(t *testing.T) {
+	t.Parallel()
 	got, err := parseAdmissionWorkload(`apiVersion: v1
 kind: Pod
 metadata:
@@ -358,6 +369,7 @@ spec:
 }
 
 func TestParseAdmissionWorkloadRequiresEveryImagePinnedWhenNoSignatureAnnotation(t *testing.T) {
+	t.Parallel()
 	got, err := parseAdmissionWorkload(`apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -380,6 +392,7 @@ spec:
 }
 
 func TestParseAdmissionWorkloadHonorsTemplateSignatureAnnotation(t *testing.T) {
+	t.Parallel()
 	got, err := parseAdmissionWorkload(`apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -403,6 +416,7 @@ spec:
 }
 
 func TestEvaluateAdmissionPoliciesDeniesExplicitPrivilegedUnsignedPolicy(t *testing.T) {
+	t.Parallel()
 	manifest := `apiVersion: v1
 kind: Pod
 metadata:

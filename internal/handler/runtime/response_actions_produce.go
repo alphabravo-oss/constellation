@@ -22,6 +22,7 @@ package runtime
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -77,9 +78,8 @@ type responseActionResultWire struct {
 	At      time.Time `json:"at"`
 }
 
-// Pending returns the pending response actions for the calling node's cluster, org-scoped
-// by the runtime-agent token so a token for org A can never read org B's queue even with a
-// guessed cluster_id. Rows with an empty node are offered to every node in the cluster.
+// Pending returns the pending response actions for the calling node's bound cluster.
+// Rows with an empty node are offered to every node in that cluster.
 func (h *ResponseActions) Pending(w http.ResponseWriter, r *http.Request) {
 	tok, ok := handler.RuntimeAgentTokenFrom(r.Context())
 	if !ok {
@@ -89,6 +89,19 @@ func (h *ResponseActions) Pending(w http.ResponseWriter, r *http.Request) {
 	clusterID, err := uuid.Parse(strings.TrimSpace(r.URL.Query().Get("cluster_id")))
 	if err != nil {
 		jsonError(w, http.StatusBadRequest, "cluster_id is required")
+		return
+	}
+	boundCluster, err := handler.ResolveAgentClusterID(r.Context(), h.db, tok)
+	if err != nil {
+		if errors.Is(err, handler.ErrAgentClusterScope) {
+			jsonError(w, http.StatusForbidden, "agent token cluster scope mismatch")
+			return
+		}
+		jsonError(w, http.StatusInternalServerError, "resolve cluster failed")
+		return
+	}
+	if boundCluster == nil || *boundCluster != clusterID {
+		jsonError(w, http.StatusForbidden, "agent token cluster scope mismatch")
 		return
 	}
 	node := strings.TrimSpace(r.URL.Query().Get("node"))
@@ -128,7 +141,7 @@ SELECT id, type, workload_id, container_id, pid, comm,
 
 // Result is the sink for a completed action. It flips the row to done (Applied) or failed
 // (not Applied), records the agent's reason into result/error, and stamps completed_at.
-// Org-scoped by the token so an agent can only complete its own org's rows. Terminal rows
+// Org- and cluster-scoped by the token so an agent can only complete its own cluster's rows. Terminal rows
 // aren't re-touched (state = 'pending' guard), so a duplicate report is a harmless no-op.
 func (h *ResponseActions) Result(w http.ResponseWriter, r *http.Request) {
 	tok, ok := handler.RuntimeAgentTokenFrom(r.Context())
@@ -147,6 +160,19 @@ func (h *ResponseActions) Result(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "id is required")
 		return
 	}
+	boundCluster, err := handler.ResolveAgentClusterID(r.Context(), h.db, tok)
+	if err != nil {
+		if errors.Is(err, handler.ErrAgentClusterScope) {
+			jsonError(w, http.StatusForbidden, "agent token cluster scope mismatch")
+			return
+		}
+		jsonError(w, http.StatusInternalServerError, "resolve cluster failed")
+		return
+	}
+	if boundCluster == nil {
+		jsonError(w, http.StatusForbidden, "agent token cluster scope is ambiguous")
+		return
+	}
 
 	state := "failed"
 	result, errText := "", res.Reason
@@ -156,8 +182,8 @@ func (h *ResponseActions) Result(w http.ResponseWriter, r *http.Request) {
 	tag, err := h.db.Pool().Exec(r.Context(), `
 UPDATE runtime_response_actions
    SET state = $1, result = $2, error = $3, completed_at = NOW()
- WHERE id = $4 AND org_id = $5 AND state = 'pending'`,
-		state, result, errText, id, tok.OrgID)
+ WHERE id = $4 AND org_id = $5 AND cluster_id = $6 AND state = 'pending'`,
+		state, result, errText, id, tok.OrgID, *boundCluster)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return

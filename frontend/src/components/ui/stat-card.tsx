@@ -1,18 +1,34 @@
-import { type ReactNode } from "react";
-import { Link } from "react-router-dom";
-import { ArrowUpRight } from "lucide-react";
+import { type HTMLAttributes, type ReactNode } from "react";
 import { cn } from "@/lib/cn";
+import { useProduct } from "@/ui";
 import { Sparkline } from "./sparkline";
 
+/** Stat tiles fit the content width (detail pages; list pages use the verdict strip). */
+export function StatGrid({ className, ...props }: HTMLAttributes<HTMLElement>) {
+  return <section className={cn("app-stat-grid", className)} {...props} />;
+}
+
+export type StatTone = "neutral" | "critical" | "high" | "medium" | "low" | "accent";
+
+/** Severity tones color the numeral only — never borders or backgrounds. */
+export const statToneText: Record<StatTone, string> = {
+  neutral: "text-foreground",
+  critical: "text-severity-critical",
+  high: "text-severity-high",
+  medium: "text-severity-medium",
+  low: "text-severity-low",
+  accent: "text-foreground",
+};
+
 /**
- * StatCard / MetricTile — dashboard-grade KPI card.
- *
- * Always shows: large number + label.
- * Optional: trend sparkline (right side), delta vs previous, color tone, link.
+ * Kit StatCard contract: label 12/500 sentence case, numeral 28 tabular,
+ * optional hint/trend/link. `valueKind="text"` keeps timestamps and words at
+ * body size.
  */
 export function StatCard({
   label,
   value,
+  valueKind = "number",
   delta,
   trend,
   href,
@@ -23,68 +39,48 @@ export function StatCard({
 }: {
   label: string;
   value: ReactNode;
+  valueKind?: "number" | "text";
   delta?: { value: string; positive?: boolean };
   trend?: number[];
   href?: string;
-  tone?: "neutral" | "critical" | "high" | "medium" | "low" | "accent";
+  tone?: StatTone;
   className?: string;
   hint?: string;
   icon?: ReactNode;
 }) {
-  const toneColor =
-    tone === "critical" ? "var(--color-severity-critical)" :
-    tone === "high"     ? "var(--color-severity-high)" :
-    tone === "medium"   ? "var(--color-severity-medium)" :
-    tone === "low"      ? "var(--color-severity-low)" :
-    tone === "accent"   ? "var(--color-primary)" :
-    "var(--color-muted-foreground)";
-
-  const inner = (
-    <div
-      className={cn(
-        "group relative rounded-md border border-border bg-card px-4 py-3 transition-all duration-100",
-        "hover:border-[color-mix(in_oklab,var(--color-primary)_30%,var(--color-border))]",
-        href && "cursor-pointer",
-        className,
-      )}
-      style={tone !== "neutral" ? { borderColor: `color-mix(in oklab, ${toneColor} 24%, var(--color-border))` } : undefined}
-    >
+  const { Link } = useProduct();
+  const body = (
+    <>
       <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-            {icon}
-            {label}
-          </div>
-          <div className="mt-1 flex items-baseline gap-2">
-            <span
-              className="text-display text-3xl font-semibold tabular-nums"
-              style={{ color: tone === "neutral" ? "var(--color-foreground)" : toneColor }}
-            >
-              {value}
-            </span>
-            {delta && (
-              <span
-                className={cn(
-                  "text-[11px] text-mono font-medium",
-                  delta.positive ? "text-[color:var(--color-status-success)]" : "text-[color:var(--color-severity-high)]",
-                )}
-              >
-                {delta.value}
-              </span>
-            )}
-          </div>
-          {hint && <div className="mt-1 text-[10px] text-muted-foreground">{hint}</div>}
-        </div>
-        <div className="flex flex-col items-end gap-1">
-          {href && (
-            <ArrowUpRight className="h-3.5 w-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-          )}
-          {trend && trend.length > 0 && <Sparkline data={trend} color={toneColor} />}
-        </div>
+        <p className="min-w-0 [overflow-wrap:anywhere] text-meta font-medium text-muted-foreground">{label}</p>
+        {icon ? <span className="shrink-0 text-muted-foreground [&_svg]:h-4 [&_svg]:w-4" aria-hidden>{icon}</span> : null}
       </div>
-    </div>
+      <div className="mt-1 flex flex-wrap items-baseline justify-between gap-2">
+        <span
+          className={cn(
+            "app-stat-value min-w-0 [overflow-wrap:anywhere] font-semibold tabular-nums tracking-tight",
+            valueKind === "text" ? "text-body" : "text-stat",
+            statToneText[tone],
+          )}
+          data-kind={valueKind}
+        >
+          {value}
+        </span>
+        {delta ? (
+          <span className={cn("font-mono text-meta", delta.positive ? "text-status-success" : "text-muted-foreground")}>{delta.value}</span>
+        ) : null}
+        {trend && trend.length > 0 ? <Sparkline data={trend} color="hsl(var(--muted-foreground))" /> : null}
+      </div>
+      {hint ? <p className="mt-0.5 text-meta text-muted-foreground">{hint}</p> : null}
+    </>
   );
-
-  if (href) return <Link to={href} className="block">{inner}</Link>;
-  return inner;
+  const frame = "app-stat-card block min-w-0 rounded-lg border border-border bg-card p-4 transition-colors";
+  if (href) {
+    return (
+      <Link to={href} className={cn(frame, "hover:bg-accent/40 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring", className)}>
+        {body}
+      </Link>
+    );
+  }
+  return <div className={cn(frame, className)}>{body}</div>;
 }

@@ -18,7 +18,7 @@ mkdir -p "$CAP"
 
 echo "==> [1/2] eBPF smoke (needs root for BPF/LSM attach)"
 sudo -E env CONSTELLATION_BPF_OBJ="$ROOT/internal/runtime/ebpf/bpf/runtime.bpf.o" \
-   PATH=$PATH go run -C "$ROOT" ./deploy/e2e/runtime-smoke -duration=8s -min-exec=10 -min-tcp=1 \
+   PATH="$PATH" go run -C "$ROOT" ./deploy/e2e/runtime-smoke -duration=8s -min-exec=10 -min-tcp=1 \
    2>&1 | tee "$CAP/runtime-smoke.log" | tail -10
 
 echo "==> [2/2] synthetic attack inside DVWA pod"

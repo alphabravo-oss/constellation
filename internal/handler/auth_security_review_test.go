@@ -1,3 +1,5 @@
+//go:build integration
+
 package handler
 
 import (
@@ -55,7 +57,7 @@ VALUES ($1, $2, $3, 'A', 'x', 0), ($4, $2, $5, 'T', 'x', 0)`,
 
 	// Create a binding granting the target the Auditor role.
 	body, _ := json.Marshal(createRoleBindingRequest{SubjectID: targetID.String(), SubjectType: "user", RoleID: "Auditor"})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/access-control/role-bindings", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/access-control/role-bindings", bytes.NewReader(body))
 	req = req.WithContext(WithSubject(req.Context(), admin))
 	rec := httptest.NewRecorder()
 	h.CreateRoleBinding(rec, req)
@@ -83,7 +85,7 @@ VALUES ($1, $2, $3, 'A', 'x', 0), ($4, $2, $5, 'T', 'x', 0)`,
 	}
 
 	// Delete the binding -> assignment removed and epoch bumped again.
-	delReq := httptest.NewRequest(http.MethodDelete, "/api/v1/access-control/role-bindings/"+created.ID, nil)
+	delReq := httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/api/v1/access-control/role-bindings/"+created.ID, nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", created.ID)
 	delReq = delReq.WithContext(WithSubject(context.WithValue(delReq.Context(), chi.RouteCtxKey, rctx), admin))

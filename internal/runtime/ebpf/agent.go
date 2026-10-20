@@ -163,6 +163,22 @@ func (a *Agent) Close() error {
 	return nil
 }
 
+// ProcessStartIdentity returns a currently retained kernel lifetime identity.
+// Legacy objects, failed hooks, evicted entries and degraded capture return
+// unavailable; callers must never replace this with a numeric-PID fallback.
+func (a *Agent) ProcessStartIdentity(pid uint32) (uint64, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.closed || a.loader == nil {
+		return 0, false
+	}
+	provider, ok := a.loader.(interface{ ProcessStartIdentity(uint32) (uint64, bool) })
+	if !ok {
+		return 0, false
+	}
+	return provider.ProcessStartIdentity(pid)
+}
+
 // loader is the kernel-side implementation. Linux build attaches real eBPF programs;
 // fallback build returns nil from newLoader so the Agent runs in degraded mode.
 type loader interface {

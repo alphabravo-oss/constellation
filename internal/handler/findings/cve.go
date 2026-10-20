@@ -3,9 +3,10 @@ package findings
 import (
 	"encoding/json"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -13,8 +14,6 @@ import (
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
-	"github.com/alphabravocompany/constellation/internal/handler/sqlx"
-	searchdsl "github.com/alphabravocompany/constellation/pkg/search/dsl"
 )
 
 type CVE struct {
@@ -195,134 +194,6 @@ var cveSortColumns = map[string]string{
 	"published": "published_at",
 }
 
-func (c *CVE) Search(w http.ResponseWriter, r *http.Request) {
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 200 {
-		limit = 50
-	}
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-
-	// Filter params.
-	kevOnly := r.URL.Query().Get("kev") == "true" || r.URL.Query().Get("kev") == "1"
-	epssGt, _ := strconv.ParseFloat(r.URL.Query().Get("epss_gt"), 64)
-	cvssGt, _ := strconv.ParseFloat(r.URL.Query().Get("cvss_gt"), 64)
-	severity := strings.ToLower(r.URL.Query().Get("severity"))
-	source := strings.TrimSpace(r.URL.Query().Get("source"))
-
-	var (
-		args    []any
-		clauses []string
-	)
-
-	// Resolve well-known nickname queries to their canonical CVE-ID so a search
-	// for "log4shell" actually returns CVE-2021-44228 even though a substring
-	// (ILIKE) match against the NVD title would otherwise return zero rows.
-	canonical := resolveNickname(q)
-
-	switch {
-	case strings.Contains(q, ":"):
-		compiled, err := searchdsl.Compile(q, cvesSearchSchema)
-		if err != nil {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "search: " + err.Error()})
-			return
-		}
-		if !compiled.Empty() {
-			args = append(args, compiled.Args...)
-			clauses = append(clauses, "("+sqlx.ShiftPlaceholders(compiled.Where, 0)+")")
-		}
-	case q != "":
-		// Substring (ILIKE) search: cve_id ILIKE, alias array containment, title +
-		// description ILIKE, plus canonical-nickname lookup. This is case-insensitive
-		// substring matching, not trigram-similarity fuzzy search. cve_id has a
-		// trigram GIN index so ILIKE on it is index-eligible; title/description fall
-		// back to seq scan which is bounded by the trailing LIMIT.
-		args = append(args, q)
-		qIdx := len(args)
-		expr := []string{
-			"cve_id ILIKE '%' || $" + strconv.Itoa(qIdx) + " || '%'",
-			"$" + strconv.Itoa(qIdx) + " = ANY(aliases)",
-			"COALESCE(title,'')       ILIKE '%' || $" + strconv.Itoa(qIdx) + " || '%'",
-			"COALESCE(description,'') ILIKE '%' || $" + strconv.Itoa(qIdx) + " || '%'",
-		}
-		if canonical != "" {
-			args = append(args, canonical)
-			expr = append(expr, "cve_id = $"+strconv.Itoa(len(args)))
-		}
-		clauses = append(clauses, "("+strings.Join(expr, " OR ")+")")
-	}
-
-	if kevOnly {
-		clauses = append(clauses, "kev_listed = TRUE")
-	}
-	if epssGt > 0 {
-		args = append(args, epssGt)
-		clauses = append(clauses, "epss_probability > $"+strconv.Itoa(len(args)))
-	}
-	if cvssGt > 0 {
-		args = append(args, cvssGt)
-		clauses = append(clauses, "cvss_base > $"+strconv.Itoa(len(args)))
-	}
-	if lo, hi, ok := severityRange(severity); ok {
-		args = append(args, lo, hi)
-		clauses = append(clauses, "cvss_base >= $"+strconv.Itoa(len(args)-1)+" AND cvss_base < $"+strconv.Itoa(len(args)))
-	}
-	if source != "" {
-		args = append(args, source)
-		clauses = append(clauses, "$"+strconv.Itoa(len(args))+" = ANY(sources)")
-	}
-
-	where := ""
-	if len(clauses) > 0 {
-		where = "WHERE " + strings.Join(clauses, " AND ")
-	}
-
-	// Server-side sort: the catalog is far larger than one page, so client-side sort
-	// over the returned rows only reorders the visible slice. Map the requested column
-	// to a whitelisted expression (no injection — column is never interpolated from raw
-	// input) and default to the relevance ordering when unset.
-	orderBy := `kev_listed DESC,
-          epss_probability DESC NULLS LAST,
-          cvss_base DESC NULLS LAST,
-          published_at DESC NULLS LAST`
-	if col, ok := cveSortColumns[strings.ToLower(strings.TrimSpace(r.URL.Query().Get("sort")))]; ok {
-		dir := "DESC"
-		if strings.ToLower(strings.TrimSpace(r.URL.Query().Get("dir"))) == "asc" {
-			dir = "ASC"
-		}
-		orderBy = col + " " + dir + " NULLS LAST, cve_id ASC"
-	}
-	args = append(args, limit, offset)
-	sql := `
-SELECT cve_id, COALESCE(title,''), COALESCE(description,''), cvss_base, cvss_vector,
-       kev_listed, kev_added, epss_probability, epss_updated_at, aliases, affected, sources,
-       published_at, modified_at
-  FROM cve_records ` + where + `
- ORDER BY ` + orderBy + `
- LIMIT $` + strconv.Itoa(len(args)-1) + ` OFFSET $` + strconv.Itoa(len(args))
-
-	rows, err := c.db.Pool().Query(r.Context(), sql, args...)
-	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	defer rows.Close()
-	out := make([]cveDTO, 0, limit)
-	for rows.Next() {
-		var d cveDTO
-		var affected []byte
-		if err := rows.Scan(&d.CVEID, &d.Title, &d.Description, &d.CVSSBase, &d.CVSSVector,
-			&d.KEVListed, &d.KEVAdded, &d.EPSSProbability, &d.EPSSUpdatedAt,
-			&d.Aliases, &affected, &d.Sources, &d.PublishedAt, &d.ModifiedAt); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		d.Affected = affected
-		out = append(out, d)
-	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"results": out, "limit": limit, "offset": offset})
-}
-
 func (c *CVE) Get(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var d cveDTO
@@ -342,14 +213,18 @@ SELECT cve_id, COALESCE(title,''), COALESCE(description,''), cvss_base, cvss_vec
 		return
 	}
 
-	httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+	apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "not found")
 }
 
 func (c *CVE) Affected(w http.ResponseWriter, r *http.Request) {
-	subj, _ := authctx.SubjectFrom(r.Context())
+	subj, ok := authctx.SubjectFrom(r.Context())
+	if !ok {
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
+		return
+	}
 	id := strings.ToUpper(strings.TrimSpace(chi.URLParam(r, "id")))
 	if id == "" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "missing cve id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "missing cve id")
 		return
 	}
 	// Optional cluster scope: when the CVE detail is opened from inside a cluster,
@@ -359,7 +234,16 @@ func (c *CVE) Affected(w http.ResponseWriter, r *http.Request) {
 	if cs := strings.TrimSpace(r.URL.Query().Get("cluster_id")); cs != "" {
 		cid, perr := uuid.Parse(cs)
 		if perr != nil {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster_id"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid cluster_id")
+			return
+		}
+		var owned bool
+		if err := c.db.Pool().QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM clusters WHERE id=$1 AND org_id=$2)`, cid, subj.OrgID).Scan(&owned); err != nil {
+			apiutil.WriteStatus(r.Context(), w, 500, "Affected evidence could not be loaded")
+			return
+		}
+		if !owned {
+			apiutil.WriteStatus(r.Context(), w, 404, "cluster not found")
 			return
 		}
 		clusterArg = cid
@@ -397,24 +281,25 @@ SELECT r.id,
        MAX(f.last_seen_at),
        r.last_scanned_at
   FROM image_scan_findings f
-  JOIN image_scan_results r ON r.id = f.image_scan_result_id
+  JOIN image_scan_results r ON r.id = f.image_scan_result_id AND r.org_id = f.org_id
  WHERE f.org_id = $1
    AND UPPER(COALESCE(f.external_id, '')) = $2
    AND ($3::uuid IS NULL OR EXISTS (
         SELECT 1 FROM image_workload_links l
+         JOIN deployments owned_deployment ON owned_deployment.id=l.deployment_id AND owned_deployment.org_id=f.org_id AND owned_deployment.cluster_id=l.cluster_id
          WHERE l.org_id = f.org_id AND l.cluster_id = $3
-           AND (l.image_digest = r.image_digest
-                OR l.image_ref = r.image_ref
-                OR l.image_ref_normalized = r.image_ref_normalized
-                OR (COALESCE(r.image_repository,'') <> '' AND l.image_repository = r.image_repository
-                    AND (COALESCE(r.image_tag,'') = '' OR l.image_tag = r.image_tag)))))
+           AND ((COALESCE(l.image_digest,'')<>'' AND l.image_digest=r.image_digest)
+             OR (COALESCE(l.image_digest,'')='' AND ((r.image_ref<>'' AND l.image_ref=r.image_ref)
+                OR (r.image_ref_normalized<>'' AND l.image_ref_normalized=r.image_ref_normalized)
+                OR (COALESCE(r.image_repository,'')<>'' AND l.image_repository=r.image_repository
+                    AND (COALESCE(r.image_tag,'')='' OR l.image_tag=r.image_tag)))))))
  GROUP BY r.id, r.asset_id, r.image_ref, r.image_ref_normalized, r.image_repository,
           r.image_tag, r.image_digest, r.platform, r.scanner_profile,
           r.vulndb_bundle_version, r.vulndb_bundle_hash, r.last_scanned_at
- ORDER BY max_risk_score DESC, r.last_scanned_at DESC
+ ORDER BY max_risk_score DESC, r.last_scanned_at DESC, r.id ASC
  LIMIT 500`, subj.OrgID, id, clusterArg)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "Affected evidence could not be loaded")
 		return
 	}
 	defer imageRows.Close()
@@ -449,7 +334,7 @@ SELECT r.id,
 			&row.LastSeenAt,
 			&row.LastScannedAt,
 		); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "Affected evidence could not be loaded")
 			return
 		}
 		row.SeverityCounts = map[string]int{
@@ -469,7 +354,7 @@ SELECT r.id,
 		images = append(images, row)
 	}
 	if err := imageRows.Err(); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "Affected evidence could not be loaded")
 		return
 	}
 
@@ -484,7 +369,7 @@ WITH matches AS (
            COALESCE(r.image_tag, '') AS image_tag,
            r.image_digest
       FROM image_scan_findings f
-      JOIN image_scan_results r ON r.id = f.image_scan_result_id
+      JOIN image_scan_results r ON r.id = f.image_scan_result_id AND r.org_id = f.org_id
      WHERE f.org_id = $1
        AND UPPER(COALESCE(f.external_id, '')) = $2
 )
@@ -509,18 +394,17 @@ SELECT l.cluster_id,
   JOIN image_workload_links l
     ON l.org_id = $1
    AND ($3::uuid IS NULL OR l.cluster_id = $3)
-   AND (
-        (m.image_digest <> '' AND l.image_digest = m.image_digest)
-     OR (m.image_ref <> '' AND l.image_ref = m.image_ref)
-     OR (m.image_ref_normalized <> '' AND l.image_ref_normalized = m.image_ref_normalized)
-     OR (m.image_repository <> '' AND l.image_repository = m.image_repository AND (m.image_tag = '' OR l.image_tag = m.image_tag))
-   )
-  LEFT JOIN clusters c ON c.id = l.cluster_id AND c.org_id = $1
+   AND ((COALESCE(l.image_digest,'')<>'' AND l.image_digest=m.image_digest)
+     OR (COALESCE(l.image_digest,'')='' AND ((m.image_ref<>'' AND l.image_ref=m.image_ref)
+     OR (m.image_ref_normalized<>'' AND l.image_ref_normalized=m.image_ref_normalized)
+     OR (m.image_repository<>'' AND l.image_repository=m.image_repository AND (m.image_tag='' OR l.image_tag=m.image_tag)))))
+  JOIN clusters c ON c.id = l.cluster_id AND c.org_id = $1
+  JOIN deployments owned_deployment ON owned_deployment.id=l.deployment_id AND owned_deployment.org_id=$1 AND owned_deployment.cluster_id=l.cluster_id
  GROUP BY l.cluster_id, c.name, l.deployment_id, l.workload_id, l.namespace, l.name, l.kind
- ORDER BY max_risk_score DESC, MAX(l.last_seen_at) DESC
+ ORDER BY max_risk_score DESC, MAX(l.last_seen_at) DESC, l.cluster_id, l.deployment_id, l.workload_id, l.namespace, l.name, l.kind
  LIMIT 1000`, subj.OrgID, id, clusterArg)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "Affected evidence could not be loaded")
 		return
 	}
 	defer workloadRows.Close()
@@ -548,7 +432,7 @@ SELECT l.cluster_id,
 			&row.HighCount,
 			&row.LastSeenAt,
 		); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "Affected evidence could not be loaded")
 			return
 		}
 		cluster := clustersByID[row.ClusterID]
@@ -567,7 +451,7 @@ SELECT l.cluster_id,
 		workloads = append(workloads, row)
 	}
 	if err := workloadRows.Err(); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "Affected evidence could not be loaded")
 		return
 	}
 
@@ -638,7 +522,7 @@ SELECT
   FROM cve_records
 `).Scan(&total, &kev, &epssGt50, &cvssGt70, &hasCVSS, &oldest, &latest,
 		&critCount, &highCount, &medCount, &lowCount, &infoCount); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 

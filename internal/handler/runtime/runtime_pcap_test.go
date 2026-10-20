@@ -1,3 +1,5 @@
+//go:build integration
+
 package runtime
 
 import (
@@ -7,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -54,7 +57,7 @@ func TestPcapNormalizeStartCaptureRequest(t *testing.T) {
 
 func TestPcapHTTP_RichCaptureStartListAndClaim(t *testing.T) {
 	d := openTestDB(t)
-	defer d.Close()
+	t.Cleanup(d.Close)
 
 	ctx := context.Background()
 	pool := d.Pool()
@@ -86,6 +89,17 @@ SELECT EXISTS (
 	if _, err := pool.Exec(ctx, `INSERT INTO clusters (id, org_id, name, state) VALUES ($1, $2, 'pcap-cluster', 'connected')`, clusterID, orgID); err != nil {
 		t.Fatalf("cluster: %v", err)
 	}
+	_, tokenID, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, "pcap-agent-"+uuid.NewString(), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+INSERT INTO cluster_init_bundles
+  (org_id, cluster_id, name, expires_at, runtime_agent_token_id, kek_fingerprint, contents_encrypted)
+VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`,
+		orgID, clusterID, "pcap-bundle-"+uuid.NewString(), tokenID); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM runtime_pcap_captures WHERE org_id=$1`, orgID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id=$1`, orgID)
@@ -105,7 +119,7 @@ SELECT EXISTS (
 		FileSizeMB: 25,
 	})
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/runtime-pcap/start", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/runtime-pcap/start", bytes.NewReader(body))
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	h.Start(rec, req)
 	if rec.Code != http.StatusCreated {
@@ -122,7 +136,7 @@ SELECT EXISTS (
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet,
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodGet,
 		"/api/v1/runtime-pcap?cluster_id="+clusterID.String()+"&status=pending&protocol=tcp&src_ip=10.0.0.5&dst_port=443",
 		nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
@@ -155,7 +169,7 @@ VALUES ($1, $2, 'inventory/api', 'inventory', $3, 30, 'completed')`,
 		t.Fatalf("other capture: %v", err)
 	}
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet,
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodGet,
 		"/api/v1/runtime-pcap?cluster_id="+clusterID.String()+"&group="+groupID.String(),
 		nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
@@ -179,8 +193,8 @@ VALUES ($1, $2, 'inventory/api', 'inventory', $3, 30, 'completed')`,
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/runtime-pcap/claim?cluster_id="+clusterID.String()+"&node=node-a", nil)
-	req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(), &handler.RuntimeAgentToken{ID: uuid.New(), OrgID: orgID, Name: "agent"}))
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/runtime-pcap/claim?cluster_id="+clusterID.String()+"&node=node-a", nil)
+	req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(), &handler.RuntimeAgentToken{ID: tokenID, OrgID: orgID, Name: "agent"}))
 	h.Claim(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("Claim status=%d body=%s", rec.Code, rec.Body.String())

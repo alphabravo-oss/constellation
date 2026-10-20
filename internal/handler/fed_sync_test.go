@@ -1,3 +1,5 @@
+//go:build integration
+
 package handler
 
 import (
@@ -7,7 +9,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -95,7 +96,11 @@ ON CONFLICT (org_id) DO UPDATE SET state='master'`, orgID); err != nil {
 	defer srv.Close()
 
 	var env syncResponse
-	resp, err := http.Get(srv.URL + "/api/v1/federation/sync?since=0")
+	httpRequest, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL+"/api/v1/federation/sync?since=0", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(httpRequest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,14 +141,6 @@ ON CONFLICT (org_id) DO UPDATE SET state='master'`, orgID); err != nil {
 	if since2 != since {
 		t.Fatalf("idempotent re-poll changed since: %d -> %d", since, since2)
 	}
-}
-
-// withURLParam injects a chi URL param so a handler reading chi.URLParam(r,"id")
-// works under httptest without a full router.
-func withURLParam(req *http.Request, key, val string) *http.Request {
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add(key, val)
-	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 }
 
 // fedTestPreflight skips a test unless the federation/policy schema (incl. the

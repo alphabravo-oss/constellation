@@ -1,3 +1,5 @@
+//go:build integration
+
 package policy
 
 import (
@@ -17,8 +19,9 @@ import (
 )
 
 func TestResponseRules_ListReturnsCatalog(t *testing.T) {
+	t.Parallel()
 	w := httptest.NewRecorder()
-	NewResponseRules().List(w, httptest.NewRequest("GET", "/api/v1/response-rules", nil))
+	NewResponseRules().List(w, httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/response-rules", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("status: %d", w.Code)
 	}
@@ -52,6 +55,7 @@ func TestResponseRules_ListReturnsCatalog(t *testing.T) {
 }
 
 func TestResponseRules_UpdatePersistsOverrideAndAudit(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	pool := d.Pool()
@@ -76,7 +80,7 @@ func TestResponseRules_UpdatePersistsOverrideAndAudit(t *testing.T) {
 	r.Post("/api/v1/response-rules/{id}/preview", h.Preview)
 	r.Patch("/api/v1/response-rules/{id}", h.Update)
 
-	previewReq := httptest.NewRequest("POST", "/api/v1/response-rules/dlp-secret-exfiltration/preview", strings.NewReader(`{"mode":"enforce","enabled":true,"reason":"pilot DLP enforcement"}`))
+	previewReq := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/response-rules/dlp-secret-exfiltration/preview", strings.NewReader(`{"mode":"enforce","enabled":true,"reason":"pilot DLP enforcement"}`))
 	previewReq = previewReq.WithContext(authctx.WithSubject(previewReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	previewResp := httptest.NewRecorder()
 	r.ServeHTTP(previewResp, previewReq)
@@ -87,7 +91,7 @@ func TestResponseRules_UpdatePersistsOverrideAndAudit(t *testing.T) {
 		t.Fatalf("unexpected preview: %s", previewResp.Body.String())
 	}
 
-	updateReq := httptest.NewRequest("PATCH", "/api/v1/response-rules/dlp-secret-exfiltration", strings.NewReader(`{"mode":"enforce","enabled":true,"reason":"pilot DLP enforcement"}`))
+	updateReq := httptest.NewRequestWithContext(t.Context(), "PATCH", "/api/v1/response-rules/dlp-secret-exfiltration", strings.NewReader(`{"mode":"enforce","enabled":true,"reason":"pilot DLP enforcement"}`))
 	updateReq = updateReq.WithContext(authctx.WithSubject(updateReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	updateResp := httptest.NewRecorder()
 	r.ServeHTTP(updateResp, updateReq)
@@ -95,7 +99,7 @@ func TestResponseRules_UpdatePersistsOverrideAndAudit(t *testing.T) {
 		t.Fatalf("update status=%d body=%s", updateResp.Code, updateResp.Body.String())
 	}
 
-	listReq := httptest.NewRequest("GET", "/api/v1/response-rules", nil)
+	listReq := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/response-rules", nil)
 	listReq = listReq.WithContext(authctx.WithSubject(listReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	listResp := httptest.NewRecorder()
 	r.ServeHTTP(listResp, listReq)
@@ -129,6 +133,7 @@ func TestResponseRules_UpdatePersistsOverrideAndAudit(t *testing.T) {
 }
 
 func TestResponseRules_UpdateRequiresReason(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	pool := d.Pool()
@@ -137,7 +142,7 @@ func TestResponseRules_UpdateRequiresReason(t *testing.T) {
 	r := chi.NewRouter()
 	h := NewResponseRules(d)
 	r.Patch("/api/v1/response-rules/{id}", h.Update)
-	req := httptest.NewRequest("PATCH", "/api/v1/response-rules/network-unauthorized-egress", strings.NewReader(`{"mode":"monitor","enabled":true}`))
+	req := httptest.NewRequestWithContext(t.Context(), "PATCH", "/api/v1/response-rules/network-unauthorized-egress", strings.NewReader(`{"mode":"monitor","enabled":true}`))
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: uuid.New(), OrgID: uuid.New()}))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)

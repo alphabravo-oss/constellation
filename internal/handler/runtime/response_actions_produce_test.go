@@ -1,3 +1,5 @@
+//go:build integration
+
 package runtime
 
 import (
@@ -11,21 +13,25 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/alphabravocompany/constellation/pkg/response"
+
 	"github.com/alphabravocompany/constellation/internal/handler"
 )
 
 // RT-KILL-02: the :pending endpoint must return only the calling node's pending rows,
 // org-scoped by the token — never another org's rows, another node's rows, or terminal
-// rows; node='' rows are broadcast to every node.
+// rows; actions without a node are broadcast to every node.
 func TestResponseActions_PendingNodeAndOrgScoped(t *testing.T) {
 	d := openTestDB(t)
-	defer d.Close()
+	t.Cleanup(d.Close)
 
 	ctx := context.Background()
 	pool := d.Pool()
 
 	orgA, orgB := uuid.New(), uuid.New()
-	clusterID := uuid.New()
+	clusterID, otherClusterID := uuid.New(), uuid.New()
+	tokenA := seedBoundRuntimeAgentScope(t, d, orgA, clusterID)
+	seedBoundRuntimeAgentScope(t, d, orgB, otherClusterID)
 	wantWL := "ns/target-" + uuid.New().String()
 
 	// org A / node-a / pending  -> WANT
@@ -49,7 +55,7 @@ func TestResponseActions_PendingNodeAndOrgScoped(t *testing.T) {
 		if _, err := pool.Exec(ctx, `
 INSERT INTO runtime_response_actions (org_id, cluster_id, node, type, workload_id, state)
 VALUES ($1, $2, $3, 'kill_process', $4, $5)`,
-			s.org, clusterID, s.node, s.wl, s.state); err != nil {
+			s.org, map[uuid.UUID]uuid.UUID{orgA: clusterID, orgB: otherClusterID}[s.org], s.node, s.wl, s.state); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
 	}
@@ -59,9 +65,9 @@ VALUES ($1, $2, $3, 'kill_process', $4, $5)`,
 	})
 
 	h := NewResponseActions(d)
-	req := httptest.NewRequest(http.MethodGet,
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
 		"/api/v1/runtime/response-actions:pending?cluster_id="+clusterID.String()+"&node=node-a", nil)
-	req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(), &handler.RuntimeAgentToken{OrgID: orgA}))
+	req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(), tokenA))
 	w := httptest.NewRecorder()
 	h.Pending(w, req)
 	if w.Code != http.StatusOK {
@@ -90,13 +96,14 @@ VALUES ($1, $2, $3, 'kill_process', $4, $5)`,
 // completed_at, and only touches the token org's rows.
 func TestResponseActions_ResultFlipsState(t *testing.T) {
 	d := openTestDB(t)
-	defer d.Close()
+	t.Cleanup(d.Close)
 
 	ctx := context.Background()
 	pool := d.Pool()
 
 	orgID := uuid.New()
 	clusterID := uuid.New()
+	token := seedBoundRuntimeAgentScope(t, d, orgID, clusterID)
 
 	var id uuid.UUID
 	if err := pool.QueryRow(ctx, `
@@ -113,8 +120,8 @@ VALUES ($1, $2, 'node-a', 'kill_process', 'ns/api', 'pending') RETURNING id`,
 		ID: id.String(), Type: "kill_process", Node: "node-a", Applied: true, Reason: "", At: time.Now().UTC(),
 	})
 	h := NewResponseActions(d)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/runtime/response-actions:result", bytes.NewReader(body))
-	req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(), &handler.RuntimeAgentToken{OrgID: orgID}))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/runtime/response-actions:result", bytes.NewReader(body))
+	req = req.WithContext(handler.WithRuntimeAgentToken(req.Context(), token))
 	w := httptest.NewRecorder()
 	h.Result(w, req)
 	if w.Code != http.StatusOK {
@@ -140,7 +147,7 @@ VALUES ($1, $2, 'kill_process', 'ns/api2', 'pending') RETURNING id`, orgID, clus
 		t.Fatalf("seed2: %v", err)
 	}
 	body2, _ := json.Marshal(responseActionResultWire{ID: id2.String(), Applied: true, At: time.Now().UTC()})
-	req2 := httptest.NewRequest(http.MethodPost, "/api/v1/runtime/response-actions:result", bytes.NewReader(body2))
+	req2 := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/runtime/response-actions:result", bytes.NewReader(body2))
 	req2 = req2.WithContext(handler.WithRuntimeAgentToken(req2.Context(), &handler.RuntimeAgentToken{OrgID: uuid.New()}))
 	w2 := httptest.NewRecorder()
 	h.Result(w2, req2)
@@ -157,7 +164,7 @@ VALUES ($1, $2, 'kill_process', 'ns/api2', 'pending') RETURNING id`, orgID, clus
 // kill_process row scoped to the workload/org/cluster.
 func TestQuarantineRuntime_KillEnqueues(t *testing.T) {
 	d := openTestDB(t)
-	defer d.Close()
+	t.Cleanup(d.Close)
 
 	ctx := context.Background()
 	pool := d.Pool()
@@ -170,7 +177,8 @@ func TestQuarantineRuntime_KillEnqueues(t *testing.T) {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM runtime_response_actions WHERE org_id=$1`, orgID)
 	})
 
-	q := &quarantineRuntime{db: d, orgID: orgID, clusterID: clusterID}
+	seedBoundRuntimeAgentScope(t, d, orgID, clusterID)
+	q := &quarantineRuntime{db: d, orgID: orgID, clusterID: clusterID, processWorkload: workload, sourceAt: time.Now().UTC(), processTarget: &response.ProcessTarget{Node: "node-a", PID: 4242, Comm: "nginx", BootID: uuid.NewString(), StartTicks: "1234", StartBootNS: "12349999999"}}
 	if err := q.Kill(ctx, workload, "shell-in-container"); err != nil {
 		t.Fatalf("Kill: %v", err)
 	}
@@ -179,7 +187,7 @@ func TestQuarantineRuntime_KillEnqueues(t *testing.T) {
 	var typ, state string
 	if err := pool.QueryRow(ctx, `
 SELECT count(*), COALESCE(max(type),''), COALESCE(max(state),'')
-  FROM runtime_response_actions
+  FROM runtime_response_actions_v2
  WHERE org_id=$1 AND cluster_id=$2 AND workload_id=$3`,
 		orgID, clusterID, workload).Scan(&n, &typ, &state); err != nil {
 		t.Fatal(err)
@@ -189,7 +197,7 @@ SELECT count(*), COALESCE(max(type),''), COALESCE(max(state),'')
 	}
 
 	// Empty workload is a no-op (nothing to target).
-	if err := q.Kill(ctx, "  ", "noop"); err != nil {
+	if err := q.Kill(ctx, "  ", "noop"); err == nil {
 		t.Fatalf("Kill(empty): %v", err)
 	}
 }

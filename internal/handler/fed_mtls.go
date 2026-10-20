@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"time"
 
+	colcrypto "github.com/alphabravocompany/constellation/internal/crypto"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -30,6 +32,7 @@ import (
 // a misconfigured joint never persists an unencrypted key.
 func PersistJointJoin(ctx context.Context, pool *pgxpool.Pool, sealer auth.Sealer, orgID uuid.UUID, clusterID, secret, clientCertPEM, clientKeyPEM, masterCAPEM string) error {
 	var keyEnc []byte
+	var keyID any
 	if clientKeyPEM != "" {
 		if sealer == nil {
 			return errors.New("federation: cannot persist joint client key without an at-rest cipher")
@@ -39,15 +42,17 @@ func PersistJointJoin(ctx context.Context, pool *pgxpool.Pool, sealer auth.Seale
 			return err
 		}
 		keyEnc = enc
+		keyID = sealer.KeyID()
 	}
 	_, err := pool.Exec(ctx, `
-INSERT INTO fed_joint_secret (org_id, cluster_id, secret, client_cert_pem, client_key_enc, master_ca_pem, updated_at)
-VALUES ($1,$2,$3,$4,$5,$6,NOW())
+INSERT INTO fed_joint_secret (org_id, cluster_id, secret, client_cert_pem, client_key_enc, master_ca_pem, key_id, algorithm, updated_at)
+VALUES ($1,$2,$3,$4,$5,$6,$7::text,CASE WHEN $7::text IS NULL THEN NULL ELSE $8::text END,NOW())
 ON CONFLICT (org_id) DO UPDATE SET
     cluster_id=EXCLUDED.cluster_id, secret=EXCLUDED.secret,
     client_cert_pem=EXCLUDED.client_cert_pem, client_key_enc=EXCLUDED.client_key_enc,
+    key_id=EXCLUDED.key_id, algorithm=EXCLUDED.algorithm,
     master_ca_pem=EXCLUDED.master_ca_pem, updated_at=NOW()`,
-		orgID, clusterID, secret, clientCertPEM, keyEnc, masterCAPEM)
+		orgID, clusterID, secret, clientCertPEM, keyEnc, masterCAPEM, keyID, colcrypto.Algorithm)
 	return err
 }
 

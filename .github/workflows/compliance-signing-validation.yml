@@ -1,0 +1,112 @@
+name: Compliance signing validation
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, 'implement/**']
+    paths:
+      - .github/workflows/compliance-signing-validation.yml
+      - cmd/constellation-compliance-scheduler/**
+      - internal/securefiles/**
+      - internal/complianceevidence/**
+      - deploy/docker/Dockerfile.compliance-scheduler
+      - deploy/docker/scanner-tools/**
+      - cmd/tools/scanner-tools/**
+      - deploy/charts/constellation/templates/compliance-scheduler-deployment.yaml
+      - scripts/tests/test_compliance_scheduler_chart.py
+permissions:
+  contents: read
+concurrency:
+  group: compliance-signing-validation-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      GOMAXPROCS: '2'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - run: bash scripts/install-ci-tools.sh goose gotestsum
+      - name: Validate maintained registry credentials and OpenPGP dependencies
+        run: |
+          go run ./cmd/tools/scanner-tools --tool cosign --prepare-only --work "$RUNNER_TEMP/cosign-source" --output "$RUNNER_TEMP/tool-output"
+          cp deploy/docker/scanner-tools/cosign/registry_security_test.go "$RUNNER_TEMP/cosign-source/cosign/cmd/cosign/cli/options/constellation_registry_security_test.go"
+          cd "$RUNNER_TEMP/cosign-source/cosign"
+          GOWORK=off go list -mod=readonly -deps ./cmd/cosign > "$GITHUB_WORKSPACE/artifacts-cosign-dependencies.txt"
+          if grep -E '^(github.com/chrismellard/docker-credential-acr-env|golang.org/x/crypto/openpgp)(/|$)' "$GITHUB_WORKSPACE/artifacts-cosign-dependencies.txt"; then
+            echo "retired vulnerable package remains in Cosign dependency graph" >&2
+            exit 1
+          fi
+          GOWORK=off go test -mod=readonly -race -shuffle=on -count=2 ./cmd/cosign/cli/options github.com/osscontainertools/docker-credential-acr/pkg/credhelper github.com/sigstore/rekor/pkg/pki/pgp
+          mkdir -p "$GITHUB_WORKSPACE/artifacts"
+          mv "$GITHUB_WORKSPACE/artifacts-cosign-dependencies.txt" "$GITHUB_WORKSPACE/artifacts/cosign-dependencies.txt"
+      - name: Database-backed compliance scheduler regression suite
+        run: |
+          make test-integration PKG="./cmd/constellation-compliance-scheduler ./internal/securefiles ./internal/complianceevidence"
+      - name: Compile actual-tool proof on hosted runner
+        run: CGO_ENABLED=0 go test -c -o artifacts/compliance-scheduler.test ./cmd/constellation-compliance-scheduler
+      - name: Prove pinned Cosign signing and independent verification without networking
+        run: |
+          docker run --rm --network none \
+            --entrypoint /proof/compliance-scheduler.test \
+            -e CONSTELLATION_TEST_COSIGN_BIN=/usr/local/bin/cosign \
+            -v "$PWD/artifacts:/proof:ro" \
+            ghcr.io/alphabravo-oss/constellation/scanner@sha256:716b0300f3d1992a1e7d142a306f2255af7b09171989bf67c87a2e961e2a5823 \
+            -test.run '^TestCosignActualToolRoundTrip$' -test.v -test.timeout 60s | tee artifacts/cosign-offline-proof.log
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: compliance-signing-regression-${{ github.sha }}
+          path: artifacts/
+          retention-days: 7
+
+  images:
+    needs: regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Record build time
+        id: time
+        run: echo "value=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+      - name: Build source-stamped OCI candidate
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: deploy/docker/Dockerfile.compliance-scheduler
+          platforms: linux/amd64
+          outputs: type=oci,dest=${{ runner.temp }}/image.tar
+          tags: constellation/compliance-scheduler:candidate-${{ github.sha }}
+          build-args: |
+            VERSION=dev-${{ github.sha }}
+            COMMIT=${{ github.sha }}
+            BUILD_TIME=${{ steps.time.outputs.value }}
+          provenance: mode=max
+          sbom: true
+      - name: Record build identity
+        env:
+          SOURCE_COMMIT: ${{ github.sha }}
+          IMAGE_ROLE: compliance-scheduler
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          BUILD_METADATA: ${{ steps.build.outputs.metadata }}
+        run: |
+          jq -n --arg c "$SOURCE_COMMIT" --arg r "$IMAGE_ROLE" --arg d "$IMAGE_DIGEST" --argjson m "$BUILD_METADATA" \
+            '{sourceCommit: $c, role: $r, digest: $d, metadata: $m}' > "$RUNNER_TEMP/identity.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: compliance-scheduler-candidate-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/image.tar
+            ${{ runner.temp }}/identity.json
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 7

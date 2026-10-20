@@ -31,8 +31,9 @@ level=WARN msg="admission profile name is deprecated" requested=restricted use=s
 ```
 
 Update any automation that imports/exports profiles by ID to use the new names.
-A real, full PSS engine is tracked separately (parity plan task C1); when it
-lands, dedicated PSS-conformant profiles can adopt the official names.
+The full PSS engine is available separately through the `pss-baseline` and
+`pss-restricted` profiles. The targeted hardening profiles retain their honest
+names because they intentionally enforce a smaller, opinionated control set.
 
 ## `basic-hardening`
 
@@ -103,6 +104,50 @@ profiles:
 
 For the full control set, see the upstream
 [Pod Security Standards](https://kubernetes.io/docs/concepts/security/pod-security-standards/).
-A complete PSS admission engine is planned (see
-`docs/neuvector-parity-implementation-plan.md`, task C1); until it lands, treat
-these profiles as targeted hardening, not PSS conformance.
+Use the `pss-baseline` or `pss-restricted` built-in profile when PSS conformance
+is required. Continue to treat `basic-hardening` and `strict-hardening` as
+targeted hardening rather than PSS profiles.
+
+## Successful vulnerability engines
+
+The built-in critical/fixable vulnerability profiles require fresh, known image
+scan results and successful Trivy **and** Grype completion:
+
+```yaml
+scanEvidence:
+  maxAge: 24h
+  requiredSuccessfulEngines: ["trivy", "grype"]
+```
+
+Migration 172 records a normalized `engine_status` map on each image scan result
+in the same completion transaction. Failed/absent engines are not clean scans;
+conflicting duplicate engine reports count as failed. Raw engine errors are not
+stored in this map. Re-scans replace the map, so an earlier successful engine
+cannot mask a later failed one. Legacy results default to an empty map and must
+be re-scanned before satisfying this requirement; findings alone cannot prove
+that an engine completed successfully.
+
+The active built-in profiles no longer require the retired VulnDB bundle or filter
+vulnerabilities to its canonical engine. Severity/fix rules and active exceptions
+still apply to findings across engines, including aggregated findings. Existing
+saved policies are not silently rewritten. Deploy migration 172, the updated API
+and updated admission controller before applying this new YAML field; older
+controllers do not understand it. Retired-bundle rules need explicit conversion
+and fresh scans as part of their deployment review.
+
+## Retiring controller replicas
+
+Built-in pod-template checks permit an `apps/v1` Deployment, ReplicaSet or
+StatefulSet full-object UPDATE that only reduces `spec.replicas`. The old and
+new objects must identify the same controller, and every other spec field,
+including the entire pod template and selector, must remain unchanged. Kubernetes
+controller metadata updates may accompany the reduction. This lets operators
+retire existing workloads even when their image evidence has become stale.
+
+Create, scale-up, same-count updates, template changes and other spec changes
+still receive the normal checks. Newly created Pods are checked independently.
+Custom Rego and CEL policies continue to run on reductions and may explicitly
+deny them. Rego receives operation, namespace, resource, actor, dry-run and old
+object context in `input.request`, alongside its existing kind and object fields.
+The reduction path does not grant Kubernetes authorization or exempt arbitrary
+custom-resource kinds or subresource requests.

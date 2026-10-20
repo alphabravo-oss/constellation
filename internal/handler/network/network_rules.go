@@ -2,17 +2,22 @@ package network
 
 import (
 	"encoding/json"
+	"errors"
 	"hash/fnv"
 	"net/http"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
+	"github.com/alphabravocompany/constellation/pkg/audit"
 )
 
 // networkRuleDTO mirrors NeuVector's RESTPolicyRule so the Network Rules page is a
@@ -32,7 +37,7 @@ type networkRuleDTO struct {
 	Learned      bool     `json:"learned"`
 	Disable      bool     `json:"disable"`
 	CfgType      string   `json:"cfg_type"`
-	Priority     uint32   `json:"priority"`
+	Priority     int64    `json:"priority"`
 	MatchCounter int64    `json:"match_counter"`
 	LastMatchTS  int64    `json:"last_match_timestamp"`
 }
@@ -88,12 +93,12 @@ SELECT from_ep, to_ep, ports, applications, action, disable, comment, priority, 
 func (h *Network) NetworkRules(w http.ResponseWriter, r *http.Request) {
 	subj, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "subject required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
 		return
 	}
 	clusterID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid cluster id")
 		return
 	}
 
@@ -133,7 +138,7 @@ SELECT src_workload, dst_workload, verdict,
 			var matches int64
 			var lastMatch *time.Time
 			if err := rows.Scan(&d.From, &d.To, &verdict, &apps, &ports, &matches, &lastMatch); err != nil {
-				httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 				return
 			}
 			key := d.From + "\x00" + d.To
@@ -142,7 +147,7 @@ SELECT src_workload, dst_workload, verdict,
 			}
 			seen[key] = true
 			d.ID = ruleID(d.From, d.To)
-			d.Priority = d.ID
+			d.Priority = int64(d.ID)
 			d.Applications = apps
 			if d.Applications == nil {
 				d.Applications = []string{}
@@ -168,13 +173,13 @@ SELECT src_workload, dst_workload, verdict,
 				d.Action = o.action
 				d.Disable = o.disable
 				d.Comment = o.comment
-				d.Priority = uint32(o.priority)
+				d.Priority = int64(o.priority)
 				d.CfgType = "learned_override"
 			}
 			out = append(out, d)
 		}
 		if err := rows.Err(); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 	}
@@ -194,7 +199,7 @@ SELECT src_workload, dst_workload, verdict,
 			Action:       o.action,
 			Disable:      o.disable,
 			Comment:      o.comment,
-			Priority:     uint32(o.priority),
+			Priority:     int64(o.priority),
 			CfgType:      "user_created",
 		}
 		if d.Ports == "" {
@@ -252,23 +257,23 @@ type ruleMutation struct {
 func (h *Network) UpsertNetworkRule(w http.ResponseWriter, r *http.Request) {
 	subj, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "subject required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
 		return
 	}
 	clusterID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid cluster id")
 		return
 	}
-	var body ruleMutation
+	body := ruleMutation{Priority: 1000}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid body")
 		return
 	}
 	body.From = strings.TrimSpace(body.From)
 	body.To = strings.TrimSpace(body.To)
 	if body.From == "" || body.To == "" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "from and to are required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "from and to are required")
 		return
 	}
 	if body.Action != "deny" {
@@ -279,9 +284,6 @@ func (h *Network) UpsertNetworkRule(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Applications == nil {
 		body.Applications = []string{}
-	}
-	if body.Priority <= 0 {
-		body.Priority = 1000
 	}
 	// Whether this pair exists in the learned set determines cfg_type.
 	var learned bool
@@ -304,7 +306,7 @@ ON CONFLICT (org_id, cluster_id, from_ep, to_ep) DO UPDATE SET
   cfg_type = EXCLUDED.cfg_type, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
 		subj.OrgID, clusterID, body.From, body.To, body.Ports, body.Applications,
 		body.Action, body.Disable, body.Comment, body.Priority, cfgType, subj.UserID); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "id": ruleID(body.From, body.To), "cfg_type": cfgType})
@@ -318,12 +320,12 @@ ON CONFLICT (org_id, cluster_id, from_ep, to_ep) DO UPDATE SET
 func (h *Network) MoveNetworkRuleToTop(w http.ResponseWriter, r *http.Request) {
 	subj, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "subject required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
 		return
 	}
 	clusterID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid cluster id")
 		return
 	}
 	var body struct {
@@ -331,41 +333,101 @@ func (h *Network) MoveNetworkRuleToTop(w http.ResponseWriter, r *http.Request) {
 		To   string `json:"to"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid body")
 		return
 	}
 	body.From, body.To = strings.TrimSpace(body.From), strings.TrimSpace(body.To)
 	if body.From == "" || body.To == "" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "from and to are required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "from and to are required")
 		return
 	}
-	// New top priority: below every existing override. Default 990 when none exist so a first
-	// move still lands above the 1000-default upsert baseline.
-	var newPri int
-	_ = h.db.Pool().QueryRow(r.Context(),
-		`SELECT COALESCE(MIN(priority), 1000) - 10 FROM network_rule_overrides WHERE org_id = $1 AND cluster_id = $2`,
-		subj.OrgID, clusterID).Scan(&newPri)
-	var learned bool
-	_ = h.db.Pool().QueryRow(r.Context(), `
+	if h.audit == nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusServiceUnavailable, "audit unavailable")
+		return
+	}
+	tx, err := h.db.Pool().BeginTx(r.Context(), pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to begin rule transition")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	var lockedCluster uuid.UUID
+	if err := tx.QueryRow(r.Context(), `SELECT id FROM clusters WHERE id=$1 AND org_id=$2 FOR UPDATE`, clusterID, subj.OrgID).Scan(&lockedCluster); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "cluster not found")
+		} else {
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to verify cluster")
+		}
+		return
+	}
+	var overridden, learned bool
+	if err := tx.QueryRow(r.Context(), `
 SELECT EXISTS (
+  SELECT 1 FROM network_rule_overrides
+   WHERE org_id=$1 AND cluster_id=$2 AND from_ep=$3 AND to_ep=$4),
+ EXISTS (
   SELECT 1 FROM network_flow_rollups
-   WHERE org_id = $1 AND cluster_id = $2 AND src_workload = $3 AND dst_workload = $4)`,
-		subj.OrgID, clusterID, body.From, body.To).Scan(&learned)
+   WHERE org_id=$1 AND cluster_id=$2 AND src_workload=$3 AND dst_workload=$4)`,
+		subj.OrgID, clusterID, body.From, body.To).Scan(&overridden, &learned); err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to verify rule")
+		return
+	}
+	if !overridden && !learned {
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "network rule not found")
+		return
+	}
+	var minPriority int
+	if err := tx.QueryRow(r.Context(), `SELECT COALESCE(MIN(priority), 1000) FROM network_rule_overrides WHERE org_id=$1 AND cluster_id=$2`, subj.OrgID, clusterID).Scan(&minPriority); err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to read precedence")
+		return
+	}
+	if minPriority < -2147483638 {
+		apiutil.WriteStatus(r.Context(), w, http.StatusConflict, "network rule priority range exhausted")
+		return
+	}
+	newPri := minPriority - 10
+	targetID := clusterID.String() + "/" + body.From + "/" + body.To
+	before := map[string]any{"cluster_id": clusterID, "from": body.From, "to": body.To}
+	auditID, _, err := h.audit.Log(r.Context(), audit.Event{
+		OrgID: &subj.OrgID, ActorID: &subj.UserID, ActorIP: networkActorIP(r),
+		Action: "network_rule.move_top_attempt", TargetKind: "network_rule", TargetID: targetID,
+		Before: before, After: map[string]any{"priority": newPri},
+	})
+	if err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusServiceUnavailable, "audit unavailable")
+		return
+	}
 	cfgType := "user_created"
 	if learned {
 		cfgType = "learned_override"
 	}
-	if _, err := h.db.Pool().Exec(r.Context(), `
+	if _, err := tx.Exec(r.Context(), `
 INSERT INTO network_rule_overrides
   (org_id, cluster_id, from_ep, to_ep, priority, cfg_type, updated_by, updated_at)
 VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
 ON CONFLICT (org_id, cluster_id, from_ep, to_ep) DO UPDATE SET
   priority = EXCLUDED.priority, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
 		subj.OrgID, clusterID, body.From, body.To, newPri, cfgType, subj.UserID); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true, "priority": newPri})
+	completionID, _, err := h.audit.LogInTx(r.Context(), tx, audit.Event{
+		OrgID: &subj.OrgID, ActorID: &subj.UserID, ActorIP: networkActorIP(r),
+		Action: "network_rule.move_top", TargetKind: "network_rule", TargetID: targetID,
+		Before: before, After: map[string]any{"priority": newPri, "audit_attempt_id": auditID},
+	})
+	if err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusServiceUnavailable, "audit unavailable")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to commit precedence")
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "priority": newPri, "audit_attempt_id": auditID,
+		"completion_audit_recorded": true, "completion_audit_id": completionID,
+	})
 }
 
 // DeleteNetworkRule drops the override for a pair. A manual rule vanishes; a learned rule
@@ -373,25 +435,25 @@ ON CONFLICT (org_id, cluster_id, from_ep, to_ep) DO UPDATE SET
 func (h *Network) DeleteNetworkRule(w http.ResponseWriter, r *http.Request) {
 	subj, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "subject required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
 		return
 	}
 	clusterID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid cluster id")
 		return
 	}
 	from := strings.TrimSpace(r.URL.Query().Get("from"))
 	to := strings.TrimSpace(r.URL.Query().Get("to"))
 	if from == "" || to == "" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "from and to are required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "from and to are required")
 		return
 	}
 	if _, err := h.db.Pool().Exec(r.Context(), `
 DELETE FROM network_rule_overrides
  WHERE org_id = $1 AND cluster_id = $2 AND from_ep = $3 AND to_ep = $4`,
 		subj.OrgID, clusterID, from, to); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"ok": true})

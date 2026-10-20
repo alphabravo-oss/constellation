@@ -15,6 +15,7 @@ import (
 // TestSignAndVerifyHMAC exercises the signer + verifier so receivers (or downstream tests)
 // can validate the X-Constellation-Signature header using the receiver's secret_key.
 func TestSignAndVerifyHMAC(t *testing.T) {
+	t.Parallel()
 	key := "supersecretkey"
 	body := []byte(`{"hello":"world"}`)
 	now := time.Unix(1700000000, 0)
@@ -36,6 +37,7 @@ func TestSignAndVerifyHMAC(t *testing.T) {
 // TestRenderBody_WebhookKindIncludesHeadersAndPayload checks the generic webhook
 // template emits the structured JSON envelope the docs promise.
 func TestRenderBody_WebhookKind(t *testing.T) {
+	t.Parallel()
 	rec := receiverRow{Kind: "webhook", TemplateID: "default"}
 	ev := Event{
 		Kind: "finding.triage", OrgID: uuid.New(), Severity: "high",
@@ -59,6 +61,7 @@ func TestRenderBody_WebhookKind(t *testing.T) {
 }
 
 func TestRenderBody_SlackKind(t *testing.T) {
+	t.Parallel()
 	rec := receiverRow{Kind: "slack", TemplateID: "default"}
 	ev := Event{Kind: "runtime.alert.exec", Severity: "critical", Title: `shell "spawn"`, Cluster: "c", Workload: "w", URL: "https://x", IdempotencyKey: uuid.New(), FiredAt: time.Now().UTC()}
 	body, _, err := renderBody(rec, ev)
@@ -78,6 +81,7 @@ func TestRenderBody_SlackKind(t *testing.T) {
 // TestRateLimit_ExhaustsBucket ensures the per-receiver token bucket throttles after
 // the configured cap.
 func TestRateLimit_ExhaustsBucket(t *testing.T) {
+	t.Parallel()
 	d := &Dispatcher{cfg: DispatcherConfig{Now: func() time.Time { return time.Unix(0, 0) }}, buckets: map[uuid.UUID]*tokenBucket{}}
 	rec := receiverRow{ID: uuid.New(), RatePerMin: 2}
 	if !d.tryConsume(rec) {
@@ -94,6 +98,7 @@ func TestRateLimit_ExhaustsBucket(t *testing.T) {
 // TestRequestHeadersOnSuccessfulDispatch spins a tiny HTTP server and exercises the
 // outbound request shape via a synthetic worker invocation (no DB).
 func TestOutboundRequestShape(t *testing.T) {
+	t.Parallel()
 	var capturedHeaders http.Header
 	var capturedBody []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -117,7 +122,7 @@ func TestOutboundRequestShape(t *testing.T) {
 		t.Fatal(err)
 	}
 	sig, _ := signHMAC(rec.SecretKey, body, time.Now().UTC())
-	req, _ := http.NewRequest("POST", rec.Endpoint, strings.NewReader(string(body)))
+	req, _ := http.NewRequestWithContext(t.Context(), "POST", rec.Endpoint, strings.NewReader(string(body)))
 	req.Header.Set("Content-Type", ct)
 	req.Header.Set("X-Constellation-Signature", sig)
 	req.Header.Set("X-Constellation-Idempotency", ev.IdempotencyKey.String())
@@ -144,6 +149,7 @@ func TestOutboundRequestShape(t *testing.T) {
 }
 
 func TestGenerateSecretKey(t *testing.T) {
+	t.Parallel()
 	k, err := GenerateSecretKey()
 	if err != nil {
 		t.Fatal(err)
@@ -158,6 +164,7 @@ func TestGenerateSecretKey(t *testing.T) {
 }
 
 func TestTruncate_RuneBoundary(t *testing.T) {
+	t.Parallel()
 	// "é" is 2 bytes (0xC3 0xA9); truncating at a byte that splits it must not
 	// produce invalid UTF-8, otherwise Postgres rejects the Exec and degraded
 	// status is never recorded.

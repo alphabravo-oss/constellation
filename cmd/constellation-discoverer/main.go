@@ -46,6 +46,7 @@ import (
 
 	"github.com/alphabravocompany/constellation/internal/imageid"
 	"github.com/alphabravocompany/constellation/internal/obslog"
+	"github.com/alphabravocompany/constellation/internal/telemetry"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -192,6 +193,18 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
+	tel, err := telemetry.Init(ctx, telemetry.ConfigFromEnv("constellation-discoverer"))
+	if err != nil {
+		logger.Error("telemetry init", slog.String("err", err.Error()))
+		os.Exit(1)
+	}
+	defer func() {
+		sctx, c := context.WithTimeout(context.Background(), 5*time.Second)
+		defer c()
+		_ = tel.Shutdown(sctx)
+	}()
+	// Liveness/readiness/metrics for the Deployment probes and Prometheus (guide ch.05).
+	telemetry.StartAdmin(ctx, telemetry.AdminAddrFromEnv(), tel.AdminHandler(telemetry.AdminOptions{}), logger)
 
 	pool, err := openDB(ctx, cfg.databaseURL)
 	if err != nil {
@@ -380,15 +393,16 @@ func (r *reconciler) getDeploymentIDs() map[workloadKey]uuid.UUID {
 }
 
 type workload struct {
-	namespace string
-	name      string
-	kind      string
-	labels    map[string]string
-	hostNet   bool
-	priv      bool
-	rootRisk  bool
-	aiFlag    bool
-	images    []string // container + init container image refs, deduped
+	scaledToZero bool
+	namespace    string
+	name         string
+	kind         string
+	labels       map[string]string
+	hostNet      bool
+	priv         bool
+	rootRisk     bool
+	aiFlag       bool
+	images       []string // container + init container image refs, deduped
 	// imageDigests maps a running image ref (the spec/status image, e.g.
 	// "nginx:1.25") to the runtime-resolved content digest ("sha256:<hex>")
 	// extracted from pod status.containerStatuses[].imageID. Spec refs carry a
@@ -419,9 +433,13 @@ type workloadKey struct {
 }
 
 func (r *reconciler) reconcile(ctx context.Context) error {
+	observedAt := time.Now().UTC()
 	wls, err := r.list(ctx)
 	if err != nil {
 		return err
+	}
+	if err := r.storeWorkloadPresence(ctx, observedAt, wls); err != nil {
+		return fmt.Errorf("store workload presence: %w", err)
 	}
 	upserted := 0
 	for _, w := range wls {
@@ -489,19 +507,23 @@ func (r *reconciler) list(ctx context.Context) ([]workload, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list deployments: %w", err)
 	}
+	if deps.Continue != "" {
+		return nil, fmt.Errorf("refusing incomplete deployments inventory")
+	}
 	for i := range deps.Items {
 		d := &deps.Items[i]
 		ps := d.Spec.Template.Spec
 		addWorkload(workload{
-			namespace: d.Namespace,
-			name:      d.Name,
-			kind:      "Deployment",
-			labels:    d.Labels,
-			hostNet:   ps.HostNetwork,
-			priv:      anyPrivileged(ps.Containers) || anyPrivileged(ps.InitContainers),
-			rootRisk:  runsAsRoot(ps),
-			images:    collectImages(ps),
-			aiFlag:    labelTrue(d.Labels, "ai-workload"),
+			namespace:    d.Namespace,
+			name:         d.Name,
+			kind:         "Deployment",
+			scaledToZero: d.Spec.Replicas != nil && *d.Spec.Replicas == 0,
+			labels:       d.Labels,
+			hostNet:      ps.HostNetwork,
+			priv:         anyPrivileged(ps.Containers) || anyPrivileged(ps.InitContainers),
+			rootRisk:     runsAsRoot(ps),
+			images:       collectImages(ps),
+			aiFlag:       labelTrue(d.Labels, "ai-workload"),
 		})
 	}
 
@@ -509,25 +531,32 @@ func (r *reconciler) list(ctx context.Context) ([]workload, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list statefulsets: %w", err)
 	}
+	if sts.Continue != "" {
+		return nil, fmt.Errorf("refusing incomplete statefulsets inventory")
+	}
 	for i := range sts.Items {
 		s := &sts.Items[i]
 		ps := s.Spec.Template.Spec
 		addWorkload(workload{
-			namespace: s.Namespace,
-			name:      s.Name,
-			kind:      "StatefulSet",
-			labels:    s.Labels,
-			hostNet:   ps.HostNetwork,
-			priv:      anyPrivileged(ps.Containers) || anyPrivileged(ps.InitContainers),
-			rootRisk:  runsAsRoot(ps),
-			images:    collectImages(ps),
-			aiFlag:    labelTrue(s.Labels, "ai-workload"),
+			namespace:    s.Namespace,
+			name:         s.Name,
+			kind:         "StatefulSet",
+			scaledToZero: s.Spec.Replicas != nil && *s.Spec.Replicas == 0,
+			labels:       s.Labels,
+			hostNet:      ps.HostNetwork,
+			priv:         anyPrivileged(ps.Containers) || anyPrivileged(ps.InitContainers),
+			rootRisk:     runsAsRoot(ps),
+			images:       collectImages(ps),
+			aiFlag:       labelTrue(s.Labels, "ai-workload"),
 		})
 	}
 
 	dsets, err := r.cs.AppsV1().DaemonSets("").List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("list daemonsets: %w", err)
+	}
+	if dsets.Continue != "" {
+		return nil, fmt.Errorf("refusing incomplete daemonsets inventory")
 	}
 	for i := range dsets.Items {
 		d := &dsets.Items[i]
@@ -559,8 +588,16 @@ func (r *reconciler) mergePodStatusImages(ctx context.Context, out []workload, b
 	if err != nil {
 		return fmt.Errorf("list pods for image ids: %w", err)
 	}
+	if pods.Continue != "" {
+		return fmt.Errorf("refusing incomplete pod image inventory")
+	}
 	for i := range pods.Items {
 		pod := &pods.Items[i]
+		// Terminal pods remain in the presence snapshot for historical findings,
+		// but must not add retired refs or overwrite current image digests here.
+		if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+			continue
+		}
 		if !namespaceAllowed(pod.Namespace, r.nsGlobs) {
 			continue
 		}
@@ -586,6 +623,9 @@ func (r *reconciler) replicaSetOwners(ctx context.Context) (map[string]workloadK
 		return nil, fmt.Errorf("list replicasets for image ids: %w", err)
 	}
 	out := map[string]workloadKey{}
+	if sets.Continue != "" {
+		return nil, fmt.Errorf("refusing incomplete replicaset inventory")
+	}
 	for i := range sets.Items {
 		rs := &sets.Items[i]
 		for _, owner := range rs.OwnerReferences {
@@ -678,15 +718,62 @@ func podSpecImages(ps corev1.PodSpec) []string {
 	return out
 }
 
+// resolvedPodStatusImages keeps runtime/configuration IDs out of pullable image
+// references. Prefer an observed repository-qualified imageID over a possibly
+// newer desired spec image; use the same named container's spec only as fallback.
+func resolvedPodStatusImages(pod corev1.Pod) []struct {
+	status corev1.ContainerStatus
+	ref    string
+} {
+	out := []struct {
+		status corev1.ContainerStatus
+		ref    string
+	}{}
+	add := func(statuses []corev1.ContainerStatus, specs map[string]string) {
+		for _, status := range statuses {
+			ref := strings.TrimSpace(status.Image)
+			if ref == "" || runtimeOnlyImageRef(ref) {
+				ref = normalizeKubeImageID(status.ImageID)
+				if ref == "" || runtimeOnlyImageRef(ref) {
+					ref = strings.TrimSpace(specs[status.Name])
+				}
+			}
+			if runtimeOnlyImageRef(ref) {
+				ref = ""
+			}
+			out = append(out, struct {
+				status corev1.ContainerStatus
+				ref    string
+			}{status, ref})
+		}
+	}
+	specs := map[string]string{}
+	for _, c := range pod.Spec.InitContainers {
+		specs[c.Name] = c.Image
+	}
+	add(pod.Status.InitContainerStatuses, specs)
+	specs = map[string]string{}
+	for _, c := range pod.Spec.Containers {
+		specs[c.Name] = c.Image
+	}
+	add(pod.Status.ContainerStatuses, specs)
+	specs = map[string]string{}
+	for _, c := range pod.Spec.EphemeralContainers {
+		specs[c.Name] = c.Image
+	}
+	add(pod.Status.EphemeralContainerStatuses, specs)
+	return out
+}
+
+func runtimeOnlyImageRef(ref string) bool {
+	return strings.HasPrefix(ref, "sha256:") || strings.Contains(ref, "://")
+}
+
 func podStatusImageRefs(pod corev1.Pod) []string {
 	out := []string{}
-	statuses := make([]corev1.ContainerStatus, 0, len(pod.Status.InitContainerStatuses)+len(pod.Status.ContainerStatuses)+len(pod.Status.EphemeralContainerStatuses))
-	statuses = append(statuses, pod.Status.InitContainerStatuses...)
-	statuses = append(statuses, pod.Status.ContainerStatuses...)
-	statuses = append(statuses, pod.Status.EphemeralContainerStatuses...)
-	for _, status := range statuses {
-		if status.Image != "" {
-			out = append(out, status.Image)
+	for _, image := range resolvedPodStatusImages(pod) {
+		if image.ref != "" {
+			out = append(out, image.ref)
 		}
 	}
 	return mergeImageRefs(nil, out...)
@@ -741,23 +828,20 @@ func normalizeKubeImageID(imageID string) string {
 	return strings.TrimSpace(imageID)
 }
 
-// podStatusImageDigests maps each running container's image ref (the
-// status.Image, e.g. "ghcr.io/acme/api:dev") to its resolved content digest
+// podStatusImageDigests maps each container's resolved image reference
+// (e.g. "ghcr.io/acme/api:dev") to its observed runtime digest
 // ("sha256:<hex>") taken from status.containerStatuses[].imageID. Containers
 // that have not started yet (empty imageID) or whose imageID carries no digest
 // are skipped, so the result only contains refs we could actually resolve.
 func podStatusImageDigests(pod corev1.Pod) map[string]string {
 	out := map[string]string{}
-	statuses := make([]corev1.ContainerStatus, 0, len(pod.Status.InitContainerStatuses)+len(pod.Status.ContainerStatuses)+len(pod.Status.EphemeralContainerStatuses))
-	statuses = append(statuses, pod.Status.InitContainerStatuses...)
-	statuses = append(statuses, pod.Status.ContainerStatuses...)
-	statuses = append(statuses, pod.Status.EphemeralContainerStatuses...)
-	for _, status := range statuses {
+	for _, image := range resolvedPodStatusImages(pod) {
+		status := image.status
 		digest := digestFromKubeImageID(status.ImageID)
 		if digest == "" {
 			continue
 		}
-		// The spec ref (status.Image, e.g. a tag) is the ref we link/scan on, so
+		// The resolved repository reference is the ref we link/scan on, so
 		// map it to the digest. Also map the normalized imageID ref itself so a
 		// "repo@sha256:..." ref resolves to its own digest.
 		//
@@ -767,7 +851,7 @@ func podStatusImageDigests(pod corev1.Pod) map[string]string {
 		// SPEC ref, so also map the default-registry-stripped variants — otherwise a
 		// locally-built image (spec omits the registry) never gets its digest and can't
 		// join to the runtime-agent's digest-keyed local evidence (WS-F1).
-		if ref := strings.TrimSpace(status.Image); ref != "" {
+		if ref := image.ref; ref != "" {
 			for _, v := range imageRefRegistryVariants(ref) {
 				out[v] = digest
 			}
@@ -883,7 +967,7 @@ func (r *reconciler) upsertWorkload(ctx context.Context, w workload) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx) //nolint:errcheck
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	// Upsert deployment.
 	images := w.images
@@ -1184,9 +1268,16 @@ SELECT id, namespace, name, kind
 }
 
 func (r *reconciler) syncPods(ctx context.Context) (int, error) {
+	observedAt := time.Now().UTC()
 	pods, err := r.cs.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return 0, fmt.Errorf("list pods: %w", err)
+	}
+	if pods.Continue != "" {
+		return 0, fmt.Errorf("refusing incomplete pod inventory snapshot")
+	}
+	if err := r.storeInventoryPresence(ctx, observedAt, pods.Items); err != nil {
+		return 0, fmt.Errorf("store pod inventory presence: %w", err)
 	}
 	ownerDeploymentIDs := r.deploymentIDsByKey(ctx)
 	// Publish the fresh owner map for the pod informer (Phase C) to read without a

@@ -1,0 +1,71 @@
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { createMemoryHistory, type RouterHistory } from "@tanstack/react-router";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
+import { operatorStorageKey } from "@/lib/operator-preferences";
+import { buildNetworkSavedViewSnapshot, buildNetworkSavedViewsExport, networkActivitySavedViewsStorageKey, type NetworkSavedView } from "@/lib/network-saved-views";
+import { networkViewHref, networkViewSnapshotFromParams } from "@/lib/network-saved-view-route";
+import { TestRouter } from "@/test/router";
+import { NetworkSavedViewFormPage, NetworkSavedViewImportPage } from "./NetworkSavedViewFormPage";
+const scope = vi.hoisted(() => ({ id: "cluster" as string | undefined, resolved: "cluster" as string | undefined, loading: false, error: null as Error | null }));
+vi.mock("@/hooks/useCluster", () => ({ useCluster: () => ({ clusterId: scope.id, cluster: scope.resolved ? { id: scope.resolved } : undefined, isLoading: scope.loading, error: scope.error }) }));
+const snapshot = buildNetworkSavedViewSnapshot({ workspaceTab: "conversations", hours: 168, namespace: "prod", group: "group-id", verdict: "block", verdictsVisible: { allow: false, alert: true, block: true }, protocolFilter: ["HTTP"], namespaceFilter: ["prod"], hidePlatformComponents: false, hiddenKinds: ["external"], scopeMode: "external", sessionFilters: { peer: "10.0.0.1", application: "https", port: "443" }, pcapFilters: { workload: "prod/api", bpf_filter: "tcp port 443" }, conversationFilters: { from: `prod/${"x".repeat(200)}`, to: "other/api", verdict_group: "blocked" } });
+let identity: { org_id: string; user_id: string } | null;
+let root: Root; let host: HTMLDivElement; let client: QueryClient; let history: RouterHistory;
+type Mode = "new" | "import";
+const key = (org = "org", user = "user") => operatorStorageKey(networkActivitySavedViewsStorageKey("cluster", user), { org_id: org, user_id: user })!;
+const view = (id = "imported"): NetworkSavedView => ({ id, name: "Imported exact filters", cluster_id: "source", saved_at: "2026-10-12T00:00:00Z", filters: snapshot });
+beforeEach(() => { (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true; identity = { org_id: "org", user_id: "user" }; localStorage.clear(); Object.assign(scope, { id: "cluster", resolved: "cluster", loading: false, error: null }); });
+afterEach(() => { act(() => root?.unmount()); client?.clear(); host?.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); localStorage.clear(); });
+async function render(mode: Mode, url?: string) { host = document.createElement("div"); document.body.append(host); root = createRoot(host); client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); history = createMemoryHistory({ initialEntries: [url ?? networkViewHref("cluster", new URLSearchParams("context=keep&conversation_page=4&flow=flow-id&inspect_from=prod/ui"), "#evidence", mode, snapshot)] }); await rerender(mode); }
+async function rerender(mode: Mode) { await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={identity ? { ...identity } : null}><TestRouter history={history}>{mode === "new" ? <NetworkSavedViewFormPage /> : <NetworkSavedViewImportPage />}</TestRouter></TablePreferencesProvider></QueryClientProvider>)); }
+async function field(selector: string, value: string) { await act(async () => { const input = host.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector)!; Object.getOwnPropertyDescriptor(input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); }); }
+async function draft(mode: Mode) { await field(mode === "new" ? "#network-view-name" : "#network-view-json", mode === "new" ? "Exact network view" : JSON.stringify(buildNetworkSavedViewsExport("source", [view()]))); }
+async function submit() { await act(async () => host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }))); }
+const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent === label || item.getAttribute("aria-label") === label || item.getAttribute("data-export-label") === label)!;
+async function settle(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
+it.each(["new", "import"] as const)("%s writes only on explicit Save and returns exact context and snapshot", async mode => {
+  await render(mode); await draft(mode); expect(localStorage.length).toBe(0); expect(host.querySelector("details")!.open).toBe(false); if (mode === "import") { expect(host.textContent).toContain("1 valid view; 0 rejected"); expect(host.textContent).toContain("source"); }
+  await submit(); const saved = JSON.parse(localStorage.getItem(key())!); expect(saved).toHaveLength(1); expect(saved[0].cluster_id).toBe("cluster"); expect(saved[0].filters).toEqual(snapshot); expect(localStorage.getItem(key("other"))).toBeNull();
+  await settle(() => expect(history.location.pathname).toBe("/clusters/cluster/network")); const params = new URLSearchParams(history.location.search); expect(params.get("context")).toBe("keep"); expect(params.get("conversation_page")).toBe("4"); expect(params.get("flow")).toBe("flow-id"); expect(params.get("inspect_from")).toBe("prod/ui"); expect(history.location.hash).toBe("#evidence"); expect(networkViewSnapshotFromParams(params)).toEqual(snapshot);
+});
+it.each(["new", "import"] as const)("%s Cancel preserves context and leaves storage untouched", async mode => { await render(mode); await draft(mode); await act(async () => button("Cancel").click()); await settle(() => expect(history.location.pathname).toBe("/clusters/cluster/network")); expect(localStorage.length).toBe(0); expect(networkViewSnapshotFromParams(new URLSearchParams(history.location.search))).toEqual(snapshot); });
+it.each(["new", "import"] as const)("%s retains the draft and reports a failed write honestly", async mode => { await render(mode); await draft(mode); const original = localStorage; vi.stubGlobal("localStorage", { getItem: original.getItem.bind(original), setItem: () => { throw new Error("private quota details"); } }); await submit(); expect(host.textContent).toContain("could not be stored"); expect(host.textContent).not.toContain("private quota"); expect(history.location.pathname).toContain("/views/"); vi.unstubAllGlobals(); await submit(); expect(JSON.parse(localStorage.getItem(key())!)).toHaveLength(1); });
+it.each((["new", "import"] as const).flatMap(mode => ["missing", "foreign", "loading", "error-stale", "session"].map(condition => [mode, condition] as const)))("blocks initial %s authoring for %s scope", async (mode, condition) => { if (condition === "missing") scope.id = undefined; if (condition === "foreign") scope.resolved = "foreign"; if (condition === "loading") scope.loading = true; if (condition === "error-stale") scope.error = new Error("failed"); if (condition === "session") identity = null; await render(mode); expect(host.querySelector("form")).toBeNull(); expect(localStorage.length).toBe(0); });
+it.each(["new", "import"] as const)("%s retains drafts through scope errors and blocks stale cache writes", async mode => { await render(mode); await draft(mode); scope.error = new Error("failed"); await rerender(mode); expect(button("Save").disabled).toBe(true); await submit(); expect(localStorage.length).toBe(0); scope.error = null; await rerender(mode); expect(button("Save").disabled).toBe(false); await act(async () => { client.setQueryData(["clusters"], { clusters: [] }); host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); }); expect(localStorage.length).toBe(0); });
+it.each(["new", "import"] as const)("%s never inherits drafts after an owner change", async mode => { await render(mode); await draft(mode); identity = { org_id: "another", user_id: "another" }; await rerender(mode); if (mode === "new") expect(host.querySelector<HTMLInputElement>("#network-view-name")!.value).not.toBe("Exact network view"); else expect(host.querySelector<HTMLTextAreaElement>("#network-view-json")!.value).toBe(""); });
+it("validates name and snapshot before writing", async () => { await render("new"); await field("#network-view-name", " "); await submit(); expect(localStorage.length).toBe(0); await field("#network-view-name", "x".repeat(121)); await submit(); expect(localStorage.length).toBe(0); });
+it.each(["{broken", "{}", JSON.stringify({ ...snapshot, schema_version: 99 })])("rejects malformed URL snapshots without authoring or writes", async raw => { await render("new", `/clusters/cluster/network/views/new?${new URLSearchParams({ network_view: raw })}`); expect(host.textContent).toContain("snapshot is missing or invalid"); expect(host.querySelector("form")).toBeNull(); expect(localStorage.length).toBe(0); });
+it("previews valid and rejected imports, preserves existing views and regenerates duplicate IDs", async () => { localStorage.setItem(key(), JSON.stringify([{ ...view(), cluster_id: "cluster" }])); await render("import"); await field("#network-view-json", JSON.stringify([view(), { id: "bad", name: "Broken", filters: {} }])); expect(host.textContent).toContain("1 valid view; 1 rejected"); expect(JSON.parse(localStorage.getItem(key())!)).toHaveLength(1); await submit(); const stored = JSON.parse(localStorage.getItem(key())!); expect(stored).toHaveLength(2); expect(new Set(stored.map((item: NetworkSavedView) => item.id)).size).toBe(2); });
+it.each(["{broken", "{}", JSON.stringify([{ id: "bad", name: "Broken", filters: {} }])])("keeps an invalid import editable without saving: %s", async raw => { await render("import"); await field("#network-view-json", raw); expect(button("Save").disabled).toBe(true); await submit(); expect(localStorage.length).toBe(0); expect(host.querySelector<HTMLTextAreaElement>("#network-view-json")!.value).toBe(raw); });
+it("does not let a delayed file read replace a newer pasted draft", async () => { await render("import"); let resolve!: (text: string) => void; const file = { size: 100, text: () => new Promise<string>(done => { resolve = done; }) }; const input = host.querySelector<HTMLInputElement>("#network-view-file")!; Object.defineProperty(input, "files", { value: [file] }); await act(async () => input.dispatchEvent(new Event("change", { bubbles: true }))); await field("#network-view-json", JSON.stringify([view("newer")])); await act(async () => resolve(JSON.stringify([view("older")]))); expect(host.querySelector<HTMLTextAreaElement>("#network-view-json")!.value).toContain("newer"); expect(host.querySelector<HTMLTextAreaElement>("#network-view-json")!.value).not.toContain("older"); });
+it("rejects a delayed file read after authenticated owner changes", async () => { await render("import"); let resolve!: (text: string) => void; const input = host.querySelector<HTMLInputElement>("#network-view-file")!; Object.defineProperty(input, "files", { value: [{ size: 100, text: () => new Promise<string>(done => { resolve = done; }) }] }); await act(async () => input.dispatchEvent(new Event("change", { bubbles: true }))); identity = { org_id: "another", user_id: "another" }; await rerender("import"); await act(async () => resolve(JSON.stringify([view()]))); expect(host.querySelector<HTMLTextAreaElement>("#network-view-json")!.value).toBe(""); expect(localStorage.length).toBe(0); });
+it("keeps a name draft while cluster refresh is pending and rechecks before Save", async () => {
+  await render("new");
+  await draft("new");
+  let resolve!: (value: { clusters: Array<{ id: string }> }) => void;
+  let refresh!: Promise<unknown>;
+  await act(async () => {
+    refresh = client.fetchQuery({ queryKey: ["clusters"], queryFn: () => new Promise(done => { resolve = done; }) });
+  });
+  // Cache state changes before React Query's scheduled UI notification. Saving
+  // must already recheck that state, even before the button reflects it.
+  expect(client.getQueryState(["clusters"])?.fetchStatus).toBe("fetching");
+  await submit();
+  expect(localStorage.length).toBe(0);
+  await settle(() => expect(button("Save").disabled).toBe(true));
+  expect(host.querySelector<HTMLInputElement>("#network-view-name")!.value).toBe("Exact network view");
+  await submit();
+  expect(localStorage.length).toBe(0);
+  await act(async () => {
+    resolve({ clusters: [{ id: "cluster" }] });
+    await refresh;
+  });
+  await settle(() => expect(button("Save").disabled).toBe(false));
+  await submit();
+  expect(JSON.parse(localStorage.getItem(key())!)).toHaveLength(1);
+});
+it("does not import an old valid preview after a newly chosen file fails to read", async () => { await render("import"); await draft("import"); const input = host.querySelector<HTMLInputElement>("#network-view-file")!; Object.defineProperty(input, "files", { value: [{ size: 100, text: () => Promise.reject(new Error("private file details")) }] }); await act(async () => input.dispatchEvent(new Event("change", { bubbles: true }))); expect(host.textContent).toContain("file could not be read"); expect(host.textContent).not.toContain("private file"); expect(button("Save").disabled).toBe(true); await submit(); expect(localStorage.length).toBe(0); });
+it.each(["new", "import"] as const)("prevents a duplicate %s write before return navigation commits", async mode => { await render(mode); await draft(mode); await act(async () => { const form = host.querySelector("form")!; form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); }); expect(JSON.parse(localStorage.getItem(key())!)).toHaveLength(1); });

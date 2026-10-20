@@ -33,10 +33,14 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/alphabravocompany/constellation/internal/telemetry"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+var ErrReceiverPaused = errors.New("notify: receiver paused")
 
 // Event is the high-level happening that fans out to receivers. Kinds follow a
 // dotted hierarchy (e.g. "finding.triage", "policy.create", "admission.deny",
@@ -87,9 +91,17 @@ type Dispatcher struct {
 	pool *pgxpool.Pool
 	cfg  DispatcherConfig
 
-	queue chan *job
-	wg    sync.WaitGroup
-	stop  chan struct{}
+	queue      chan *job
+	wg         sync.WaitGroup
+	stop       context.Context
+	cancelStop context.CancelFunc
+	done       chan struct{}
+
+	// Registration and the transition to stopping share this lock. Once Stop
+	// starts waiting, no worker or delayed retry may add to wg.
+	lifecycleMu sync.Mutex
+	started     bool
+	stopping    bool
 
 	bucketsMu sync.Mutex
 	buckets   map[uuid.UUID]*tokenBucket // keyed by receiver id
@@ -124,33 +136,47 @@ func NewDispatcher(pool *pgxpool.Pool, cfg DispatcherConfig) *Dispatcher {
 	if cfg.Now == nil {
 		cfg.Now = func() time.Time { return time.Now().UTC() }
 	}
+	stop, cancelStop := context.WithCancel(context.Background())
 	return &Dispatcher{
-		pool:    pool,
-		cfg:     cfg,
-		queue:   make(chan *job, cfg.Buffer),
-		stop:    make(chan struct{}),
-		buckets: make(map[uuid.UUID]*tokenBucket),
+		pool:       pool,
+		cfg:        cfg,
+		queue:      make(chan *job, cfg.Buffer),
+		stop:       stop,
+		cancelStop: cancelStop,
+		done:       make(chan struct{}),
+		buckets:    make(map[uuid.UUID]*tokenBucket),
 	}
 }
 
 // Start launches the worker pool + retry sweeper. Idempotent.
 func (d *Dispatcher) Start(ctx context.Context) {
+	d.lifecycleMu.Lock()
+	defer d.lifecycleMu.Unlock()
+	if d.started || d.stopping {
+		return
+	}
+	d.started = true
+	d.wg.Add(d.cfg.Workers + 1)
 	for i := 0; i < d.cfg.Workers; i++ {
-		d.wg.Add(1)
 		go d.worker(ctx, i)
 	}
-	d.wg.Add(1)
 	go d.sweeper(ctx)
 }
 
-// Stop signals workers to exit and waits up to 5s for drain.
+// Stop signals workers and delayed retries to exit and waits up to 5s for
+// in-flight work. Repeated calls share the same completion waiter.
 func (d *Dispatcher) Stop() {
-	close(d.stop)
-	done := make(chan struct{})
-	go func() {
-		d.wg.Wait()
-		close(done)
-	}()
+	d.lifecycleMu.Lock()
+	if !d.stopping {
+		d.stopping = true
+		d.cancelStop()
+		go func() {
+			d.wg.Wait()
+			close(d.done)
+		}()
+	}
+	done := d.done
+	d.lifecycleMu.Unlock()
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
@@ -206,17 +232,16 @@ func (d *Dispatcher) Dispatch(ctx context.Context, ev Event) ([]uuid.UUID, error
 			// Queue full — DON'T drop the alert. Mark it retrying with next_retry_at set so
 			// the sweeper re-enqueues it once the worker pool drains. final_state stays NULL
 			// (a full queue during an alert storm is exactly when losing alerts is worst).
-			d.markQueueFull(context.Background(), dlvID)
+			d.markQueueFull(context.WithoutCancel(ctx), dlvID)
 		}
 	}
 	return ids, nil
 }
 
-// DispatchSynchronous is the test/operator hook used by /test-fire: same path as
-// Dispatch but waits for the single receiver to actually fire (or fail) and returns
-// the resulting delivery id. Honours retries.
+// DispatchTo queues a delivery to one named receiver and returns its receipt id.
+// The caller can poll the receipt for the final outcome, including retries.
 func (d *Dispatcher) DispatchTo(ctx context.Context, receiverID uuid.UUID, ev Event) (uuid.UUID, error) {
-	rec, err := d.loadReceiver(ctx, receiverID)
+	rec, err := d.loadReceiver(ctx, receiverID, ev.OrgID)
 	if err != nil {
 		return uuid.Nil, fmt.Errorf("notify: load receiver: %w", err)
 	}
@@ -328,16 +353,19 @@ SELECT id, org_id, name, kind, endpoint,
 	return out, rows.Err()
 }
 
-func (d *Dispatcher) loadReceiver(ctx context.Context, id uuid.UUID) (receiverRow, error) {
+func (d *Dispatcher) loadReceiver(ctx context.Context, id, orgID uuid.UUID) (receiverRow, error) {
 	var r receiverRow
 	err := d.pool.QueryRow(ctx, `
 SELECT id, org_id, name, kind, endpoint,
        COALESCE(secret_key,''), COALESCE(rate_per_min,60),
        COALESCE(template_id,'default'), COALESCE(paused,false),
        COALESCE(config,'{}'::jsonb)
-  FROM receivers WHERE id = $1`, id).Scan(
+  FROM receivers WHERE id = $1 AND org_id = $2`, id, orgID).Scan(
 		&r.ID, &r.OrgID, &r.Name, &r.Kind, &r.Endpoint,
 		&r.SecretKey, &r.RatePerMin, &r.TemplateID, &r.Paused, &r.Config)
+	if err == nil && r.Paused {
+		return receiverRow{}, ErrReceiverPaused
+	}
 	return r, err
 }
 
@@ -365,7 +393,7 @@ func (d *Dispatcher) worker(ctx context.Context, idx int) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-d.stop:
+		case <-d.stop.Done():
 			return
 		case j, ok := <-d.queue:
 			if !ok {
@@ -377,6 +405,25 @@ func (d *Dispatcher) worker(ctx context.Context, idx int) {
 }
 
 func (d *Dispatcher) process(ctx context.Context, j *job) {
+	var paused bool
+	err := d.pool.QueryRow(ctx, `
+SELECT r.paused
+  FROM receiver_deliveries d
+  JOIN receivers r ON r.id = d.receiver_id
+ WHERE d.id = $1 AND d.final_state IS NULL`, j.deliveryID).Scan(&paused)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return
+	}
+	if err != nil {
+		d.cfg.Logger.Warn("notify: check receiver pause failed", slog.String("err", err.Error()))
+		d.markDeferred(ctx, j.deliveryID, "receiver pause check failed")
+		return
+	}
+	if paused {
+		d.markPaused(ctx, j.deliveryID)
+		return
+	}
+
 	// Rate-limit gate.
 	if !d.tryConsume(j.receiver) {
 		// Watermark check: if queued for >5min, drop.
@@ -384,15 +431,10 @@ func (d *Dispatcher) process(ctx context.Context, j *job) {
 			d.markRateLimited(ctx, j.deliveryID)
 			return
 		}
-		// Re-queue (best-effort) after a short sleep.
-		go func() {
-			time.Sleep(2 * time.Second)
-			select {
-			case d.queue <- j:
-			default:
-				d.markRateLimited(context.Background(), j.deliveryID)
-			}
-		}()
+		// Keep the same job and original enqueue time across rate-limit waits.
+		// The delayed retry belongs to the dispatcher lifecycle, just like a worker.
+		timer := time.NewTimer(2 * time.Second)
+		d.requeueRateLimitedAfter(ctx, j, timer.C, timer.Stop)
 		return
 	}
 
@@ -431,7 +473,7 @@ func (d *Dispatcher) process(ctx context.Context, j *job) {
 		d.handleFailure(ctx, j, fmt.Sprintf("post: %v", err))
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 {
 		// Drain a snippet of body for the error column.
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
@@ -441,6 +483,48 @@ func (d *Dispatcher) process(ctx context.Context, j *job) {
 
 	// Success.
 	d.markDelivered(ctx, j, latency, signedAt)
+}
+
+// requeueRateLimitedAfter registers a delayed retry before Stop can begin waiting.
+// The channel and stop function belong to one timer; taking them separately keeps
+// timer delivery deterministic in lifecycle tests without changing retry policy.
+func (d *Dispatcher) requeueRateLimitedAfter(ctx context.Context, j *job, ready <-chan time.Time, stopTimer func() bool) bool {
+	d.lifecycleMu.Lock()
+	if d.stopping || ctx.Err() != nil {
+		d.lifecycleMu.Unlock()
+		stopTimer()
+		return false
+	}
+	d.wg.Add(1)
+	d.lifecycleMu.Unlock()
+	go func() {
+		defer d.wg.Done()
+		defer stopTimer()
+		select {
+		case <-ctx.Done():
+			return
+		case <-d.stop.Done():
+			return
+		case <-ready:
+		}
+
+		// Serialize enqueue with Stop so a ready timer cannot requeue after the
+		// stop transition. Never hold the lifecycle lock during database work.
+		d.lifecycleMu.Lock()
+		if d.stopping || ctx.Err() != nil {
+			d.lifecycleMu.Unlock()
+			return
+		}
+		select {
+		case d.queue <- j:
+			d.lifecycleMu.Unlock()
+			return
+		default:
+			d.lifecycleMu.Unlock()
+		}
+		d.markRateLimited(ctx, j.deliveryID)
+	}()
+	return true
 }
 
 // markDelivered records a successful delivery + flips the receiver healthy. Shared
@@ -454,6 +538,7 @@ UPDATE receiver_deliveries
        latency_ms  = $2,
        signed_at   = $3,
        delivered_at = NOW(),
+       error = NULL,
        next_retry_at = NULL
  WHERE id = $1`, j.deliveryID, latencyMs, signedAt)
 	_, _ = d.pool.Exec(ctx, `
@@ -562,6 +647,21 @@ UPDATE receiver_deliveries
  WHERE id = $1`, id, state, truncate(msg, 1024))
 }
 
+func (d *Dispatcher) markPaused(ctx context.Context, id uuid.UUID) {
+	_, _ = d.pool.Exec(ctx, `
+UPDATE receiver_deliveries
+   SET status = 'paused', final_state = 'paused',
+       next_retry_at = NULL, error = 'receiver paused'
+ WHERE id = $1 AND final_state IS NULL`, id)
+}
+
+func (d *Dispatcher) markDeferred(ctx context.Context, id uuid.UUID, reason string) {
+	_, _ = d.pool.Exec(ctx, `
+UPDATE receiver_deliveries
+   SET status = 'retrying', next_retry_at = $2, error = $3
+ WHERE id = $1 AND final_state IS NULL`, id, d.cfg.Now().Add(d.cfg.BackoffSchedule[0]), reason)
+}
+
 // markQueueFull is the non-terminal counterpart to markFailed for an over-capacity queue:
 // it keeps final_state NULL and sets next_retry_at so the sweeper re-enqueues the delivery
 // rather than dropping it forever (the sweeper selects final_state IS NULL AND next_retry_at
@@ -579,13 +679,31 @@ UPDATE receiver_deliveries
 }
 
 func (d *Dispatcher) markRateLimited(ctx context.Context, id uuid.UUID) {
-	_, _ = d.pool.Exec(ctx, `
+	ctx, cancel := d.rateLimitUpdateContext(ctx)
+	defer cancel()
+	if _, err := d.pool.Exec(ctx, `
 UPDATE receiver_deliveries
    SET status      = 'rate_limited',
        final_state = 'rate_limited',
        next_retry_at = NULL,
        error       = 'dropped: rate-limit watermark exceeded'
- WHERE id = $1`, id)
+ WHERE id = $1`, id); err != nil {
+		// The delivery identifier is safe to log; database diagnostics can include
+		// connection details and do not belong in this operational message.
+		d.cfg.Logger.Warn("notify: rate-limit status update failed", slog.String("delivery", id.String()))
+	}
+}
+
+func (d *Dispatcher) rateLimitUpdateContext(parent context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+	stopCancel := context.AfterFunc(d.stop, cancel)
+	if d.stop.Err() != nil {
+		cancel()
+	}
+	return ctx, func() {
+		stopCancel()
+		cancel()
+	}
 }
 
 // sweeper polls for retry-due deliveries and re-enqueues them.
@@ -597,7 +715,7 @@ func (d *Dispatcher) sweeper(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-d.stop:
+		case <-d.stop.Done():
 			return
 		case <-t.C:
 			d.sweepOnce(ctx)
@@ -606,6 +724,10 @@ func (d *Dispatcher) sweeper(ctx context.Context) {
 }
 
 func (d *Dispatcher) sweepOnce(ctx context.Context) {
+	d.sweepDue(ctx, nil)
+}
+
+func (d *Dispatcher) sweepDue(ctx context.Context, deliveryID *uuid.UUID) {
 	rows, err := d.pool.Query(ctx, `
 SELECT d.id, d.receiver_id, d.idempotency_key, d.attempts, d.event_type, d.severity,
        COALESCE(d.payload, '{}'::jsonb),
@@ -618,7 +740,8 @@ SELECT d.id, d.receiver_id, d.idempotency_key, d.attempts, d.event_type, d.sever
  WHERE d.final_state IS NULL
    AND d.next_retry_at IS NOT NULL
    AND d.next_retry_at <= NOW()
- LIMIT 64`)
+   AND ($1::uuid IS NULL OR d.id = $1)
+ LIMIT 64`, deliveryID)
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
 			d.cfg.Logger.Debug("notify: sweep query", slog.String("err", err.Error()))
@@ -642,7 +765,7 @@ SELECT d.id, d.receiver_id, d.idempotency_key, d.attempts, d.event_type, d.sever
 		}
 		r.ID = rcvID
 		if r.Paused {
-			d.markFailed(ctx, dlvID, "paused", "receiver paused")
+			d.markPaused(ctx, dlvID)
 			continue
 		}
 		// Replay the exact original event from the persisted payload so the retry body
@@ -740,7 +863,7 @@ func signHMAC(key string, body []byte, now time.Time) (string, time.Time) {
 	}
 	ts := now.Unix()
 	mac := hmac.New(sha256.New, []byte(key))
-	fmt.Fprintf(mac, "%d.", ts)
+	_, _ = fmt.Fprintf(mac, "%d.", ts)
 	mac.Write(body)
 	return fmt.Sprintf("t=%d,v1=%s", ts, hex.EncodeToString(mac.Sum(nil))), now
 }
@@ -765,7 +888,7 @@ func VerifyHMAC(key, header string, body []byte) bool {
 		return false
 	}
 	mac := hmac.New(sha256.New, []byte(key))
-	fmt.Fprintf(mac, "%s.", ts)
+	_, _ = fmt.Fprintf(mac, "%s.", ts)
 	mac.Write(body)
 	expected := hex.EncodeToString(mac.Sum(nil))
 	return hmac.Equal([]byte(expected), []byte(sig))
@@ -834,7 +957,7 @@ func newGuardedHTTPClient(timeout time.Duration) *http.Client {
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 	}
-	return &http.Client{Timeout: timeout, Transport: tr}
+	return &http.Client{Timeout: timeout, Transport: telemetry.HTTPTransport(tr)}
 }
 
 // ssrfDialControl is the net.Dialer Control hook: address is the post-resolution "ip:port"
@@ -881,6 +1004,18 @@ func isBlockedIP(ip net.IP) bool {
 // dialer Control hook above is the authoritative dial-time guard (it also defeats rebind).
 // Returns a descriptive error when the endpoint is rejected.
 func PublicURLAllowed(endpoint string) error {
+	return PublicURLAllowedContext(context.Background(), endpoint)
+}
+
+// PublicURLAllowedContext bounds DNS validation to five seconds and respects the
+// caller's cancellation. Use this variant on request paths. The dial-time guard
+// remains authoritative when DNS is unavailable or changes after validation.
+func PublicURLAllowedContext(ctx context.Context, endpoint string) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	u, err := neturl.Parse(strings.TrimSpace(endpoint))
 	if err != nil {
 		return fmt.Errorf("invalid endpoint URL: %w", err)
@@ -903,7 +1038,10 @@ func PublicURLAllowed(endpoint string) error {
 	if strings.EqualFold(host, "localhost") {
 		return errors.New("endpoint host localhost is not allowed")
 	}
-	ips, err := net.LookupIP(host)
+	ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	if err == nil {
 		for _, ip := range ips {
 			if isBlockedIP(ip) {

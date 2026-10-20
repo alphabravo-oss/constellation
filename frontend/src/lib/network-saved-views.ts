@@ -1,10 +1,10 @@
 import type { SavedViewBase } from "@/hooks/useSavedViews";
 
-export const NETWORK_SAVED_VIEW_SCHEMA_VERSION = 1;
+export const NETWORK_SAVED_VIEW_SCHEMA_VERSION = 2;
 export const NETWORK_SAVED_VIEW_KIND = "constellation.networkActivity.savedViews";
 
 export const NETWORK_SAVED_WORKSPACE_TABS = ["map", "conversations", "sessions", "pcap", "rules", "threats"] as const;
-export const NETWORK_SAVED_VERDICTS = ["", "allow", "alert", "block"] as const;
+export const NETWORK_SAVED_VERDICTS = ["", "allow", "alert", "deny", "block"] as const;
 export const NETWORK_SAVED_VERDICT_GROUPS = ["allow", "alert", "block"] as const;
 export const NETWORK_SAVED_NODE_KINDS = ["workload", "host", "unmanaged", "external"] as const;
 export const NETWORK_SAVED_SCOPE_MODES = ["both", "internal", "external"] as const;
@@ -16,6 +16,7 @@ export type NetworkSavedNodeKind = (typeof NETWORK_SAVED_NODE_KINDS)[number];
 export type NetworkSavedScopeMode = (typeof NETWORK_SAVED_SCOPE_MODES)[number];
 
 export interface NetworkSavedViewSnapshot {
+  conversation_filters?: { from: string; to: string; verdict_group: "" | "blocked" };
   schema_version: typeof NETWORK_SAVED_VIEW_SCHEMA_VERSION;
   workspace_tab: NetworkSavedWorkspaceTab;
   hours: number;
@@ -25,7 +26,7 @@ export interface NetworkSavedViewSnapshot {
   verdicts_visible: Record<NetworkSavedVerdictGroup, boolean>;
   protocols: string[];
   namespaces: string[];
-  hide_kube_system: boolean;
+  hide_platform_components: boolean;
   hidden_kinds: NetworkSavedNodeKind[];
   scope_mode: NetworkSavedScopeMode;
   session_filters: NetworkSessionSavedFilters;
@@ -42,6 +43,9 @@ export interface NetworkSessionSavedFilters {
 }
 
 export interface NetworkPcapSavedFilters {
+  q?: string;
+  namespace?: string;
+  node?: string;
   status: string;
   workload: string;
   duration_s: number;
@@ -82,13 +86,15 @@ export function buildNetworkSavedViewSnapshot(input: {
   verdictsVisible: Record<NetworkSavedVerdictGroup, boolean>;
   protocolFilter: Iterable<string>;
   namespaceFilter: Iterable<string>;
-  hideKubeSystem: boolean;
+  hidePlatformComponents: boolean;
   hiddenKinds: Iterable<string>;
   scopeMode: NetworkSavedScopeMode;
   sessionFilters?: Partial<NetworkSessionSavedFilters>;
   pcapFilters?: Partial<NetworkPcapSavedFilters>;
+  conversationFilters?: { from?: string; to?: string; verdict_group?: string };
 }): NetworkSavedViewSnapshot {
   return {
+    conversation_filters: normalizeConversationFilters(input.conversationFilters),
     schema_version: NETWORK_SAVED_VIEW_SCHEMA_VERSION,
     workspace_tab: normalizeWorkspaceTab(input.workspaceTab),
     hours: normalizeHours(input.hours),
@@ -98,7 +104,7 @@ export function buildNetworkSavedViewSnapshot(input: {
     verdicts_visible: normalizeVerdictsVisible(input.verdictsVisible),
     protocols: normalizeTokenList(Array.from(input.protocolFilter), { upper: true }),
     namespaces: normalizeTokenList(Array.from(input.namespaceFilter)),
-    hide_kube_system: input.hideKubeSystem,
+    hide_platform_components: input.hidePlatformComponents,
     hidden_kinds: normalizeNodeKinds(Array.from(input.hiddenKinds)),
     scope_mode: normalizeScopeMode(input.scopeMode),
     session_filters: normalizeSessionSavedFilters(input.sessionFilters),
@@ -107,8 +113,9 @@ export function buildNetworkSavedViewSnapshot(input: {
 }
 
 export function normalizeNetworkSavedViewSnapshot(value: unknown): NetworkSavedViewSnapshot | null {
-  if (!isRecord(value)) return null;
+  if (!isValidNetworkSnapshotInput(value)) return null;
   return {
+    conversation_filters: normalizeConversationFilters(value.conversation_filters),
     schema_version: NETWORK_SAVED_VIEW_SCHEMA_VERSION,
     workspace_tab: normalizeWorkspaceTab(value.workspace_tab),
     hours: normalizeHours(value.hours),
@@ -118,7 +125,12 @@ export function normalizeNetworkSavedViewSnapshot(value: unknown): NetworkSavedV
     verdicts_visible: normalizeVerdictsVisible(value.verdicts_visible),
     protocols: normalizeTokenList(Array.isArray(value.protocols) ? value.protocols : [], { upper: true }),
     namespaces: normalizeTokenList(Array.isArray(value.namespaces) ? value.namespaces : []),
-    hide_kube_system: typeof value.hide_kube_system === "boolean" ? value.hide_kube_system : true,
+    hide_platform_components:
+      typeof value.hide_platform_components === "boolean"
+        ? value.hide_platform_components
+        : typeof value.hide_kube_system === "boolean"
+          ? value.hide_kube_system
+          : true,
     hidden_kinds: normalizeNodeKinds(Array.isArray(value.hidden_kinds) ? value.hidden_kinds : ["unmanaged"]),
     scope_mode: normalizeScopeMode(value.scope_mode),
     session_filters: normalizeSessionSavedFilters(value.session_filters),
@@ -127,7 +139,7 @@ export function normalizeNetworkSavedViewSnapshot(value: unknown): NetworkSavedV
 }
 
 export function normalizeNetworkSavedView(value: unknown, clusterID?: string): NetworkSavedView | null {
-  if (!isRecord(value) || typeof value.id !== "string" || typeof value.name !== "string") return null;
+  if (!isRecord(value) || typeof value.id !== "string" || !value.id.trim() || typeof value.name !== "string" || !value.name.trim() || value.name.trim().length > 120) return null;
   const filters = normalizeNetworkSavedViewSnapshot(value.filters);
   if (!filters) return null;
   return {
@@ -139,16 +151,23 @@ export function normalizeNetworkSavedView(value: unknown, clusterID?: string): N
   };
 }
 
+export interface NetworkSavedViewsImportPreview { views: NetworkSavedView[]; rejected: number; sourceCluster: string | null }
+export function previewNetworkSavedViewsImport(text: string, clusterID: string): NetworkSavedViewsImportPreview {
+  if (text.length > 2_000_000) throw new Error("Import files must be at most 2 MB.");
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { throw new Error("Choose a valid JSON saved-view file."); }
+  if (!Array.isArray(parsed) && (!isRecord(parsed) || !Array.isArray(parsed.views))) throw new Error("The file must contain an array of network saved views or a saved-view export bundle.");
+  if (isRecord(parsed) && ((parsed.schema_version !== undefined && parsed.schema_version !== NETWORK_SAVED_VIEW_SCHEMA_VERSION) || (parsed.kind !== undefined && parsed.kind !== NETWORK_SAVED_VIEW_KIND))) throw new Error("The saved-view bundle kind or schema version is unsupported.");
+  const entries = Array.isArray(parsed) ? parsed : (parsed as { views: unknown[] }).views;
+  if (entries.length > 1000) throw new Error("Import at most 1,000 saved views at a time.");
+  const views = entries.map(view => normalizeNetworkSavedView(view, clusterID)).filter((view): view is NetworkSavedView => Boolean(view));
+  return { views, rejected: entries.length - views.length, sourceCluster: isRecord(parsed) && typeof parsed.cluster_id === "string" ? parsed.cluster_id : null };
+}
 export function parseNetworkSavedViewsImport(text: string, clusterID: string): NetworkSavedView[] {
-  const parsed = JSON.parse(text) as unknown;
-  const views = Array.isArray(parsed)
-    ? parsed
-    : isRecord(parsed) && Array.isArray(parsed.views)
-      ? parsed.views
-      : [];
-  return views
-    .map((view) => normalizeNetworkSavedView(view, clusterID))
-    .filter((view): view is NetworkSavedView => Boolean(view));
+  return previewNetworkSavedViewsImport(text, clusterID).views;
+}
+export function isNetworkSavedView(value: unknown, clusterID: string): value is NetworkSavedView {
+  return isRecord(value) && value.cluster_id === clusterID && Boolean(normalizeNetworkSavedView(value));
 }
 
 export function mergeNetworkSavedViews(
@@ -244,6 +263,9 @@ function normalizeSessionSavedFilters(value: unknown): NetworkSessionSavedFilter
 function normalizePcapSavedFilters(value: unknown): NetworkPcapSavedFilters {
   const record = isRecord(value) ? value : {};
   return {
+    ...(normalizeTextFilter(record.q) ? { q: normalizeTextFilter(record.q) } : {}),
+    ...(normalizeTextFilter(record.namespace) ? { namespace: normalizeTextFilter(record.namespace) } : {}),
+    ...(normalizeTextFilter(record.node) ? { node: normalizeTextFilter(record.node) } : {}),
     status: normalizePcapStatus(record.status),
     workload: normalizeTextFilter(record.workload),
     duration_s: normalizePcapDuration(record.duration_s),
@@ -305,8 +327,10 @@ function normalizePortFilter(value: unknown) {
   return Number.isInteger(n) && n > 0 && n <= 65535 ? String(n) : "";
 }
 
-function normalizeTextFilter(value: unknown, maxLen = 128) {
-  return typeof value === "string" ? value.trim().slice(0, maxLen) : "";
+function normalizeTextFilter(value: unknown, maxLen?: number) {
+  if (typeof value !== "string") return "";
+  const text = value.trim();
+  return maxLen === undefined ? text : text.slice(0, maxLen);
 }
 
 function normalizeNodeKinds(values: unknown[]): NetworkSavedNodeKind[] {
@@ -328,4 +352,47 @@ function normalizeTokenList(values: unknown[], options: { upper?: boolean } = {}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function normalizeConversationFilters(value: unknown): { from: string; to: string; verdict_group: "" | "blocked" } {
+  const input = isRecord(value) ? value : {};
+  return { from: typeof input.from === "string" ? input.from.trim() : "", to: typeof input.to === "string" ? input.to.trim() : "", verdict_group: input.verdict_group === "blocked" ? "blocked" : "" };
+}
+
+// Legacy snapshots may omit fields introduced in schema 2. Provided filters
+// must still be valid: importing must never silently erase a restrictive filter.
+function isValidNetworkSnapshotInput(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value) || (value.schema_version !== undefined && value.schema_version !== 2)) return false;
+  if (!NETWORK_SAVED_WORKSPACE_TABS.includes(value.workspace_tab as NetworkSavedWorkspaceTab) || typeof value.hours !== "number" || !Number.isInteger(value.hours) || value.hours < 1 || value.hours > 720) return false;
+  if (typeof value.namespace !== "string" || !NETWORK_SAVED_VERDICTS.includes(value.verdict as NetworkSavedVerdict) || !NETWORK_SAVED_SCOPE_MODES.includes(value.scope_mode as NetworkSavedScopeMode)) return false;
+  if (!isRecord(value.verdicts_visible) || !NETWORK_SAVED_VERDICT_GROUPS.every(key => typeof (value.verdicts_visible as Record<string, unknown>)[key] === "boolean")) return false;
+  if (![value.protocols, value.namespaces].every(list => Array.isArray(list) && list.every(item => typeof item === "string"))) return false;
+  if (!Array.isArray(value.hidden_kinds) || !value.hidden_kinds.every(kind => NETWORK_SAVED_NODE_KINDS.includes(kind))) return false;
+  if (value.hide_platform_components !== undefined && typeof value.hide_platform_components !== "boolean") return false;
+  if (value.hide_kube_system !== undefined && typeof value.hide_kube_system !== "boolean") return false;
+  if (value.group !== undefined && typeof value.group !== "string") return false;
+  if (value.conversation_filters !== undefined) {
+    const pair = value.conversation_filters;
+    if (!isRecord(pair) || typeof pair.from !== "string" || typeof pair.to !== "string" || !["", "blocked"].includes(pair.verdict_group as string)) return false;
+  }
+  if (value.session_filters !== undefined) {
+    if (!isRecord(value.session_filters)) return false;
+    const input = value.session_filters;
+    if (!Object.values(input).every(item => typeof item === "string")) return false;
+    if (input.protocol !== undefined && normalizeSessionProtocol(input.protocol) !== input.protocol) return false;
+    if (input.port !== undefined && normalizePortFilter(input.port) !== input.port) return false;
+  }
+  if (value.pcap_filters !== undefined) {
+    if (!isRecord(value.pcap_filters)) return false;
+    const input = value.pcap_filters;
+    if (!Object.entries(input).every(([key, item]) => key === "duration_s" ? typeof item === "number" && Number.isInteger(item) && item >= 5 && item <= 300 : typeof item === "string")) return false;
+    if (typeof input.bpf_filter === "string" && input.bpf_filter.length > 1024) return false;
+    if (typeof input.interface === "string" && input.interface.length > 15) return false;
+    if (input.status !== undefined && normalizePcapStatus(input.status) !== input.status) return false;
+    if (input.protocol !== undefined && normalizePcapProtocol(input.protocol) !== input.protocol) return false;
+    if (input.dst_port !== undefined && normalizePortFilter(input.dst_port) !== input.dst_port) return false;
+    if (input.file_count !== undefined && normalizePcapFileCount(input.file_count) !== input.file_count) return false;
+    if (input.file_size_mb !== undefined && normalizePcapFileSizeMB(input.file_size_mb) !== input.file_size_mb) return false;
+  }
+  return true;
 }

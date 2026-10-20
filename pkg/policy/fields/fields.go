@@ -21,12 +21,12 @@ const (
 
 // Field is the metadata for one criterion field.
 type Field struct {
-	Name              string   `json:"name"`
-	Description       string   `json:"description"`
-	Type              Type     `json:"type"`
-	EnumValues        []string `json:"enum_values,omitempty"`
+	Name               string   `json:"name"`
+	Description        string   `json:"description"`
+	Type               Type     `json:"type"`
+	EnumValues         []string `json:"enum_values,omitempty"`
 	ScopeApplicability []string `json:"scope_applicability"` // BUILD / DEPLOY / RUNTIME
-	Category          string   `json:"category"`
+	Category           string   `json:"category"`
 }
 
 // All returns the curated catalogue, sorted alphabetically by Name. Returned
@@ -69,9 +69,9 @@ var catalogue = []Field{
 		ScopeApplicability: []string{"BUILD", "DEPLOY"},
 	},
 	{
-		Name: "image.signature.verified",
+		Name:        "image.signature.verified",
 		Description: "Whether the image carries a cosign-verified signature matching trust policy.",
-		Type: TypeBool, Category: "image",
+		Type:        TypeBool, Category: "image",
 		ScopeApplicability: []string{"BUILD", "DEPLOY"},
 	},
 	{
@@ -89,7 +89,7 @@ var catalogue = []Field{
 	{
 		Name: "cve.severity", Description: "Highest CVE severity present in the image.",
 		Type: TypeEnum, EnumValues: []string{"info", "low", "medium", "high", "critical"},
-		Category: "cve",
+		Category:           "cve",
 		ScopeApplicability: []string{"BUILD", "DEPLOY"},
 	},
 	{
@@ -105,47 +105,47 @@ var catalogue = []Field{
 
 	// --- container security context ---
 	{
-		Name: "container.securityContext.runAsNonRoot",
+		Name:        "container.securityContext.runAsNonRoot",
 		Description: "Container runs as a non-root UID.",
-		Type: TypeBool, Category: "securityContext",
+		Type:        TypeBool, Category: "securityContext",
 		ScopeApplicability: []string{"DEPLOY", "RUNTIME"},
 	},
 	{
-		Name: "container.securityContext.privileged",
+		Name:        "container.securityContext.privileged",
 		Description: "Container is privileged (--privileged / privileged: true).",
-		Type: TypeBool, Category: "securityContext",
+		Type:        TypeBool, Category: "securityContext",
 		ScopeApplicability: []string{"DEPLOY", "RUNTIME"},
 	},
 	{
-		Name: "container.securityContext.readOnlyRootFilesystem",
+		Name:        "container.securityContext.readOnlyRootFilesystem",
 		Description: "Container has a read-only root filesystem.",
-		Type: TypeBool, Category: "securityContext",
+		Type:        TypeBool, Category: "securityContext",
 		ScopeApplicability: []string{"DEPLOY", "RUNTIME"},
 	},
 	{
-		Name: "container.securityContext.allowPrivilegeEscalation",
+		Name:        "container.securityContext.allowPrivilegeEscalation",
 		Description: "Container allows privilege escalation (default: true).",
-		Type: TypeBool, Category: "securityContext",
+		Type:        TypeBool, Category: "securityContext",
 		ScopeApplicability: []string{"DEPLOY", "RUNTIME"},
 	},
 	{
-		Name: "container.securityContext.capabilities.added",
+		Name:        "container.securityContext.capabilities.added",
 		Description: "Linux capabilities added beyond the K8s default set.",
-		Type: TypeString, Category: "securityContext",
+		Type:        TypeString, Category: "securityContext",
 		ScopeApplicability: []string{"DEPLOY", "RUNTIME"},
 	},
 
 	// --- resources ---
 	{
-		Name: "container.resources.limits.cpu",
+		Name:        "container.resources.limits.cpu",
 		Description: "CPU limit (millicores or core string).",
-		Type: TypeString, Category: "resources",
+		Type:        TypeString, Category: "resources",
 		ScopeApplicability: []string{"DEPLOY"},
 	},
 	{
-		Name: "container.resources.limits.memory",
+		Name:        "container.resources.limits.memory",
 		Description: "Memory limit (Mi/Gi).",
-		Type: TypeString, Category: "resources",
+		Type:        TypeString, Category: "resources",
 		ScopeApplicability: []string{"DEPLOY"},
 	},
 
@@ -178,9 +178,9 @@ var catalogue = []Field{
 		ScopeApplicability: []string{"RUNTIME"},
 	},
 	{
-		Name: "network.egress.domain",
+		Name:        "network.egress.domain",
 		Description: "Egress DNS domain observed for a workload.",
-		Type: TypeRegex, Category: "runtime",
+		Type:        TypeRegex, Category: "runtime",
 		ScopeApplicability: []string{"RUNTIME"},
 	},
 }

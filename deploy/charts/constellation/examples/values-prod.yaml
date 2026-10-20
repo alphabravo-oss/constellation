@@ -5,7 +5,7 @@
 #   -f ops/values-prod.yaml`.
 
 image:
-  tag: v0.2.0          # pin to a released tag in prod
+  tag: v0.3.0          # pin to a released tag in prod
   pullPolicy: IfNotPresent
   pullSecrets:
     - name: ghcr-pull-secret
@@ -84,11 +84,10 @@ tls:
 # Postgres remains supported with mode=external + existingSecret.
 postgres:
   mode: cnpg
-  embedded: false
   cloudnativepg:
     enabled: true
     instances: 3
-    imageName: ghcr.io/alphabravo-oss/constellation/postgres:v0.2.0
+    imageName: ghcr.io/alphabravo-oss/constellation/postgres:16.14-v0.3.0
     storage: 50Gi
 
 # Public Ingress TLS is separate from the private admission certificate issuer.

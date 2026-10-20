@@ -15,12 +15,12 @@
 //
 // Why a snapshot rather than a per-request DB call?
 //
-//   The admission webhook is on the critical path of every Pod CREATE.
-//   A 50ms DB round-trip per request is the difference between "fine" and
-//   "the kubelet times out and the node thrashes." We accept up to 5s of
-//   staleness (configurable) — quarantine is not an enforcement primitive
-//   for already-running pods (use the policy state machine for that), so
-//   a short staleness window has no security cost.
+//	The admission webhook is on the critical path of every Pod CREATE.
+//	A 50ms DB round-trip per request is the difference between "fine" and
+//	"the kubelet times out and the node thrashes." We accept up to 5s of
+//	staleness (configurable) — quarantine is not an enforcement primitive
+//	for already-running pods (use the policy state machine for that), so
+//	a short staleness window has no security cost.
 package quarantine
 
 import (
@@ -30,13 +30,15 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
 )
 
 // Scope is one of workload | image | namespace. The semantics live in the
 // migration's column comment; this package treats them as opaque strings
-// keyed on equal-prefix matching for image, equal-string for workload and
+// keyed on repository/reference matching for scan images, prefix matching for other
+// images, and equal-string matching for workload and
 // namespace.
 type Scope string
 
@@ -49,16 +51,16 @@ const (
 // Entry is one quarantine row materialized in memory. Field names match
 // the SQL column names for symmetry.
 type Entry struct {
-	ID         uuid.UUID `json:"id"`
-	OrgID      uuid.UUID `json:"org_id"`
-	ClusterID  uuid.UUID `json:"cluster_id"`
-	Scope      Scope     `json:"scope"`
-	MatchKey   string    `json:"match_key"`
-	Reason     string    `json:"reason"`
-	Origin     string    `json:"origin"`
-	SourceKind string    `json:"source_kind,omitempty"`
+	ID         uuid.UUID  `json:"id"`
+	OrgID      uuid.UUID  `json:"org_id"`
+	ClusterID  uuid.UUID  `json:"cluster_id"`
+	Scope      Scope      `json:"scope"`
+	MatchKey   string     `json:"match_key"`
+	Reason     string     `json:"reason"`
+	Origin     string     `json:"origin"`
+	SourceKind string     `json:"source_kind,omitempty"`
 	SourceID   *uuid.UUID `json:"source_id,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
+	CreatedAt  time.Time  `json:"created_at"`
 	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
 }
 
@@ -70,14 +72,14 @@ func (e Entry) Active(t time.Time) bool {
 
 // Snapshot is the immutable per-refresh view of all active entries for
 // one cluster. Lookups are O(1) for namespace and exact-workload, O(n)
-// over image-prefix entries (typically <100, so still microseconds).
+// over image entries (typically <100).
 type Snapshot struct {
 	clusterID uuid.UUID
 	at        time.Time
 	// Indexed views.
-	namespaces map[string]Entry        // ns -> first matching entry
-	workloads  map[string]Entry        // "ns/name" -> entry
-	images     []Entry                 // scope=image; matched by HasPrefix
+	namespaces map[string]Entry // ns -> first matching entry
+	workloads  map[string]Entry // "ns/name" -> entry
+	images     []Entry          // scope=image; scan repository/reference or legacy prefix matching
 }
 
 // Hit describes a quarantine match against a candidate pod.
@@ -110,12 +112,55 @@ func (s *Snapshot) Match(pod *corev1.Pod) *Hit {
 			if !e.Active(s.at) {
 				continue
 			}
-			if strings.HasPrefix(ctr.Image, e.MatchKey) {
+			if imageEntryMatches(e, ctr.Image) {
 				return &Hit{Entry: e, MatchKind: "image", MatchValue: ctr.Image}
 			}
 		}
 	}
 	return nil
+}
+
+// Automatic scan entries describe an image repository or a concrete image ref,
+// never an arbitrary string prefix. Keep manual and older non-scan prefix entries
+// compatible, including intentional registry-wide entries ending in '/'.
+func imageEntryMatches(e Entry, image string) bool {
+	if e.Origin != "auto" || e.SourceKind != "scan" {
+		return strings.HasPrefix(image, e.MatchKey)
+	}
+	candidate, err := name.ParseReference(image)
+	if err != nil {
+		return false
+	}
+	if repository, err := name.NewRepository(e.MatchKey); err == nil {
+		return candidate.Context().Name() == repository.Name()
+	}
+	// Historical scan fallbacks may contain a tag or digest instead of a repo.
+	// Honor that exact normalized reference rather than broadening its scope.
+	reference, err := name.ParseReference(e.MatchKey)
+	return err == nil && candidate.Name() == reference.Name()
+}
+
+// WorkloadHit checks an exact controller identity supplied by the admission resolver.
+func (s *Snapshot) WorkloadHit(key string) *Hit {
+	if s == nil {
+		return nil
+	}
+	if e, ok := s.workloads[key]; ok && e.Active(s.at) {
+		return &Hit{Entry: e, MatchKind: "workload", MatchValue: key}
+	}
+	return nil
+}
+
+func (s *Snapshot) HasWorkloads(namespace string) bool {
+	if s == nil || namespace == "" {
+		return false
+	}
+	for key, e := range s.workloads {
+		if strings.HasPrefix(key, namespace+"/") && e.Active(s.at) {
+			return true
+		}
+	}
+	return false
 }
 
 // Stats reports the index size — useful for /metrics and for noticing
@@ -256,11 +301,11 @@ func (s *Source) Current() *Snapshot { return s.snap.Load() }
 
 // Health describes the source's freshness for /readyz and /metrics.
 type Health struct {
-	LastRefresh time.Time `json:"last_refresh"`
+	LastRefresh time.Time     `json:"last_refresh"`
 	Age         time.Duration `json:"age"`
-	Successes   int64     `json:"successes"`
-	Failures    int64     `json:"failures"`
-	LastError   string    `json:"last_error,omitempty"`
+	Successes   int64         `json:"successes"`
+	Failures    int64         `json:"failures"`
+	LastError   string        `json:"last_error,omitempty"`
 }
 
 // Health returns a fresh snapshot of the source's state.
@@ -283,10 +328,9 @@ func (s *Source) Health() Health {
 // Job) set ownerReferences; this function uses the top-level owner kind
 // + name when present. Naked pods fall back to "namespace/pod-name".
 //
-// We deliberately don't synthesize a Deployment name from a ReplicaSet
-// suffix — too brittle. Operators authoring quarantine workload keys
-// for Deployments should target the Deployment's ReplicaSet name as
-// reported by the runtime alert, which is what we record.
+// This immediate-owner key remains compatible with existing entries. The admission
+// engine also checks the admitted controller itself and verified ReplicaSet/Job
+// ancestry; Deployment names are never synthesized from name suffixes.
 func workloadKeyForPod(pod *corev1.Pod) string {
 	if pod.Namespace == "" {
 		return ""
@@ -304,8 +348,11 @@ func workloadKeyForPod(pod *corev1.Pod) string {
 }
 
 func allContainers(pod *corev1.Pod) []corev1.Container {
-	out := make([]corev1.Container, 0, len(pod.Spec.Containers)+len(pod.Spec.InitContainers))
+	out := make([]corev1.Container, 0, len(pod.Spec.Containers)+len(pod.Spec.InitContainers)+len(pod.Spec.EphemeralContainers))
 	out = append(out, pod.Spec.Containers...)
 	out = append(out, pod.Spec.InitContainers...)
+	for _, c := range pod.Spec.EphemeralContainers {
+		out = append(out, corev1.Container{Name: c.Name, Image: c.Image})
+	}
 	return out
 }

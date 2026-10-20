@@ -1,3 +1,5 @@
+//go:build integration
+
 package handler
 
 import (
@@ -6,6 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/alphabravocompany/constellation/internal/inventorypresence"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -16,13 +21,13 @@ func TestClusters_HealthValidatesClusterIDAndSubject(t *testing.T) {
 	r.Get("/api/v1/clusters/{id}/health", NewClusters(nil).Health)
 
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/clusters/not-a-uuid/health", nil))
+	r.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/clusters/not-a-uuid/health", nil))
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("invalid id status: %d", w.Code)
 	}
 
 	w = httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest("GET", "/api/v1/clusters/"+uuid.NewString()+"/health", nil))
+	r.ServeHTTP(w, httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/clusters/"+uuid.NewString()+"/health", nil))
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("missing subject status: %d", w.Code)
 	}
@@ -72,7 +77,7 @@ VALUES ($1, $2, $3, 'prod-east', 'k3s', NOW() + INTERVAL '7 days', 'test-fingerp
 	r := chi.NewRouter()
 	r.Get("/api/v1/clusters/{id}/health", NewClusters(d).Health)
 
-	req := httptest.NewRequest("GET", "/api/v1/clusters/"+clusterID.String()+"/health", nil)
+	req := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/clusters/"+clusterID.String()+"/health", nil)
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -165,7 +170,7 @@ VALUES ($1, $2, $3, 'prod-east', 'k3s', NOW() + INTERVAL '7 days', 'test-fingerp
 		t.Fatalf("component gate: %+v", got.Gates[2])
 	}
 
-	listReq := httptest.NewRequest("GET", "/api/v1/clusters", nil)
+	listReq := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/clusters", nil)
 	listReq = listReq.WithContext(WithSubject(listReq.Context(), Subject{UserID: userID, OrgID: orgID}))
 	listW := httptest.NewRecorder()
 	NewClusters(d).List(listW, listReq)
@@ -246,7 +251,7 @@ VALUES
 
 	r := chi.NewRouter()
 	r.Get("/api/v1/clusters/{id}/health", NewClusters(d).Health)
-	req := httptest.NewRequest("GET", "/api/v1/clusters/"+clusterID.String()+"/health", nil)
+	req := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/clusters/"+clusterID.String()+"/health", nil)
 	req = req.WithContext(WithSubject(req.Context(), Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -282,5 +287,99 @@ VALUES
 				t.Fatalf("%s component should ignore stale replaced instance: %+v", component.Name, component)
 			}
 		}
+	}
+}
+
+func TestClustersListWorkloadScope(t *testing.T) {
+	d := openTestDB(t)
+	defer d.Close()
+	ctx := context.Background()
+	org, cluster, empty := uuid.New(), uuid.New(), uuid.New()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := d.Pool().Exec(ctx, sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec(`INSERT INTO orgs(id,name,display_name) VALUES($1::uuid,$1::text,'scope')`, org)
+	defer func() {
+		_, _ = d.Pool().Exec(ctx, `DELETE FROM findings WHERE org_id=$1`, org)
+		_, _ = d.Pool().Exec(ctx, `DELETE FROM orgs WHERE id=$1`, org)
+	}()
+	exec(`INSERT INTO clusters(id,org_id,name,state) VALUES($1,$3,'scope','connected'),($2,$3,'empty','connected')`, cluster, empty, org)
+	labels := `{"app.kubernetes.io/name":"constellation","app.kubernetes.io/part-of":"constellation","app.kubernetes.io/managed-by":"Helm","helm.sh/chart":"constellation-0.2.0"}`
+	for _, fixture := range []struct {
+		name, labels string
+		risk         int
+	}{{"api", labels, 90}, {"customer", "{}", 20}} {
+		exec(`INSERT INTO deployments(org_id,cluster_id,namespace,name,kind,labels,risk_score) VALUES($1,$2,'constellation-system',$3,'Deployment',$4::jsonb,$5)`, org, cluster, fixture.name, fixture.labels, fixture.risk)
+		for _, pod := range []string{"live", "old", "unknown"} {
+			asset := uuid.New()
+			exec(`INSERT INTO assets(id,org_id,cluster_id,kind,name) VALUES($1,$2,$3,'workload',$4)`, asset, org, cluster, "constellation-system/pod/"+fixture.name+"-"+pod)
+			exec(`INSERT INTO findings(org_id,cluster_id,asset_id,kind,external_id,title,severity,target_type,target_ref,last_seen_at) VALUES($1,$2,$3,'vulnerability',$4,'scope','critical','workload',$5,NOW()-INTERVAL '1 minute')`, org, cluster, asset, "CVE-"+pod, "constellation-system/"+fixture.name)
+		}
+	}
+	// Unknown ownership must remain in the application view.
+	exec(`INSERT INTO findings(org_id,cluster_id,asset_id,kind,title,severity,target_type,target_ref) VALUES($1,$2,$3,'vulnerability','unknown','high','image','sha256:unknown')`, org, cluster, uuid.New())
+	now := time.Now().UTC()
+	if err := inventorypresence.Store(ctx, d.Pool(), org, cluster, now, now.Add(time.Hour), inventorypresence.Snapshot{ImageDigests: map[string]bool{}, Pods: map[string]string{"constellation-system/pod/api-live": "Running", "constellation-system/pod/customer-live": "Running"}}); err != nil {
+		t.Fatal(err)
+	}
+	// Findings newer than inventory stay unverified instead of being called historical.
+	exec(`UPDATE findings SET last_seen_at=$2 WHERE org_id=$1 AND external_id='CVE-unknown'`, org, now.Add(time.Minute))
+	for _, tc := range []struct {
+		scope                                              string
+		total, deps, risk, current, historical, unverified int
+	}{
+		{"application", 4, 1, 20, 1, 1, 2}, {"constellation", 3, 1, 90, 1, 1, 1}, {"all", 7, 2, 90, 2, 2, 3}, {"", 7, 2, 90, 2, 2, 3},
+	} {
+		t.Run(tc.scope, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/?workload_scope="+tc.scope, nil)
+			req = req.WithContext(WithSubject(ctx, Subject{OrgID: org}))
+			w := httptest.NewRecorder()
+			NewClusters(d).List(w, req)
+			if w.Code != 200 {
+				t.Fatalf("status %d: %s", w.Code, w.Body.String())
+			}
+			var result struct {
+				Clusters []struct {
+					ID, State   string
+					Deployments int
+					MaxRisk     int `json:"max_risk"`
+					Stats       struct {
+						Total int `json:"total_findings"`
+					}
+					Exposure inventorypresence.Counts
+				}
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Clusters) != 2 {
+				t.Fatalf("empty cluster lost: %s", w.Body.String())
+			}
+			for _, c := range result.Clusters {
+				if c.State != "connected" {
+					t.Fatalf("health changed: %+v", c)
+				}
+				if c.ID == empty.String() {
+					if c.Stats.Total != 0 {
+						t.Fatal(c)
+					}
+					continue
+				}
+				e := c.Exposure
+				if c.Stats.Total != tc.total || c.Deployments != tc.deps || c.MaxRisk != tc.risk || e.CurrentOccurrences != tc.current || e.HistoricalOccurrences != tc.historical || e.UnverifiedOccurrences != tc.unverified {
+					t.Fatalf("scope counts: %+v", c)
+				}
+			}
+		})
+	}
+	req := httptest.NewRequest("GET", "/?workload_scope=invalid", nil)
+	req = req.WithContext(WithSubject(ctx, Subject{OrgID: org}))
+	w := httptest.NewRecorder()
+	NewClusters(d).List(w, req)
+	if w.Code != 400 {
+		t.Fatalf("invalid scope status %d", w.Code)
 	}
 }

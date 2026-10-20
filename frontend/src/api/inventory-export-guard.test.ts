@@ -1,0 +1,80 @@
+import { afterEach, expect, it, vi } from "vitest";
+import { api, backupsApi, assets, containers, downloadExecutiveReport, findings, securityTimeline, baselines, compliance, componentsInventory, cve, deployments, fileProfiles, imageScanResults, network, nodes, registries, repositoryScans, runtimeEvents, runtimeThreats, scanJobs, serverlessFunctions, type ScanInventoryDownloadGuard } from "./client";
+
+afterEach(() => vi.restoreAllMocks());
+const exporters: Array<[string, (guard: ScanInventoryDownloadGuard) => Promise<unknown>]> = [
+  ["assets", guard => assets.exportCsv({}, guard)],
+  ["backup metadata", guard => backupsApi.inventoryCSV({}, "org", guard)],
+  ["backup artifact", guard => backupsApi.download("owned-backup", guard)],
+  ["compliance artifact", guard => compliance.downloadRunArtifact("run", guard)],
+  ["executive report", guard => downloadExecutiveReport("org", "cluster", guard)],
+  ["containers", guard => containers.exportCSV("cluster", {}, guard)],
+  ["timeline", guard => securityTimeline.exportCSV({}, guard)],
+  ["findings", guard => findings.exportCSV({}, guard)],
+  ["asset findings", guard => assets.findingsCSV("asset", {}, guard)],
+  ["node vulnerabilities", guard => nodes.exportVulnerabilitiesCSV("cluster", "node", {}, guard)],
+  ["compliance evidence", guard => compliance.exportEvidenceCSV({}, guard)],
+  ["deployment findings", guard => deployments.findingsCSV("deployment", { cluster_id: "cluster" }, guard)],
+  ["baselines", guard => baselines.inventoryCSV({ cluster_id: "cluster" }, guard)],
+  ["file profiles", guard => fileProfiles.inventoryCSV({ cluster_id: "cluster" }, guard)],
+  ["conversations", guard => network.conversationsCSV({}, guard)],
+  ["sessions", guard => network.sessionsCSV({}, guard)],
+  ["threats", guard => runtimeThreats.exportCSV({}, guard)],
+  ["scan jobs", guard => scanJobs.exportCSV({}, guard)],
+  ["image scans", guard => imageScanResults.exportCSV({}, guard)],
+  ["serverless", guard => serverlessFunctions.exportCSV({}, guard)],
+  ["repository scans", guard => repositoryScans.exportCSV({}, guard)],
+  ["CVE affected images", guard => cve.affectedInventoryCSV("CVE-2026-1000", "images", {}, guard)],
+  ["runtime events", guard => runtimeEvents.exportCSV({}, guard)],
+  ["nodes", guard => nodes.exportCSV("cluster", {}, guard)],
+  ["compliance checks", guard => compliance.exportChecksCSV({}, guard)],
+  ["components", guard => componentsInventory.exportCSV({}, guard)],
+  ["registry images", guard => registries.imagesCSV("registry", {}, guard)],
+];
+
+it.each(exporters)("does not dispatch pending %s CSV after its scope becomes stale", async (_name, download) => {
+  let respond!: () => void;
+  vi.spyOn(api, "get").mockImplementation(() => new Promise(resolve => {
+    respond = () => resolve({ data: new Blob(["ID\n1\n"]), headers: { "x-export-total": "1", "x-export-limit": _name === "timeline" ? "10000" : "100000", "x-export-truncated": "false" } });
+  }));
+  const createURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:export");
+  const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+  let current = true;
+  const result = download(() => current);
+  const rejected = expect(result).rejects.toThrow("Refresh the inventory");
+  current = false;
+  respond();
+  await rejected;
+  expect(createURL).not.toHaveBeenCalled();
+  expect(click).not.toHaveBeenCalled();
+});
+
+it.each([
+  {},
+  { "x-report-org-id": "org", "x-report-cluster-id": "organization" },
+  { "x-report-org-id": "other", "x-report-cluster-id": "cluster" },
+  { "x-report-org-id": "org", "x-report-cluster-id": "sibling" },
+])("withholds an executive report with missing or mismatched scope receipts: %j", async headers => {
+  vi.spyOn(api, "get").mockResolvedValue({ data: new Blob(["report"]), headers });
+  const createURL = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:report");
+  await expect(downloadExecutiveReport("org", "cluster", () => true)).rejects.toThrow("did not confirm");
+  expect(createURL).not.toHaveBeenCalled();
+});
+
+it("downloads executive HTML only for the confirmed report scope", async () => {
+  const request = vi.spyOn(api, "get").mockResolvedValue({ data: new Blob(["report"]), headers: { "x-report-org-id": "org", "x-report-cluster-id": "cluster", "content-disposition": 'attachment; filename="cluster-report.html"' } });
+  vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:report");
+  vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+  const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { expect(this.download).toBe("cluster-report.html"); });
+  await downloadExecutiveReport("org", "cluster", () => true);
+  expect(request).toHaveBeenCalledWith("/reports/executive.html", { params: { cluster_id: "cluster" }, responseType: "blob" });
+  expect(click).toHaveBeenCalledOnce();
+});
+
+it("allows direct-call exports without a scope callback", async () => {
+  vi.spyOn(api, "get").mockResolvedValue({ data: new Blob(["ID\n1\n"]), headers: { "x-export-total": "1", "x-export-limit": "100000", "x-export-truncated": "false" } });
+  vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:export"); vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+  const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+  await expect(imageScanResults.exportCSV()).resolves.toEqual({ total: 1, exported: 1, limit: 100000, truncated: false });
+  expect(click).toHaveBeenCalledOnce();
+});

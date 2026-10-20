@@ -1,79 +1,56 @@
 # Development
 
-This repository consumes `github.com/alphabravocompany/constellation-vulndb`
-through its public `pkg/*` packages. The VulnDB repository remains a separate
-producer and publisher of signed bundle artifacts; Constellation should not
-vendor or copy it under `third_party/`.
+## One-command dev loop
 
-## Local Multi-Repo Workspace
-
-For local work on Constellation and VulnDB at the same time, clone the
-repositories as siblings:
-
-```bash
-gh repo clone AlphaBravoCompany/constellation
-gh repo clone AlphaBravoCompany/constellation-vulndb
-cd constellation
-cp go.work.example go.work
-go work sync
+```sh
+make dev        # scripts/dev.sh up
+make dev-logs   # tail everything (or: scripts/dev.sh logs api|operator|scanner|web|compose)
+make dev-down
 ```
 
-The example workspace maps Constellation's required VulnDB module version to
-the sibling VulnDB checkout without adding a permanent `replace` directive to
-`go.mod`. If the VulnDB version in `go.mod` changes, update the version in the
-local `go.work` file as well, or regenerate it with:
+`scripts/dev.sh up`:
 
-```bash
-version="$(go list -m -f '{{.Version}}' github.com/alphabravocompany/constellation-vulndb)"
-go work edit -replace="github.com/alphabravocompany/constellation-vulndb@${version}=../constellation-vulndb"
-```
+1. checks for `docker go air node npx` and prints install hints for anything missing;
+2. loads `.env.dev` (tracked defaults) then `.env.dev.local` (gitignored; auto-created from
+   `.env.dev` on first run — put your overrides there);
+3. starts `deploy/dev/compose.yaml`: pgvector Postgres 16 on `:15432`, Prometheus `:9090`,
+   Tempo `:3200` (OTLP gRPC `:4317`), Loki `:3100`, Grafana `:3000` with provisioned
+   datasources (`deploy/dev/observability/`);
+4. applies the embedded migrations (`constellation-api --migrate-only`) and seeds `admin@demo.test` / `Constellation!1` (`cmd/constellation-seed`);
+5. starts `constellation-api` (`:18080`, admin `:18081`), `constellation-operator`
+   (`:18082` metrics, `:18083` probes, watching the `constellation-dev` namespace of
+   `$KUBECONFIG` so it never fights a deployed operator) and `constellation-scanner`
+   (`:18084`) under Air (`.air.<binary>.toml`, rebuild on save, `_test.go` excluded);
+6. starts Vite on `:5173` proxying `/api`, `/openapi.json` and `/ws` to the API.
 
-## Private Module Fetches
+Logs live under `tmp/dev/logs/` and are rotated with a timestamp suffix on every `up`.
+The scanner needs `trivy`, `grype`, `syft` on `PATH` to run real scans; without them it
+serves health/metrics and logs the missing tools.
 
-No-workspace builds that fetch `constellation-vulndb` from GitHub need normal
-GitHub credentials and private-module settings so Go does not ask the public
-checksum database for the private module:
+Install the Go tools once: `go install github.com/air-verse/air@latest` and
+`make tools` installs the CI pins (golangci-lint, gosec, govulncheck, gitleaks, gotestsum, shellcheck).
 
-```bash
-export GOPRIVATE=github.com/alphabravocompany/*
-export GONOSUMDB=github.com/alphabravocompany/*
-```
+## Quality gates
 
-CI jobs that checkout both repositories create a temporary local workspace, but
-release builders that do not use that workspace should set these environment
-variables before running `go mod download`, `go mod tidy`, or `go test`.
+| Command | What |
+|---|---|
+| `make check` | lint (golangci-lint v2), vet, fmt (verify-only), shellcheck, frontend lint + tsc, unit tests |
+| `make test` | gotestsum `-race -shuffle=on -count=1 ./...` — no Docker; DB tests skip when `CONSTELLATION_TEST_DATABASE_URL` is unset |
+| `make test-integration` | `-tags=integration -p 8`; `internal/testutil/pgtest` starts one `pgvector/pgvector:pg16` testcontainer per test process and clones a migrated template DB per test (pgtestdb) |
+| `make security` | gosec, govulncheck, gitleaks (full history) → SARIF under `artifacts/` |
+| `make helm-lint helm-template-smoke` | chart lint + renders across value profiles (Helm 4) |
+| `make e2e` | Playwright; `PLAYWRIGHT_BASE_URL=http://localhost:5173 VITE_API_URL=http://localhost:18080` against the dev loop |
 
-## GitHub Actions Cross-Repo Access
+Bring your own database for integration tests with
+`CONSTELLATION_TEST_DATABASE_URL=postgres://... make test-integration`.
 
-The committed CI and Security workflows need read access to the private
-`AlphaBravoCompany/constellation-vulndb` repository before they can run Go
-tests, govulncheck, or CodeQL for Constellation. Configure a repository or
-organization secret named `CONSTELLATION_VULNDB_TOKEN` with read access to
-that repository. When the secret is absent, the workflows still run Helm and
-static guard checks, but they emit a notice and skip private-module Go analysis.
+## Images and release
 
-## Module Boundary
+`make image-<role>` builds one role image; `GO_VERSION` is read from `go.mod` and passed as
+`--build-arg` (Dockerfiles have no default, `make check-go-version` enforces it). Release
+promotion runs `bin/release-gate gate|promote` (Grype, no fixable critical/high) before a
+tag is created; see `.github/workflows/release.yml`.
 
-Keep these invariants in place:
+## Repository layout
 
-- Constellation imports only public VulnDB packages such as `pkg/model`,
-  `pkg/bundledb`, `pkg/bundleimport`, and `pkg/compat`.
-- `go.mod` uses a real VulnDB module version or pseudo-version.
-- `go.mod` does not contain a local `replace` for
-  `github.com/alphabravocompany/constellation-vulndb`.
-- `third_party/constellation-vulndb` must not reappear.
-- CI may create a temporary `go.work` file to test both repositories together,
-  but that workspace file is not committed.
-
-## Useful Checks
-
-```bash
-go mod verify
-go test ./...
-test ! -d third_party/constellation-vulndb
-! grep -n "replace github.com/alphabravocompany/constellation-vulndb" go.mod
-! grep -n "v0.0.0-00010101000000" go.mod
-! git grep -n -E "third_party/constellation-vulndb|v0.0.0-00010101000000" -- \
-  ':!docs/development.md' \
-  ':!.github/workflows/*'
-```
+See `CLAUDE.md` ("Where things live") and the ADRs under `docs/decisions/`.

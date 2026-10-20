@@ -3,18 +3,18 @@
 //
 // Falco rule shape (simplified):
 //
-//	- rule: Terminal shell in container
-//	  desc: A shell was used as the entrypoint/exec point into a container with an attached terminal.
-//	  condition: spawned_process and container and shell_procs and proc.tty != 0
-//	  output: A shell was spawned in a container (...)
-//	  priority: NOTICE
-//	  tags: [container, shell, mitre_execution]
+//   - rule: Terminal shell in container
+//     desc: A shell was used as the entrypoint/exec point into a container with an attached terminal.
+//     condition: spawned_process and container and shell_procs and proc.tty != 0
+//     output: A shell was spawned in a container (...)
+//     priority: NOTICE
+//     tags: [container, shell, mitre_execution]
 //
-//	- macro: shell_procs
-//	  condition: proc.name in (shell_binaries)
+//   - macro: shell_procs
+//     condition: proc.name in (shell_binaries)
 //
-//	- list: shell_binaries
-//	  items: [sh, bash, csh, ksh, tcsh, zsh, dash]
+//   - list: shell_binaries
+//     items: [sh, bash, csh, ksh, tcsh, zsh, dash]
 //
 // We parse rules + macros + lists but evaluate conditions lazily — the runtime agent
 // passes a per-process map { proc.name, proc.tty, container.id, … } and we return
@@ -247,10 +247,10 @@ func evalBool(tokens []string, facts map[string]any, doc *Document) bool {
 	i := 0
 	for i < len(tokens) {
 		t := tokens[i]
-		switch {
-		case t == "(":
+		switch t {
+		case "(":
 			ops = append(ops, t)
-		case t == ")":
+		case ")":
 			for len(ops) > 0 && ops[len(ops)-1] != "(" {
 				out = append(out, ops[len(ops)-1])
 				ops = ops[:len(ops)-1]
@@ -258,7 +258,7 @@ func evalBool(tokens []string, facts map[string]any, doc *Document) bool {
 			if len(ops) > 0 {
 				ops = ops[:len(ops)-1]
 			}
-		case t == "and" || t == "or" || t == "not":
+		case "and", "or", "not":
 			for len(ops) > 0 && ops[len(ops)-1] != "(" && prec(ops[len(ops)-1]) >= prec(t) {
 				out = append(out, ops[len(ops)-1])
 				ops = ops[:len(ops)-1]
@@ -321,9 +321,9 @@ func evalBool(tokens []string, facts map[string]any, doc *Document) bool {
 }
 
 var (
-	reInList    = regexp.MustCompile(`^(\S+)\s+in\s+(\S+)$`)        // key in list_name (parens stripped in tokenizer)
-	reInInline  = regexp.MustCompile(`^(\S+)\s+in\s+\((.+)\)$`)     // key in (a, b, c)
-	reCmp       = regexp.MustCompile(`^(\S+)\s*(==|!=|>=|<=|>|<|=)\s*(.+?)\s*$`)
+	reInList   = regexp.MustCompile(`^(\S+)\s+in\s+(\S+)$`)    // key in list_name (parens stripped in tokenizer)
+	reInInline = regexp.MustCompile(`^(\S+)\s+in\s+\((.+)\)$`) // key in (a, b, c)
+	reCmp      = regexp.MustCompile(`^(\S+)\s*(==|!=|>=|<=|>|<|=)\s*(.+?)\s*$`)
 )
 
 // evalLeaf evaluates a single comparison or membership test. Bare facts are truthy when

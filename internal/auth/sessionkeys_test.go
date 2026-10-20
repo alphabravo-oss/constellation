@@ -1,10 +1,13 @@
+//go:build integration
+
 package auth
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -14,20 +17,9 @@ import (
 // skips when the DB is unreachable (mirrors the server package's DB-gated tests).
 func testSessionKeyDB(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	url := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-	if url == "" {
-		url = "postgres://test:test@localhost:15433/constellation_test?sslmode=disable"
-	}
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, url)
-	if err != nil {
-		t.Skipf("skipping: cannot open test DB (%v)", err)
-	}
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		t.Skipf("skipping: cannot reach test DB (%v)", err)
-	}
-	// Idempotent: matches db/migrations/100_session_signing_keys.sql so the test runs even if
+	pool := pgtest.Pool(t)
+	// Idempotent: matches internal/server/database/migrations/100_session_signing_keys.sql so the test runs even if
 	// goose has not been pointed at this DB yet.
 	if _, err := pool.Exec(ctx, `
 CREATE TABLE IF NOT EXISTS session_signing_keys (

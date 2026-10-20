@@ -96,15 +96,16 @@ type PlatformEvidenceView struct {
 }
 
 type PlatformScanJobView struct {
-	ID             uuid.UUID               `json:"id"`
-	Status         string                  `json:"status"`
-	Error          string                  `json:"error,omitempty"`
-	PackageCount   int                     `json:"package_count,omitempty"`
-	FindingCount   int                     `json:"finding_count,omitempty"`
-	BundleMetadata *scanner.BundleMetadata `json:"bundle_metadata,omitempty"`
-	RequestedAt    time.Time               `json:"requested_at"`
-	ClaimedAt      *time.Time              `json:"claimed_at,omitempty"`
-	FinishedAt     *time.Time              `json:"finished_at,omitempty"`
+	ClaimedInventoryHash string                  `json:"claimed_inventory_hash,omitempty"`
+	ID                   uuid.UUID               `json:"id"`
+	Status               string                  `json:"status"`
+	Error                string                  `json:"error,omitempty"`
+	PackageCount         int                     `json:"package_count,omitempty"`
+	FindingCount         int                     `json:"finding_count,omitempty"`
+	BundleMetadata       *scanner.BundleMetadata `json:"bundle_metadata,omitempty"`
+	RequestedAt          time.Time               `json:"requested_at"`
+	ClaimedAt            *time.Time              `json:"claimed_at,omitempty"`
+	FinishedAt           *time.Time              `json:"finished_at,omitempty"`
 }
 
 type PlatformFindingsSummary struct {
@@ -129,11 +130,12 @@ type PlatformFindingRow struct {
 }
 
 func (h *PlatformFactsHandler) Report(w http.ResponseWriter, r *http.Request) {
-	orgID, ok := orgFromTokenContext(r.Context())
-	if !ok {
-		jsonError(w, http.StatusUnauthorized, "service token required")
+	tok, ok := runtimeAgentTokenFrom(r.Context())
+	if !ok || tok == nil {
+		jsonError(w, http.StatusUnauthorized, "runtime-agent token required")
 		return
 	}
+	orgID := tok.OrgID
 	r.Body = http.MaxBytesReader(w, r.Body, 4<<20)
 
 	var body PlatformFactsReport
@@ -158,6 +160,32 @@ SELECT name, distro
 	}
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, "cluster lookup: "+err.Error())
+		return
+	}
+	boundCluster, err := ResolveAgentClusterID(r.Context(), h.db, tok)
+	if errors.Is(err, ErrAgentClusterScope) {
+		jsonError(w, http.StatusForbidden, "agent token cluster scope mismatch")
+		return
+	}
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "resolve agent cluster failed")
+		return
+	}
+	if boundCluster == nil || *boundCluster != body.ClusterID {
+		jsonError(w, http.StatusForbidden, "agent token cannot report this cluster")
+		return
+	}
+	var tokenBound bool
+	if err := h.db.Pool().QueryRow(r.Context(), `
+SELECT EXISTS (
+    SELECT 1 FROM cluster_init_bundles
+     WHERE runtime_agent_token_id = $1 AND org_id = $2 AND cluster_id = $3
+)`, tok.ID, orgID, body.ClusterID).Scan(&tokenBound); err != nil {
+		jsonError(w, http.StatusInternalServerError, "verify agent cluster binding failed")
+		return
+	}
+	if !tokenBound {
+		jsonError(w, http.StatusForbidden, "agent token cannot report this cluster")
 		return
 	}
 	if body.ClusterName == "" {
@@ -273,10 +301,25 @@ UPDATE clusters
 			jsonError(w, http.StatusInternalServerError, "scan evidence: "+err.Error())
 			return
 		}
-		jobID, err = enqueueScanJobIfIdle(r.Context(), tx, orgID, target.ID, nil)
-		if err != nil {
-			jsonError(w, http.StatusInternalServerError, "enqueue scan job: "+err.Error())
+		// The discoverer reports every reconcile interval (30s by default). Only enqueue a
+		// scan when the package inventory actually changed since the last completed scan;
+		// otherwise an already-scanned platform target is re-scanned every 30 seconds.
+		var alreadyScanned bool
+		if err := tx.QueryRow(r.Context(), `
+SELECT EXISTS(
+    SELECT 1 FROM scan_jobs
+     WHERE org_id = $1 AND target_id = $2 AND status = 'completed'
+       AND claimed_inventory_hash = $3
+)`, orgID, target.ID, inventoryHash).Scan(&alreadyScanned); err != nil {
+			jsonError(w, http.StatusInternalServerError, "scan history: "+err.Error())
 			return
+		}
+		if !alreadyScanned {
+			jobID, err = enqueueScanJobIfIdle(r.Context(), tx, orgID, target.ID, nil)
+			if err != nil {
+				jsonError(w, http.StatusInternalServerError, "enqueue scan job: "+err.Error())
+				return
+			}
 		}
 	}
 
@@ -346,7 +389,7 @@ func (h *PlatformFactsHandler) Get(w http.ResponseWriter, r *http.Request) {
 		ClusterID:       clusterID,
 		ClusterName:     clusterName,
 		Distro:          distro,
-		Status:          platformFactsStatus(facts, evidence, job),
+		Status:          platformFactsStatus(facts, target, evidence, job),
 		Facts:           facts,
 		ScanTarget:      target,
 		Evidence:        evidence,
@@ -510,12 +553,12 @@ func (h *PlatformFactsHandler) loadPlatformJob(r *http.Request, orgID, targetID 
 	var bundleRaw []byte
 	err := h.db.Pool().QueryRow(r.Context(), `
 SELECT id, status, COALESCE(error, ''), COALESCE(package_count, 0), COALESCE(finding_count, 0),
-       COALESCE(bundle_metadata, '{}'::jsonb), requested_at, claimed_at, finished_at
+       COALESCE(bundle_metadata, '{}'::jsonb), requested_at, claimed_at, finished_at, COALESCE(claimed_inventory_hash, '')
   FROM scan_jobs
  WHERE org_id = $1 AND target_id = $2
  ORDER BY requested_at DESC
  LIMIT 1`, orgID, targetID).Scan(&out.ID, &out.Status, &out.Error, &out.PackageCount, &out.FindingCount,
-		&bundleRaw, &out.RequestedAt, &out.ClaimedAt, &out.FinishedAt)
+		&bundleRaw, &out.RequestedAt, &out.ClaimedAt, &out.FinishedAt, &out.ClaimedInventoryHash)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -727,18 +770,31 @@ func nullableUUID(id uuid.UUID) any {
 	return id
 }
 
-func platformFactsStatus(facts *ClusterPlatformFacts, evidence *PlatformEvidenceView, job *PlatformScanJobView) string {
+func platformFactsStatus(facts *ClusterPlatformFacts, target *PlatformScanTargetView, evidence *PlatformEvidenceView, job *PlatformScanJobView) string {
 	if facts == nil {
 		return "missing"
 	}
-	if job != nil {
-		if job.Status == "completed" {
-			return "scanned"
-		}
-		return job.Status
+	if evidence == nil {
+		return "reported"
 	}
-	if evidence != nil {
+	if target == nil || evidence.InventoryHash == "" || target.InventoryHash != evidence.InventoryHash {
+		return "unverified"
+	}
+	if job == nil {
 		return "ready"
 	}
-	return "reported"
+	// Pending work has not selected its inventory yet. The claim snapshots it.
+	if job.Status == "pending" {
+		return "pending"
+	}
+	if job.ClaimedInventoryHash == "" {
+		return "unverified"
+	}
+	if job.ClaimedInventoryHash != evidence.InventoryHash {
+		return "outdated"
+	}
+	if job.Status == "completed" {
+		return "scanned"
+	}
+	return job.Status
 }

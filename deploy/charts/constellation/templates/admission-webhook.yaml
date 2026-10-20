@@ -3,8 +3,20 @@
 ValidatingWebhookConfiguration. The caBundle is populated by:
   - the cert-manager Certificate's `cert-manager.io/inject-ca-from` annotation, OR
   - the tls-bootstrap Job (default).
-We render it with an empty caBundle and let the bootstrap Job patch it in-flight.
+Preserve existing trust during upgrades, including upgrades with hooks disabled.
+On first install the certificate controller or bootstrap Job still supplies it.
 */ -}}
+{{- $caBundle := "" -}}
+{{- $existing := lookup "admissionregistration.k8s.io/v1" "ValidatingWebhookConfiguration" "" (printf "%s-admission" (include "constellation.fullname" .)) -}}
+{{- range $existing.webhooks -}}
+{{- if eq .name "pods.constellation.alphabravo.io" -}}
+{{- $caBundle = default "" .clientConfig.caBundle -}}
+{{- end -}}
+{{- end -}}
+{{- if not $caBundle -}}
+{{- $secret := lookup "v1" "Secret" .Release.Namespace (include "constellation.admissionTLSSecret" .) -}}
+{{- $caBundle = default "" (index (default dict $secret.data) "ca.crt") -}}
+{{- end -}}
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:
@@ -21,17 +33,13 @@ webhooks:
     sideEffects: {{ .Values.admission.webhook.sideEffects }}
     failurePolicy: {{ .Values.admission.webhook.failurePolicy }}
     timeoutSeconds: {{ .Values.admission.webhook.timeoutSeconds }}
-    # namespaceSelector: ALWAYS exclude our own release namespace from
-    # admission validation. Without this the runtime-agent DaemonSet
-    # (privileged: true for BPF + NFQUEUE) gets denied by the chart's
-    # default block-privileged rule, deadlocking the install. Operators
-    # who provide their own namespaceSelector get it merged AFTER the
-    # self-exclusion clause so they can't accidentally turn it off.
+    # Mandatory own/core namespace exclusions plus trusted dependency additions.
+    # User selectors are ANDed with this exclusion and cannot remove it.
     namespaceSelector:
       matchExpressions:
         - key: kubernetes.io/metadata.name
           operator: NotIn
-          values: [{{ .Release.Namespace | quote }}]
+          values: {{ include "constellation.protectedNamespaces" (dict "ctx" .) }}
         {{- with .Values.admission.webhook.namespaceSelector.matchExpressions }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -44,6 +52,6 @@ webhooks:
         namespace: {{ .Release.Namespace }}
         path: /validate
         port: {{ .Values.admission.service.port }}
-      caBundle: ""
+      caBundle: {{ $caBundle | quote }}
     rules: {{- toYaml .Values.admission.webhook.rules | nindent 6 }}
 {{- end }}

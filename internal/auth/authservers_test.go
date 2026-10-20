@@ -2,26 +2,25 @@ package auth
 
 import (
 	"context"
-	"crypto/rand"
 	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 
-	regsecrets "github.com/alphabravocompany/constellation/pkg/registry/secrets"
+	colcrypto "github.com/alphabravocompany/constellation/internal/crypto"
 )
 
 // newTestSealer builds a real AES-GCM cipher (no DB) so the seal/open helpers can be exercised
 // end-to-end.
 func newTestSealer(t *testing.T) Sealer {
 	t.Helper()
-	key := make([]byte, 32)
-	if _, err := rand.Read(key); err != nil {
+	secret, _, err := colcrypto.GenerateKey()
+	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := regsecrets.New(key)
+	c, err := colcrypto.NewEncryptor(secret)
 	if err != nil {
-		t.Fatalf("new cipher: %v", err)
+		t.Fatalf("new encryptor: %v", err)
 	}
 	return c
 }

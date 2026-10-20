@@ -1,3 +1,5 @@
+//go:build integration
+
 package netpolicy
 
 import (
@@ -48,9 +50,12 @@ func TestNetworkFlowsIngest_MatchCountersAndNBE(t *testing.T) {
 
 	const ruleID = 918273
 	tokenName := "a7b6-test-" + uuid.New().String()
-	raw, _, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
+	raw, tokenID, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
 	if err != nil {
 		t.Fatalf("issue token: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO cluster_init_bundles (org_id, cluster_id, name, expires_at, runtime_agent_token_id, kek_fingerprint, contents_encrypted) VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`, orgID, clusterID, "flow-test-"+uuid.NewString(), tokenID); err != nil {
+		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		bg := context.Background()
@@ -92,7 +97,7 @@ func TestNetworkFlowsIngest_MatchCountersAndNBE(t *testing.T) {
 	})
 
 	h := NewNetworkFlowsIngest(d)
-	req := httptest.NewRequest("POST", "/api/v1/network-flows:bulk", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/network-flows:bulk", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+raw)
 	w := httptest.NewRecorder()
 	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(w, req)

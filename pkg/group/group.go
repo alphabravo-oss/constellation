@@ -70,7 +70,7 @@ type Group struct {
 	Kind        Kind        `json:"kind"`
 	Comment     string      `json:"comment,omitempty"`
 	Criteria    []Criterion `json:"criteria"`
-	Members     []string    `json:"members,omitempty"`     // workload ids (server-computed from criteria)
+	Members     []string    `json:"members,omitempty"`      // workload ids (server-computed from criteria)
 	LearnedFrom string      `json:"learned_from,omitempty"` // workload id template for learned
 	CfgType     string      `json:"cfg_type,omitempty"`     // user|learned|fed
 	PolicyMode  Mode        `json:"policy_mode,omitempty"`  // discover|monitor|protect
@@ -188,36 +188,7 @@ func LearnFromObservations(obs []Observation, window time.Duration, minMembers i
 	if minMembers <= 0 {
 		minMembers = 1
 	}
-	type bucket struct {
-		cluster   string
-		namespace string
-		service   string
-		members   map[string]struct{}
-		labels    map[string]map[string]int // key -> value -> count
-		last      time.Time
-	}
-	buckets := map[string]*bucket{}
-	for _, o := range obs {
-		key := o.Workload.Cluster + "\x00" + o.Workload.Namespace + "\x00" + o.Workload.Service
-		b, ok := buckets[key]
-		if !ok {
-			b = &bucket{
-				cluster: o.Workload.Cluster, namespace: o.Workload.Namespace, service: o.Workload.Service,
-				members: map[string]struct{}{}, labels: map[string]map[string]int{},
-			}
-			buckets[key] = b
-		}
-		b.members[o.Workload.ID] = struct{}{}
-		for k, v := range o.Workload.Labels {
-			if b.labels[k] == nil {
-				b.labels[k] = map[string]int{}
-			}
-			b.labels[k][v]++
-		}
-		if o.At.After(b.last) {
-			b.last = o.At
-		}
-	}
+	buckets := bucketObservations(obs)
 	out := []Group{}
 	now := time.Now()
 	for _, b := range buckets {
@@ -232,28 +203,7 @@ func LearnFromObservations(obs []Observation, window time.Duration, minMembers i
 		// sorted order so ties (e.g. a single-member bucket where every label has
 		// count 1) resolve deterministically instead of by random map order — the
 		// synthesizer re-runs each tick and must produce stable criteria.
-		var bestKey, bestVal string
-		bestCount := 0
-		labelKeys := make([]string, 0, len(b.labels))
-		for k := range b.labels {
-			labelKeys = append(labelKeys, k)
-		}
-		sort.Strings(labelKeys)
-		for _, k := range labelKeys {
-			vmap := b.labels[k]
-			vals := make([]string, 0, len(vmap))
-			for v := range vmap {
-				vals = append(vals, v)
-			}
-			sort.Strings(vals)
-			for _, v := range vals {
-				if vmap[v] > bestCount {
-					bestCount = vmap[v]
-					bestKey = k
-					bestVal = v
-				}
-			}
-		}
+		bestKey, bestVal := mostCommonLabel(b.labels)
 		criteria := []Criterion{{Key: "namespace", Value: b.namespace, Op: OpEq}}
 		if bestKey != "" {
 			criteria = append(criteria, Criterion{Key: "label." + bestKey, Value: bestVal, Op: OpEq})
@@ -278,6 +228,66 @@ func LearnFromObservations(obs []Observation, window time.Duration, minMembers i
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+type learnBucket struct {
+	cluster   string
+	namespace string
+	service   string
+	members   map[string]struct{}
+	labels    map[string]map[string]int // key -> value -> count
+	last      time.Time
+}
+
+// bucketObservations groups observations by (cluster, namespace, service).
+func bucketObservations(obs []Observation) map[string]*learnBucket {
+	buckets := map[string]*learnBucket{}
+	for _, o := range obs {
+		key := o.Workload.Cluster + "\x00" + o.Workload.Namespace + "\x00" + o.Workload.Service
+		b, ok := buckets[key]
+		if !ok {
+			b = &learnBucket{
+				cluster: o.Workload.Cluster, namespace: o.Workload.Namespace, service: o.Workload.Service,
+				members: map[string]struct{}{}, labels: map[string]map[string]int{},
+			}
+			buckets[key] = b
+		}
+		b.members[o.Workload.ID] = struct{}{}
+		for k, v := range o.Workload.Labels {
+			if b.labels[k] == nil {
+				b.labels[k] = map[string]int{}
+			}
+			b.labels[k][v]++
+		}
+		if o.At.After(b.last) {
+			b.last = o.At
+		}
+	}
+	return buckets
+}
+
+// mostCommonLabel returns the label key/value seen most often, scanning keys and
+// values in sorted order so ties resolve deterministically.
+func mostCommonLabel(labels map[string]map[string]int) (bestKey, bestVal string) {
+	bestCount := 0
+	for _, k := range sortedMapKeys(labels) {
+		vmap := labels[k]
+		for _, v := range sortedMapKeys(vmap) {
+			if vmap[v] > bestCount {
+				bestCount, bestKey, bestVal = vmap[v], k, v
+			}
+		}
+	}
+	return bestKey, bestVal
+}
+
+func sortedMapKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // Validate returns an error if g is malformed.

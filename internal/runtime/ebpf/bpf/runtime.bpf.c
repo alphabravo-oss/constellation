@@ -51,6 +51,7 @@ struct cstl_proc_event {
     char comm[MAX_COMM];
     char filename[MAX_PATH];
     char args[MAX_ARGS];
+    __u64 start_boot_ns; /* optional additive tail; old readers ignore it */
 };
 
 struct cstl_file_event {
@@ -82,8 +83,24 @@ static __always_inline void fill_hdr(struct event_hdr *h, __u8 kind) {
     h->ts = bpf_ktime_get_ns();
 }
 
+/* Bounded lifetime identity, independent of ring-buffer delivery. Missing or
+ * evicted entries disable targeted response; they never trigger PID fallback. */
+struct {
+    __uint(type, BPF_MAP_TYPE_LRU_HASH);
+    __uint(max_entries, 4096);
+    __type(key, __u32);
+    __type(value, __u64);
+} process_starts SEC(".maps");
+
 SEC("tp/sched/sched_process_exec")
 int trace_sched_exec(struct trace_event_raw_sched_process_exec *ctx) {
+    __u32 pid = (__u32)(bpf_get_current_pid_tgid() >> 32);
+    __u64 start = 0;
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    if (task && bpf_core_field_exists(task->start_boottime))
+        start = BPF_CORE_READ(task, start_boottime);
+    if (start) bpf_map_update_elem(&process_starts, &pid, &start, BPF_ANY);
+    else bpf_map_delete_elem(&process_starts, &pid);
     struct cstl_proc_event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
     if (!e) return 0;
     fill_hdr(&e->h, 1);
@@ -92,7 +109,22 @@ int trace_sched_exec(struct trace_event_raw_sched_process_exec *ctx) {
     const char *fn = (const char *)((__u64)ctx + (filename_loc & 0xffff));
     bpf_probe_read_kernel_str(e->filename, sizeof(e->filename), fn);
     e->args[0] = 0;
+    e->start_boot_ns = start;
     bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("tp/sched/sched_process_exit")
+int trace_sched_exit(void *ctx) {
+    __u64 ids = bpf_get_current_pid_tgid();
+    __u32 pid = (__u32)(ids >> 32);
+    if ((__u32)ids != pid) return 0; /* thread exit cannot erase leader identity */
+    struct task_struct *task = (struct task_struct *)bpf_get_current_task();
+    __u64 *known = bpf_map_lookup_elem(&process_starts, &pid);
+    if (known && task && bpf_core_field_exists(task->start_boottime)) {
+        __u64 start = BPF_CORE_READ(task, start_boottime);
+        if (*known == start) bpf_map_delete_elem(&process_starts, &pid);
+    }
     return 0;
 }
 

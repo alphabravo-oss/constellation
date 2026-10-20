@@ -3,7 +3,7 @@
 //
 // A ResponseRule binds a runtime event_type (process|file|network|admission|scan|compliance) to an
 // ordered set of conditions (generic field/op/value clauses) and an ordered set of actions
-// (quarantine|suppress_log|webhook|tag). The engine is storage-agnostic and pure: rules are
+// (quarantine|suppress_log|webhook). The engine is storage-agnostic and pure: rules are
 // passed in by the API layer (which loads them from the response_rules table), so condition
 // matching, priority ordering, and the enabled filter are trivially unit-testable and reused
 // from both the ingest evaluator and the agent :sync bundle serializer.
@@ -69,7 +69,7 @@ const (
 )
 
 var validActionTypes = map[ActionType]bool{
-	ActionQuarantine: true, ActionSuppressLog: true, ActionWebhook: true, ActionTag: true,
+	ActionQuarantine: true, ActionSuppressLog: true, ActionWebhook: true,
 }
 
 // Condition is one match clause on a runtime event. Field names the event attribute
@@ -120,30 +120,50 @@ func (r *ResponseRule) Validate() error {
 		return fmt.Errorf("responserule: at least one action required")
 	}
 	for _, c := range r.Conditions {
-		if strings.TrimSpace(c.Field) == "" {
-			return fmt.Errorf("responserule: condition field required")
-		}
-		if !validOps[c.Op] {
-			return fmt.Errorf("responserule: invalid op %q", c.Op)
-		}
-		if c.Op == OpRegex {
-			if _, err := regexp.Compile(c.Value); err != nil {
-				return fmt.Errorf("responserule: invalid regex %q: %w", c.Value, err)
-			}
-		}
-		if c.Op == OpGt || c.Op == OpLt {
-			if _, err := strconv.ParseFloat(strings.TrimSpace(c.Value), 64); err != nil {
-				return fmt.Errorf("responserule: op %s requires a numeric value, got %q", c.Op, c.Value)
-			}
+		if err := validateCondition(c); err != nil {
+			return err
 		}
 	}
 	for _, a := range r.Actions {
-		if !validActionTypes[a.Type] {
-			return fmt.Errorf("responserule: invalid action type %q", a.Type)
+		if err := validateAction(r.EventType, a); err != nil {
+			return err
 		}
-		if a.Type == ActionWebhook && strings.TrimSpace(a.Params["receiver"]) == "" {
-			return fmt.Errorf("responserule: webhook action requires a 'receiver' param")
+	}
+	return nil
+}
+
+func validateCondition(c Condition) error {
+	if strings.TrimSpace(c.Field) == "" {
+		return fmt.Errorf("responserule: condition field required")
+	}
+	if !validOps[c.Op] {
+		return fmt.Errorf("responserule: invalid op %q", c.Op)
+	}
+	if c.Op == OpRegex {
+		if _, err := regexp.Compile(c.Value); err != nil {
+			return fmt.Errorf("responserule: invalid regex %q: %w", c.Value, err)
 		}
+	}
+	if c.Op == OpGt || c.Op == OpLt {
+		if _, err := strconv.ParseFloat(strings.TrimSpace(c.Value), 64); err != nil {
+			return fmt.Errorf("responserule: op %s requires a numeric value, got %q", c.Op, c.Value)
+		}
+	}
+	return nil
+}
+
+func validateAction(eventType EventType, a Action) error {
+	if a.Type == ActionTag {
+		return fmt.Errorf("responserule: tag action is unsupported")
+	}
+	if eventType == EventScan && a.Type == ActionSuppressLog {
+		return fmt.Errorf("responserule: suppress_log is unsupported for scan events")
+	}
+	if !validActionTypes[a.Type] {
+		return fmt.Errorf("responserule: invalid action type %q", a.Type)
+	}
+	if a.Type == ActionWebhook && strings.TrimSpace(a.Params["receiver"]) == "" {
+		return fmt.Errorf("responserule: webhook action requires a 'receiver' param")
 	}
 	return nil
 }

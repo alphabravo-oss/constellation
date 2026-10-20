@@ -12,6 +12,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -24,12 +26,13 @@ import (
 
 // Auth bundles the auth-related routes.
 type Auth struct {
-	db       *db.DB
-	signer   *auth.Signer
-	oidc     *auth.OIDCClient
-	saml     *auth.SAMLProvider
-	ldap     *auth.LDAPProvider
-	auditLog *audit.Logger
+	db                 *db.DB
+	signer             *auth.Signer
+	oidc               *auth.OIDCClient
+	saml               *auth.SAMLProvider
+	ldap               *auth.LDAPProvider
+	auditLog           *audit.Logger
+	browserIdleTimeout time.Duration
 
 	// providers, when non-nil, is the B4 DB-backed, hot-reloadable provider set. The login
 	// endpoints read the LIVE provider through providerOIDC/providerSAML/providerLDAP, which
@@ -46,6 +49,7 @@ type Auth struct {
 	// live provider-set's ParseResponse is NOT substituted, so the canned-assertion test path
 	// keeps working even after a provider-set reload.
 	samlParseOverridden bool
+	samlBrowserBindings samlBrowserBindingStore
 }
 
 func NewAuth(database *db.DB, signer *auth.Signer, oidc *auth.OIDCClient, samlP *auth.SAMLProvider, ldapP *auth.LDAPProvider, auditLog *audit.Logger) *Auth {
@@ -53,6 +57,11 @@ func NewAuth(database *db.DB, signer *auth.Signer, oidc *auth.OIDCClient, samlP 
 	if samlP != nil {
 		a.samlParse = samlP.ParseResponse
 	}
+	return a
+}
+
+func (a *Auth) WithBrowserSessionTimeout(timeout time.Duration) *Auth {
+	a.browserIdleTimeout = timeout
 	return a
 }
 
@@ -69,9 +78,7 @@ func (a *Auth) WithProviderSet(ps *auth.ProviderSet) *Auth {
 // static env-wired one.
 func (a *Auth) providerOIDC() *auth.OIDCClient {
 	if a.providers != nil {
-		if p := a.providers.OIDC(); p != nil {
-			return p
-		}
+		return a.providers.OIDC()
 	}
 	return a.oidc
 }
@@ -79,9 +86,7 @@ func (a *Auth) providerOIDC() *auth.OIDCClient {
 // providerSAML returns the live SAML provider (set snapshot, else static).
 func (a *Auth) providerSAML() *auth.SAMLProvider {
 	if a.providers != nil {
-		if p := a.providers.SAML(); p != nil {
-			return p
-		}
+		return a.providers.SAML()
 	}
 	return a.saml
 }
@@ -89,11 +94,19 @@ func (a *Auth) providerSAML() *auth.SAMLProvider {
 // providerLDAP returns the live LDAP provider (set snapshot, else static).
 func (a *Auth) providerLDAP() *auth.LDAPProvider {
 	if a.providers != nil {
-		if p := a.providers.LDAP(); p != nil {
-			return p
-		}
+		return a.providers.LDAP()
 	}
 	return a.ldap
+}
+
+// Providers exposes only available browser SSO methods, never provider configuration.
+// Resolve the same live providers used by the login endpoints, including disabled states.
+func (a *Auth) Providers(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]bool{
+		"oidc": a.providerOIDC() != nil,
+		"saml": a.providerSAML() != nil,
+	})
 }
 
 // providerSAMLParse returns the SAML ACS identity resolver to use for this request. A test-set
@@ -130,7 +143,7 @@ type loginRequest struct {
 }
 
 type loginResponse struct {
-	Token     string    `json:"token"`
+	Token     string    `json:"token,omitempty"`
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
@@ -196,11 +209,11 @@ var decoyPasswordHash = func() string {
 func (a *Auth) Login(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad request")
 		return
 	}
 	if req.Email == "" || req.Password == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing fields"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "missing fields")
 		return
 	}
 	principal, err := a.resolveLoginPrincipal(r.Context(), req.Email)
@@ -211,7 +224,7 @@ func (a *Auth) Login(w http.ResponseWriter, r *http.Request) {
 		// (RSP-AUDIT-05) is server-side only, so it doesn't reintroduce an enumeration oracle.
 		_ = auth.VerifyPassword(decoyPasswordHash, req.Password)
 		a.auditLoginFailure(r.Context(), r, nil, nil, req.Email, "unknown_user")
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 	// A2: brute-force lockout pre-check. If the account is inside the lockout window we
@@ -224,7 +237,7 @@ func (a *Auth) Login(w http.ResponseWriter, r *http.Request) {
 		// user-enumeration / lockout oracle.
 		_ = auth.VerifyPassword(decoyPasswordHash, req.Password)
 		a.auditLoginFailure(r.Context(), r, &principal.OrgID, &principal.UserID, req.Email, "account_locked")
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 	if principal.PasswordHash == nil {
@@ -232,7 +245,7 @@ func (a *Auth) Login(w http.ResponseWriter, r *http.Request) {
 		// 401 as a wrong password (A2: do not reveal that the account exists but is SSO-only).
 		_ = auth.VerifyPassword(decoyPasswordHash, req.Password)
 		a.auditLoginFailure(r.Context(), r, &principal.OrgID, &principal.UserID, req.Email, "no_local_password")
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 	if err := auth.VerifyPassword(*principal.PasswordHash, req.Password); err != nil {
@@ -242,7 +255,7 @@ func (a *Auth) Login(w http.ResponseWriter, r *http.Request) {
 		if locked {
 			a.auditLoginLocked(r.Context(), r, &principal.OrgID, &principal.UserID, req.Email)
 		}
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 	// A2: success clears the counter + any lockout.
@@ -274,7 +287,7 @@ func (a *Auth) Login(w http.ResponseWriter, r *http.Request) {
 	roles, _ := loadRoleNames(r.Context(), a.db, principal.UserID)
 	tok, expiresAt, err := a.issueSession(r.Context(), principal.UserID, principal.OrgID, req.Email, roles, principal.SessionEpoch)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "issue token"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "issue token")
 		return
 	}
 	_, _, _ = a.auditLog.Log(r.Context(), audit.Event{
@@ -284,7 +297,7 @@ func (a *Auth) Login(w http.ResponseWriter, r *http.Request) {
 		TargetKind: "user",
 		TargetID:   principal.UserID.String(),
 	})
-	writeJSON(w, http.StatusOK, loginResponse{Token: tok, ExpiresAt: expiresAt})
+	a.respondSession(w, r, tok, expiresAt, false)
 }
 
 func (a *Auth) resolveLoginPrincipal(ctx context.Context, email string) (loginPrincipal, error) {
@@ -479,44 +492,35 @@ func RevokeUserSessions(ctx context.Context, tx sessionEpochExecer, userID uuid.
 	return nil
 }
 
-// issueSession mints a session JWT for the user and records it for the A3
-// concurrent-session cap: the new session id is inserted into user_sessions and any
-// sessions beyond maxConcurrentSessions (oldest first) are evicted. The auth middleware
-// rejects a JWT whose session row has been evicted, so logging in on an (N+1)th device
-// silently logs out the oldest device — bounded fan-out, not a full epoch bump. Session
-// tracking is best-effort: a bookkeeping failure must not block an otherwise-valid login
-// (the JWT still works; the cap is simply not tightened for that login).
 func (a *Auth) issueSession(ctx context.Context, userID, orgID uuid.UUID, email string, roles []string, epoch int64) (string, time.Time, error) {
-	// A1: a per-org SecurityPolicy may override the deploy-time JWT TTL at login time. Load it
-	// (falling back to the signer's env default when the org has no policy row) and mint the
-	// session with that absolute lifetime so the returned expires_at matches the JWT's exp.
-	ttl := a.signer.TTL()
-	if pol, _, perr := auth.LoadSecurityPolicy(ctx, a.db.Pool(), orgID); perr == nil {
-		ttl = pol.SessionTTL(ttl)
-	}
-	expiresAt := time.Now().Add(ttl)
-	tok, sessionID, err := a.signer.IssueWithTTL(ttl, userID, orgID, email, roles, epoch)
+	policy, _, err := auth.LoadSecurityPolicy(ctx, a.db.Pool(), orgID)
 	if err != nil {
 		return "", time.Time{}, err
 	}
-	// A3: record the new session and evict the oldest beyond the cap in ONE transaction, so the
-	// invariant "at most maxConcurrentSessions rows per user" cannot be transiently violated by a
-	// partial write (the original code ran the INSERT and DELETE as two independent Execs, so a
-	// failure between them could leave the user over the cap). Eviction keeps the most recent
-	// maxConcurrentSessions by created_at; session_id is a deterministic tiebreaker for the
-	// (rare) sub-millisecond-simultaneous case so the same row is chosen regardless of plan.
-	// Session tracking remains best-effort: a bookkeeping failure rolls back and does not block
-	// the otherwise-valid login (the JWT still works; the cap is simply not tightened this time).
+	ttl := policy.SessionTTL(a.signer.TTL())
+	if ttl <= 0 || ttl > 15*time.Minute {
+		ttl = 15 * time.Minute
+	}
+	expiresAt := time.Now().Add(ttl)
+	tok, sessionID, err := a.signer.IssueTracked(ttl, uuid.New(), userID, orgID, email, roles, epoch)
+	if err != nil {
+		return "", time.Time{}, err
+	}
 	tx, err := a.db.Pool().Begin(ctx)
 	if err != nil {
-		slog.WarnContext(ctx, "record session: begin", slog.String("err", err.Error()))
-		return tok, expiresAt, nil
+		return "", time.Time{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	var currentEpoch int64
+	if err := tx.QueryRow(ctx, `SELECT session_epoch FROM users WHERE id=$1 AND org_id=$2 AND NOT disabled FOR UPDATE`, userID, orgID).Scan(&currentEpoch); err != nil {
+		return "", time.Time{}, err
+	}
+	if currentEpoch != epoch {
+		return "", time.Time{}, errors.New("session changed during login")
+	}
 	if _, err := tx.Exec(ctx,
-		`INSERT INTO user_sessions (session_id, user_id) VALUES ($1, $2)`, sessionID, userID); err != nil {
-		slog.WarnContext(ctx, "record session", slog.String("err", err.Error()))
-		return tok, expiresAt, nil
+		`INSERT INTO user_sessions (session_id, user_id, created_at, last_seen_at, expires_at) VALUES ($1, $2, clock_timestamp(), clock_timestamp(), $3)`, sessionID, userID, expiresAt); err != nil {
+		return "", time.Time{}, err
 	}
 	if _, err := tx.Exec(ctx, `
 DELETE FROM user_sessions
@@ -527,11 +531,10 @@ DELETE FROM user_sessions
         ORDER BY created_at DESC, session_id
         LIMIT $2
    )`, userID, maxConcurrentSessions); err != nil {
-		slog.WarnContext(ctx, "evict sessions", slog.String("err", err.Error()))
-		return tok, expiresAt, nil
+		return "", time.Time{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		slog.WarnContext(ctx, "record session: commit", slog.String("err", err.Error()))
+		return "", time.Time{}, err
 	}
 	return tok, expiresAt, nil
 }
@@ -550,16 +553,16 @@ type changePasswordRequest struct {
 func (a *Auth) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	subj, ok := SubjectFrom(r.Context())
 	if !ok || subj.UserID == uuid.Nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "no subject"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "no subject")
 		return
 	}
 	var req changePasswordRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad request")
 		return
 	}
 	if req.NewPassword == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing fields"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "missing fields")
 		return
 	}
 	// A1: enforce the caller's per-org password policy (falls back to the built-in default when
@@ -570,38 +573,38 @@ func (a *Auth) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	if err := a.db.Pool().QueryRow(r.Context(),
 		`SELECT password_hash FROM users WHERE id = $1`, subj.UserID,
 	).Scan(&currentHash); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "load user"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "load user")
 		return
 	}
 	if currentHash == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "local login not enabled for user"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "local login not enabled for user")
 		return
 	}
 	if err := auth.VerifyPassword(*currentHash, req.CurrentPassword); err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "current password incorrect"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "current password incorrect")
 		return
 	}
 	// A4: policy + reuse enforcement.
 	if err := auth.ValidatePassword(profile, req.NewPassword); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "password does not meet policy"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "password does not meet policy")
 		return
 	}
 	reused, err := a.passwordReused(r.Context(), subj.UserID, *currentHash, req.NewPassword, profile.HistoryDepth)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "check password history"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "check password history")
 		return
 	}
 	if reused {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "password was used recently; choose a new one"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "password was used recently; choose a new one")
 		return
 	}
 	newHash, err := auth.HashPassword(req.NewPassword)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "hash password"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "hash password")
 		return
 	}
 	if err := a.commitPasswordChange(r.Context(), subj.UserID, *currentHash, newHash, profile.HistoryDepth); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "change password"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "change password")
 		return
 	}
 	_, _, _ = a.auditLog.Log(r.Context(), audit.Event{
@@ -686,12 +689,12 @@ UPDATE users
 func (a *Auth) OIDCStart(w http.ResponseWriter, r *http.Request) {
 	oidc := a.providerOIDC()
 	if oidc == nil {
-		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "oidc disabled"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotImplemented, "oidc disabled")
 		return
 	}
 	url, state, verifier, nonce, err := oidc.StartURL()
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	// State + verifier + nonce go into short-lived HttpOnly cookies; the callback validates
@@ -706,7 +709,7 @@ func (a *Auth) OIDCStart(w http.ResponseWriter, r *http.Request) {
 func (a *Auth) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 	oidc := a.providerOIDC()
 	if oidc == nil {
-		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "oidc disabled"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotImplemented, "oidc disabled")
 		return
 	}
 	q := r.URL.Query()
@@ -716,7 +719,7 @@ func (a *Auth) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 	verifierCookie, _ := r.Cookie("oidc_verifier")
 	nonceCookie, _ := r.Cookie("oidc_nonce")
 	if stateCookie == nil || verifierCookie == nil || nonceCookie == nil || stateCookie.Value != state {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "state mismatch"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "state mismatch")
 		return
 	}
 	claims, _, err := oidc.Exchange(r.Context(), code, verifierCookie.Value, nonceCookie.Value)
@@ -724,7 +727,9 @@ func (a *Auth) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		// RSP-AUDIT-05: a failed OIDC code exchange / id_token validation is a failed login
 		// attempt on the OIDC path — audit it (identity unknown pre-validation, so no username).
 		a.auditLoginFailure(r.Context(), r, nil, nil, "", "oidc_exchange_failed")
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
+		// Provider/JWKS/parser errors can contain upstream bytes or URLs. The
+		// browser receives a stable category; no identity is issued on failure.
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "oidc authentication failed")
 		return
 	}
 	// Route OIDC through the shared linked-session tail (like SAML/LDAP) so its id_token groups are
@@ -737,17 +742,45 @@ func (a *Auth) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 // SAMLLogin starts an SP-initiated SAML login: it mints an AuthnRequest (recording its ID so the
 // ACS can match InResponseTo) and redirects the browser to the IdP's SSO endpoint. Mirrors
 // OIDCStart but uses a 302 since the SAML redirect binding is a plain browser redirect.
+// Browser logins replace caller RelayState with a five-minute, single-use nonce bound to a
+// Secure HttpOnly SameSite=None host cookie; the IdP must return that RelayState unchanged.
 func (a *Auth) SAMLLogin(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	browser := samlBrowserRequest(r)
+	if browser {
+		a.samlBrowserBindings.discardRequest(r)
+	}
 	saml := a.providerSAML()
 	if saml == nil {
-		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "saml disabled"})
+		if browser {
+			clearSAMLBrowserCookie(w)
+		}
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotImplemented, "saml disabled")
 		return
 	}
-	redirectURL, err := saml.StartLogin(r.URL.Query().Get("relay_state"))
+	relayState := r.URL.Query().Get("relay_state")
+	if browser {
+		var err error
+		relayState, err = a.samlBrowserBindings.mint()
+		if err != nil {
+			clearSAMLBrowserCookie(w)
+			apiutil.WriteStatus(r.Context(), w, http.StatusServiceUnavailable, "unable to start SAML login")
+			return
+		}
+	}
+	redirectURL, err := saml.StartLogin(relayState)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		if browser {
+			a.samlBrowserBindings.discard(relayState)
+			clearSAMLBrowserCookie(w)
+		}
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "unable to start SAML login")
 		return
 	}
+	if browser {
+		setSAMLBrowserCookie(w, relayState)
+	}
+	// #nosec G710 -- Destination comes from configured IdP metadata; StartLogin query-escapes caller RelayState.
 	http.Redirect(w, r, redirectURL, http.StatusFound)
 }
 
@@ -755,18 +788,33 @@ func (a *Auth) SAMLLogin(w http.ResponseWriter, r *http.Request) {
 // It validates the assertion, maps groups->roles, links the IdP identity to a provisioned user
 // via the shared oidc_issuer/oidc_subject columns (SAML Issuer + NameID), and issues an
 // identical session to OIDCCallback.
+// Browser ACS requests require the SP-login cookie and RelayState before assertion parsing;
+// unsolicited IdP-initiated browser login is rejected. Non-browser bearer SAML is unchanged.
+// Binding state is process-local, like pending AuthnRequests: replicas need login affinity,
+// and an API restart requires restarting browser login.
 func (a *Auth) SAMLACS(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	browser := samlBrowserRequest(r)
+	if browser {
+		clearSAMLBrowserCookie(w)
+		defer a.samlBrowserBindings.discardRequest(r)
+	}
 	parse := a.providerSAMLParse()
 	if a.providerSAML() == nil || parse == nil {
-		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "saml disabled"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotImplemented, "saml disabled")
+		return
+	}
+	if !a.prepareSAMLACS(w, r, browser) {
 		return
 	}
 	id, err := parse(r)
 	if err != nil {
 		// RSP-AUDIT-05: a rejected/invalid SAML assertion is a failed login attempt on the SAML
 		// path — audit it (identity unresolved pre-validation, so no username).
-		a.auditLoginFailure(r.Context(), r, nil, nil, "", "saml_validation_failed")
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": err.Error()})
+		if a.auditLog != nil {
+			a.auditLoginFailure(r.Context(), r, nil, nil, "", "saml_validation_failed")
+		}
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "invalid SAML response")
 		return
 	}
 	a.issueLinkedSession(w, r, id.Issuer, id.Subject, id.Email, id.Roles, id.ScopedRoles, "auth.login.saml")
@@ -778,16 +826,16 @@ func (a *Auth) SAMLACS(w http.ResponseWriter, r *http.Request) {
 func (a *Auth) LDAPLogin(w http.ResponseWriter, r *http.Request) {
 	ldap := a.providerLDAP()
 	if ldap == nil {
-		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "ldap disabled"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotImplemented, "ldap disabled")
 		return
 	}
 	var req ldapLoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad request")
 		return
 	}
 	if req.Username == "" || req.Password == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing fields"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "missing fields")
 		return
 	}
 	issuer := ldapIssuer(ldap.URL())
@@ -805,7 +853,7 @@ func (a *Auth) LDAPLogin(w http.ResponseWriter, r *http.Request) {
 		lockUserPtr = &lockUserID
 		if lerr := a.loginLocked(r.Context(), uuid.Nil, lockUserID); lerr != nil {
 			a.auditLoginFailure(r.Context(), r, nil, lockUserPtr, req.Username, "account_locked")
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
 	}
@@ -820,7 +868,7 @@ func (a *Auth) LDAPLogin(w http.ResponseWriter, r *http.Request) {
 		if locked {
 			a.auditLoginLocked(r.Context(), r, nil, lockUserPtr, req.Username)
 		}
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 	a.issueLinkedSession(w, r, issuer, id.DN, id.Email, id.Roles, id.ScopedRoles, "auth.login.ldap")
@@ -901,7 +949,7 @@ func (a *Auth) issueLinkedSession(w http.ResponseWriter, r *http.Request, issuer
 		// a flood of bad passwords (recorded in LDAPLogin) blocks a subsequent good one.
 		if lerr := a.loginLocked(r.Context(), orgID, userID); lerr != nil {
 			a.auditLoginFailure(r.Context(), r, &orgID, &userID, loginUsername(email, subject), "account_locked")
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
 		// User already linked. Reconcile its assignments to the IdP-asserted set only when JIT is
@@ -910,7 +958,7 @@ func (a *Auth) issueLinkedSession(w http.ResponseWriter, r *http.Request, issuer
 		if a.orgJITEnabled(r.Context(), orgID) {
 			ep, rerr := reconcileJITRoles(r.Context(), a.db, userID, orgID, idpRoles, scopedRoles)
 			if rerr != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reconcile roles"})
+				apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "reconcile roles")
 				return
 			}
 			sessionEpoch = ep
@@ -922,13 +970,13 @@ func (a *Auth) issueLinkedSession(w http.ResponseWriter, r *http.Request, issuer
 		jitOrg, ok := a.jitProvisioningOrg(r.Context())
 		if !ok {
 			a.auditLoginFailure(r.Context(), r, nil, nil, loginUsername(email, subject), "not_provisioned")
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "no user linked to identity; ask admin to provision"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusForbidden, "no user linked to identity; ask admin to provision")
 			return
 		}
 		orgID = jitOrg
 		userID, err = provisionJITUser(r.Context(), a.db, orgID, issuer, subject, email)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "provision user"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "provision user")
 			return
 		}
 		// A freshly provisioned user starts at epoch 0; seeding roles bumps it to 1 inside
@@ -936,12 +984,12 @@ func (a *Auth) issueLinkedSession(w http.ResponseWriter, r *http.Request, issuer
 		// stored value (H10 — without this the very first SSO login is dead-on-arrival).
 		ep, rerr := reconcileJITRoles(r.Context(), a.db, userID, orgID, idpRoles, scopedRoles)
 		if rerr != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "reconcile roles"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "reconcile roles")
 			return
 		}
 		sessionEpoch = ep
 	default:
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "lookup user"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "lookup user")
 		return
 	}
 	// A2: a fully successful external-IdP login clears any failed-login lockout.
@@ -949,14 +997,64 @@ func (a *Auth) issueLinkedSession(w http.ResponseWriter, r *http.Request, issuer
 	roles, _ := loadRoleNames(r.Context(), a.db, userID)
 	tok, expiresAt, err := a.issueSession(r.Context(), userID, orgID, email, roles, sessionEpoch)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "issue token"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "issue token")
 		return
 	}
 	_, _, _ = a.auditLog.Log(r.Context(), audit.Event{
 		OrgID: &orgID, ActorID: &userID,
 		Action: action, TargetKind: "user", TargetID: userID.String(),
 	})
-	writeJSON(w, http.StatusOK, loginResponse{Token: tok, ExpiresAt: expiresAt})
+	a.respondSession(w, r, tok, expiresAt, action == "auth.login.oidc" || action == "auth.login.saml")
+}
+
+func (a *Auth) respondSession(w http.ResponseWriter, r *http.Request, token string, expires time.Time, redirect bool) {
+	w.Header().Set("Cache-Control", "no-store")
+	if !auth.BrowserRequest(r) {
+		writeJSON(w, http.StatusOK, loginResponse{Token: token, ExpiresAt: expires})
+		return
+	}
+	session, err := auth.StartBrowserSession(r.Context(), a.db.Pool(), a.signer, token)
+	if err != nil {
+		if claims, verifyErr := a.signer.Verify(token); verifyErr == nil {
+			_, _ = a.db.Pool().Exec(r.Context(), `DELETE FROM user_sessions WHERE session_id=$1`, claims.SessionID())
+		}
+		auth.ClearBrowserCookies(w)
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "create browser session")
+		return
+	}
+	auth.SetBrowserCookies(w, session)
+	if redirect {
+		http.Redirect(w, r, "/clusters", http.StatusSeeOther)
+		return
+	}
+	writeJSON(w, http.StatusOK, loginResponse{ExpiresAt: session.AccessExpires})
+}
+
+func (a *Auth) Refresh(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie(auth.RefreshCookie)
+	if err != nil {
+		auth.ClearBrowserCookies(w)
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "missing refresh session")
+		return
+	}
+	session, err := auth.RotateBrowserSession(r.Context(), a.db.Pool(), a.signer, cookie.Value, a.browserIdleTimeout)
+	if err != nil {
+		if errors.Is(err, auth.ErrRefreshReused) && session != nil {
+			_, _, _ = a.auditLog.Log(r.Context(), audit.Event{
+				OrgID: &session.OrgID, ActorID: &session.UserID, Action: "auth.refresh.reuse",
+				TargetKind: "session", TargetID: session.SessionID.String(),
+			})
+		}
+		if errors.Is(err, auth.ErrRefreshInvalid) || errors.Is(err, auth.ErrRefreshReused) {
+			auth.ClearBrowserCookies(w)
+			apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "invalid refresh session")
+			return
+		}
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "refresh session")
+		return
+	}
+	auth.SetBrowserCookies(w, session)
+	writeJSON(w, http.StatusOK, loginResponse{ExpiresAt: session.AccessExpires})
 }
 
 // Logout bumps the user's session_epoch (A1), which invalidates the JWT used to call it
@@ -964,12 +1062,13 @@ func (a *Auth) issueLinkedSession(w http.ResponseWriter, r *http.Request, issuer
 // revocation primitive, consistent across API replicas. Previously this was a no-op, so a
 // "logged out" token kept working until its 1h TTL.
 func (a *Auth) Logout(w http.ResponseWriter, r *http.Request) {
+	auth.ClearBrowserCookies(w)
 	subj, _ := SubjectFrom(r.Context())
 	uid := subj.UserID
 	oid := subj.OrgID
 	if uid != uuid.Nil {
 		if err := bumpSessionEpoch(r.Context(), a.db.Pool(), uid); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "logout"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "logout")
 			return
 		}
 		// Drop the user's session rows too (A3): the epoch bump already invalidates every
@@ -989,7 +1088,7 @@ func (a *Auth) Logout(w http.ResponseWriter, r *http.Request) {
 func (a *Auth) Me(w http.ResponseWriter, r *http.Request) {
 	subj, ok := SubjectFrom(r.Context())
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "no subject"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "no subject")
 		return
 	}
 	roles := make([]string, 0, len(subj.Assignments))

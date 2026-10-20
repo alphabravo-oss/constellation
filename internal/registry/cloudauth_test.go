@@ -119,7 +119,7 @@ func TestGCPAccessToken_ExchangeAndCache(t *testing.T) {
 	defer srv.Close()
 
 	saJSON, _ := testSAKey(t, "cache-test@proj.iam.gserviceaccount.com", srv.URL+"/token")
-	cfg := Config{ServiceAccountJSON: saJSON, HTTPClient: srv.Client()}
+	cfg := Config{CredentialCacheScope: "owned-cache-test", ServiceAccountJSON: saJSON, HTTPClient: srv.Client()}
 
 	tok, err := cfg.gcpAccessToken(context.Background(), srv.Client())
 	if err != nil {

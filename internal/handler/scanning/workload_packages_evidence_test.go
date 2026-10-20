@@ -1,21 +1,25 @@
+//go:build integration
+
 package scanning
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/alphabravocompany/constellation/internal/handler"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/handler"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
 func TestScannerPackagesFromWorkloadPackagesAddsImageHints(t *testing.T) {
+	t.Parallel()
 	got := scannerPackagesFromWorkloadPackages(WorkloadPackagesPayload{
 		WorkloadID: "payments/pod/api",
 		Containers: []WorkloadPackageContainer{{
@@ -45,6 +49,7 @@ func TestScannerPackagesFromWorkloadPackagesAddsImageHints(t *testing.T) {
 }
 
 func TestWorkloadContainerImageIdentityUsesBareCRIRefAsDigestOnly(t *testing.T) {
+	t.Parallel()
 	container := WorkloadPackageContainer{
 		Image:    "docker.io/constellation/api:0.1.0",
 		ImageRef: "sha256:eb15e83d7a4364dcf9711473e213136c997495c1e8e78f42a45e0ee3b9127244",
@@ -74,10 +79,11 @@ func TestWorkloadContainerImageIdentityUsesBareCRIRefAsDigestOnly(t *testing.T) 
 }
 
 func TestWorkloadPackagesReportQueuesScanEvidence(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
-	ctx := httptest.NewRequest("GET", "/", nil).Context()
+	ctx := httptest.NewRequestWithContext(t.Context(), "GET", "/", nil).Context()
 	pool := d.Pool()
 	var regclass string
 	if err := pool.QueryRow(ctx, `SELECT COALESCE(to_regclass('public.scan_evidence')::text, '')`).Scan(&regclass); err != nil || regclass == "" {
@@ -120,8 +126,11 @@ INSERT INTO image_workload_links (
 	_, _ = pool.Exec(ctx, `DELETE FROM runtime_agent_tokens WHERE name = 'workload-evidence-test'`)
 	_, _ = pool.Exec(ctx, `DELETE FROM scanner_tokens WHERE name = 'workload-evidence-test'`)
 
-	runtimeToken, _, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, "workload-evidence-test", time.Hour)
+	runtimeToken, tokenID, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, "workload-evidence-test", time.Hour)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO cluster_init_bundles (org_id, cluster_id, name, expires_at, runtime_agent_token_id, kek_fingerprint, contents_encrypted) VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`, orgID, clusterID, "workload-evidence-"+uuid.NewString(), tokenID); err != nil {
 		t.Fatal(err)
 	}
 	body, _ := json.Marshal(WorkloadPackagesPayload{
@@ -150,7 +159,7 @@ INSERT INTO image_workload_links (
 			}},
 		}},
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/workload-packages:report", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/workload-packages:report", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+runtimeToken)
 	rec := httptest.NewRecorder()
 	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(NewWorkloadPackages(d).Report)).ServeHTTP(rec, req)
@@ -199,10 +208,10 @@ INSERT INTO image_workload_links (
 	}
 	claims := map[string]claimResponse{}
 	for i := 0; i < 2; i++ {
-		req = httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/claim", nil)
+		req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/claim", nil)
 		req.Header.Set("Authorization", "Bearer "+scannerToken)
 		rec = httptest.NewRecorder()
-		handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(jobs.Claim)).ServeHTTP(rec, req)
+		handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(jobs.Claim)).ServeHTTP(rec, currentScanLeaseRequest(t, pool, req))
 		if rec.Code != http.StatusOK {
 			t.Fatalf("claim %d status: %d body: %s", i, rec.Code, rec.Body.String())
 		}
@@ -229,13 +238,13 @@ INSERT INTO image_workload_links (
 	}
 
 	evidence := handler.NewScanEvidence(d)
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/scan-evidence/"+report.ScanEvidenceID.String(), nil)
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scan-evidence/"+report.ScanEvidenceID.String(), nil)
 	req.Header.Set("Authorization", "Bearer "+scannerToken)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", report.ScanEvidenceID.String())
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 	rec = httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(evidence.Get)).ServeHTTP(rec, req)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(evidence.Get)).ServeHTTP(rec, currentScanLeaseRequest(t, pool, req))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("evidence status: %d body: %s", rec.Code, rec.Body.String())
 	}
@@ -266,13 +275,13 @@ INSERT INTO image_workload_links (
 		t.Fatalf("packages = %+v", evidenceRes.Packages)
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/api/v1/scan-evidence/"+report.ImageScanTargets[0].ScanEvidenceID.String(), nil)
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scan-evidence/"+report.ImageScanTargets[0].ScanEvidenceID.String(), nil)
 	req.Header.Set("Authorization", "Bearer "+scannerToken)
 	rctx = chi.NewRouteContext()
 	rctx.URLParams.Add("id", report.ImageScanTargets[0].ScanEvidenceID.String())
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 	rec = httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(evidence.Get)).ServeHTTP(rec, req)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(evidence.Get)).ServeHTTP(rec, currentScanLeaseRequest(t, pool, req))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("image evidence status: %d body: %s", rec.Code, rec.Body.String())
 	}

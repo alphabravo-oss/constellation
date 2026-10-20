@@ -1,105 +1,63 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
-import { Crown, GitBranch, Hash, LogOut as LeaveIcon, Plus, Users } from "lucide-react";
-
-import { federation, type FedMember } from "@/api/client";
+import { useNavigate } from "@tanstack/react-router";
+import { LogOut as LeaveIcon, Plus } from "lucide-react";
+import { federation, type FedMember, type FedMembership } from "@/api/client";
 import { PageHeader, PageContainer } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
-import { StatCard } from "@/components/ui/stat-card";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { Collapse } from "@/components/ui/collapse";
+import { Button } from "@/components/ui/button";
+import { ErrorState, LoadingState } from "@/components/ui/states";
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
+import { useRouteSearchParams } from "@/lib/route-search";
 
 const memberColumns: Column<FedMember>[] = [
-  { id: "name", header: "Cluster", cell: (m) => m.name, className: "text-xs font-medium" },
-  { id: "role", header: "Role", cell: (m) => m.role, className: "text-xs" },
-  { id: "status", header: "Status", cell: (m) => m.status, className: "text-xs" },
-  { id: "revision", header: "Revision", cell: (m) => m.revision, className: "text-xs" },
+  { id: "name", header: "Cluster", kind: "name", wrap: true, cell: m => m.name },
+  { id: "role", header: "Role", kind: "status", cell: m => m.role },
+  { id: "status", header: "Status", kind: "status", cell: m => m.status },
+  { id: "revision", header: "Revision", kind: "count", cell: m => m.revision },
 ];
-
 export function FederationPage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const state = useQuery({ queryKey: ["fed-state"], queryFn: () => federation.state() });
-  const members = useQuery({ queryKey: ["fed-members"], queryFn: () => federation.members() });
-  const memberRows = members.data?.members ?? [];
-
+  const identity = useTablePreferencesIdentity();
+  const owner = `${identity?.org_id}:${identity?.user_id}`;
+  const [params, setParams] = useRouteSearchParams();
+  const query = params.get("q") ?? "";
+  const state = useQuery({ queryKey: ["fed-state", owner], queryFn: () => federation.state() });
+  const members = useQuery({ queryKey: ["fed-members", owner], queryFn: () => federation.members() });
+  const stateReady = state.isSuccess && !state.isFetching && !state.isError;
+  const membersReady = members.isSuccess && !members.isFetching && !members.isError;
+  const cur = stateReady ? state.data : undefined;
+  const rows = membersReady ? members.data.members : [];
+  const memberRows = rows.filter(member => !query.trim() || [member.name, member.cluster_id, member.role, member.status].some(value => value.toLowerCase().includes(query.trim().toLowerCase())));
   const transit = useMutation({
-    mutationFn: (action: "promote" | "demote" | "leave") =>
-      federation.transition(action),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["fed-state"] }),
+    mutationFn: (action: "promote" | "demote" | "leave") => {
+      const latest = qc.getQueryState<FedMembership>(["fed-state", owner]);
+      const expected = action === "promote" ? "standalone" : action === "demote" ? "master" : "joint";
+      if (latest?.status !== "success" || latest.fetchStatus !== "idle" || latest.data?.state !== expected) throw new Error("Federation state changed; refresh before retrying.");
+      return federation.transition(action);
+    },
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: ["fed-state", owner] }); void qc.invalidateQueries({ queryKey: ["fed-members", owner] }); },
   });
-
-  const cur = state.data;
-
-  return (
-    <PageContainer>
-      <PageHeader
-        title="Federation"
-        description="Share security policies and user groups across multiple Constellation clusters. One cluster is the master; joint clusters receive its synced config. Runtime data stays local to each cluster."
-      />
-
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label="State" value={cur?.state ?? "unknown"} tone="accent" icon={<Crown className="h-3.5 w-3.5" aria-hidden />} />
-        <StatCard label="Master" value={cur?.master_id ? cur.master_id.slice(0, 12) : "—"} hint={cur?.master_id ?? undefined} icon={<GitBranch className="h-3.5 w-3.5" aria-hidden />} />
-        <StatCard label="Revision" value={cur?.revision ?? 0} icon={<Hash className="h-3.5 w-3.5" aria-hidden />} />
-        <StatCard label="Members" value={memberRows.length} icon={<Users className="h-3.5 w-3.5" aria-hidden />} />
-      </section>
-
-      <section className="rounded-lg border border-border bg-card p-4 space-y-3">
-        <h2 className="text-sm font-medium">Membership actions</h2>
-        <div className="flex flex-wrap gap-2">
-          <button
-            disabled={cur?.state !== "standalone"}
-            onClick={() => transit.mutate("promote")}
-            className="rounded-md border border-border bg-background px-3 py-1.5 text-xs hover:bg-accent disabled:opacity-50"
-          >
-            Promote → Master
-          </button>
-          <button
-            disabled={cur?.state !== "master"}
-            onClick={() => transit.mutate("demote")}
-            className="rounded-md border border-border bg-background px-3 py-1.5 text-xs hover:bg-accent disabled:opacity-50"
-          >
-            Demote → Standalone
-          </button>
-          <button
-            disabled={cur?.state !== "standalone"}
-            onClick={() => navigate("/federation/new")}
-            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Join federation
-          </button>
-          <button
-            disabled={cur?.state !== "joint"}
-            onClick={() => transit.mutate("leave")}
-            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-3 py-1.5 text-xs hover:bg-accent disabled:opacity-50"
-          >
-            <LeaveIcon className="h-3.5 w-3.5" />
-            Leave federation
-          </button>
-        </div>
-      </section>
-
-      <section className="rounded-lg border border-border bg-card">
-        <div className="flex items-center justify-between border-b border-border px-3 py-2">
-          <div className="flex items-center gap-2">
-            <Users className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm font-medium">Members</span>
-          </div>
-          <span className="text-xs text-muted-foreground">{memberRows.length}</span>
-        </div>
-        <DataTable<FedMember>
-          rows={memberRows}
-          columns={memberColumns}
-          rowKey={(m) => m.id}
-          showDensityToggle={false}
-          className="rounded-none border-0"
-          emptyState={
-            <div className="px-3 py-6 text-center text-xs text-muted-foreground">
-              No federation members.
-            </div>
-          }
-        />
-      </section>
-    </PageContainer>
-  );
+  return <PageContainer>
+    <PageHeader title="Federation" description="Organization-wide federation membership and policy synchronization. Runtime data remains local to each member cluster." actions={<Button disabled={state.isFetching || members.isFetching} onClick={() => { void state.refetch(); void members.refetch(); }}>Refresh</Button>} />
+    <VerdictBanner status={state.isError || members.isError ? "degraded" : "info"} title={state.isError ? "Federation state is unavailable" : members.isError ? "Federation members are unavailable" : !stateReady || !membersReady ? "Loading federation evidence" : `Federation state: ${cur?.state}`} detail="Membership actions require the latest settled federation state. Member counts describe only the loaded organization inventory." numbers={[{ label: "State", value: cur?.state ?? "Unavailable" }, { label: "Master", value: stateReady ? cur?.master_id?.slice(0, 12) ?? "None reported" : "Unavailable", title: cur?.master_id }, { label: "Revision", value: cur?.revision ?? "Unavailable" }, { label: "Loaded members", value: membersReady ? rows.length : "Unavailable" }]} />
+    
+    {state.isError && <ErrorState title="Federation state could not be loaded or refreshed." action={<Button onClick={() => void state.refetch()}>Retry state</Button>} />}
+    <section className="space-y-3">
+      <h2 className="text-sm font-semibold">Members</h2>
+      <input aria-label="Search loaded federation members" placeholder="Search loaded members" className="w-full rounded border border-input bg-background px-3 py-2" value={query} onChange={event => setParams(current => { const next = new URLSearchParams(current); if (event.target.value) next.set("q", event.target.value); else next.delete("q"); return next; }, { replace: true })} />
+      {members.isError ? <ErrorState title="Federation members could not be loaded or refreshed." action={<Button onClick={() => void members.refetch()}>Retry members</Button>} /> : !membersReady ? <LoadingState label="Loading federation members…" /> : <DataTable rows={memberRows} columns={memberColumns} rowKey={member => member.id} preferencesKey="federation-members" exportFileName="constellation-federation-loaded-members" exportLabel="Export loaded matches CSV" emptyState={<p className="p-6 text-sm text-muted-foreground">No federation members match the loaded inventory.</p>} />}
+    </section>
+    <Collapse label="Membership actions">
+      {transit.isError && <ErrorState title="The federation transition failed. refresh state and retry." />}
+      <div className="flex flex-wrap gap-2">
+        <Button disabled={cur?.state !== "standalone" || transit.isPending} onClick={() => transit.mutate("promote")}>Promote → Master</Button>
+        <Button disabled={cur?.state !== "master" || transit.isPending} onClick={() => transit.mutate("demote")}>Demote → Standalone</Button>
+        <Button disabled={cur?.state !== "standalone" || transit.isPending} onClick={() => void navigate({ href: "/federation/new" })}><Plus className="h-3.5 w-3.5" />Join federation</Button>
+        <Button disabled={cur?.state !== "joint" || transit.isPending} onClick={() => transit.mutate("leave")}><LeaveIcon className="h-3.5 w-3.5" />Leave federation</Button>
+      </div>
+    </Collapse>
+  </PageContainer>;
 }

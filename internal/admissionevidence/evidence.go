@@ -2,6 +2,8 @@ package admissionevidence
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -70,6 +72,7 @@ type admissionEvidenceHit struct {
 }
 
 type admissionEvidenceScanResult struct {
+	EngineStatus        map[string]string
 	ID                  uuid.UUID
 	ImageRef            string
 	Digest              string
@@ -230,6 +233,11 @@ func (s *Source) evaluateScanEvidenceGate(ctx context.Context, gate admission.Ev
 				image.Container, image.Raw, age.Truncate(time.Second), maxAge), true, result, true, nil
 		}
 	}
+	for _, engine := range normalizeAdmissionStrings(gate.RequiredSuccessfulEngines) {
+		if result.EngineStatus[engine] != "succeeded" {
+			return fmt.Sprintf("container %q image %q has no successful %s scan evidence", image.Container, image.Raw, engine), true, result, true, nil
+		}
+	}
 	if gate.RequireVulnDBBundle && (strings.TrimSpace(result.VulnDBBundleVersion) == "" || strings.TrimSpace(result.VulnDBBundleHash) == "") {
 		return fmt.Sprintf("container %q image %q scan result has no VulnDB bundle provenance", image.Container, image.Raw), true, result, true, nil
 	}
@@ -248,6 +256,7 @@ func (s *Source) evaluateScanEvidenceGate(ctx context.Context, gate admission.Ev
 
 func scanEvidenceGateRequiresResult(gate admission.EvidenceGate) bool {
 	return gate.RequireKnownScanResult ||
+		len(gate.RequiredSuccessfulEngines) > 0 ||
 		gate.MaxScanAgeSeconds > 0 ||
 		gate.RequireVulnDBBundle ||
 		len(gate.AllowedSourceTypes) > 0 ||
@@ -392,7 +401,8 @@ SELECT r.id,
        r.vulndb_bundle_version,
        r.vulndb_bundle_hash,
        r.package_count,
-       r.finding_count
+       r.finding_count,
+       r.engine_status
   FROM image_scan_results r
   LEFT JOIN scan_targets st ON st.id = r.scan_target_id
  WHERE r.org_id = $1
@@ -407,6 +417,7 @@ SELECT r.id,
           r.last_scanned_at DESC, r.updated_at DESC
  LIMIT 1`, s.orgID, image.Candidates, image.Digest, sourceTypes, gate.RequireDigestMatch)
 	var result admissionEvidenceScanResult
+	var engineStatus []byte
 	if err := row.Scan(
 		&result.ID,
 		&result.ImageRef,
@@ -418,11 +429,15 @@ SELECT r.id,
 		&result.VulnDBBundleHash,
 		&result.PackageCount,
 		&result.FindingCount,
+		&engineStatus,
 	); err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return admissionEvidenceScanResult{}, false, nil
 		}
 		return admissionEvidenceScanResult{}, false, err
+	}
+	if err := json.Unmarshal(engineStatus, &result.EngineStatus); err != nil {
+		return admissionEvidenceScanResult{}, false, fmt.Errorf("decode scan engine outcomes: %w", err)
 	}
 	return result, true, nil
 }
@@ -453,7 +468,7 @@ SELECT a.id
    AND (cardinality($6::text[]) = 0 OR a.signer_issuer = ANY($6::text[]))
  ORDER BY a.observed_at DESC, a.created_at DESC
  LIMIT 1`, s.orgID, result.ID, result.Digest, predicateTypes, identities, issuers).Scan(&id)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
@@ -576,7 +591,7 @@ SELECT upper(f.external_id)
            AND ia.revoked_at IS NULL AND ia.accepted_until > NOW()))
  LIMIT 1`,
 		s.orgID, image.Candidates, image.Digest, upperStrings(gate.DeniedCVEs), graceDaysArg(gate), gate.HonorActiveExceptions).Scan(&matched)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return "", false, nil
 	}
 	if err != nil {
@@ -888,7 +903,7 @@ SELECT id,
 		&hit.Path,
 		&hit.Count,
 	); err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return admissionEvidenceHit{}, false, nil
 		}
 		return admissionEvidenceHit{}, false, err
@@ -1019,7 +1034,7 @@ SELECT id,
 		&riskTypeCSV,
 		&hit.Count,
 	); err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return admissionEvidenceHit{}, false, nil
 		}
 		return admissionEvidenceHit{}, false, err
@@ -1109,7 +1124,7 @@ SELECT l.id,
 		&identity,
 		&reason,
 	); err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return admissionEvidenceHit{}, false, nil
 		}
 		return admissionEvidenceHit{}, false, err
@@ -1164,7 +1179,7 @@ func admissionEvidenceImages(pod *corev1.Pod) []admissionEvidenceImage {
 		out = append(out, admissionEvidenceImageFor(c.Name, "container", c.Image))
 	}
 	for _, c := range pod.Spec.EphemeralContainers {
-		out = append(out, admissionEvidenceImageFor(c.Name, "ephemeral", c.EphemeralContainerCommon.Image))
+		out = append(out, admissionEvidenceImageFor(c.Name, "ephemeral", c.Image))
 	}
 	return out
 }

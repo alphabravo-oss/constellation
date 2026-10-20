@@ -15,9 +15,8 @@ import (
 // without a restart. Deletes are batched so a large backlog is worked off across
 // cycles instead of one long lock.
 //
-// ponytail: batched ctid DELETE, matching the network_flows pruner. events is
-// partitioned by time, so DROP-partition is the eventual cheap upgrade once the
-// ingest side rotates partitions.
+// The batched DELETE uses the partitioned table's (id, at) primary key. A ctid
+// alone is only unique inside one child partition and can delete unrelated rows.
 func RunEventsRetentionMonitor(ctx context.Context, pool *pgxpool.Pool, retention func(ctx context.Context) time.Duration, logger *slog.Logger) {
 	if pool == nil || retention == nil {
 		return
@@ -103,13 +102,18 @@ DELETE FROM scan_jobs
 }
 
 func pruneEventsOnce(ctx context.Context, pool *pgxpool.Pool, retention time.Duration, batch int64) (int64, error) {
+	if retention <= 0 || batch <= 0 {
+		return 0, nil
+	}
 	secs := strconv.FormatInt(int64(retention/time.Second), 10)
 	tag, err := pool.Exec(ctx, `
 DELETE FROM events
- WHERE ctid IN (
-     SELECT ctid FROM events
+ WHERE (id, at) IN (
+     SELECT id, at FROM events
       WHERE at < now() - ($1::text || ' seconds')::interval
+      ORDER BY at, id
       LIMIT $2
+      FOR UPDATE SKIP LOCKED
  )`, secs, batch)
 	if err != nil {
 		return 0, err

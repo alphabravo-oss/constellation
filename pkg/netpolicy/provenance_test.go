@@ -15,12 +15,13 @@ func egressRule(port uint16, ip string) *dp.PolicyRule {
 }
 
 func TestMergeRulesPreservesUserDropsLearned(t *testing.T) {
+	t.Parallel()
 	existing := []*SourcedRule{
 		{PolicyRule: ingressRule(443, "10.0.0.1"), CfgType: CfgTypeUser},
 		{PolicyRule: egressRule(80, "10.0.0.2"), CfgType: CfgTypeLearned},
 	}
 	fresh := []*SourcedRule{
-		{PolicyRule: egressRule(80, "10.0.0.3"), CfgType: CfgTypeLearned}, // new learned edge
+		{PolicyRule: egressRule(80, "10.0.0.3"), CfgType: CfgTypeLearned},   // new learned edge
 		{PolicyRule: ingressRule(443, "10.0.0.1"), CfgType: CfgTypeLearned}, // collides with user rule
 	}
 
@@ -56,6 +57,7 @@ func TestMergeRulesPreservesUserDropsLearned(t *testing.T) {
 }
 
 func TestMergeRulesTreatsEmptyCfgAsUser(t *testing.T) {
+	t.Parallel()
 	// A rule stored before provenance existed (empty cfg) must be preserved, not
 	// treated as learned and dropped.
 	existing := []*SourcedRule{{PolicyRule: ingressRule(22, "10.1.0.1")}} // cfg ""

@@ -83,7 +83,7 @@ func (c *Client) refresh(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("jwks: fetch: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("jwks: status %d", resp.StatusCode)
 	}
@@ -178,11 +178,23 @@ func parseEC(m map[string]any) (*ecdsa.PublicKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("jwks: decode y: %w", err)
 	}
-	return &ecdsa.PublicKey{
-		Curve: curve,
-		X:     new(big.Int).SetBytes(xBytes),
-		Y:     new(big.Int).SetBytes(yBytes),
-	}, nil
+	// Build the SEC 1 uncompressed point (0x04 || X || Y) with each coordinate
+	// left-padded to the curve's field size; the parser validates the point is on the curve.
+	size := (curve.Params().BitSize + 7) / 8
+	if len(xBytes) > size || len(yBytes) > size {
+		return nil, errors.New("jwks: ec key coordinate too long for curve")
+	}
+	point := make([]byte, 1, 1+2*size)
+	point[0] = 4
+	point = append(point, make([]byte, size-len(xBytes))...)
+	point = append(point, xBytes...)
+	point = append(point, make([]byte, size-len(yBytes))...)
+	point = append(point, yBytes...)
+	pub, err := ecdsa.ParseUncompressedPublicKey(curve, point)
+	if err != nil {
+		return nil, fmt.Errorf("jwks: ec key invalid point: %w", err)
+	}
+	return pub, nil
 }
 
 // b64decode tolerates accidental padding from misconfigured IdPs.

@@ -1,3 +1,5 @@
+//go:build integration
+
 package compliance
 
 import (
@@ -38,7 +40,7 @@ func TestBenchRun_EnqueueAndClaim(t *testing.T) {
 	subj := authctx.Subject{UserID: userID, OrgID: orgID}
 
 	// Enqueue an on-demand kube-bench run scoped to the cluster.
-	runReq := httptest.NewRequest(http.MethodPost, "/api/v1/compliance/bench/run?profile=kube-bench&cluster_id="+clusterID.String(), nil)
+	runReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/compliance/bench/run?profile=kube-bench&cluster_id="+clusterID.String(), nil)
 	runReq = runReq.WithContext(authctx.WithSubject(runReq.Context(), subj))
 	runResp := httptest.NewRecorder()
 	h.RunBench(runResp, runReq)
@@ -59,7 +61,7 @@ SELECT id, status, profile FROM compliance_bench_run_requests
 	}
 
 	// The runner claims it: 200 with the request, and it flips to claimed.
-	claimReq := httptest.NewRequest(http.MethodPost, "/api/v1/compliance/bench/claim?profile=kube-bench&cluster_id="+clusterID.String(), nil)
+	claimReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/compliance/bench/claim?profile=kube-bench&cluster_id="+clusterID.String(), nil)
 	claimReq = claimReq.WithContext(authctx.WithSubject(claimReq.Context(), subj))
 	claimResp := httptest.NewRecorder()
 	h.ClaimBenchRun(claimResp, claimReq)
@@ -80,7 +82,7 @@ SELECT id, status, profile FROM compliance_bench_run_requests
 	}
 
 	// The queue is now empty: a second claim returns 204.
-	claim2 := httptest.NewRequest(http.MethodPost, "/api/v1/compliance/bench/claim?profile=kube-bench&cluster_id="+clusterID.String(), nil)
+	claim2 := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/compliance/bench/claim?profile=kube-bench&cluster_id="+clusterID.String(), nil)
 	claim2 = claim2.WithContext(authctx.WithSubject(claim2.Context(), subj))
 	claim2Resp := httptest.NewRecorder()
 	h.ClaimBenchRun(claim2Resp, claim2)
@@ -92,7 +94,7 @@ SELECT id, status, profile FROM compliance_bench_run_requests
 	if _, err := pool.Exec(ctx, `UPDATE compliance_bench_run_requests SET status='pending', claimed_at=NULL WHERE id=$1`, reqID); err != nil {
 		t.Fatalf("reset row: %v", err)
 	}
-	dockerClaim := httptest.NewRequest(http.MethodPost, "/api/v1/compliance/bench/claim?profile=docker-bench&cluster_id="+clusterID.String(), nil)
+	dockerClaim := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/compliance/bench/claim?profile=docker-bench&cluster_id="+clusterID.String(), nil)
 	dockerClaim = dockerClaim.WithContext(authctx.WithSubject(dockerClaim.Context(), subj))
 	dockerResp := httptest.NewRecorder()
 	h.ClaimBenchRun(dockerResp, dockerClaim)

@@ -1,3 +1,5 @@
+//go:build integration
+
 package runtime
 
 import (
@@ -9,11 +11,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/response"
-	"github.com/google/uuid"
 )
 
 // TestRuntimeThreats_BulkRoundTrip covers Wave 5: agent POSTs a DPI threat
@@ -40,8 +43,11 @@ func TestRuntimeThreats_BulkRoundTrip(t *testing.T) {
 	}
 
 	tokenName := "wave5-test-" + uuid.New().String()
-	raw, _, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
+	raw, tokenID, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO cluster_init_bundles (org_id, cluster_id, name, expires_at, runtime_agent_token_id, kek_fingerprint, contents_encrypted) VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`, orgID, clusterID, "threat-test-"+uuid.NewString(), tokenID); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -107,7 +113,7 @@ DO UPDATE SET namespace = EXCLUDED.namespace,
 	})
 
 	h := NewRuntimeThreats(d)
-	req := httptest.NewRequest("POST", "/api/v1/runtime-threats:bulk", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/runtime-threats:bulk", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+raw)
 	w := httptest.NewRecorder()
 	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(w, req)
@@ -198,8 +204,11 @@ func TestRuntimeThreats_V2SuppressLogSkipsThreatRow(t *testing.T) {
 	}
 
 	tokenName := "threat-v2-suppress-" + uuid.New().String()
-	raw, _, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
+	raw, tokenID, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO cluster_init_bundles (org_id, cluster_id, name, expires_at, runtime_agent_token_id, kek_fingerprint, contents_encrypted) VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`, orgID, clusterID, "threat-test-"+uuid.NewString(), tokenID); err != nil {
 		t.Fatal(err)
 	}
 	workloadID := "payments/api-" + uuid.New().String()
@@ -241,7 +250,7 @@ VALUES ($1, $2, '', true, 'threat', $3, $4, $5) RETURNING id`,
 		WithAudit(audit.New(pool)).
 		WithResponseEngine(NewResponseDispatch(d, nil)).
 		WithResponseDecision(NewResponseDecision(d))
-	req := httptest.NewRequest("POST", "/api/v1/runtime-threats:bulk", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/runtime-threats:bulk", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+raw)
 	w := httptest.NewRecorder()
 	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(w, req)
@@ -277,6 +286,90 @@ SELECT COALESCE(after->>'enforced','')
 	}
 }
 
+func TestRuntimeThreats_V2SpecificCategoriesSuppressOnlyMatchingThreats(t *testing.T) {
+	d := openTestDB(t)
+	t.Cleanup(d.Close)
+	ctx := context.Background()
+	pool := d.Pool()
+	var orgID, clusterID uuid.UUID
+	orgName := "response-categories-" + uuid.NewString()
+	if err := pool.QueryRow(ctx, `INSERT INTO orgs (name, display_name) VALUES ($1, $1) RETURNING id`, orgName).Scan(&orgID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id=$1`, orgID) })
+	if err := pool.QueryRow(ctx, `INSERT INTO clusters (org_id, name) VALUES ($1, $2) RETURNING id`, orgID, orgName).Scan(&clusterID); err != nil {
+		t.Fatal(err)
+	}
+	tokenName := "response-categories-" + uuid.NewString()
+	raw, tokenID, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO cluster_init_bundles (org_id, cluster_id, name, expires_at, runtime_agent_token_id, kek_fingerprint, contents_encrypted) VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`, orgID, clusterID, "response-categories-"+uuid.NewString(), tokenID); err != nil {
+		t.Fatal(err)
+	}
+	workloadID := "response-categories/" + uuid.NewString()
+	conditions, _ := json.Marshal([]response.Condition{{Type: response.CondLevel, Value: "high"}})
+	actions, _ := json.Marshal([]response.Action{{Kind: response.ActionSuppressLog}})
+	selector, _ := json.Marshal(response.WorkloadSelector{})
+	ruleIDs := []uuid.UUID{}
+	for _, eventType := range []response.EventType{response.EventDLP, response.EventWAF} {
+		var ruleID uuid.UUID
+		if err := pool.QueryRow(ctx, `INSERT INTO response_rules_v2 (org_id, cluster_id, name, description, enabled, event_type, conditions, actions, workload_match) VALUES ($1, $2, $3, '', true, $4, $5, $6, $7) RETURNING id`, orgID, clusterID, "response-categories-"+string(eventType)+"-"+uuid.NewString(), eventType, conditions, actions, selector).Scan(&ruleID); err != nil {
+			t.Fatal(err)
+		}
+		ruleIDs = append(ruleIDs, ruleID)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM runtime_threats WHERE org_id=$1 AND workload_id=$2`, orgID, workloadID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM audit_events WHERE org_id=$1 AND target_id=$2`, orgID, workloadID)
+		for _, ruleID := range ruleIDs {
+			_, _ = pool.Exec(context.Background(), `DELETE FROM response_rules_v2 WHERE id=$1`, ruleID)
+		}
+		_, _ = pool.Exec(context.Background(), `DELETE FROM runtime_agent_tokens WHERE name=$1`, tokenName)
+	})
+	rows := []ThreatIngestRow{
+		{At: time.Now().UTC(), Node: "response-categories", WorkloadID: workloadID, ThreatID: 2022, Severity: 4},
+		{At: time.Now().UTC(), Node: "response-categories", WorkloadID: workloadID, ThreatID: 20001, Severity: 4},
+		{At: time.Now().UTC(), Node: "response-categories", WorkloadID: workloadID, ThreatID: 40001, Severity: 4},
+	}
+	body, _ := json.Marshal(rows)
+	var gotTypes []response.EventType
+	h := NewRuntimeThreats(d).
+		WithAudit(audit.New(pool)).
+		WithResponseDecision(NewResponseDecision(d)).
+		WithResponseEngine(func(_ context.Context, _, _ uuid.UUID, event response.Event) {
+			gotTypes = append(gotTypes, event.Type)
+		})
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/runtime-threats:bulk", bytes.NewReader(body))
+	request.Header.Set("Authorization", "Bearer "+raw)
+	result := httptest.NewRecorder()
+	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(result, request)
+	if result.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", result.Code, result.Body.String())
+	}
+	var ingested ThreatIngestResponse
+	if err := json.NewDecoder(result.Body).Decode(&ingested); err != nil {
+		t.Fatal(err)
+	}
+	if ingested.Accepted != 1 || ingested.Alerts != 1 {
+		t.Fatalf("accepted=%d alerts=%d want 1/1", ingested.Accepted, ingested.Alerts)
+	}
+	if len(gotTypes) != 3 || gotTypes[0] != response.EventThreat || gotTypes[1] != response.EventDLP || gotTypes[2] != response.EventWAF {
+		t.Fatalf("response types=%v", gotTypes)
+	}
+	var persisted, suppressed int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM runtime_threats WHERE org_id=$1 AND workload_id=$2`, orgID, workloadID).Scan(&persisted); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id=$1 AND target_id=$2 AND action='response_rule_v2.action.suppress_log'`, orgID, workloadID).Scan(&suppressed); err != nil {
+		t.Fatal(err)
+	}
+	if persisted != 1 || suppressed != 2 {
+		t.Fatalf("persisted=%d suppressed=%d want 1/2", persisted, suppressed)
+	}
+}
+
 // TestThreatCategory pins the NeuVector-parity threat_id->category mapping that the
 // ?category= filter relies on: built-in IPS/IDS DPI signatures (incl. SQL_INJECTION 2022
 // and the flood detectors 1001-1003) are "ips" — NOT "waf"; DLP rules occupy [20000,40000)
@@ -301,7 +394,7 @@ func TestThreatCategory(t *testing.T) {
 		{50000, "ips"}, // above MaxWafRuleID -> falls back to ips bucket
 	}
 	for _, c := range cases {
-		if got := threatCategory(c.id); got != c.want {
+		if got := threatCategory(int64(c.id)); got != c.want {
 			t.Errorf("threatCategory(%d) = %q want %q", c.id, got, c.want)
 		}
 	}
@@ -330,8 +423,11 @@ func TestRuntimeThreats_CategoryFilter(t *testing.T) {
 
 	node := "cat-filter-node-" + uuid.New().String()
 	tokenName := "cat-filter-" + uuid.New().String()
-	raw, _, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
+	raw, tokenID, err := handler.IssueRuntimeAgentToken(ctx, pool, orgID, tokenName, time.Hour)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO cluster_init_bundles (org_id, cluster_id, name, expires_at, runtime_agent_token_id, kek_fingerprint, contents_encrypted) VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`, orgID, clusterID, "threat-test-"+uuid.NewString(), tokenID); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -348,7 +444,7 @@ func TestRuntimeThreats_CategoryFilter(t *testing.T) {
 		{At: time.Now().UTC(), Node: node, ThreatID: 40001, Severity: 6, DlpNameHash: 0},  // WAF rule, hash unset
 	})
 	h := NewRuntimeThreats(d)
-	req := httptest.NewRequest("POST", "/api/v1/runtime-threats:bulk", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/runtime-threats:bulk", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+raw)
 	w := httptest.NewRecorder()
 	handler.RuntimeAgentTokenMiddleware(pool)(http.HandlerFunc(h.Bulk)).ServeHTTP(w, req)
@@ -358,9 +454,9 @@ func TestRuntimeThreats_CategoryFilter(t *testing.T) {
 
 	// listCategory issues GET /runtime-threats?category=<cat> as the org's user and returns the
 	// threat_ids (restricted to this test's node) so cross-test rows don't interfere.
-	listCategory := func(cat string) []int32 {
+	listCategory := func(cat string) []int64 {
 		t.Helper()
-		lreq := httptest.NewRequest("GET", "/api/v1/runtime-threats?category="+cat, nil)
+		lreq := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/runtime-threats?category="+cat, nil)
 		lreq = lreq.WithContext(authctx.WithSubject(ctx, authctx.Subject{OrgID: orgID}))
 		lw := httptest.NewRecorder()
 		h.List(lw, lreq)
@@ -373,7 +469,7 @@ func TestRuntimeThreats_CategoryFilter(t *testing.T) {
 		if err := json.NewDecoder(lw.Body).Decode(&resp); err != nil {
 			t.Fatalf("decode list: %v", err)
 		}
-		var ids []int32
+		var ids []int64
 		for _, tr := range resp.Threats {
 			if tr.Node == node {
 				ids = append(ids, tr.ThreatID)
@@ -437,7 +533,7 @@ VALUES
 		t.Fatalf("threats: %v", err)
 	}
 
-	req := httptest.NewRequest("GET", "/api/v1/runtime-threats?cluster_id="+clusterID.String()+"&group="+groupID.String(), nil)
+	req := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/runtime-threats?cluster_id="+clusterID.String()+"&group="+groupID.String(), nil)
 	req = req.WithContext(authctx.WithSubject(ctx, authctx.Subject{OrgID: orgID}))
 	rec := httptest.NewRecorder()
 	NewRuntimeThreats(d).List(rec, req)

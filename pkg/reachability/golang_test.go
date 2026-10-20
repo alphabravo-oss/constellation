@@ -17,6 +17,7 @@ const fixtureGovulnJSON = `
 `
 
 func TestParseGovulncheckJSON_ReachableAndImportOnly(t *testing.T) {
+	t.Parallel()
 	verdicts, err := parseGovulncheckJSON([]byte(strings.TrimSpace(fixtureGovulnJSON)))
 	if err != nil {
 		t.Fatal(err)
@@ -64,6 +65,7 @@ func TestParseGovulncheckJSON_ReachableAndImportOnly(t *testing.T) {
 }
 
 func TestPickCVE_PrefersCVEAlias(t *testing.T) {
+	t.Parallel()
 	got := pickCVE([]string{"GHSA-x", "CVE-2024-1", "GHSA-y"}, "GO-2024-1")
 	if got != "CVE-2024-1" {
 		t.Fatalf("got %q", got)

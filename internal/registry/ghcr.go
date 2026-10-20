@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 )
 
 // GHCR is the ghcr.io connector. Public reads work without auth; private reads use a
@@ -37,26 +39,28 @@ func (g *GHCR) ListImages(ctx context.Context) ([]Image, error) {
 	url := fmt.Sprintf("https://api.github.com/users/%s/packages?package_type=container&per_page=100", owner)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return nil, errors.New("registry: invalid request endpoint")
 	}
 	req.Header.Set("Authorization", "Bearer "+g.cfg.Token)
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
 	resp, err := g.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("ghcr: list: %w", err)
+		return nil, responseFailure("ghcr list", "request failed", 0, err)
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	body, readErr := readRegistryPage(resp, 4<<20)
+	if readErr != nil {
+		return nil, responseFailure("ghcr list", "response read or close failed", resp.StatusCode, readErr)
+	}
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("ghcr: status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, responseFailure("ghcr list", "response rejected", resp.StatusCode, nil)
 	}
 	var pkgs []struct {
 		Name      string    `json:"name"`
 		UpdatedAt time.Time `json:"updated_at"`
 	}
 	if err := json.Unmarshal(body, &pkgs); err != nil {
-		return nil, fmt.Errorf("ghcr: decode: %w", err)
+		return nil, responseFailure("ghcr list", "invalid list response", resp.StatusCode, err)
 	}
 	out := make([]Image, 0, len(pkgs))
 	for _, p := range pkgs {
@@ -65,10 +69,88 @@ func (g *GHCR) ListImages(ctx context.Context) ([]Image, error) {
 			PushedAt:   p.UpdatedAt.UTC().Format(time.RFC3339),
 		})
 	}
-	populateTagsViaV2(ctx, g.client, out, g.cfg.Token)
-	return out, nil
+	group, tagCtx := errgroup.WithContext(ctx)
+	// Bound registry traffic while keeping multi-package discovery within the
+	// interactive connection-test deadline. Each worker writes one image slot.
+	group.SetLimit(4)
+	for i := range out {
+		group.Go(func() error {
+			token, err := g.pullToken(tagCtx, out[i].Repository)
+			if err != nil {
+				return err
+			}
+			tags, err := listTagsViaV2(tagCtx, g.client, out[i].Repository, token)
+			if err != nil {
+				return fmt.Errorf("ghcr: enumerate tags: %w", err)
+			}
+			// An untagged package must not become an invented :latest target.
+			out[i].Tags = tags
+			return nil
+		})
+	}
+	if err := group.Wait(); err != nil {
+		return nil, err
+	}
+	filtered := out[:0]
+	for _, im := range out {
+		if len(im.Tags) > 0 {
+			filtered = append(filtered, im)
+		}
+	}
+	return filtered, nil
 }
 
 func (g *GHCR) ResolveDigest(ctx context.Context, ref string) (string, error) {
-	return resolveDigestViaV2(ctx, g.client, ref, g.cfg.Token)
+	host, repo, _, err := parseRef(ref)
+	if err != nil || host != "ghcr.io" {
+		return "", errors.New("ghcr: expected a ghcr.io image reference")
+	}
+	token, err := g.pullToken(ctx, host+"/"+repo)
+	if err != nil {
+		return "", err
+	}
+	return resolveDigestViaV2(ctx, g.client, ref, token)
+}
+
+// GitHub API credentials are not registry bearer tokens. Exchange them at the
+// fixed GHCR issuer, never at a realm supplied by an arbitrary registry.
+func (g *GHCR) pullToken(ctx context.Context, repository string) (string, error) {
+	if !strings.HasPrefix(repository, "ghcr.io/") {
+		return "", errors.New("ghcr: invalid repository host")
+	}
+	query := url.Values{"service": {"ghcr.io"}, "scope": {"repository:" + strings.TrimPrefix(repository, "ghcr.io/") + ":pull"}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://ghcr.io/token?"+query.Encode(), nil)
+	if err != nil {
+		return "", errors.New("ghcr: invalid token request")
+	}
+	if g.cfg.Token != "" {
+		req.SetBasicAuth(g.cfg.Username, g.cfg.Token)
+	}
+	client := *g.client
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", responseFailure("ghcr token", "request failed", 0, err)
+	}
+	body, err := readRegistryPage(resp, tokenResponseLimit)
+	if err != nil {
+		return "", responseFailure("ghcr token", "response read failed", resp.StatusCode, err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", responseFailure("ghcr token", "response rejected", resp.StatusCode, nil)
+	}
+	var result struct {
+		Token       string `json:"token"`
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", responseFailure("ghcr token", "invalid response", resp.StatusCode, err)
+	}
+	if result.Token == "" {
+		result.Token = result.AccessToken
+	}
+	if result.Token == "" {
+		return "", errors.New("ghcr: empty registry token")
+	}
+	return result.Token, nil
 }

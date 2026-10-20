@@ -20,6 +20,28 @@ test("Cluster health page (deep route) renders sensor bundle", async ({ page }) 
   expect(id).toBeTruthy();
   await page.goto(`/clusters/${id}/health`);
   await expect(page.getByTestId("cluster-components-table")).toContainText("admission");
+  await page.getByRole("tab", { name: "Health gates", exact: true }).click();
   await expect(page.getByTestId("cluster-health-gate").first()).toBeVisible();
+  await page.getByRole("tab", { name: "Registration", exact: true }).click();
   await expect(page.getByText("helm upgrade --install constellation deploy/charts/constellation")).toBeVisible();
+});
+
+test("Cluster health keeps the selected sensor scope in the URL", async ({ page }) => {
+  await page.goto("/clusters");
+  const cards = page.getByTestId("cluster-card");
+  await expect(cards.nth(1)).toBeVisible();
+  const firstID = await cards.first().getAttribute("data-cluster-id");
+  const secondID = await cards.nth(1).getAttribute("data-cluster-id");
+  expect(firstID).toBeTruthy();
+  expect(secondID).toBeTruthy();
+
+  await page.goto(`/clusters/${firstID}/health?source=bookmark#sensors`);
+  await expect(page.getByRole("heading", { name: "Cluster Health" })).toBeVisible();
+  await page.getByRole("tab", { name: "Other clusters", exact: true }).click();
+  const firstName = await page.getByTestId("cluster-health-card-name").first().innerText();
+  const secondName = await page.getByTestId("cluster-health-card-name").nth(1).innerText();
+  await expect(page.getByTestId("cluster-health-panel").getByRole("heading", { level: 2 }).first()).toHaveText(firstName);
+  await page.getByTestId("cluster-card").nth(1).click();
+  await expect(page).toHaveURL(`/clusters/${secondID}/health?source=bookmark&tab=clusters#sensors`);
+  await expect(page.getByTestId("cluster-health-panel").getByRole("heading", { level: 2 }).first()).toHaveText(secondName);
 });

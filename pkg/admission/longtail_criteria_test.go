@@ -23,6 +23,7 @@ func engineWith(id string, conds RuleConditions) *PolicyEngine {
 // --- ADM-30: OpenShift DeploymentConfig is not bypassed ---------------------
 
 func TestEvaluate_DeniesBadDeploymentConfigTemplate(t *testing.T) {
+	t.Parallel()
 	e := NewEngine() // built-in block-privileged
 	dc := map[string]any{
 		"apiVersion": "apps.openshift.io/v1",
@@ -41,6 +42,7 @@ func TestEvaluate_DeniesBadDeploymentConfigTemplate(t *testing.T) {
 }
 
 func TestExtractPodFromObject_DeploymentConfig(t *testing.T) {
+	t.Parallel()
 	if !isPodTemplateKind("DeploymentConfig") {
 		t.Fatal("DeploymentConfig must be recognised as a pod-template kind")
 	}
@@ -67,6 +69,7 @@ func TestExtractPodFromObject_DeploymentConfig(t *testing.T) {
 // --- ADM-26: HostIPC --------------------------------------------------------
 
 func TestEvaluate_HostIPC(t *testing.T) {
+	t.Parallel()
 	tr := true
 	e := engineWith("block-host-ipc", RuleConditions{HostIPC: &tr})
 
@@ -90,6 +93,7 @@ func TestEvaluate_HostIPC(t *testing.T) {
 // --- ADM-26: allowPrivilegeEscalation --------------------------------------
 
 func TestEvaluate_AllowPrivilegeEscalation(t *testing.T) {
+	t.Parallel()
 	tr := true
 	fa := false
 	e := engineWith("block-priv-esc", RuleConditions{AllowPrivilegeEscalation: &tr})
@@ -124,6 +128,7 @@ func TestEvaluate_AllowPrivilegeEscalation(t *testing.T) {
 // --- ADM-26: imageNoOS ------------------------------------------------------
 
 func TestEvaluate_ImageNoOS(t *testing.T) {
+	t.Parallel()
 	tr := true
 	e := engineWith("block-no-os", RuleConditions{ImageNoOS: &tr})
 
@@ -147,6 +152,7 @@ func TestEvaluate_ImageNoOS(t *testing.T) {
 // --- ADM-26: resourceLimit --------------------------------------------------
 
 func TestEvaluate_ResourceLimit_MissingLimits(t *testing.T) {
+	t.Parallel()
 	e := engineWith("require-limits", RuleConditions{ResourceLimit: &ResourceLimitCondition{
 		RequireCPURequest: true, RequireCPULimit: true,
 		RequireMemoryRequest: true, RequireMemoryLimit: true,
@@ -183,6 +189,7 @@ func TestEvaluate_ResourceLimit_MissingLimits(t *testing.T) {
 }
 
 func TestEvaluate_ResourceLimit_Exceeds(t *testing.T) {
+	t.Parallel()
 	e := engineWith("cap-limits", RuleConditions{ResourceLimit: &ResourceLimitCondition{
 		MaxCPULimit: "500m", MaxMemoryLimit: "256Mi",
 	}})

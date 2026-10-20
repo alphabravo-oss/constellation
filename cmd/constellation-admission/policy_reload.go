@@ -65,8 +65,7 @@ func loadAdmissionPolicyRules(ctx context.Context, pool *pgxpool.Pool, clusterID
 
 // loadRegoEngine compiles every engine='opa' row into a RegoEngine. The
 // spec_yaml column holds the Rego module source verbatim. Per-rule compile
-// errors are logged (and the offending policy skipped) rather than failing the
-// whole reload, matching the catalog's "one bad row never wedges the rest" rule.
+// errors are logged; enforce-mode policies remain as fail-closed sentinels.
 func loadRegoEngine(ctx context.Context, pool *pgxpool.Pool, clusterID uuid.UUID, logger *slog.Logger) (*admission.RegoEngine, error) {
 	rows, err := loadPolicyRowsByEngine(ctx, pool, clusterID, "opa")
 	if err != nil {
@@ -86,7 +85,7 @@ func loadRegoEngine(ctx context.Context, pool *pgxpool.Pool, clusterID uuid.UUID
 		return nil, err
 	}
 	for id, cerr := range compileErrs {
-		logger.Warn("admission rego policy compile failed; skipping", "policy", id, "err", cerr)
+		logger.Warn("admission rego policy compile failed; rule remains fail-closed", "policy", id, "err", cerr)
 	}
 	return eng, nil
 }
@@ -101,7 +100,7 @@ type celPolicySpec struct {
 }
 
 // loadCELEngine compiles every engine='cel' row into a CELEngine. Per-rule
-// compile errors are logged and the policy skipped, never failing the reload.
+// compile/parse errors are logged; enforce-mode policies remain fail-closed.
 func loadCELEngine(ctx context.Context, pool *pgxpool.Pool, clusterID uuid.UUID, logger *slog.Logger) (*admission.CELEngine, error) {
 	rows, err := loadPolicyRowsByEngine(ctx, pool, clusterID, "cel")
 	if err != nil {
@@ -110,12 +109,24 @@ func loadCELEngine(ctx context.Context, pool *pgxpool.Pool, clusterID uuid.UUID,
 	if len(rows) == 0 {
 		return nil, nil
 	}
+	celRules := celPolicyRowsToRules(rows, logger)
+	eng, compileErrs, err := admission.NewCELEngine(celRules)
+	if err != nil {
+		return nil, err
+	}
+	for id, cerr := range compileErrs {
+		logger.Warn("admission cel policy compile failed; rule remains fail-closed", "policy", id, "err", cerr)
+	}
+	return eng, nil
+}
+
+func celPolicyRowsToRules(rows []admissionPolicyRow, logger *slog.Logger) []*admission.CELRule {
 	celRules := make([]*admission.CELRule, 0, len(rows))
 	for _, row := range rows {
 		var spec celPolicySpec
 		if err := yaml.Unmarshal([]byte(row.SpecYAML), &spec); err != nil {
-			logger.Warn("admission cel policy parse failed; skipping", "policy", row.Name, "err", err)
-			continue
+			logger.Warn("admission cel policy parse failed; rule remains fail-closed", "policy", row.Name, "err", err)
+			spec = celPolicySpec{}
 		}
 		celRules = append(celRules, &admission.CELRule{
 			ID:                row.Name,
@@ -124,14 +135,7 @@ func loadCELEngine(ctx context.Context, pool *pgxpool.Pool, clusterID uuid.UUID,
 			Mode:              row.Mode,
 		})
 	}
-	eng, compileErrs, err := admission.NewCELEngine(celRules)
-	if err != nil {
-		return nil, err
-	}
-	for id, cerr := range compileErrs {
-		logger.Warn("admission cel policy compile failed; skipping", "policy", id, "err", cerr)
-	}
-	return eng, nil
+	return celRules
 }
 
 func admissionPolicyRowsToRules(rows []admissionPolicyRow) ([]admission.Rule, error) {

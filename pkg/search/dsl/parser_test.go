@@ -7,15 +7,16 @@ import (
 
 func testSchema() Schema {
 	return Schema{Fields: map[string]Field{
-		"severity":      {Column: "f.severity", Type: FieldString},
-		"kind":          {Column: "f.kind", Type: FieldString},
-		"risk":          {Column: "f.risk_score", Type: FieldInt},
-		"last_seen":     {Column: "f.last_seen_at", Type: FieldTime},
-		"title":         {Column: "f.title", Type: FieldString},
+		"severity":  {Column: "f.severity", Type: FieldString},
+		"kind":      {Column: "f.kind", Type: FieldString},
+		"risk":      {Column: "f.risk_score", Type: FieldInt},
+		"last_seen": {Column: "f.last_seen_at", Type: FieldTime},
+		"title":     {Column: "f.title", Type: FieldString},
 	}}
 }
 
 func TestCompileEmpty(t *testing.T) {
+	t.Parallel()
 	c, err := Compile("", testSchema())
 	if err != nil || !c.Empty() {
 		t.Fatalf("expected empty compile, got %+v err=%v", c, err)
@@ -23,6 +24,7 @@ func TestCompileEmpty(t *testing.T) {
 }
 
 func TestCompileSimple(t *testing.T) {
+	t.Parallel()
 	c, err := Compile("severity:high", testSchema())
 	if err != nil {
 		t.Fatal(err)
@@ -36,6 +38,7 @@ func TestCompileSimple(t *testing.T) {
 }
 
 func TestCompileRegexAndOr(t *testing.T) {
+	t.Parallel()
 	c, err := Compile("kind:vulnerability OR title:r/^CVE-2024", testSchema())
 	if err != nil {
 		t.Fatal(err)
@@ -46,6 +49,7 @@ func TestCompileRegexAndOr(t *testing.T) {
 }
 
 func TestCompileNegate(t *testing.T) {
+	t.Parallel()
 	c, err := Compile("kind:!iac severity:high", testSchema())
 	if err != nil {
 		t.Fatal(err)
@@ -56,6 +60,7 @@ func TestCompileNegate(t *testing.T) {
 }
 
 func TestCompileTimeRange(t *testing.T) {
+	t.Parallel()
 	c, err := Compile("last_seen:tr/[2026-01-01,2026-02-01]", testSchema())
 	if err != nil {
 		t.Fatal(err)
@@ -69,12 +74,14 @@ func TestCompileTimeRange(t *testing.T) {
 }
 
 func TestCompileUnknownField(t *testing.T) {
+	t.Parallel()
 	if _, err := Compile("nope:value", testSchema()); err == nil {
 		t.Fatalf("expected error")
 	}
 }
 
 func TestCompileInt(t *testing.T) {
+	t.Parallel()
 	c, err := Compile("risk:80", testSchema())
 	if err != nil {
 		t.Fatal(err)
@@ -88,6 +95,7 @@ func TestCompileInt(t *testing.T) {
 }
 
 func TestCompileGlob(t *testing.T) {
+	t.Parallel()
 	c, err := Compile("title:g/CVE-2024-*", testSchema())
 	if err != nil {
 		t.Fatal(err)
@@ -102,6 +110,7 @@ func TestCompileGlob(t *testing.T) {
 }
 
 func TestCompileParens(t *testing.T) {
+	t.Parallel()
 	c, err := Compile("(severity:high OR severity:critical) kind:vulnerability", testSchema())
 	if err != nil {
 		t.Fatal(err)

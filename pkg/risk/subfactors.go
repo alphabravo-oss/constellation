@@ -9,9 +9,9 @@ import "math"
 type Subfactor struct {
 	Name        string  `json:"name"`
 	Description string  `json:"description"`
-	Score       int     `json:"score"`        // weighted contribution to composite
-	Raw         int     `json:"raw"`          // raw 0..100 magnitude before weighting
-	Weight      float64 `json:"weight"`       // 0..1 share of composite
+	Score       int     `json:"score"`  // weighted contribution to composite
+	Raw         int     `json:"raw"`    // raw 0..100 magnitude before weighting
+	Weight      float64 `json:"weight"` // 0..1 share of composite
 }
 
 // Decomposition is the per-finding subfactor breakdown returned by the API.
@@ -26,7 +26,7 @@ type Decomposition struct {
 // the extras zero — they degrade gracefully.
 type SubfactorInputs struct {
 	Inputs
-	PolicyViolationCount int // number of distinct policies the finding violates
+	PolicyViolationCount int  // number of distinct policies the finding violates
 	NetworkExposed       bool // workload exposes a port to public network
 	IngressFromInternet  bool // ingress traffic observed from outside the cluster
 }

@@ -4,10 +4,10 @@
 // has reached this point — the process is running, sockets exist, signals
 // are being handled. A 503 means the process should be restarted.
 //
-// /readyz is more conservative: it answers 200 only once dp's keepalive has
-// round-tripped at least once AND the tap reconciler has run at least once.
-// Until then we report 503 with a structured body so kubelet keeps the pod
-// out of any internal Service endpoints (none today, but future state).
+// /readyz requires the current active dp generation to have answered a
+// keepalive, or reports ready immediately when dp is disabled. Lifecycle,
+// keepalive and tap counters are diagnostic; fresh tap reconciliation and
+// enforcement acceptance require their own signals.
 package main
 
 import (
@@ -75,18 +75,25 @@ func runHealthServer(ctx context.Context, logger *slog.Logger, addr string, dpSu
 	}
 }
 
-// writeReadyJSON inspects the dp supervisor (when enabled) for the two
-// signals that mean "the data plane is functioning": at least one keepalive
-// round-trip + at least one tap installed (or zero adds and zero errors,
-// meaning the reconciler ran on an empty host).
+// writeReadyJSON reports readiness for the current active dp generation.
+// Keep the concrete supervisor boundary so a disabled (nil) dp stays ready.
 func writeReadyJSON(w http.ResponseWriter, dpSup *dp.Supervisor) {
-	body := map[string]any{}
 	if dpSup == nil {
-		body["status"] = "ready"
-		body["dp"] = "disabled"
-		writeHealthJSON(w, http.StatusOK, body)
+		writeHealthJSON(w, http.StatusOK, map[string]any{"status": "ready", "dp": "disabled"})
 		return
 	}
+	writeDPReadyJSON(w, dpSup)
+}
+
+type dpReadinessSource interface {
+	Ready() bool
+	Stats() (dp.LifecycleStats, dp.Stats, dp.ClientStats, dp.TapStats)
+}
+
+// writeDPReadyJSON keeps cumulative counters as diagnostics and gates on the
+// supervisor's current active generation, including exits and pending restarts.
+func writeDPReadyJSON(w http.ResponseWriter, dpSup dpReadinessSource) {
+	body := map[string]any{}
 	life, _, ka, taps := dpSup.Stats()
 	body["dp_starts"] = life.StartCount
 	body["dp_crashes"] = life.CrashCount
@@ -96,20 +103,12 @@ func writeReadyJSON(w http.ResponseWriter, dpSup *dp.Supervisor) {
 	body["dp_taps_errors"] = taps.Errors
 	body["dp_taps_current"] = taps.CurrentTaps
 
-	// Ready when:
-	//   - dp has been started at least once (init done)
-	//   - keepalive has round-tripped (IPC alive)
-	//   - reconciler ran (Added > 0 OR Errors == 0 with CurrentTaps == 0
-	//     for a host with no pod veths yet)
-	if life.StartCount == 0 {
+	if !dpSup.Ready() {
 		body["status"] = "starting"
-		body["reason"] = "dp not yet started"
-		writeHealthJSON(w, http.StatusServiceUnavailable, body)
-		return
-	}
-	if ka.Replied == 0 {
-		body["status"] = "starting"
-		body["reason"] = "no dp keepalive reply yet"
+		body["reason"] = "current dp generation is not ready"
+		if life.StartCount == 0 {
+			body["reason"] = "dp not yet started"
+		}
 		writeHealthJSON(w, http.StatusServiceUnavailable, body)
 		return
 	}

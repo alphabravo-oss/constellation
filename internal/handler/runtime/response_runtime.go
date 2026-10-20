@@ -20,6 +20,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"sort"
 	"strings"
@@ -29,6 +30,7 @@ import (
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	runtimequarantine "github.com/alphabravocompany/constellation/internal/runtime/quarantine"
+	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/notify"
 	"github.com/alphabravocompany/constellation/pkg/quarantine"
 	"github.com/alphabravocompany/constellation/pkg/response"
@@ -39,9 +41,12 @@ import (
 // server-side closure (see NewResponseDispatch), so the interface's workload-only methods
 // have everything they need.
 type quarantineRuntime struct {
-	db        *db.DB
-	orgID     uuid.UUID
-	clusterID uuid.UUID
+	db              *db.DB
+	orgID           uuid.UUID
+	clusterID       uuid.UUID
+	processTarget   *response.ProcessTarget
+	processWorkload string
+	sourceAt        time.Time
 }
 
 // Quarantine records an origin='auto' workload-scoped quarantine entry. Best-effort: a
@@ -69,32 +74,21 @@ func (q *quarantineRuntime) Isolate(ctx context.Context, workload, reason string
 	return q.enqueueCordon(ctx, workload, reason, entryID)
 }
 
-// Kill enqueues a targeted kill_process response action (RT-KILL-02) for the running
-// workload onto runtime_response_actions. The runtime-agent responder pulls pending rows
-// for its node (GET /runtime/response-actions:pending), SIGKILLs the resolved pid, and
-// POSTs the outcome back to the :result sink. Best-effort and node-agnostic: the row is
-// left node=” so it's offered to every agent in the cluster; each agent's
-// killProcessDecision guards against killing the wrong process (comm/container/pid checks),
-// so an empty-target row is harmless where the workload isn't present.
-//
-// Mirrors Isolate's shape (org/cluster captured at construction, workload+reason in). The
-// pid/comm are resolved by the agent from the workload/container at execution time; the
-// Runtime interface carries only the workload, so nothing narrower is passed through here.
+// Kill enqueues only the exact process observed by the triggering event.
+// Old events without kernel start identity are explicitly refused.
 func (q *quarantineRuntime) Kill(ctx context.Context, workload, reason string) error {
-	matchKey := strings.TrimSpace(workload)
-	if matchKey == "" {
-		return nil // nothing to target
+	if err := checkResponseWorkloadProtection(q.clusterID, workload); err != nil {
+		return err
 	}
-	_, err := q.db.Pool().Exec(ctx, `
-INSERT INTO runtime_response_actions (org_id, cluster_id, type, workload_id, state)
-VALUES ($1, $2, 'kill_process', $3, 'pending')`,
-		q.orgID, q.clusterID, matchKey)
-	return err
+	return q.enqueueProcessAction(ctx, workload, reason)
 }
 
 // record inserts the origin='auto' quarantine entry and returns its id. A nil id (with no
 // error) means there was nothing to record or an existing active entry collapsed the insert.
 func (q *quarantineRuntime) record(ctx context.Context, workload, reason string) (*uuid.UUID, error) {
+	if err := checkResponseWorkloadProtection(q.clusterID, workload); err != nil {
+		return nil, err
+	}
 	matchKey := strings.TrimSpace(workload)
 	if matchKey == "" {
 		return nil, nil // nothing to attribute the quarantine to
@@ -202,12 +196,23 @@ func NewResponseDispatch(database *db.DB, dispatcher *notify.Dispatcher) func(ct
 		}
 		ev = annotateResponseRuleGroups(ctx, database, orgID, clusterID, ev, rules)
 		receivers := buildReceiverMap(ctx, database, dispatcher, orgID, rules)
-		eng := response.NewEngine(receivers, &quarantineRuntime{db: database, orgID: orgID, clusterID: clusterID}, nil)
+		eng := response.NewEngine(receivers, &quarantineRuntime{db: database, orgID: orgID, clusterID: clusterID, processTarget: ev.ProcessTarget, processWorkload: ev.Workload, sourceAt: ev.ObservedAt}, nil)
 		eng.SetRules(rules)
 		// Don't discard the engine's warnings: an unknown/paused receiver or a delivery
 		// error here used to vanish silently, so an operator's notify/ticket rule could
 		// no-op with no trace. Surface them.
 		for _, d := range eng.Dispatch(ctx, &ev) {
+			refusals := responseProtectionRefusals(d.Warnings)
+			if len(refusals) > 0 {
+				_, _, err := audit.New(database.Pool()).Log(ctx, audit.Event{
+					OrgID: &orgID, Action: "runtime.response_rule.refused", TargetKind: "cluster", TargetID: clusterID.String(),
+					After: map[string]any{"cluster_id": clusterID, "rule_id": d.RuleID, "event_id": ev.ID, "workload_id": ev.Workload, "refusals": refusals,
+						"refusal_summary": fmt.Sprintf("Rule %s · workload %s\n%s", d.RuleID, ev.Workload, strings.Join(refusals, "\n"))},
+				})
+				if err != nil {
+					slog.Default().Error("response: could not persist protection refusal", "rule_id", d.RuleID, "org_id", orgID, "cluster_id", clusterID, "err", err)
+				}
+			}
 			for _, warn := range d.Warnings {
 				slog.Default().Warn("response: rule action warning",
 					slog.String("rule_id", d.RuleID),
@@ -216,6 +221,20 @@ func NewResponseDispatch(database *db.DB, dispatcher *notify.Dispatcher) func(ct
 			}
 		}
 	}
+}
+
+// Persist only our explicit protection refusals, never arbitrary receiver errors.
+func responseProtectionRefusals(warnings []string) []string {
+	var out []string
+	for _, warning := range warnings {
+		for _, action := range []string{"quarantine", "isolate", "kill"} {
+			if strings.HasPrefix(warning, action+": response action refused:") {
+				out = append(out, warning)
+				break
+			}
+		}
+	}
+	return out
 }
 
 // ResponseRuleDecision is the side-effect-free v2 response-rule result used by ingest

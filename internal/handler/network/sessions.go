@@ -2,6 +2,7 @@ package network
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -9,19 +10,25 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
+	"github.com/alphabravocompany/constellation/internal/lifecycle"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 )
 
 // sessionIngestRow is the wire shape the runtime-agent POSTs to /network-sessions:bulk.
-// One row per live dp session (NV RESTSession). Field tags match the agent's dp_session.go.
+// One row per live dp session (NV RESTSession). Fields match the agent's dp_session.go;
+// cluster_id is an optional claim checked against the token binding.
 type sessionIngestRow struct {
 	ID             int64  `json:"id"`
+	ClusterID      string `json:"cluster_id,omitempty"`
 	Node           string `json:"node,omitempty"`
 	EPMAC          string `json:"ep_mac,omitempty"`
 	WorkloadID     string `json:"workload_id,omitempty"`
@@ -70,39 +77,75 @@ const maxSessionBatchSize = 5000
 func (h *Network) IngestSessions(w http.ResponseWriter, r *http.Request) {
 	tok, ok := handler.RuntimeAgentTokenFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "runtime-agent token required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "runtime-agent token required")
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 8<<20)
 	var rows []sessionIngestRow
 	if err := json.NewDecoder(r.Body).Decode(&rows); err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body: " + err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid body: "+err.Error())
 		return
 	}
 	if len(rows) > maxSessionBatchSize {
-		httpx.WriteJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": fmt.Sprintf("batch > %d", maxSessionBatchSize)})
+		apiutil.WriteStatus(r.Context(), w, http.StatusRequestEntityTooLarge, fmt.Sprintf("batch > %d", maxSessionBatchSize))
 		return
 	}
-	// Resolve the agent's cluster (org primary connected cluster), same fallback as
-	// runtime-threats ingest.
-	var clusterID uuid.UUID
-	if err := h.db.Pool().QueryRow(r.Context(),
-		`SELECT id FROM clusters WHERE org_id = $1
-		 ORDER BY CASE WHEN state = 'connected' THEN 0 ELSE 1 END,
-		          last_heartbeat_at DESC NULLS LAST, created_at ASC
-		 LIMIT 1`, tok.OrgID).Scan(&clusterID); err != nil {
-		httpx.WriteJSON(w, http.StatusOK, map[string]any{"accepted": 0, "note": "no cluster"})
+	boundCluster, err := handler.ResolveAgentClusterID(r.Context(), h.db, tok)
+	if err != nil {
+		if errors.Is(err, handler.ErrAgentClusterScope) {
+			apiutil.WriteStatus(r.Context(), w, http.StatusForbidden, "agent token cluster scope mismatch")
+			return
+		}
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "resolve cluster failed")
 		return
 	}
-	// The reporting node — all rows in a snapshot share it (the agent sets it per row).
-	node := ""
-	if len(rows) > 0 {
-		node = rows[0].Node
+	if boundCluster == nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusForbidden, "agent token cluster scope is ambiguous")
+		return
+	}
+	clusterID := *boundCluster
+	for _, requested := range r.URL.Query()["cluster_id"] {
+		requestedID, err := uuid.Parse(strings.TrimSpace(requested))
+		if err != nil {
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid cluster_id")
+			return
+		}
+		if requestedID != clusterID {
+			apiutil.WriteStatus(r.Context(), w, http.StatusForbidden, "agent token cluster scope mismatch")
+			return
+		}
+	}
+	if len(rows) == 0 {
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{"accepted": 0})
+		return
+	}
+	// A snapshot replaces one node's rows; validate the entire batch before deleting.
+	node := rows[0].Node
+	if strings.TrimSpace(node) == "" {
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "node required")
+		return
+	}
+	for _, row := range rows {
+		if row.Node != node {
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "snapshot contains multiple nodes")
+			return
+		}
+		if row.ClusterID != "" {
+			rowClusterID, err := uuid.Parse(row.ClusterID)
+			if err != nil {
+				apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid cluster_id")
+				return
+			}
+			if rowClusterID != clusterID {
+				apiutil.WriteStatus(r.Context(), w, http.StatusForbidden, "agent token cluster scope mismatch")
+				return
+			}
+		}
 	}
 
 	tx, err := h.db.Pool().Begin(r.Context())
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
@@ -111,7 +154,7 @@ func (h *Network) IngestSessions(w http.ResponseWriter, r *http.Request) {
 	if _, err := tx.Exec(r.Context(),
 		`DELETE FROM network_sessions WHERE org_id = $1 AND cluster_id = $2 AND node = $3`,
 		tok.OrgID, clusterID, node); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	const insertSQL = `
@@ -142,15 +185,31 @@ ON CONFLICT (org_id, cluster_id, node, id) DO UPDATE SET
 		accepted++
 	}
 	if err := tx.Commit(r.Context()); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.writeSessionIngestResponse(w, r, tok.OrgID, clusterID, node, accepted)
+}
+
+func (h *Network) writeSessionIngestResponse(w http.ResponseWriter, r *http.Request, orgID, clusterID uuid.UUID, node string, accepted int) {
+	// The snapshot is already committed and can safely be replaced on retry. Read
+	// settings before consuming commands: a failed read must neither disable
+	// detection nor discard pending kills from the unsuccessful response.
+	weakTLS := false
+	err := h.db.Pool().QueryRow(r.Context(),
+		`SELECT weak_tls_enabled FROM dpi_threat_settings WHERE org_id = $1 AND cluster_id = $2`,
+		orgID, clusterID).Scan(&weakTLS)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "read threat settings failed")
 		return
 	}
 	// Deliver + consume pending session-kill requests for this node (NV session-kill).
 	// The agent issues dp ctrl_clear_session for each id it gets back.
 	kills := []int64{}
 	if kr, err := h.db.Pool().Query(r.Context(),
-		`DELETE FROM network_session_kills WHERE org_id = $1 AND cluster_id = $2 AND node = $3 RETURNING session_id`,
-		tok.OrgID, clusterID, node); err == nil {
+		`DELETE FROM network_session_kills WHERE org_id = $1 AND cluster_id = $2 AND node = $3
+ AND requested_at >= statement_timestamp() - interval '5 minutes' RETURNING session_id`,
+		orgID, clusterID, node); err == nil {
 		defer kr.Close()
 		for kr.Next() {
 			var id int64
@@ -159,11 +218,6 @@ ON CONFLICT (org_id, cluster_id, node, id) DO UPDATE SET
 			}
 		}
 	}
-	// Carry the cluster's DPI toggle back so the agent applies it live via dp ctrl_set_threat.
-	weakTLS := false
-	_ = h.db.Pool().QueryRow(r.Context(),
-		`SELECT weak_tls_enabled FROM dpi_threat_settings WHERE org_id = $1 AND cluster_id = $2`,
-		tok.OrgID, clusterID).Scan(&weakTLS)
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"accepted": accepted, "kill": kills, "weak_tls": weakTLS})
 }
 
@@ -191,6 +245,7 @@ type sessionFilters struct {
 	GroupName    string
 	GroupActive  bool
 	GroupMembers []string
+	Hours        int
 }
 
 // KillSession queues a request to terminate one live session (NV DELETE /v1/session).
@@ -200,12 +255,12 @@ func (h *Network) KillSession(w http.ResponseWriter, r *http.Request) {
 	subj, _ := authctx.SubjectFrom(r.Context())
 	clusterID, err := h.resolveNetworkCluster(r, subj.OrgID)
 	if err != nil || clusterID == nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "cluster_id required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "cluster_id required")
 		return
 	}
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid session id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid session id")
 		return
 	}
 	node := strings.TrimSpace(r.URL.Query().Get("node"))
@@ -216,7 +271,7 @@ INSERT INTO network_session_kills (org_id, cluster_id, node, session_id, request
 VALUES ($1,$2,$3,$4,$5,$6)
 ON CONFLICT (org_id, cluster_id, node, session_id) DO UPDATE SET requested_by = EXCLUDED.requested_by, requested_at = EXCLUDED.requested_at`,
 		subj.OrgID, *clusterID, node, id, subj.UserID, requestedAt); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	response := map[string]any{
@@ -226,6 +281,7 @@ ON CONFLICT (org_id, cluster_id, node, session_id) DO UPDATE SET requested_by = 
 		"node":         node,
 		"cluster_id":   clusterID.String(),
 		"requested_at": requestedAt,
+		"expires_at":   requestedAt.Add(lifecycle.SessionKillLifetime),
 	}
 	if target != nil {
 		response["target"] = target
@@ -244,6 +300,7 @@ ON CONFLICT (org_id, cluster_id, node, session_id) DO UPDATE SET requested_by = 
 				"node":         node,
 				"session_id":   id,
 				"requested_at": requestedAt,
+				"expires_at":   requestedAt.Add(lifecycle.SessionKillLifetime),
 				"target":       target,
 			},
 		})
@@ -309,6 +366,14 @@ func parseSessionFilters(r *http.Request) (sessionFilters, error) {
 	filters.Workload = strings.ToLower(strings.TrimSpace(q.Get("workload")))
 	filters.Node = strings.ToLower(strings.TrimSpace(q.Get("node")))
 	filters.Group = strings.TrimSpace(q.Get("group"))
+	filters.Hours = 0
+	if raw := strings.TrimSpace(q.Get("hours")); raw != "" {
+		hours, err := strconv.Atoi(raw)
+		if err != nil || hours < 1 || hours > 720 {
+			return filters, fmt.Errorf("invalid hours")
+		}
+		filters.Hours = hours
+	}
 	return filters, nil
 }
 
@@ -369,158 +434,58 @@ func (f sessionFilters) applySessionWhere(where []string, args []any) ([]string,
 		p := add(f.GroupMembers)
 		where = append(where, "workload_id = ANY("+p+"::text[])")
 	}
+	if f.Hours > 0 {
+		where = append(where, "updated_at >= NOW() - ("+add(f.Hours)+"::int * INTERVAL '1 hour')")
+	}
 	return where, args
 }
 
-func appFilterPorts(raw string) []int {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "http":
-		return []int{80, 8080, 8000}
-	case "https", "tls":
-		return []int{443, 8443}
-	case "dns":
-		return []int{53}
-	case "ssh":
-		return []int{22}
-	case "mysql":
-		return []int{3306}
-	default:
-		return nil
-	}
-}
+func appFilterPorts(raw string) []int { return handler.ApplicationFilterPorts(raw) }
 
 // sessionDTO is one live connection returned to the UI (NV RESTSession).
 type sessionDTO struct {
-	ID          int64  `json:"id"`
-	Node        string `json:"node"`
-	WorkloadID  string `json:"workload_id,omitempty"`
-	Application string `json:"application"`
-	IPProto     string `json:"ip_proto"`
-	ClientIP    string `json:"client_ip"`
-	ClientPort  int    `json:"client_port"`
-	ServerIP    string `json:"server_ip"`
-	ServerPort  int    `json:"server_port"`
-	ClientState string `json:"client_state"`
-	ServerState string `json:"server_state"`
-	ClientBytes int64  `json:"client_bytes"`
-	ServerBytes int64  `json:"server_bytes"`
-	ClientPkts  int64  `json:"client_pkts"`
-	ServerPkts  int64  `json:"server_pkts"`
-	Age         int    `json:"age"`
-	Idle        int    `json:"idle"`
-	Ingress     bool   `json:"ingress"`
-	Severity    int    `json:"severity"`
-	ThreatID    int64  `json:"threat_id,omitempty"`
+	RowID        string    `json:"row_id"`
+	ClusterID    uuid.UUID `json:"cluster_id"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	ID           int64     `json:"id"`
+	Node         string    `json:"node"`
+	WorkloadID   string    `json:"workload_id,omitempty"`
+	PlatformRole string    `json:"platform_role"`
+	Application  string    `json:"application"`
+	IPProto      string    `json:"ip_proto"`
+	ClientIP     string    `json:"client_ip"`
+	ClientPort   int       `json:"client_port"`
+	ServerIP     string    `json:"server_ip"`
+	ServerPort   int       `json:"server_port"`
+	ClientState  string    `json:"client_state"`
+	ServerState  string    `json:"server_state"`
+	ClientBytes  int64     `json:"client_bytes"`
+	ServerBytes  int64     `json:"server_bytes"`
+	ClientPkts   int64     `json:"client_pkts"`
+	ServerPkts   int64     `json:"server_pkts"`
+	Age          int       `json:"age"`
+	Idle         int       `json:"idle"`
+	Ingress      bool      `json:"ingress"`
+	Severity     int       `json:"severity"`
+	ThreatID     int64     `json:"threat_id,omitempty"`
 }
 
 // Sessions returns the current live connection table (NV's Network > Sessions). Cluster-scoped;
 // stale rows (node stopped reporting > 5 min) are excluded so the view stays "live".
 // GET /network/sessions
 func (h *Network) Sessions(w http.ResponseWriter, r *http.Request) {
-	subj, _ := authctx.SubjectFrom(r.Context())
-	clusterID, err := h.resolveNetworkCluster(r, subj.OrgID)
-	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 2000 {
-		limit = 500
-	}
-	filters, err := parseSessionFilters(r)
-	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-	groupMembers, groupName, groupActive, err := handler.ResolveGroupFilterMembers(r.Context(), h.db.Pool(), subj.OrgID, clusterID, filters.Group)
-	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-	filters.GroupMembers = groupMembers
-	filters.GroupName = groupName
-	filters.GroupActive = groupActive
-	where := []string{
-		"org_id = $1",
-		"($2::uuid IS NULL OR cluster_id = $2)",
-		"updated_at > NOW() - INTERVAL '5 minutes'",
-	}
-	args := []any{subj.OrgID, clusterID}
-	where, args = filters.applySessionWhere(where, args)
-	whereSQL := strings.Join(where, " AND ")
-	total := 0
-	_ = h.db.Pool().QueryRow(r.Context(), fmt.Sprintf(`
-SELECT COUNT(*)::int
-  FROM network_sessions
- WHERE %s`, whereSQL), args...).Scan(&total)
-	listArgs := append(append([]any{}, args...), limit)
-	rows, err := h.db.Pool().Query(r.Context(), fmt.Sprintf(`
-SELECT id, node, workload_id, application, ip_proto,
-       client_ip, client_port, server_ip, server_port, client_state, server_state,
-       client_bytes, server_bytes, client_pkts, server_pkts, age, idle, ingress, severity, threat_id
-  FROM network_sessions
- WHERE %s
- ORDER BY (client_bytes + server_bytes) DESC, age DESC
- LIMIT $%d`, whereSQL, len(listArgs)), listArgs...)
-	if err != nil {
-		httpx.WriteJSON(w, http.StatusOK, map[string]any{"sessions": []sessionDTO{}, "total": 0, "limit": limit, "has_more": false})
-		return
-	}
-	defer rows.Close()
-	out := []sessionDTO{}
-	for rows.Next() {
-		var s sessionDTO
-		var proto, cstate, sstate int
-		if err := rows.Scan(&s.ID, &s.Node, &s.WorkloadID, new(int), &proto,
-			&s.ClientIP, &s.ClientPort, &s.ServerIP, &s.ServerPort, &cstate, &sstate,
-			&s.ClientBytes, &s.ServerBytes, &s.ClientPkts, &s.ServerPkts, &s.Age, &s.Idle, &s.Ingress, &s.Severity, &s.ThreatID); err != nil {
-			continue
-		}
-		s.IPProto = ipProtoName(proto)
-		s.Application = appLabel(proto, s.ServerPort)
-		s.ClientState = tcpStateName(cstate)
-		s.ServerState = tcpStateName(sstate)
-		out = append(out, s)
-	}
-	response := map[string]any{
-		"sessions": out,
-		"total":    total,
-		"limit":    limit,
-		"has_more": total > len(out),
-	}
-	if clusterID != nil {
-		response["cluster_id"] = clusterID.String()
-	}
-	if filters.GroupActive {
-		response["selected_group"] = filters.GroupName
-		response["selected_group_members"] = len(filters.GroupMembers)
-	}
-	httpx.WriteJSON(w, http.StatusOK, response)
+	h.writeSessionInventory(w, r, false, false)
 }
 
-// SessionsSummary returns live-session counts (NV RESTSessionSummary): total + by IP proto.
-// GET /network/sessions/summary
+// SessionsCSV exports the matching live cohort, independently of visible pages.
+func (h *Network) SessionsCSV(w http.ResponseWriter, r *http.Request) {
+	h.writeSessionInventory(w, r, true, false)
+}
+
+// SessionsSummary retains its flat count response, over the same filtered live
+// cohort as Sessions. It never converts a failed database read into zero counts.
 func (h *Network) SessionsSummary(w http.ResponseWriter, r *http.Request) {
-	subj, _ := authctx.SubjectFrom(r.Context())
-	clusterID, err := h.resolveNetworkCluster(r, subj.OrgID)
-	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-	var total, tcp, udp, icmp, other int
-	_ = h.db.Pool().QueryRow(r.Context(), `
-SELECT COUNT(*)::int,
-       COUNT(*) FILTER (WHERE ip_proto = 6)::int,
-       COUNT(*) FILTER (WHERE ip_proto = 17)::int,
-       COUNT(*) FILTER (WHERE ip_proto IN (1,58))::int,
-       COUNT(*) FILTER (WHERE ip_proto NOT IN (6,17,1,58))::int
-  FROM network_sessions
- WHERE org_id = $1 AND ($2::uuid IS NULL OR cluster_id = $2)
-   AND updated_at > NOW() - INTERVAL '5 minutes'`, subj.OrgID, clusterID).
-		Scan(&total, &tcp, &udp, &icmp, &other)
-	httpx.WriteJSON(w, http.StatusOK, map[string]int{
-		"total": total, "tcp": tcp, "udp": udp, "icmp": icmp, "other": other,
-	})
+	h.writeSessionInventory(w, r, false, true)
 }
 
 // ipProtoName maps an IP protocol number to a short name.
@@ -563,14 +528,4 @@ func appLabel(proto, port int) string {
 		return "MongoDB"
 	}
 	return ipProtoName(proto)
-}
-
-// tcpStateName maps dp's TCP state (the standard Linux linux/tcp.h enum dp uses:
-// TCP_ESTABLISHED=1 … TCP_CLOSING=11) to a readable label. 0 → "" (non-TCP / unset).
-func tcpStateName(s int) string {
-	names := []string{"", "ESTABLISHED", "SYN_SENT", "SYN_RECV", "FIN_WAIT1", "FIN_WAIT2", "TIME_WAIT", "CLOSE", "CLOSE_WAIT", "LAST_ACK", "LISTEN", "CLOSING"}
-	if s >= 0 && s < len(names) {
-		return names[s]
-	}
-	return fmt.Sprintf("state-%d", s)
 }

@@ -3,6 +3,7 @@ package attack
 import "testing"
 
 func TestMap_EventToTechniques(t *testing.T) {
+	t.Parallel()
 	if got := Map(EventShellSpawn); len(got) != 1 || got[0] != "T1059.004" {
 		t.Fatalf("shell-spawn: %v", got)
 	}
@@ -15,6 +16,7 @@ func TestMap_EventToTechniques(t *testing.T) {
 }
 
 func TestGet_SubTechniqueFallback(t *testing.T) {
+	t.Parallel()
 	if _, ok := Get("T1059.004"); !ok {
 		t.Fatal("known sub-technique not found")
 	}
@@ -27,6 +29,7 @@ func TestGet_SubTechniqueFallback(t *testing.T) {
 }
 
 func TestByTactic_GroupsByCanonicalTactic(t *testing.T) {
+	t.Parallel()
 	g := ByTactic()
 	if len(g["Execution"]) == 0 {
 		t.Fatal("Execution tactic empty")

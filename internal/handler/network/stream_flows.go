@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/pkg/livegraph"
 )
@@ -28,7 +30,7 @@ func (h *StreamFlows) Stream(w http.ResponseWriter, r *http.Request) {
 	subj, _ := authctx.SubjectFrom(r.Context())
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "streaming unsupported")
 		return
 	}
 

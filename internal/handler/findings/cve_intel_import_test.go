@@ -6,6 +6,7 @@ import (
 )
 
 func TestParseKEV(t *testing.T) {
+	t.Parallel()
 	const fixture = `{
       "catalogVersion": "2026.08.19",
       "count": 2,
@@ -30,6 +31,7 @@ func TestParseKEV(t *testing.T) {
 }
 
 func TestParseEPSS(t *testing.T) {
+	t.Parallel()
 	const fixture = `#model_version:v2025.03.14,score_date:2026-08-19T00:00:00+0000
 cve,epss,percentile
 CVE-2021-44228,0.94500,0.99990

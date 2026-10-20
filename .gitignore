@@ -1,35 +1,39 @@
-bin/
-dist/
+# Build output
+/bin/
+/tmp/
+/dist/
 *.test
 *.out
+*.o
+!internal/runtime/ebpf/bpf/*.c
+
+# Local environment
 .env
 .env.local
+.env.dev.local
+.idea/
+.vscode/
+.claude/
+
+# Test / tooling artefacts
+/artifacts/
+/test-results/
+/node_modules/
+**/__pycache__/
+
+# Frontend
 frontend/node_modules/
 frontend/dist/
 frontend/test-results/
 frontend/playwright-report/
-test-results/
-/checkov-plugin
-/constellation-api
-/constellation-bootstrap
-/constellation-runtime-agent
-/constellationctl
-.idea/
-.vscode/
+frontend/.playwright-auth/
 
 # eBPF build artifacts (built locally via `make -C internal/runtime/ebpf/bpf`)
 internal/runtime/ebpf/bpf/*.o
-tools/vscode-extension/node_modules/
-tools/vscode-extension/out/
 
-# Python bytecode + pytest caches in the integration test harness.
-tools/constellation-test-suite/**/__pycache__/
-tools/constellation-test-suite/.pytest_cache/
-.claude/
-/rancher/
+# Admission test credentials are streamed to Kubernetes, never retained as evidence.
+/deploy/e2e/threat-scenarios/04-admission-tls/captures/secret.yaml
+/deploy/e2e/threat-scenarios/04-admission-tls/captures/tls/*.key
 
-# Built Go binaries at repo root (never commit)
-/constellation-scanner
-/constellation-discoverer
-/constellation-api
-/constellation-runtime-agent
+# stray go build outputs at the repo root (use make build -> bin/)
+/constellation-*

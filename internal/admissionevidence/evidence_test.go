@@ -1,12 +1,15 @@
+//go:build integration
+
 package admissionevidence
 
 import (
 	"context"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -17,6 +20,7 @@ import (
 )
 
 func TestAdmissionEvidenceImagesIncludesAllPodContainerTypes(t *testing.T) {
+	t.Parallel()
 	pod := &corev1.Pod{Spec: corev1.PodSpec{
 		InitContainers: []corev1.Container{{Name: "init", Image: "busybox:1.36"}},
 		Containers:     []corev1.Container{{Name: "app", Image: "ghcr.io/acme/app:1.0"}},
@@ -34,6 +38,7 @@ func TestAdmissionEvidenceImagesIncludesAllPodContainerTypes(t *testing.T) {
 }
 
 func TestImageRefCandidatesAddsDockerAndDigestForms(t *testing.T) {
+	t.Parallel()
 	busybox := imageRefCandidates(admission.ParseReqImageName("busybox"))
 	wantBusybox := []string{"busybox", "docker.io/library/busybox:latest", "busybox:latest", "docker.io/busybox:latest"}
 	if !reflect.DeepEqual(busybox, wantBusybox) {
@@ -48,6 +53,7 @@ func TestImageRefCandidatesAddsDockerAndDigestForms(t *testing.T) {
 }
 
 func TestEvidenceGateSeverityAndKindMapping(t *testing.T) {
+	t.Parallel()
 	vuln := admission.EvidenceGate{Type: "vulnerability", MaxAllowedSeverity: "high"}
 	if got := minimumSeverityRankForGate(vuln); got != 4 {
 		t.Fatalf("critical-only rank = %d", got)
@@ -66,6 +72,7 @@ func TestEvidenceGateSeverityAndKindMapping(t *testing.T) {
 }
 
 func TestFindEvidenceHitFailsClosedForNonVulnerabilityKinds(t *testing.T) {
+	t.Parallel()
 	// image_scan_findings persists only vulnerability findings, so a
 	// misconfiguration/iac/cloud-config/compliance gate cannot be evaluated and
 	// must fail closed (return an error the caller turns into a deny) rather than
@@ -89,6 +96,7 @@ func TestFindEvidenceHitFailsClosedForNonVulnerabilityKinds(t *testing.T) {
 }
 
 func TestArtifactGateFromFindingGate(t *testing.T) {
+	t.Parallel()
 	secretGate, ok := artifactGateFromFindingGate(admission.EvidenceGate{
 		Type:              "finding",
 		FindingKinds:      []string{"secret"},
@@ -125,6 +133,7 @@ func TestArtifactGateFromFindingGate(t *testing.T) {
 }
 
 func TestFormatAdmissionArtifactHits(t *testing.T) {
+	t.Parallel()
 	image := admissionEvidenceImage{Container: "app", Raw: "ghcr.io/acme/app@sha256:abc"}
 	secret := formatAdmissionEvidenceHit(admission.Rule{}, admission.EvidenceGate{Type: "artifact"}, image, admissionEvidenceHit{
 		Kind: "secret", Severity: "high", ExternalID: "aws-access-key", Title: "AWS access key", Path: "/app/config.env", Count: 2,
@@ -153,6 +162,7 @@ func TestFormatAdmissionArtifactHits(t *testing.T) {
 }
 
 func TestAdmissionEvidenceArtifactsFromPostgres(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	pool := openAdmissionTestPool(t)
 	defer pool.Close()
@@ -295,6 +305,7 @@ INSERT INTO image_scan_artifacts (
 }
 
 func TestAdmissionEvidenceScanQualityGatesFromPostgres(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	pool := openAdmissionTestPool(t)
 	defer pool.Close()
@@ -569,18 +580,7 @@ INSERT INTO scan_result_attestations (
 
 func openAdmissionTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	url := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-	if url == "" {
-		url = "postgres://test:test@localhost:15433/constellation_test?sslmode=disable"
-	}
-	pool, err := pgxpool.New(context.Background(), url)
-	if err != nil {
-		t.Skipf("skipping: cannot reach test DB (%v)", err)
-	}
-	if err := pool.Ping(context.Background()); err != nil {
-		pool.Close()
-		t.Skipf("skipping: cannot reach test DB (%v)", err)
-	}
+	pool := pgtest.Pool(t)
 	return pool
 }
 
@@ -589,6 +589,7 @@ func openAdmissionTestPool(t *testing.T) *pgxpool.Pool {
 // counted (distinct external_id), and the gate denies when the count exceeds
 // MaxCVEsAtOrAboveScore. DB-backed; auto-skips if the test DB is unreachable.
 func TestAdmissionEvidenceCVEScoreGateFromPostgres(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	pool := openAdmissionTestPool(t)
 	defer pool.Close()
@@ -676,6 +677,7 @@ INSERT INTO image_scan_findings (
 // from both the named-deny and count paths. DB-backed; auto-skips if the test DB
 // is unreachable.
 func TestAdmissionEvidenceDeniedCVEAndGraceFromPostgres(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	pool := openAdmissionTestPool(t)
 	defer pool.Close()
@@ -788,4 +790,52 @@ func itoaTest(n int) string {
 		n /= 10
 	}
 	return string(b)
+}
+
+func TestRequiredSuccessfulEnginesFromPostgres(t *testing.T) {
+	ctx := t.Context()
+	pool := openAdmissionTestPool(t)
+	defer pool.Close()
+	orgID := uuid.New()
+	resultID := uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id,name,display_name) VALUES ($1,$2,'Engine proof')`, orgID, "engine-proof-"+orgID.String()); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id=$1`, orgID) })
+	ref := "registry.invalid/engine-proof:latest"
+	if _, err := pool.Exec(ctx, `INSERT INTO image_scan_results (id,org_id,image_ref,image_ref_normalized,image_repository,image_digest) VALUES ($1,$2,$3,$3,'registry.invalid/engine-proof','sha256:engine-proof')`, resultID, orgID, ref); err != nil {
+		t.Fatal(err)
+	}
+	source := New(pool, orgID)
+	// Engine requirements alone must force a result lookup, even without a severity gate.
+	gate := admission.EvidenceGate{Type: "vulnerability", RequiredSuccessfulEngines: []string{"Trivy", " grype "}}
+	rule := admission.Rule{Conditions: admission.RuleConditions{EvidenceGates: []admission.EvidenceGate{gate}}}
+	pod := &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: ref}}}}
+	for _, tc := range []struct {
+		name, status string
+		denied       bool
+	}{
+		{"legacy", "{}", true},
+		{"sbom only", `{"syft":"succeeded"}`, true},
+		{"partial", `{"trivy":"succeeded","grype":"failed"}`, true},
+		{"unknown status", `{"trivy":"succeeded","grype":"unknown"}`, true},
+		{"both succeeded", `{"trivy":"succeeded","grype":"succeeded"}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := pool.Exec(ctx, `UPDATE image_scan_results SET engine_status=$1::jsonb WHERE id=$2`, tc.status, resultID); err != nil {
+				t.Fatal(err)
+			}
+			reason, denied, err := source.EvaluateAdmissionEvidence(ctx, rule, pod)
+			if err != nil || denied != tc.denied {
+				t.Fatalf("denied=%v want=%v reason=%q err=%v", denied, tc.denied, reason, err)
+			}
+		})
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM image_scan_results WHERE id=$1`, resultID); err != nil {
+		t.Fatal(err)
+	}
+	_, denied, err := source.EvaluateAdmissionEvidence(ctx, rule, pod)
+	if err != nil || !denied {
+		t.Fatalf("missing result allowed: denied=%v err=%v", denied, err)
+	}
 }

@@ -29,6 +29,7 @@ import (
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
 
 	"github.com/go-chi/chi/v5"
+	containername "github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -39,6 +40,7 @@ import (
 	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/responserule"
 	"github.com/alphabravocompany/constellation/pkg/sbom"
+	"github.com/alphabravocompany/constellation/pkg/scanlease"
 	"github.com/alphabravocompany/constellation/pkg/vulnprofile"
 )
 
@@ -301,12 +303,36 @@ func (h *ScanJobs) Enqueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Registry provenance alone must not authorize credential release. Resolve the
+	// selected registry within the caller's organization before attaching it to
+	// the target consumed by the lease-bound credential endpoint.
+	var registryID *uuid.UUID
+	if req.SourceType == "registry" {
+		id, err := uuid.Parse(req.SourceRef)
+		if err != nil || req.TargetType != "image" {
+			jsonError(w, http.StatusBadRequest, "registry-sourced scans require an image target and registry UUID source_ref")
+			return
+		}
+		var exists bool
+		if err := h.db.Pool().QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM registries WHERE id=$1 AND org_id=$2)`, id, subj.OrgID).Scan(&exists); err != nil {
+			jsonError(w, http.StatusInternalServerError, "registry lookup failed")
+			return
+		}
+		if !exists {
+			jsonError(w, http.StatusNotFound, "registry not found")
+			return
+		}
+		req.SourceRef = id.String()
+		registryID = &id
+	}
+
 	target, err := h.upsertScanTarget(r.Context(), nil, subj.OrgID, handler.ScanTargetUpsert{
 		TargetType:      req.TargetType,
 		TargetRef:       req.TargetRef,
 		TargetClusterID: req.TargetClusterID,
 		SourceType:      req.SourceType,
 		SourceRef:       req.SourceRef,
+		RegistryID:      registryID,
 		ImageRef:        imageRefForTarget(req.TargetType, req.TargetRef, ""),
 		Platform:        req.Platform,
 		InventoryHash:   req.InventoryHash,
@@ -357,81 +383,8 @@ func (h *ScanJobs) loadScanTarget(ctx context.Context, tx pgx.Tx, id uuid.UUID) 
 	return handler.LoadScanTarget(ctx, h.db.Pool(), tx, id)
 }
 
-// List returns recent scan jobs for the calling org.
-func (h *ScanJobs) List(w http.ResponseWriter, r *http.Request) {
-	subj, _ := authctx.SubjectFrom(r.Context())
-	targetType := strings.TrimSpace(r.URL.Query().Get("target_type"))
-	status := strings.TrimSpace(r.URL.Query().Get("status"))
-	var clusterID *uuid.UUID
-	if raw := strings.TrimSpace(r.URL.Query().Get("cluster_id")); raw != "" {
-		parsed, err := uuid.Parse(raw)
-		if err != nil {
-			jsonError(w, http.StatusBadRequest, "invalid cluster_id")
-			return
-		}
-		clusterID = &parsed
-	}
-	if targetType != "" && !validScanTargetType(targetType) {
-		jsonError(w, http.StatusBadRequest, "unsupported target_type")
-		return
-	}
-	rows, err := h.db.Pool().Query(r.Context(), `
-SELECT sj.id, sj.org_id, st.id, st.type, st.ref, st.cluster_id,
-       st.source_type, COALESCE(st.source_ref, ''),
-       COALESCE(st.image_ref, ''),
-       COALESCE(st.platform, ''),
-       COALESCE(st.inventory_hash, ''),
-       st.registry_id, COALESCE(st.image_digest, ''), st.metadata,
-       COALESCE(sj.enqueue_reason,''), COALESCE(sj.registry_policy_hash,''), COALESCE(sj.vulndb_bundle_version,''),
-       sj.status, COALESCE(sj.worker_id,''), COALESCE(sj.error,''),
-       COALESCE(sj.attempt_count,0), COALESCE(sj.max_attempts,3),
-       COALESCE(sj.package_count,0), COALESCE(sj.finding_count,0),
-       sj.bundle_metadata, sj.requested_at, sj.claimed_at, sj.lease_expires_at,
-       sj.next_attempt_at, sj.last_attempt_at, sj.last_error_at, sj.finished_at
-  FROM scan_jobs sj
-  JOIN scan_targets st ON st.id = sj.target_id
- WHERE sj.org_id = $1
-   AND ($2 = '' OR st.type = $2)
-   AND ($3 = '' OR sj.status = $3)
-   AND ($4::uuid IS NULL OR st.cluster_id = $4)
- ORDER BY sj.requested_at DESC
- LIMIT 200`, subj.OrgID, targetType, status, clusterID)
-	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	defer rows.Close()
-	out := []JobView{}
-	for rows.Next() {
-		var j JobView
-		var bundleRaw, metadataRaw []byte
-		if err := rows.Scan(&j.ID, &j.OrgID, &j.TargetID, &j.TargetType, &j.TargetRef, &j.TargetClusterID,
-			&j.SourceType, &j.SourceRef, &j.ImageRef, &j.Platform, &j.InventoryHash,
-			&j.RegistryID, &j.ImageDigest, &metadataRaw, &j.EnqueueReason, &j.RegistryPolicyHash, &j.VulnDBBundleVersion,
-			&j.Status, &j.WorkerID, &j.Error, &j.AttemptCount, &j.MaxAttempts, &j.PackageCount, &j.FindingCount,
-			&bundleRaw,
-			&j.RequestedAt, &j.ClaimedAt, &j.LeaseExpiresAt, &j.NextAttemptAt, &j.LastAttemptAt, &j.LastErrorAt, &j.FinishedAt); err != nil {
-			jsonError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		if len(bundleRaw) > 0 {
-			var metadata scanner.BundleMetadata
-			if err := json.Unmarshal(bundleRaw, &metadata); err != nil {
-				jsonError(w, http.StatusInternalServerError, "invalid scan job bundle metadata")
-				return
-			}
-			j.BundleMetadata = &metadata
-		}
-		j.Metadata = handler.NormalizedJSONRaw(metadataRaw)
-		out = append(out, j)
-	}
-	metrics, err := handler.ScanQueueMetrics(r.Context(), h.db.Pool(), subj.OrgID)
-	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	httpx.WriteJSON(w, 200, map[string]any{"jobs": out, "queue_metrics": metrics})
-}
+// List returns the matching scan-job inventory for the calling organization.
+func (h *ScanJobs) List(w http.ResponseWriter, r *http.Request) { h.listInventory(w, r, false) }
 
 // Attempts returns the persisted per-attempt ledger for one scan job.
 func (h *ScanJobs) Attempts(w http.ResponseWriter, r *http.Request) {
@@ -447,7 +400,11 @@ func (h *ScanJobs) Attempts(w http.ResponseWriter, r *http.Request) {
 	}
 	var exists bool
 	if err := h.db.Pool().QueryRow(r.Context(), `
-SELECT EXISTS (SELECT 1 FROM scan_jobs WHERE id = $1 AND org_id = $2)`, id, subj.OrgID).Scan(&exists); err != nil {
+SELECT EXISTS (
+    SELECT 1 FROM scan_jobs sj
+    JOIN scan_targets st ON st.id = sj.target_id AND st.org_id = sj.org_id
+    WHERE sj.id = $1 AND sj.org_id = $2
+)`, id, subj.OrgID).Scan(&exists); err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -498,8 +455,9 @@ SELECT COUNT(*) FILTER (WHERE status = 'completed')::int,
        COUNT(*) FILTER (WHERE status = 'failed')::int,
        COUNT(*) FILTER (WHERE status = 'paused')::int,
        COUNT(*) FILTER (WHERE status = 'canceled')::int
-  FROM scan_jobs
- WHERE org_id = $1`, subj.OrgID).Scan(&out.Scanned, &out.Scheduled, &out.Scanning, &out.Failed, &out.Paused, &out.Canceled); err != nil {
+  FROM scan_jobs sj
+  JOIN scan_targets st ON st.id = sj.target_id AND st.org_id = sj.org_id
+ WHERE sj.org_id = $1`, subj.OrgID).Scan(&out.Scanned, &out.Scheduled, &out.Scanning, &out.Failed, &out.Paused, &out.Canceled); err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -511,6 +469,7 @@ SELECT COALESCE(bundle_version, ''), COALESCE(exported_at, '')
                COALESCE(sj.finished_at, sj.requested_at) AS observed_at,
                1 AS priority
           FROM scan_jobs sj
+          JOIN scan_targets st ON st.id = sj.target_id AND st.org_id = sj.org_id
          WHERE sj.org_id = $1
            AND sj.bundle_metadata IS NOT NULL
            AND sj.bundle_metadata <> '{}'::jsonb
@@ -545,12 +504,14 @@ func (h *ScanJobs) Claim(w http.ResponseWriter, r *http.Request) {
 		orgID           uuid.UUID
 		targetID        uuid.UUID
 		leaseExpiresAt  time.Time
+		leaseID         uuid.UUID
 		attemptCount    int
 		maxAttempts     int
 		platform        string
 		targetType      string
 		targetRef       string
 		targetClusterID *uuid.UUID
+		registryID      *uuid.UUID
 		sourceType      string
 		sourceRef       string
 		imageDigest     string
@@ -561,8 +522,10 @@ func (h *ScanJobs) Claim(w http.ResponseWriter, r *http.Request) {
 WITH claimed AS (
 UPDATE scan_jobs sj
    SET status           = 'running',
+ lease_id = gen_random_uuid(),
        worker_id        = $1,
        claimed_at       = NOW(),
+       claimed_inventory_hash = (SELECT st.inventory_hash FROM scan_targets st WHERE st.id = sj.target_id AND st.org_id = sj.org_id),
        lease_expires_at = NOW() + $3::interval,
        attempt_count    = COALESCE(attempt_count, 0) + 1,
        last_attempt_at  = NOW(),
@@ -572,7 +535,7 @@ UPDATE scan_jobs sj
  WHERE sj.id = (
    SELECT sj2.id
      FROM scan_jobs sj2
-     JOIN scan_targets st2 ON st2.id = sj2.target_id
+     JOIN scan_targets st2 ON st2.id = sj2.target_id AND st2.org_id = sj2.org_id
     WHERE sj2.org_id = $2
       AND (cardinality($4::text[]) = 0 OR st2.type = ANY($4::text[]))
       AND (
@@ -610,22 +573,24 @@ attempt AS (
         lease_expires_at = EXCLUDED.lease_expires_at
  RETURNING job_id
 )
-SELECT c.id, c.org_id, st.id, c.lease_expires_at,
+SELECT c.id, c.org_id, st.id, c.lease_expires_at, c.lease_id,
        COALESCE(c.attempt_count, 0), COALESCE(c.max_attempts, 3),
        COALESCE(st.platform, ''),
-       st.type, st.ref, st.cluster_id,
+       st.type, st.ref, st.cluster_id, st.registry_id,
        st.source_type, COALESCE(st.source_ref, ''), COALESCE(st.image_digest, ''), COALESCE(st.inventory_hash, ''),
        ev.id
   FROM claimed c
   JOIN attempt a ON a.job_id = c.id
-  JOIN scan_targets st ON st.id = c.target_id
+  JOIN scan_targets st ON st.id = c.target_id AND st.org_id = c.org_id
   LEFT JOIN LATERAL (
-      SELECT id
-        FROM scan_evidence
-       WHERE org_id = c.org_id
-         AND evidence_type = 'package-inventory'
+      SELECT ev.id
+        FROM scan_evidence ev
+        JOIN scan_targets evidence_target ON evidence_target.id = ev.scan_target_id
+                                         AND evidence_target.org_id = c.org_id
+       WHERE ev.org_id = c.org_id
+         AND ev.evidence_type = 'package-inventory'
          AND (
-              scan_target_id = st.id
+              ev.scan_target_id = st.id
               -- For image targets, also reuse package evidence collected for
               -- the SAME image under another target (e.g. the runtime-agent
               -- collected it off a running container, keyed by digest). Match
@@ -634,16 +599,16 @@ SELECT c.id, c.org_id, st.id, c.lease_expires_at,
               -- scanned from local evidence instead of failing on a registry
               -- pull. NOTE: requires st.image_digest to be populated for the
               -- digest path to connect to runtime-agent evidence (see plan F1).
-              OR (st.type = 'image' AND target_ref = st.ref)
-              OR (st.type = 'image' AND st.image_digest <> '' AND target_ref = st.image_digest)
+              OR (st.type = 'image' AND ev.target_ref = st.ref)
+              OR (st.type = 'image' AND st.image_digest <> '' AND ev.target_ref = st.image_digest)
              )
-         AND (COALESCE(st.inventory_hash, '') = '' OR inventory_hash = st.inventory_hash)
-       ORDER BY (scan_target_id = st.id) DESC, observed_at DESC
+         AND (COALESCE(st.inventory_hash, '') = '' OR ev.inventory_hash = st.inventory_hash)
+       ORDER BY (ev.scan_target_id = st.id) DESC, ev.observed_at DESC
        LIMIT 1
   ) ev ON st.type IN ('host', 'workload', 'platform', 'serverless', 'repository')
       OR st.type = 'image'`,
 		workerID, token.OrgID, handler.ScannerJobLeaseInterval, targetTypes)
-	if err := row.Scan(&id, &orgID, &targetID, &leaseExpiresAt, &attemptCount, &maxAttempts, &platform, &targetType, &targetRef, &targetClusterID, &sourceType, &sourceRef, &imageDigest, &inventoryHash, &evidenceID); err != nil {
+	if err := row.Scan(&id, &orgID, &targetID, &leaseExpiresAt, &leaseID, &attemptCount, &maxAttempts, &platform, &targetType, &targetRef, &targetClusterID, &registryID, &sourceType, &sourceRef, &imageDigest, &inventoryHash, &evidenceID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -655,8 +620,9 @@ SELECT c.id, c.org_id, st.id, c.lease_expires_at,
 		"id": id, "org_id": orgID, "target_id": targetID, "platform": platform,
 		"target_type": targetType, "target_ref": targetRef, "target_cluster_id": targetClusterID,
 		"source_type": sourceType, "source_ref": sourceRef, "image_digest": imageDigest, "inventory_hash": inventoryHash,
-		"evidence_id": evidenceID, "lease_expires_at": leaseExpiresAt,
+		"evidence_id": evidenceID, "lease_expires_at": leaseExpiresAt, "lease_id": leaseID,
 		"attempt_count": attemptCount, "max_attempts": maxAttempts,
+		"registry_id": registryID,
 	}
 	// SIG-ROOTS-38: ride this org's DB-managed sigstore roots-of-trust on the job envelope so the
 	// scanner (which has no DB pool) can union them onto its static --signature-roots for THIS job
@@ -680,6 +646,11 @@ func (h *ScanJobs) RenewLease(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "invalid job id")
 		return
 	}
+	requestLeaseID, leaseErr := scanlease.FromRequest(r)
+	if leaseErr != nil {
+		jsonError(w, http.StatusBadRequest, leaseErr.Error())
+		return
+	}
 	workerID := handler.ScannerWorkerIDFromRequest(token, r)
 	var (
 		leaseExpiresAt time.Time
@@ -687,14 +658,19 @@ func (h *ScanJobs) RenewLease(w http.ResponseWriter, r *http.Request) {
 		maxAttempts    int
 	)
 	if err := h.db.Pool().QueryRow(r.Context(), `
-UPDATE scan_jobs
-   SET lease_expires_at = NOW() + $4::interval
- WHERE id = $1
-   AND org_id = $2
-   AND status = 'running'
-   AND worker_id = $3
- RETURNING lease_expires_at, COALESCE(attempt_count, 0), COALESCE(max_attempts, 3)`,
-		id, token.OrgID, workerID, handler.ScannerJobLeaseInterval).Scan(&leaseExpiresAt, &attemptCount, &maxAttempts); err != nil {
+WITH owned AS MATERIALIZED (
+ SELECT id, lease_id, COALESCE(lease_expires_at, claimed_at + $4::interval) AS expires_at
+ FROM scan_jobs
+ WHERE id = $1 AND org_id = $2 AND status = 'running' AND worker_id = $3
+ AND EXISTS (SELECT 1 FROM scan_targets st WHERE st.id = scan_jobs.target_id AND st.org_id = scan_jobs.org_id)
+ FOR UPDATE
+)
+UPDATE scan_jobs sj SET lease_expires_at = clock_timestamp() + $4::interval
+ FROM owned WHERE sj.id = owned.id
+ AND owned.lease_id IS NOT DISTINCT FROM $5::uuid
+ AND owned.expires_at > clock_timestamp()
+ RETURNING sj.lease_expires_at, COALESCE(sj.attempt_count, 0), COALESCE(sj.max_attempts, 3)`,
+		id, token.OrgID, workerID, handler.ScannerJobLeaseInterval, requestLeaseID).Scan(&leaseExpiresAt, &attemptCount, &maxAttempts); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			jsonError(w, http.StatusConflict, "job must be running and claimed by this worker before renewal")
 			return
@@ -716,6 +692,11 @@ func (h *ScanJobs) Complete(w http.ResponseWriter, r *http.Request) {
 	token, ok := handler.ScannerTokenFrom(r.Context())
 	if !ok {
 		jsonError(w, http.StatusUnauthorized, "scanner token required")
+		return
+	}
+	requestLeaseID, leaseErr := scanlease.FromRequest(r)
+	if leaseErr != nil {
+		jsonError(w, http.StatusBadRequest, leaseErr.Error())
 		return
 	}
 	requestWorkerID := handler.ScannerWorkerIDFromRequest(token, r)
@@ -755,6 +736,7 @@ func (h *ScanJobs) Complete(w http.ResponseWriter, r *http.Request) {
 		attemptCount           int
 		claimedAt              *time.Time
 		jobVulnDBBundleVersion string
+		claimedInventoryHash   string
 		target                 handler.ScanTarget
 	)
 	if err := tx.QueryRow(r.Context(),
@@ -763,17 +745,17 @@ func (h *ScanJobs) Complete(w http.ResponseWriter, r *http.Request) {
 		        COALESCE(sj.worker_id, ''),
 		        COALESCE(sj.attempt_count, 0),
 		        sj.claimed_at,
-		        COALESCE(sj.vulndb_bundle_version, ''),
+		        COALESCE(sj.vulndb_bundle_version, ''), COALESCE(sj.claimed_inventory_hash, ''),
 		        st.id, st.org_id, st.cluster_id, st.type, st.ref, st.source_type,
 		        COALESCE(st.source_ref, ''), COALESCE(st.image_ref, ''),
 		        COALESCE(st.image_digest, ''),
 		        st.registry_id, COALESCE(st.platform, ''),
 		        COALESCE(st.inventory_hash, '')
 		   FROM scan_jobs sj
-		   JOIN scan_targets st ON st.id = sj.target_id
+		   JOIN scan_targets st ON st.id = sj.target_id AND st.org_id = sj.org_id
 		  WHERE sj.id = $1
-		  FOR UPDATE OF sj`, id,
-	).Scan(&orgID, &status, &workerID, &attemptCount, &claimedAt, &jobVulnDBBundleVersion,
+		  FOR UPDATE OF sj, st`, id,
+	).Scan(&orgID, &status, &workerID, &attemptCount, &claimedAt, &jobVulnDBBundleVersion, &claimedInventoryHash,
 		&target.ID, &target.OrgID, &target.ClusterID, &target.Type, &target.Ref, &target.SourceType,
 		&target.SourceRef, &target.ImageRef, &target.ImageDigest, &target.RegistryID, &target.Platform, &target.InventoryHash); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -810,6 +792,23 @@ func (h *ScanJobs) Complete(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusConflict, "job claimed by different worker")
 		return
 	}
+
+	// The job and target rows are locked above. Check the database clock after
+	// acquiring those locks so a request delayed by a lock cannot revive a lease.
+	var ownsLease bool
+	if err := tx.QueryRow(r.Context(), `SELECT COALESCE(
+   lease_id IS NOT DISTINCT FROM $2::uuid AND
+   COALESCE(lease_expires_at, claimed_at + $3::interval) > clock_timestamp(), false)
+   FROM scan_jobs WHERE id=$1`, id, requestLeaseID, handler.ScannerJobLeaseInterval).Scan(&ownsLease); err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !ownsLease {
+		jsonError(w, http.StatusConflict, "scan lease expired or superseded")
+		return
+	}
+
+	inventoryStatus := scanCompletionInventoryStatus(claimedInventoryHash, target.InventoryHash)
 
 	identity, err := scanCompletionImageIdentity(target, body, jobVulnDBBundleVersion)
 	if err != nil {
@@ -849,17 +848,20 @@ func (h *ScanJobs) Complete(w http.ResponseWriter, r *http.Request) {
 		bundleMetadataJSON = &encoded
 	}
 
-	if _, err := tx.Exec(r.Context(), `
+	// Historical results must not roll newer target metadata backward.
+	if inventoryStatus != "outdated" {
+		if _, err := tx.Exec(r.Context(), `
 UPDATE scan_targets
    SET last_seen_at = NOW(),
        image_ref = COALESCE(NULLIF($2, ''), image_ref),
        image_digest = COALESCE(NULLIF($3, ''), image_digest),
        platform = COALESCE(NULLIF($4, ''), platform),
        inventory_hash = COALESCE(NULLIF($5, ''), inventory_hash)
- WHERE id = $1`,
-		target.ID, target.ImageRef, target.ImageDigest, target.Platform, target.InventoryHash); err != nil {
-		jsonError(w, http.StatusInternalServerError, "target update: "+err.Error())
-		return
+ WHERE id = $1 AND org_id = $6`,
+			target.ID, target.ImageRef, target.ImageDigest, target.Platform, target.InventoryHash, orgID); err != nil {
+			jsonError(w, http.StatusInternalServerError, "target update: "+err.Error())
+			return
+		}
 	}
 
 	assetID, err := upsertScanAsset(r.Context(), tx, orgID, target, identity, body.Signature, body.Layers)
@@ -870,7 +872,7 @@ UPDATE scan_targets
 
 	var imageScanResultID uuid.UUID
 	if target.Type == "image" {
-		imageScanResultID, err = upsertImageScanResult(r.Context(), tx, orgID, id, target, identity, assetID, body.PackageCount, len(body.Findings))
+		imageScanResultID, err = upsertImageScanResult(r.Context(), tx, orgID, id, target, identity, assetID, body.PackageCount, len(body.Findings), scanEngineStatus(body.Engines))
 		if err != nil {
 			jsonError(w, http.StatusInternalServerError, "image scan result: "+err.Error())
 			return
@@ -940,23 +942,26 @@ UPDATE scan_targets
 			imageScanFindingID = uuid.NewSHA1(uuid.NameSpaceURL, []byte("constellation:image-scan-finding:"+imageScanResultID.String()+":"+imageScanFindingKey))
 		}
 		detail, _ := json.Marshal(scannerFindingDetail(f, scanFindingContext{
-			ScanFindingKey:      findingKey,
-			ImageRef:            target.ImageRef,
-			ImageDigest:         identity.Digest,
-			Platform:            identity.Platform,
-			ScannerProfile:      identity.ScannerProfile,
-			ImageScanResultID:   imageScanResultID,
-			ImageScanFindingID:  imageScanFindingID,
-			ImageScanFindingKey: imageScanFindingKey,
-			TargetID:            target.ID,
-			TargetType:          target.Type,
-			TargetRef:           target.Ref,
-			TargetClusterID:     target.ClusterID,
-			SourceType:          target.SourceType,
-			SourceRef:           target.SourceRef,
-			TargetMetadata:      target.Metadata,
-			BundleMetadata:      body.BundleMetadata,
-			VulnProfileDecision: vulnProfileDecision,
+			ScanFindingKey:       findingKey,
+			ScanJobID:            id,
+			ClaimedInventoryHash: claimedInventoryHash,
+			InventoryStatus:      inventoryStatus,
+			ImageRef:             target.ImageRef,
+			ImageDigest:          identity.Digest,
+			Platform:             identity.Platform,
+			ScannerProfile:       identity.ScannerProfile,
+			ImageScanResultID:    imageScanResultID,
+			ImageScanFindingID:   imageScanFindingID,
+			ImageScanFindingKey:  imageScanFindingKey,
+			TargetID:             target.ID,
+			TargetType:           target.Type,
+			TargetRef:            target.Ref,
+			TargetClusterID:      target.ClusterID,
+			SourceType:           target.SourceType,
+			SourceRef:            target.SourceRef,
+			TargetMetadata:       target.Metadata,
+			BundleMetadata:       body.BundleMetadata,
+			VulnProfileDecision:  vulnProfileDecision,
 		}))
 		title := f.Title
 		if title == "" {
@@ -1040,12 +1045,14 @@ ON CONFLICT (job_id, attempt_number) DO UPDATE
 		return
 	}
 	after := map[string]any{
-		"finding_count":     len(body.Findings),
-		"findings_inserted": findingsInserted,
-		"asset_id":          assetID.String(),
-		"target_id":         target.ID.String(),
-		"target_type":       target.Type,
-		"target_ref":        target.Ref,
+		"claimed_inventory_hash":         claimedInventoryHash,
+		"inventory_status_at_completion": inventoryStatus,
+		"finding_count":                  len(body.Findings),
+		"findings_inserted":              findingsInserted,
+		"asset_id":                       assetID.String(),
+		"target_id":                      target.ID.String(),
+		"target_type":                    target.Type,
+		"target_ref":                     target.Ref,
 	}
 	if target.Type == "image" {
 		after["image_scan_result_id"] = imageScanResultID.String()
@@ -1056,6 +1063,17 @@ ON CONFLICT (job_id, attempt_number) DO UPDATE
 	if body.BundleMetadata != nil {
 		after["vulndb_bundle"] = body.BundleMetadata
 	}
+	// E1: evaluate the org's enabled EventScan response rules against this scan result and
+	// apply the ordered matching actions (NeuVector EventCVEReport parity). Runs after the
+	// txn has committed so a buggy rule can never roll back the scan ingest; panic-isolated
+	// and best-effort like the runtime path's dispatchResponseRules. Keep the operational
+	// completion audit below regardless of the response-rule outcome.
+	if inventoryStatus == "outdated" {
+		after["response_rules_skipped"] = "inventory_changed_since_claim"
+	}
+	if h.evalResponseRules != nil && inventoryStatus != "outdated" {
+		h.dispatchScanResponseRules(r.Context(), token.OrgID, target, identity, body.Findings)
+	}
 	_, _, _ = h.audit.Log(r.Context(), audit.Event{
 		OrgID:      &token.OrgID,
 		Action:     "scan-job.complete",
@@ -1063,18 +1081,12 @@ ON CONFLICT (job_id, attempt_number) DO UPDATE
 		TargetID:   id.String(),
 		After:      after,
 	})
-	// E1: evaluate the org's enabled EventScan response rules against this scan result and
-	// apply the ordered matching actions (NeuVector EventCVEReport parity). Runs after the
-	// txn has committed so a buggy rule can never roll back the scan ingest; panic-isolated
-	// and best-effort like the runtime path's dispatchResponseRules.
-	if h.evalResponseRules != nil {
-		h.dispatchScanResponseRules(r.Context(), token.OrgID, target, identity, body.Findings)
-	}
 	httpx.WriteJSON(w, 200, map[string]any{
-		"status":               "completed",
-		"asset_id":             assetID,
-		"image_scan_result_id": imageScanResultID,
-		"findings_inserted":    findingsInserted,
+		"status":                         "completed",
+		"inventory_status_at_completion": inventoryStatus,
+		"asset_id":                       assetID,
+		"image_scan_result_id":           imageScanResultID,
+		"findings_inserted":              findingsInserted,
 	})
 }
 
@@ -1082,22 +1094,35 @@ func scanCompletionImageIdentity(target handler.ScanTarget, body completeScanReq
 	if target.Type != "image" {
 		return scanImageIdentity{}, nil
 	}
+	targetRef := strings.TrimSpace(target.Ref)
+	targetIdentity := imageid.Parse(targetRef)
 	ref := strings.TrimSpace(body.ImageRef)
 	if ref == "" {
-		ref = strings.TrimSpace(target.ImageRef)
+		ref = targetRef
 	}
-	if ref == "" {
-		ref = strings.TrimSpace(target.Ref)
-	}
-
 	identity := imageid.Parse(ref)
-	targetIdentity := imageid.Parse(target.Ref)
+	// A digest-only target may acquire a friendly repository name, but must keep
+	// its immutable digest. Named targets must stay in the same repository.
+	var targetRepository string
+	if !strings.HasPrefix(targetRef, "sha256:") {
+		parsed, err := containername.ParseReference(targetRef)
+		if err != nil {
+			return scanImageIdentity{}, fmt.Errorf("invalid image target reference")
+		}
+		targetRepository = parsed.Context().Name()
+	}
+	if !strings.HasPrefix(ref, "sha256:") {
+		parsed, err := containername.ParseReference(ref)
+		if err != nil {
+			return scanImageIdentity{}, fmt.Errorf("invalid image completion reference")
+		}
+		if targetRepository != "" && parsed.Context().Name() != targetRepository {
+			return scanImageIdentity{}, fmt.Errorf("image completion repository differs from target")
+		}
+	}
 	digest := strings.TrimSpace(body.ImageDigest)
 	if digest == "" {
 		digest = identity.Digest
-	}
-	if digest == "" {
-		digest = strings.TrimSpace(target.ImageDigest)
 	}
 	if digest == "" {
 		digest = targetIdentity.Digest
@@ -1105,9 +1130,17 @@ func scanCompletionImageIdentity(target handler.ScanTarget, body completeScanReq
 	if digest == "" {
 		return scanImageIdentity{}, fmt.Errorf("image_digest required for image scan completion")
 	}
-	if !strings.HasPrefix(digest, "sha256:") {
-		return scanImageIdentity{}, fmt.Errorf("image_digest must be sha256")
+	normalizedDigest := normalizeSecretSHA256(digest)
+	if normalizedDigest == "" {
+		return scanImageIdentity{}, fmt.Errorf("image_digest must be a valid sha256 digest")
 	}
+	digest = normalizedDigest
+	for _, pinned := range []string{identity.Digest, targetIdentity.Digest} {
+		if pinned != "" && (normalizeSecretSHA256(pinned) == "" || normalizeSecretSHA256(pinned) != digest) {
+			return scanImageIdentity{}, fmt.Errorf("image completion digest differs from reference")
+		}
+	}
+
 	if identity.Repository == "" {
 		identity = targetIdentity
 	}
@@ -1306,19 +1339,19 @@ SELECT COALESCE(
 	identity.NormalizedRef = parsed.Repository + "@" + identity.Digest
 }
 
-func upsertImageScanResult(ctx context.Context, tx pgx.Tx, orgID, jobID uuid.UUID, target handler.ScanTarget, identity scanImageIdentity, assetID uuid.UUID, packageCount, findingCount int) (uuid.UUID, error) {
+func upsertImageScanResult(ctx context.Context, tx pgx.Tx, orgID, jobID uuid.UUID, target handler.ScanTarget, identity scanImageIdentity, assetID uuid.UUID, packageCount, findingCount int, engineStatus string) (uuid.UUID, error) {
 	resultID := uuid.New()
 	err := tx.QueryRow(ctx, `
 INSERT INTO image_scan_results (
     id, org_id, scan_target_id, last_scan_job_id, asset_id,
     image_ref, image_ref_normalized, image_repository, image_tag, image_digest,
     platform, scanner_profile, vulndb_bundle_version, vulndb_bundle_hash,
-    source_type, source_ref, package_count, finding_count, bundle_metadata, last_scanned_at, updated_at
+    source_type, source_ref, package_count, finding_count, bundle_metadata, engine_status, last_scanned_at, updated_at
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, NULLIF($9, ''), $10,
     $11, $12, $13, $14,
-    NULLIF($15, ''), NULLIF($16, ''), $17, $18, $19::jsonb, NOW(), NOW()
+    NULLIF($15, ''), NULLIF($16, ''), $17, $18, $19::jsonb, $20::jsonb, NOW(), NOW()
 )
 ON CONFLICT (
     org_id, image_digest, platform, scanner_profile, vulndb_bundle_version, vulndb_bundle_hash
@@ -1335,14 +1368,34 @@ ON CONFLICT (
     package_count = EXCLUDED.package_count,
     finding_count = EXCLUDED.finding_count,
     bundle_metadata = EXCLUDED.bundle_metadata,
+    engine_status = EXCLUDED.engine_status,
     last_scanned_at = NOW(),
     updated_at = NOW()
 RETURNING id`,
 		resultID, orgID, target.ID, jobID, assetID,
 		identity.Ref, identity.NormalizedRef, identity.Repository, identity.Tag, identity.Digest,
 		identity.Platform, identity.ScannerProfile, identity.BundleVersion, identity.BundleHash,
-		target.SourceType, target.SourceRef, packageCount, findingCount, identity.BundleMetadata).Scan(&resultID)
+		target.SourceType, target.SourceRef, packageCount, findingCount, identity.BundleMetadata, engineStatus).Scan(&resultID)
 	return resultID, err
+}
+
+// Store only engine outcomes, never raw engine errors that could contain secrets.
+// Conflicting duplicates fail closed; legacy uploads have no proof of success.
+func scanEngineStatus(engines []completeScanEngine) string {
+	status := make(map[string]string)
+	for _, engine := range engines {
+		name := strings.ToLower(strings.TrimSpace(engine.Engine))
+		if name == "" {
+			continue
+		}
+		if strings.TrimSpace(engine.Error) != "" || status[name] == "failed" {
+			status[name] = "failed"
+		} else {
+			status[name] = "succeeded"
+		}
+	}
+	raw, _ := json.Marshal(status)
+	return string(raw)
 }
 
 func completeScanEnginesToResults(engines []completeScanEngine) []scanner.EngineResult {
@@ -1576,16 +1629,17 @@ func upsertTargetFinding(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, cluste
 		clusterArg = *clusterID
 	}
 	var existing uuid.UUID
+	var existingFirstSeen time.Time
 	err := tx.QueryRow(ctx, `
-SELECT id
+SELECT id,first_seen_at
   FROM findings
  WHERE org_id = $1
    AND kind = 'vulnerability'
    AND COALESCE(cluster_id, '00000000-0000-0000-0000-000000000000'::uuid) = COALESCE($2::uuid, '00000000-0000-0000-0000-000000000000'::uuid)
    AND scan_target_id = $3
    AND detail_json->>'scan_finding_key' = $4
- ORDER BY last_seen_at DESC
- LIMIT 1`, orgID, clusterArg, target.ID, findingKey).Scan(&existing)
+ ORDER BY last_seen_at DESC,id ASC,first_seen_at ASC
+ LIMIT 1`, orgID, clusterArg, target.ID, findingKey).Scan(&existing, &existingFirstSeen)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return err
 	}
@@ -1619,10 +1673,10 @@ UPDATE findings
                        WHEN accepted_until IS NOT NULL THEN lifecycle
                        WHEN NULLIF($19, '') IS NOT NULL THEN $19
                        ELSE 'open' END
- WHERE id = $1 AND org_id = $17`,
+ WHERE id = $1 AND org_id = $17 AND first_seen_at=$20`,
 			existing, assetID, clusterArg, f.VulnerabilityID, title, f.Description,
 			severity, risk, canonicalEngine, string(engines), string(detail),
-			target.ID, target.Type, target.Ref, target.ClusterID, target.SourceType, orgID, f.Reachable, lifecycleOverride)
+			target.ID, target.Type, target.Ref, target.ClusterID, target.SourceType, orgID, f.Reachable, lifecycleOverride, existingFirstSeen)
 		return err
 	}
 	_, err = tx.Exec(ctx, `
@@ -2040,23 +2094,26 @@ func vulnerabilityProfileNamespace(target handler.ScanTarget) string {
 }
 
 type scanFindingContext struct {
-	ScanFindingKey      string
-	ImageRef            string
-	ImageDigest         string
-	Platform            string
-	ScannerProfile      string
-	ImageScanResultID   uuid.UUID
-	ImageScanFindingID  uuid.UUID
-	ImageScanFindingKey string
-	TargetID            uuid.UUID
-	TargetType          string
-	TargetRef           string
-	TargetClusterID     *uuid.UUID
-	SourceType          string
-	SourceRef           string
-	TargetMetadata      json.RawMessage
-	BundleMetadata      *scanner.BundleMetadata
-	VulnProfileDecision map[string]any
+	ScanJobID            uuid.UUID
+	ClaimedInventoryHash string
+	InventoryStatus      string
+	ScanFindingKey       string
+	ImageRef             string
+	ImageDigest          string
+	Platform             string
+	ScannerProfile       string
+	ImageScanResultID    uuid.UUID
+	ImageScanFindingID   uuid.UUID
+	ImageScanFindingKey  string
+	TargetID             uuid.UUID
+	TargetType           string
+	TargetRef            string
+	TargetClusterID      *uuid.UUID
+	SourceType           string
+	SourceRef            string
+	TargetMetadata       json.RawMessage
+	BundleMetadata       *scanner.BundleMetadata
+	VulnProfileDecision  map[string]any
 }
 
 func scannerFindingDetail(f scanner.Finding, ctx scanFindingContext) map[string]any {
@@ -2074,6 +2131,15 @@ func scannerFindingDetail(f scanner.Finding, ctx scanFindingContext) map[string]
 		"target_type": ctx.TargetType,
 		"target_ref":  ctx.TargetRef,
 		"source_type": ctx.SourceType,
+	}
+	if ctx.ScanJobID != uuid.Nil {
+		detail["scan_job_id"] = ctx.ScanJobID.String()
+	}
+	if ctx.ClaimedInventoryHash != "" {
+		detail["claimed_inventory_hash"] = ctx.ClaimedInventoryHash
+	}
+	if ctx.InventoryStatus != "" {
+		detail["inventory_status_at_completion"] = ctx.InventoryStatus
 	}
 	// A4: persist the CVE publish date so the admission grace-window
 	// (detail_json->>'published') can exclude freshly-disclosed CVEs. Omitted
@@ -2228,6 +2294,11 @@ func (h *ScanJobs) Fail(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusUnauthorized, "scanner token required")
 		return
 	}
+	requestLeaseID, leaseErr := scanlease.FromRequest(r)
+	if leaseErr != nil {
+		jsonError(w, http.StatusBadRequest, leaseErr.Error())
+		return
+	}
 	workerID := handler.ScannerWorkerIDFromRequest(token, r)
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
@@ -2248,13 +2319,14 @@ func (h *ScanJobs) Fail(w http.ResponseWriter, r *http.Request) {
 		nextAttemptAt *time.Time
 	)
 	if err := h.db.Pool().QueryRow(r.Context(), `
-WITH current_job AS (
-	SELECT id, claimed_at, COALESCE(attempt_count, 0) AS attempt_count, COALESCE(max_attempts, 3) AS max_attempts
+WITH current_job AS MATERIALIZED (
+	SELECT id, claimed_at, lease_id, COALESCE(lease_expires_at, claimed_at + $9::interval) AS expires_at, COALESCE(attempt_count, 0) AS attempt_count, COALESCE(max_attempts, 3) AS max_attempts
 	  FROM scan_jobs
 	 WHERE id = $2
 	   AND org_id = $3
 	   AND status = 'running'
 	   AND worker_id = $4
+	   AND EXISTS (SELECT 1 FROM scan_targets st WHERE st.id = scan_jobs.target_id AND st.org_id = scan_jobs.org_id)
 	 FOR UPDATE
 ),
 updated AS (
@@ -2276,6 +2348,8 @@ updated AS (
 	       END
 	  FROM current_job
 	 WHERE scan_jobs.id = current_job.id
+ AND current_job.lease_id IS NOT DISTINCT FROM $8::uuid
+ AND current_job.expires_at > clock_timestamp()
 	 RETURNING scan_jobs.id, scan_jobs.status, scan_jobs.attempt_count, scan_jobs.max_attempts, scan_jobs.next_attempt_at
 ),
 attempt AS (
@@ -2296,7 +2370,7 @@ attempt AS (
 )
 SELECT id, status, attempt_count, max_attempts, next_attempt_at
   FROM updated
-  JOIN attempt ON attempt.job_id = updated.id`, body.Error, id, token.OrgID, workerID, body.Retryable, int(scannerJobBaseRetryDelay/time.Second), int(scannerJobMaxRetryDelay/time.Second)).Scan(&updatedID, &status, &attemptCount, &maxAttempts, &nextAttemptAt); err != nil {
+  JOIN attempt ON attempt.job_id = updated.id`, body.Error, id, token.OrgID, workerID, body.Retryable, int(scannerJobBaseRetryDelay/time.Second), int(scannerJobMaxRetryDelay/time.Second), requestLeaseID, handler.ScannerJobLeaseInterval).Scan(&updatedID, &status, &attemptCount, &maxAttempts, &nextAttemptAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			if scanJobWasCanceledByOperator(r.Context(), h.db.Pool(), id, token.OrgID, workerID) {
 				httpx.WriteJSON(w, 200, map[string]any{
@@ -2317,7 +2391,7 @@ SELECT id, status, attempt_count, max_attempts, next_attempt_at
 			Action:     "scan-job.fail",
 			TargetKind: "scan-job",
 			TargetID:   id.String(),
-			After: map[string]any{
+			After: map[string]any{ // apiutil:allow — audit payload, not an HTTP error body
 				"error":           body.Error,
 				"status":          status,
 				"retryable":       body.Retryable,
@@ -2346,4 +2420,15 @@ SELECT status, COALESCE(worker_id, '')
 		return false
 	}
 	return status == "canceled" && (owner == "" || owner == workerID)
+}
+
+// Empty claim hashes are historical/unknown, never proof of a current inventory.
+func scanCompletionInventoryStatus(claimed, current string) string {
+	if claimed == "" {
+		return "unverified"
+	}
+	if claimed != current {
+		return "outdated"
+	}
+	return "current"
 }

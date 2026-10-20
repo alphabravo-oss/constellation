@@ -1,0 +1,28 @@
+// Dev-only log shipper: tails the Air/Vite log files scripts/dev.sh writes
+// (tmp/dev/logs/<service>.log) into Loki, labelled service=<file stem>, so the
+// request-summary line can be queried by correlation_id in Grafana.
+local.file_match "dev" {
+  path_targets = [{ "__path__" = "/var/log/constellation/*.log" }]
+}
+
+loki.source.file "dev" {
+  targets    = local.file_match.dev.targets
+  forward_to = [loki.process.dev.receiver]
+}
+
+loki.process "dev" {
+  stage.regex {
+    source     = "filename"
+    expression = ".*/(?P<service>[^/]+)\\.log$"
+  }
+  stage.labels {
+    values = { service = "" }
+  }
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

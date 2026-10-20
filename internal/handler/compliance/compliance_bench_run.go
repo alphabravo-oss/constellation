@@ -28,13 +28,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
-	"github.com/alphabravocompany/constellation/internal/handler/sqlx"
+
 	"github.com/alphabravocompany/constellation/pkg/audit"
+	compliancepkg "github.com/alphabravocompany/constellation/pkg/compliance"
 )
 
 // BenchRunRequest is one queued on-demand host-benchmark run.
@@ -50,63 +52,90 @@ type BenchRunRequest struct {
 // normalizeBenchProfile maps the accepted profile aliases onto the two canonical
 // runner profiles, matching the Ingest handler's ?profile= switch.
 func normalizeBenchProfile(raw string) (string, bool) {
-	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "", "kube-bench", "kubebench":
-		return "kube-bench", true
-	case "docker-bench", "docker":
-		return "docker-bench", true
-	default:
-		return "", false
+	return compliancepkg.NormalizeBenchProfile(raw)
+}
+
+// Query selectors retain their historical precedence over the optional body.
+// Validate the whole body even when the query already supplies both selectors.
+func benchRunOptions(w http.ResponseWriter, r *http.Request) (string, string, error) {
+	profile := r.URL.Query().Get("profile")
+	benchmark := strings.TrimSpace(r.URL.Query().Get("benchmark"))
+	if r.Body == nil {
+		return profile, benchmark, nil
 	}
+	var input *struct {
+		Profile   string `json:"profile"`
+		Benchmark string `json:"benchmark"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&input); errors.Is(err, io.EOF) {
+		return profile, benchmark, nil
+	} else if err != nil || input == nil {
+		return "", "", errors.New("invalid benchmark request")
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		return "", "", errors.New("invalid benchmark request")
+	}
+	if profile == "" {
+		profile = input.Profile
+	}
+	if benchmark == "" {
+		benchmark = strings.TrimSpace(input.Benchmark)
+	}
+	return profile, benchmark, nil
 }
 
 // RunBench enqueues an on-demand kube-bench/docker-bench run for the caller's org
 // (optionally scoped to a cluster). The runner services it out-of-band; this
 // handler only writes the request row and returns it.
 func (c *Compliance) RunBench(w http.ResponseWriter, r *http.Request) {
-	subj, _ := authctx.SubjectFrom(r.Context())
+	scope, authorized := c.userWriteScope(w, r)
+	if !authorized {
+		return
+	}
 
-	// Accept profile + benchmark from either the query string or a small JSON body.
-	profileRaw := r.URL.Query().Get("profile")
-	benchmark := strings.TrimSpace(r.URL.Query().Get("benchmark"))
-	if r.Body != nil {
-		if body, _ := io.ReadAll(io.LimitReader(r.Body, 4<<10)); len(body) > 0 {
-			var in struct {
-				Profile   string `json:"profile"`
-				Benchmark string `json:"benchmark"`
-			}
-			if err := json.Unmarshal(body, &in); err == nil {
-				if profileRaw == "" {
-					profileRaw = in.Profile
-				}
-				if benchmark == "" {
-					benchmark = strings.TrimSpace(in.Benchmark)
-				}
-			}
-		}
+	profileRaw, benchmark, err := benchRunOptions(w, r)
+	if err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid benchmark request")
+		return
 	}
 	profile, ok := normalizeBenchProfile(profileRaw)
 	if !ok {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown profile (want kube-bench or docker-bench)"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "unknown profile (want kube-bench or docker-bench)")
 		return
 	}
 
-	clusterArg, err := sqlx.ParseClusterIDParam(r)
+	if !compliancepkg.ValidBenchmarkID(benchmark) {
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid benchmark identifier")
+		return
+	}
+	ctx := r.Context()
+	tx, err := c.db.Pool().Begin(ctx)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "enqueue unavailable")
 		return
 	}
-
+	defer func() { _ = tx.Rollback(ctx) }()
+	if !scope.lockCluster(w, r, tx) {
+		return
+	}
+	clusterArg := scope.clusterID
 	var req BenchRunRequest
 	var clusterID *uuid.UUID
 	var requestedAt time.Time
-	if err := c.db.Pool().QueryRow(r.Context(), `
+	if err := tx.QueryRow(ctx, `
 INSERT INTO compliance_bench_run_requests (org_id, cluster_id, profile, benchmark, requested_by)
-VALUES ($1, $2, $3, $4, $5)
+SELECT $1, $2, $3, $4, $5 WHERE $2::uuid IS NULL OR EXISTS(SELECT 1 FROM clusters WHERE id=$2 AND org_id=$1)
 RETURNING id::text, cluster_id, profile, benchmark, status, requested_at`,
-		subj.OrgID, clusterArg, profile, benchmark, subj.UserID,
+		scope.orgID, clusterArg, profile, benchmark, scope.actorID,
 	).Scan(&req.ID, &clusterID, &req.Profile, &req.Benchmark, &req.Status, &requestedAt); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		if errors.Is(err, pgx.ErrNoRows) {
+			apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "cluster not found")
+			return
+		}
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "enqueue unavailable")
 		return
 	}
 	req.RequestedAt = requestedAt.UTC().Format(time.RFC3339)
@@ -115,21 +144,21 @@ RETURNING id::text, cluster_id, profile, benchmark, status, requested_at`,
 	}
 
 	if c.audit != nil {
-		oid := subj.OrgID
-		uid := subj.UserID
-		_, _, _ = c.audit.Log(r.Context(), audit.Event{
-			OrgID:      &oid,
-			ActorID:    &uid,
-			Action:     "compliance.bench.run_requested",
-			TargetKind: "compliance_bench_run",
-			TargetID:   req.ID,
-		})
+		_, _, err := c.audit.LogInTx(ctx, tx, audit.Event{OrgID: &scope.orgID, ActorID: scope.actorID, Action: "compliance.bench.run_requested", TargetKind: "compliance_bench_run", TargetID: req.ID, After: map[string]any{"cluster_id": scope.clusterID, "profile": profile, "benchmark": benchmark}})
+		if err != nil {
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "enqueue unavailable")
+			return
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "enqueue unavailable")
+		return
 	}
 
 	httpx.WriteJSON(w, http.StatusAccepted, map[string]any{
 		"request": req,
 		"queued":  true,
-		"message": "bench run queued; the " + profile + " runner will pick it up and POST fresh results to /compliance/ingest",
+		"message": "bench run queued; the " + profile + " runner will pick it up and POST fresh results to /agent/compliance/ingest",
 	})
 }
 
@@ -138,45 +167,69 @@ RETURNING id::text, cluster_id, profile, benchmark, status, requested_at`,
 // cluster's requests plus org-wide (cluster_id IS NULL) requests. Returns 200
 // with the claimed request, or 204 when the queue is empty.
 func (c *Compliance) ClaimBenchRun(w http.ResponseWriter, r *http.Request) {
-	subj, _ := authctx.SubjectFrom(r.Context())
+	scope, ok := c.userWriteScope(w, r)
+	if ok {
+		c.claimBenchRun(w, r, scope)
+	}
+}
 
+func (c *Compliance) claimBenchRun(w http.ResponseWriter, r *http.Request, scope complianceWriteScope) {
 	profile, ok := normalizeBenchProfile(r.URL.Query().Get("profile"))
 	if !ok {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown profile (want kube-bench or docker-bench)"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "unknown profile (want kube-bench or docker-bench)")
 		return
 	}
-	clusterArg, err := sqlx.ParseClusterIDParam(r)
+	ctx := r.Context()
+	tx, err := c.db.Pool().Begin(ctx)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "claim unavailable")
 		return
 	}
-
-	// FOR UPDATE SKIP LOCKED so two runners polling concurrently never claim the
-	// same row. A NULL clusterArg (runner sent no cluster_id) matches any request.
+	defer func() { _ = tx.Rollback(ctx) }()
+	if !scope.lockCluster(w, r, tx) {
+		return
+	}
 	var req BenchRunRequest
 	var clusterID *uuid.UUID
 	var requestedAt time.Time
-	err = c.db.Pool().QueryRow(r.Context(), `
-UPDATE compliance_bench_run_requests
-   SET status = 'claimed', claimed_at = NOW()
- WHERE id = (
-     SELECT id FROM compliance_bench_run_requests
-      WHERE org_id = $1
-        AND status = 'pending'
-        AND profile = $2
-        AND ($3::uuid IS NULL OR cluster_id IS NULL OR cluster_id = $3)
-      ORDER BY requested_at
-      FOR UPDATE SKIP LOCKED
-      LIMIT 1)
-RETURNING id::text, cluster_id, profile, benchmark, status, requested_at`,
-		subj.OrgID, profile, clusterArg,
-	).Scan(&req.ID, &clusterID, &req.Profile, &req.Benchmark, &req.Status, &requestedAt)
+	var inherited bool
+	err = tx.QueryRow(ctx, `WITH candidate AS (
+ SELECT r.id,r.cluster_id FROM compliance_bench_run_requests r
+ WHERE r.org_id=$1 AND r.status='pending' AND r.profile=$2
+ AND ($3::uuid IS NULL OR r.cluster_id IS NULL OR r.cluster_id=$3)
+ AND (r.cluster_id IS NULL OR EXISTS(SELECT 1 FROM clusters c WHERE c.id=r.cluster_id AND c.org_id=$1))
+ ORDER BY r.requested_at,r.id FOR UPDATE SKIP LOCKED LIMIT 1)
+ UPDATE compliance_bench_run_requests req SET status='claimed',claimed_at=NOW(),cluster_id=COALESCE(req.cluster_id,$3::uuid)
+ FROM candidate WHERE req.id=candidate.id
+ RETURNING req.id::text,req.cluster_id,req.profile,req.benchmark,req.status,req.requested_at,candidate.cluster_id IS NULL`,
+		scope.orgID, profile, scope.clusterID).Scan(&req.ID, &clusterID, &req.Profile, &req.Benchmark, &req.Status, &requestedAt, &inherited)
+	if errors.Is(err, pgx.ErrNoRows) {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			w.WriteHeader(http.StatusNoContent)
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "claim unavailable")
+		return
+	}
+	if scope.clusterID == nil && clusterID != nil {
+		selected := scope
+		selected.clusterID = clusterID
+		if !selected.lockCluster(w, r, tx) {
 			return
 		}
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	logger := c.audit
+	if logger == nil {
+		logger = audit.New(c.db.Pool())
+	}
+	_, _, err = logger.LogInTx(ctx, tx, audit.Event{OrgID: &scope.orgID, ActorID: scope.actorID, Action: "compliance.bench.claimed", TargetKind: "compliance_bench_run", TargetID: req.ID,
+		Before: map[string]any{"org_wide": inherited}, After: map[string]any{"cluster_id": clusterID, "agent_token_id": scope.agentID, "profile": profile}})
+	if err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "claim unavailable")
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "claim unavailable")
 		return
 	}
 	req.RequestedAt = requestedAt.UTC().Format(time.RFC3339)

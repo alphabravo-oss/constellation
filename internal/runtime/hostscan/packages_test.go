@@ -10,6 +10,7 @@ import (
 )
 
 func TestReadDpkg(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	body := `Package: bash
 Status: install ok installed
@@ -57,6 +58,7 @@ Version: 0.0.0
 // /var/lib/dpkg/status and instead drop one control fragment per package in
 // status.d/. readDpkg must walk status.d/ and union the parsed packages.
 func TestReadDpkg_StatusDir(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	dpkgDir := filepath.Join(dir, "var", "lib", "dpkg")
 	statusD := filepath.Join(dpkgDir, "status.d")
@@ -105,6 +107,7 @@ Version: 12.4+deb12u4
 }
 
 func TestReadApk(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	body := `C:Q1abcdef
 P:musl
@@ -138,6 +141,7 @@ A:noarch
 }
 
 func TestCollectPackages_LiveDpkg(t *testing.T) {
+	t.Parallel()
 	// Skip if dpkg DB isn't present (e.g. running on RHEL/Alpine CI).
 	if _, err := os.Stat("/var/lib/dpkg/status"); err != nil {
 		t.Skip("dpkg status not present on this host")
@@ -155,6 +159,7 @@ func TestCollectPackages_LiveDpkg(t *testing.T) {
 }
 
 func TestReadRpmSQLite(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	dbPath := filepath.Join(root, "usr/lib/sysimage/rpm/rpmdb.sqlite")
 	writeRpmSQLite(t, dbPath,
@@ -198,6 +203,7 @@ func TestReadRpmSQLite(t *testing.T) {
 }
 
 func TestCollectPackages_RpmDistro(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeRpmSQLite(t, filepath.Join(root, "var/lib/rpm/rpmdb.sqlite"),
 		rpmHeaderBlob(t, rpmHeaderPackage{
@@ -227,6 +233,7 @@ func TestCollectPackages_RpmDistro(t *testing.T) {
 }
 
 func TestCollectPackages_RpmUnknownDistro(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writeRpmSQLite(t, filepath.Join(root, "usr/lib/sysimage/rpm/rpmdb.sqlite"),
 		rpmHeaderBlob(t, rpmHeaderPackage{
@@ -247,6 +254,7 @@ func TestCollectPackages_RpmUnknownDistro(t *testing.T) {
 }
 
 func TestCollectPackages_WolfiUsesApk(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	path := filepath.Join(root, "lib/apk/db/installed")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -308,11 +316,11 @@ func writeRpmSQLite(t *testing.T, path string, blobs ...[]byte) {
 			t.Fatal(err)
 		}
 	}()
-	if _, err := db.Exec(`CREATE TABLE Packages (hnum INTEGER PRIMARY KEY AUTOINCREMENT, blob BLOB NOT NULL)`); err != nil {
+	if _, err := db.ExecContext(t.Context(), `CREATE TABLE Packages (hnum INTEGER PRIMARY KEY AUTOINCREMENT, blob BLOB NOT NULL)`); err != nil {
 		t.Fatal(err)
 	}
 	for _, blob := range blobs {
-		if _, err := db.Exec(`INSERT INTO Packages(blob) VALUES (?)`, blob); err != nil {
+		if _, err := db.ExecContext(t.Context(), `INSERT INTO Packages(blob) VALUES (?)`, blob); err != nil {
 			t.Fatal(err)
 		}
 	}

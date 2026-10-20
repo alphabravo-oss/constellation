@@ -2,16 +2,20 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
-	"net/http/pprof"
 	"os"
 	"strings"
 	"time"
+
+	"github.com/rs/zerolog"
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
@@ -21,8 +25,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
 	"github.com/alphabravocompany/constellation/internal/astronomer"
 	"github.com/alphabravocompany/constellation/internal/auth"
+	colcrypto "github.com/alphabravocompany/constellation/internal/crypto"
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
@@ -34,19 +40,29 @@ import (
 	"github.com/alphabravocompany/constellation/internal/handler/policy"
 	"github.com/alphabravocompany/constellation/internal/handler/runtime"
 	"github.com/alphabravocompany/constellation/internal/handler/scanning"
+	"github.com/alphabravocompany/constellation/internal/lifecycle"
+	"github.com/alphabravocompany/constellation/internal/logging"
 	"github.com/alphabravocompany/constellation/internal/syscfg"
+	"github.com/alphabravocompany/constellation/internal/telemetry"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/livegraph"
 	"github.com/alphabravocompany/constellation/pkg/notify"
-	"github.com/alphabravocompany/constellation/pkg/observability"
 	"github.com/alphabravocompany/constellation/pkg/rbac"
-	regsecrets "github.com/alphabravocompany/constellation/pkg/registry/secrets"
 	"github.com/alphabravocompany/constellation/pkg/version"
 )
 
 // Config is the constellation-api configuration.
 type Config struct {
-	ListenAddr  string
+	ListenAddr string
+	// AdminListenAddr serves /healthz, /readyz, /metrics (and pprof when enabled) on a
+	// dedicated listener that is never exposed through the public ingress.
+	AdminListenAddr string
+	// RequestTimeout bounds every non-streaming API request (chi middleware.Timeout).
+	RequestTimeout time.Duration
+	// MaxBodyBytes caps request bodies before any handler runs; handlers may tighten it.
+	MaxBodyBytes int64
+	// EnablePprof mounts net/http/pprof on the admin listener.
+	EnablePprof bool
 	DatabaseURL string
 	JWTKeys     [][]byte // active key in [0]; older keys still accepted
 	JWTIssuer   string
@@ -81,8 +97,9 @@ type Config struct {
 
 // Server holds the HTTP server + its dependencies.
 type Server struct {
+	log      zerolog.Logger
 	cfg      Config
-	tel      *observability.Telemetry
+	tel      *telemetry.Telemetry
 	db       *db.DB
 	auditLog *audit.Logger
 	signer   *auth.Signer
@@ -129,11 +146,17 @@ type Server struct {
 	bootstrapOrgID uuid.UUID
 	// sealer is the install-KEK cipher (H2) the auth-server CRUD handler seals IdP secret fields
 	// with before persisting them to auth_servers.config. nil when no KEK is available.
-	sealer auth.Sealer
+	sealer                auth.Sealer
+	supportBundleJobs     *handler.SupportBundleJobs
+	sessionCleanupMetrics *lifecycle.Metrics
+	partitionStatsMetrics *lifecycle.StatisticsMetrics
 }
 
 // New constructs the server. Caller must Run() and Shutdown().
-func New(ctx context.Context, cfg Config, tel *observability.Telemetry, database *db.DB) (*Server, error) {
+func New(ctx context.Context, cfg Config, tel *telemetry.Telemetry, database *db.DB) (*Server, error) {
+	if err := database.RequireSchema(ctx); err != nil {
+		return nil, err
+	}
 	// A5: session JWTs are signed RS256 by default. When no JWT_KEYS env secret is
 	// provided we load (or first-boot generate + persist) a shared RSA keypair from the
 	// session_signing_keys table so every replica signs with the same key and a rotation
@@ -175,7 +198,7 @@ func New(ctx context.Context, cfg Config, tel *observability.Telemetry, database
 	// and (H2) the IdP secret fields in auth_servers.config. nil when no KEK is available, in which
 	// case those paths fall back to their pre-seal behavior rather than failing startup.
 	var sealer auth.Sealer
-	if cipher, cerr := regsecrets.Default(ctx, database.Pool(), tel.Logger); cerr != nil {
+	if cipher, cerr := colcrypto.Default(); cerr != nil {
 		tel.Logger.Warn("install KEK cipher unavailable; per-joint mTLS + IdP secret sealing disabled", slog.String("err", cerr.Error()))
 	} else {
 		sealer = cipher
@@ -253,6 +276,7 @@ func New(ctx context.Context, cfg Config, tel *observability.Telemetry, database
 	s := &Server{
 		cfg:                 cfg,
 		tel:                 tel,
+		log:                 tel.Log,
 		db:                  database,
 		auditLog:            audit.New(database.Pool()),
 		signer:              signer,
@@ -271,6 +295,15 @@ func New(ctx context.Context, cfg Config, tel *observability.Telemetry, database
 		authProviders:       authProviders,
 		sealer:              sealer,
 	}
+	s.sessionCleanupMetrics, err = lifecycle.NewMetrics(tel.Registry)
+	if err != nil {
+		return nil, fmt.Errorf("register session cleanup metrics: %w", err)
+	}
+	s.partitionStatsMetrics, err = lifecycle.NewStatisticsMetrics(tel.Registry)
+	if err != nil {
+		return nil, fmt.Errorf("register partition statistics metrics: %w", err)
+	}
+	s.supportBundleJobs = handler.NewSupportBundleJobs(database, s.auditLog)
 	// B1: seed each existing org's system_config from env BOOTSTRAP DEFAULTS on first
 	// boot (idempotent — a row already present wins), then the DB row is source of
 	// truth. Best-effort: a seed error is logged, not fatal, since the accessor falls
@@ -309,7 +342,7 @@ func firstOrgID(ctx context.Context, pool *pgxpool.Pool) (uuid.UUID, bool) {
 // seedAuthServers writes the env/Helm-wired LDAP/SAML/OIDC providers into auth_servers as
 // bootstrap rows for org if no row of that type exists yet (so the DB then owns them). Best-effort:
 // a seed error is logged, not fatal — the static provider set stays in effect until a row exists.
-func seedAuthServers(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, cfg Config, sealer auth.Sealer, tel *observability.Telemetry) {
+func seedAuthServers(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, cfg Config, sealer auth.Sealer, tel *telemetry.Telemetry) {
 	var seeds []auth.AuthServer
 	if cfg.OIDC != nil {
 		seeds = append(seeds, auth.AuthServer{
@@ -364,7 +397,7 @@ func seedAuthServers(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, c
 // seedSystemConfig seeds env-derived bootstrap defaults into every existing org's
 // system_config row if absent, and warms the Provider cache for each. New orgs created
 // later get Default() via the accessor's load-or-default path until their first PATCH.
-func seedSystemConfig(ctx context.Context, pool *pgxpool.Pool, p *syscfg.Provider, tel *observability.Telemetry) error {
+func seedSystemConfig(ctx context.Context, pool *pgxpool.Pool, p *syscfg.Provider, tel *telemetry.Telemetry) error {
 	defaults := syscfg.DefaultsFromEnv()
 	rows, err := pool.Query(ctx, `SELECT id FROM orgs`)
 	if err != nil {
@@ -521,33 +554,25 @@ func corsAllowedOrigins(origins []string) []string {
 
 func (s *Server) buildRouter() chi.Router {
 	r := chi.NewRouter()
+	// Chain order (guide ch.03 §interceptor chain): recovery first so a panic anywhere
+	// below still yields a 500 with a request id, then request id + trace span, then the
+	// access log, then the cross-cutting guards, then authn (authMiddleware) and authz
+	// (requireVerb) at the route groups.
+	r.Use(apiutil.Recoverer)
 	r.Use(chimw.RequestID)
-	// SECURITY: honor X-Forwarded-For / X-Real-IP ONLY when the direct peer is a
-	// trusted proxy. Bare chimw.RealIP rewrites RemoteAddr from those headers for
-	// every client, letting an attacker spoof its source IP and mint a fresh
-	// per-IP auth rate-limit bucket per request (credential-spray bypass).
+	r.Use(correlationID)
+	// Resolve the client only through the trusted suffix of X-Forwarded-For;
+	// client-supplied prefixes and alternative headers cannot mint rate buckets.
 	r.Use(s.trustedProxyRealIP())
-	r.Use(chimw.Recoverer)
-	r.Use(s.slogMiddleware)
 	r.Use(s.tel.HTTPMiddleware)
-	// A8 CORS/CSRF hardening:
-	//   - We authenticate exclusively via a bearer token in the Authorization header
-	//     (see authMiddleware — it reads only `Authorization: Bearer …`, never a cookie).
-	//     The browser does not attach the Authorization header automatically, so a
-	//     cross-site form/img/script cannot forge an authenticated mutation: this API
-	//     is structurally CSRF-immune. A CSRF-token middleware would only be required if
-	//     a cookie-authenticated mutation path is ever introduced — if you add one, add
-	//     double-submit / SameSite=strict CSRF protection alongside it.
-	//   - AllowCredentials is true, so per the Fetch spec the wildcard origin "*" is
-	//     forbidden (a wildcard with credentials would let any site read responses).
-	//     corsAllowedOrigins drops any "*"/empty entry defensively; if that leaves the
-	//     list empty we install a deny-all AllowOriginFunc below, so no cross-origin
-	//     browser request is permitted (same-origin only) rather than go-chi's
-	//     empty-list "allow all" default.
+	r.Use(s.requestSummary)
+	r.Use(s.requestTimeout())
+	r.Use(s.maxBodyBytes())
 	corsOpts := cors.Options{
 		AllowedOrigins:   corsAllowedOrigins(s.cfg.CORSOrigins),
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Authorization", "Content-Type", "X-Request-Id", "Idempotency-Key"},
+		AllowedHeaders:   []string{"Authorization", "Content-Type", "If-Match", "X-Request-Id", "Idempotency-Key", auth.BrowserHeader},
+		ExposedHeaders:   []string{"X-Export-Total", "X-Export-Limit", "X-Export-Truncated", "X-Export-Org-ID", "X-Export-Scope", "X-Report-Org-ID", "X-Report-Cluster-ID", "X-Report-Limit", "X-Report-Total", "X-Report-Truncated", "X-Constellation-PDF-Fallback", "Content-Disposition", apiutil.RequestIDHeader},
 		AllowCredentials: true,
 		MaxAge:           300,
 	}
@@ -560,24 +585,20 @@ func (s *Server) buildRouter() chi.Router {
 		corsOpts.AllowOriginFunc = func(*http.Request, string) bool { return false }
 	}
 	r.Use(cors.Handler(corsOpts))
+	r.NotFound(apiutil.NotFoundHandler)
+	r.MethodNotAllowed(apiutil.MethodNotAllowedHandler)
+	r.NotFound(apiutil.NotFoundHandler)
+	r.MethodNotAllowed(apiutil.MethodNotAllowedHandler)
 
 	r.Get("/healthz", s.handleHealth)
 	r.Get("/readyz", s.handleReady)
 	r.Get("/version", s.handleVersion) // root-level convenience mirror of /api/v1/version
-	r.Get("/metrics", s.tel.MetricsHandler().ServeHTTP)
-	// Runtime profiling, mounted on the same listener as /metrics and OFF by
-	// default. net/http/pprof is unauthenticated and exposes heap/goroutine/CPU
-	// profiles, so it must only be enabled in a trusted environment.
-	if os.Getenv("CONSTELLATION_ENABLE_PPROF") == "true" {
-		r.HandleFunc("/debug/pprof/*", pprof.Index)
-		r.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-		r.HandleFunc("/debug/pprof/profile", pprof.Profile)
-		r.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-		r.HandleFunc("/debug/pprof/trace", pprof.Trace)
-	}
+	// /metrics and pprof live on the admin listener (Config.AdminListenAddr), never on
+	// the public API port — see Run.
 	r.Get("/openapi.json", handler.OpenAPISpec)
 
 	r.Route("/api/v1", func(r chi.Router) {
+		r.Use(s.browserCSRF)
 		// A3: a lenient global per-token request ceiling on /api/v1/* — an abuse circuit
 		// breaker, not a fairness throttle. Keyed by the bearer token (JWT or PAT) so one
 		// credential cannot saturate the API; keyless requests fall back to the client IP.
@@ -599,7 +620,8 @@ func (s *Server) buildRouter() chi.Router {
 		// password-spray from a single source — complementing the per-account lockout
 		// (A2), which a botnet rotating accounts would otherwise sidestep. RealIP (set in
 		// buildRouter) feeds httprate the real client address behind the proxy.
-		auth := handler.NewAuth(s.db, s.signer, s.oidc, s.saml, s.ldap, s.auditLog).WithProviderSet(s.authProviders)
+		auth := handler.NewAuth(s.db, s.signer, s.oidc, s.saml, s.ldap, s.auditLog).WithProviderSet(s.authProviders).WithBrowserSessionTimeout(s.cfg.SessionIdleTimeout)
+		r.With(httprate.Limit(60, time.Minute, httprate.WithKeyByIP(), httprate.WithLimitHandler(rateLimited))).Post("/auth/refresh", auth.Refresh)
 		r.Group(func(r chi.Router) {
 			r.Use(httprate.Limit(
 				authIPRateLimit, time.Minute,
@@ -607,6 +629,7 @@ func (s *Server) buildRouter() chi.Router {
 				httprate.WithLimitHandler(rateLimited),
 			))
 			r.Post("/auth/login", auth.Login)
+			r.Get("/auth/providers", auth.Providers)
 			r.Get("/auth/oidc/start", auth.OIDCStart)
 			r.Get("/auth/oidc/callback", auth.OIDCCallback)
 			r.Get("/auth/saml/login", auth.SAMLLogin)
@@ -647,6 +670,15 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/findings/{id}/comments", s.requireVerb(rbac.VerbReadFindings, comments.List))
 			r.Post("/findings/{id}/comments", s.requireVerb(rbac.VerbTriageFindings, comments.Create))
 
+			// Exact occurrence paths are distinct so old replicas fail closed
+			// instead of ignoring a selector during rolling upgrades.
+			r.Get("/finding-instances/{id}", s.requireVerb(rbac.VerbReadFindings, findingsH.Get))
+			r.Post("/finding-instances/{id}/triage", s.requireVerb(rbac.VerbTriageFindings, findingsH.Triage))
+			r.Post("/finding-instances/{id}/suppress", s.requireVerb(rbac.VerbSuppressFindings, findingsH.Suppress))
+			r.Post("/finding-instances/{id}/accept-risk", s.requireVerb(rbac.VerbAcceptRisk, findingsH.AcceptRisk))
+			r.Post("/finding-instances/{id}/reachability", s.requireVerb(rbac.VerbTriageFindings, findingsH.Reachability))
+			r.Get("/finding-instances/{id}/comments", s.requireVerb(rbac.VerbReadFindings, comments.List))
+			r.Post("/finding-instances/{id}/comments", s.requireVerb(rbac.VerbTriageFindings, comments.Create))
 			csv := findings.NewFindingsCSV(s.db)
 			r.Get("/findings.csv", s.requireVerb(rbac.VerbReadFindings, csv.Stream))
 
@@ -655,7 +687,10 @@ func (s *Server) buildRouter() chi.Router {
 			// RBAC-NS-24: requireVerbNS so a namespace-scoped subject can list and is
 			// row-filtered to its namespaces (deps.List honors NamespaceFilterFrom).
 			r.Get("/deployments", s.requireVerbNS(rbac.VerbReadFindings, deps.List))
+			r.Get("/deployments.csv", s.requireVerbNS(rbac.VerbReadFindings, deps.ExportCSV))
 			r.Get("/deployments/{id}", s.requireVerb(rbac.VerbReadFindings, deps.Get))
+			r.Get("/deployments/{id}/findings", s.requireVerb(rbac.VerbReadFindings, deps.FindingsInventory))
+			r.Get("/deployments/{id}/findings.csv", s.requireVerb(rbac.VerbReadFindings, deps.FindingsCSV))
 			r.Get("/violations", s.requireVerb(rbac.VerbReadFindings, deps.Violations))
 
 			networkMap := network.NewNetwork(s.db).WithAudit(s.auditLog)
@@ -663,12 +698,15 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/network/exposure", s.requireVerb(rbac.VerbReadFindings, networkMap.Exposure))
 			r.Get("/network/peers", s.requireVerb(rbac.VerbReadFindings, networkMap.Peers))
 			r.Get("/network/sessions", s.requireVerb(rbac.VerbReadFindings, networkMap.Sessions))
+			r.Get("/network/sessions.csv", s.requireVerb(rbac.VerbReadFindings, networkMap.SessionsCSV))
 			r.Get("/network/sessions/summary", s.requireVerb(rbac.VerbReadFindings, networkMap.SessionsSummary))
 			r.Delete("/network/sessions/{id}", s.requireVerb(rbac.VerbManagePolicies, networkMap.KillSession))
 			r.Get("/network/enforcement", s.requireVerb(rbac.VerbReadFindings, networkMap.EnforcementList))
 			r.Post("/network/enforcement", s.requireVerb(rbac.VerbManagePolicies, networkMap.EnforcementCreate))
 			r.Delete("/network/enforcement/{id}", s.requireVerb(rbac.VerbManagePolicies, networkMap.EnforcementLift))
 			r.Get("/clusters/{id}/network-rules", s.requireVerb(rbac.VerbReadFindings, networkMap.NetworkRules))
+			r.Get("/clusters/{id}/network-rules/inventory", s.requireVerb(rbac.VerbReadFindings, networkMap.NetworkRulesInventory))
+			r.Get("/clusters/{id}/network-rules/inventory.csv", s.requireVerb(rbac.VerbReadFindings, networkMap.NetworkRulesInventoryCSV))
 			r.Post("/clusters/{id}/network-rules", s.requireVerb(rbac.VerbManagePolicies, networkMap.UpsertNetworkRule))
 			r.Put("/clusters/{id}/network-rules", s.requireVerb(rbac.VerbManagePolicies, networkMap.UpsertNetworkRule))
 			r.Delete("/clusters/{id}/network-rules", s.requireVerb(rbac.VerbManagePolicies, networkMap.DeleteNetworkRule))
@@ -679,6 +717,7 @@ func (s *Server) buildRouter() chi.Router {
 			// Wave 5: user-facing list of DPI threats. Same auth as findings.
 			runtimeThreats := runtime.NewRuntimeThreats(s.db)
 			r.Get("/runtime-threats", s.requireVerb(rbac.VerbReadFindings, runtimeThreats.List))
+			r.Get("/runtime-threats.csv", s.requireVerb(rbac.VerbReadFindings, runtimeThreats.ListCSV))
 			// Wave 5b: per-id drilldown — returns the captured packet bytes
 			// (base64-encoded) plus a parsed L7 preview (HTTP/DNS/TLS).
 			r.Get("/runtime-threats/{id}", s.requireVerb(rbac.VerbReadFindings, runtimeThreats.Get))
@@ -688,6 +727,7 @@ func (s *Server) buildRouter() chi.Router {
 			// Read-only aggregation over existing tables (same auth as findings).
 			securityTimeline := handler.NewSecurityTimeline(s.db)
 			r.Get("/security/timeline", s.requireVerb(rbac.VerbReadFindings, securityTimeline.List))
+			r.Get("/security/timeline.csv", s.requireVerb(rbac.VerbReadFindings, securityTimeline.ExportCSV))
 			// B8: score what-if. Recomputes the projected risk score if a set of
 			// findings were resolved. Read-only projection; never mutates state.
 			scorePredict := handler.NewScorePredict(s.db)
@@ -710,6 +750,11 @@ func (s *Server) buildRouter() chi.Router {
 			r.Post("/runtime-policies/{id}/demote", s.requireVerb(rbac.VerbManagePolicies, rtPolicies.Demote))
 			r.Post("/runtime-policies/{id}/disable", s.requireVerb(rbac.VerbManagePolicies, rtPolicies.Disable))
 			r.Delete("/runtime-policies/{id}", s.requireVerb(rbac.VerbManagePolicies, rtPolicies.Delete))
+			r.Put("/runtime-policies/{id}/reviewed", s.requireVerb(rbac.VerbManagePolicies, rtPolicies.ReviewedUpdate))
+			r.Post("/runtime-policies/{id}/reviewed/promote", s.requireVerb(rbac.VerbManagePolicies, rtPolicies.ReviewedPromote))
+			r.Post("/runtime-policies/{id}/reviewed/demote", s.requireVerb(rbac.VerbManagePolicies, rtPolicies.ReviewedDemote))
+			r.Post("/runtime-policies/{id}/reviewed/disable", s.requireVerb(rbac.VerbManagePolicies, rtPolicies.ReviewedDisable))
+			r.Delete("/runtime-policies/{id}/reviewed", s.requireVerb(rbac.VerbManagePolicies, rtPolicies.ReviewedDelete))
 			// Wave B2/B3: match-stats (saved) + simulate (candidate). Read
 			// verb on both — neither mutates state.
 			r.Get("/runtime-policies/{id}/match-stats", s.requireVerb(rbac.VerbReadFindings, rtPolicies.MatchStats))
@@ -724,6 +769,11 @@ func (s *Server) buildRouter() chi.Router {
 			// where dp's NFQUEUE path is bypassed — operator exports
 			// CiliumNetworkPolicy and applies it via kubectl.
 			r.Get("/runtime-policies/{id}/export", s.requireVerb(rbac.VerbReadFindings, rtPolicies.Export))
+			groupEdges := runtime.NewGroupEdgesHTTP(s.db, runtime.NewRuntimePolicyStore(s.db, s.auditLog), s.auditLog)
+			r.Get("/runtime-policies/group-edges", s.requireGroupEdgeVerb(rbac.VerbReadFindings, groupEdges.List))
+			r.Post("/runtime-policies/group-edges", s.requireGroupEdgeVerb(rbac.VerbManagePolicies, groupEdges.Create))
+			r.Post("/runtime-policies/group-edges/{id}/expand", s.requireGroupEdgeVerb(rbac.VerbManagePolicies, groupEdges.Expand))
+			r.Delete("/runtime-policies/group-edges/{id}", s.requireGroupEdgeVerb(rbac.VerbManagePolicies, groupEdges.Delete))
 
 			// Wave C4: DLP regex rules. Same mode vocabulary as runtime_policies
 			// (monitor / enforce / disabled) and same audit-action mapping.
@@ -766,6 +816,8 @@ func (s *Server) buildRouter() chi.Router {
 			pcap := runtime.NewPcapHTTP(s.db)
 			r.Post("/runtime-pcap/start", s.requireVerb(rbac.VerbManagePolicies, pcap.Start))
 			r.Get("/runtime-pcap", s.requireVerb(rbac.VerbReadFindings, pcap.List))
+			r.Get("/runtime-pcap/inventory", s.requireVerb(rbac.VerbReadFindings, pcap.Inventory))
+			r.Get("/runtime-pcap/inventory.csv", s.requireVerb(rbac.VerbReadFindings, pcap.InventoryCSV))
 			r.Get("/runtime-pcap/{id}", s.requireVerb(rbac.VerbReadFindings, pcap.Get))
 			r.Get("/runtime-pcap/{id}/download", s.requireVerb(rbac.VerbReadFindings, pcap.Download))
 			r.Delete("/runtime-pcap/{id}", s.requireVerb(rbac.VerbManagePolicies, pcap.Delete))
@@ -787,8 +839,12 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/clusters/{id}/platform-facts", s.requireVerb(rbac.VerbReadFindings, platformFacts.Get))
 			r.Post("/clusters/{id}/platform-scan", s.requireVerb(rbac.VerbManagePolicies, platformFacts.Scan))
 			r.Get("/clusters/{id}/nodes", s.requireVerb(rbac.VerbReadFindings, nodes.List))
+			r.Get("/clusters/{id}/nodes.csv", s.requireVerb(rbac.VerbReadFindings, nodes.ExportCSV))
 			r.Get("/clusters/{id}/nodes/{node}", s.requireVerb(rbac.VerbReadFindings, nodes.Get))
+			r.Get("/clusters/{id}/nodes/{node}/vulnerabilities", s.requireVerb(rbac.VerbReadFindings, nodes.Vulnerabilities))
+			r.Get("/clusters/{id}/nodes/{node}/vulnerabilities.csv", s.requireVerb(rbac.VerbReadFindings, nodes.VulnerabilitiesCSV))
 			r.Get("/clusters/{id}/containers", s.requireVerb(rbac.VerbReadFindings, nodes.Containers))
+			r.Get("/clusters/{id}/containers.csv", s.requireVerb(rbac.VerbReadFindings, nodes.ContainersCSV))
 			r.Post("/clusters/{id}/cross-scan", s.requireVerb(rbac.VerbManagePolicies, clusters.CrossScan))
 
 			// Wave N1: cluster init-bundles (StackRox-style pre-minted onboarding kits).
@@ -811,6 +867,8 @@ func (s *Server) buildRouter() chi.Router {
 			// synthesized from observed deployments so the kanban renders against live data.
 			// `baselines` is constructed at /api/v1 scope above and shared with the ingest path.
 			r.Get("/runtime/baselines", s.requireVerb(rbac.VerbReadFindings, baselines.List))
+			r.Get("/runtime/baselines/inventory", s.requireVerb(rbac.VerbReadFindings, baselines.Inventory))
+			r.Get("/runtime/baselines/inventory.csv", s.requireVerb(rbac.VerbReadFindings, baselines.InventoryCSV))
 			r.Get("/runtime/baselines/{workload_id}", s.requireVerb(rbac.VerbReadFindings, baselines.Get))
 			r.Post("/runtime/baselines/{workload_id}/mode", s.requireVerb(rbac.VerbManageRuntimeRules, baselines.SetMode))
 			r.Get("/runtime/baselines/{workload_id}/rules", s.requireVerb(rbac.VerbReadFindings, baselines.ListRules))
@@ -819,6 +877,8 @@ func (s *Server) buildRouter() chi.Router {
 			r.Delete("/runtime/baselines/{workload_id}/rules/{rule_id}", s.requireVerb(rbac.VerbManageRuntimeRules, baselines.DeleteRule))
 			fileProfiles := runtime.NewFileProfiles(s.db, s.auditLog)
 			r.Get("/runtime/file-profiles", s.requireVerb(rbac.VerbReadFindings, fileProfiles.List))
+			r.Get("/runtime/file-profiles/inventory", s.requireVerb(rbac.VerbReadFindings, fileProfiles.Inventory))
+			r.Get("/runtime/file-profiles/inventory.csv", s.requireVerb(rbac.VerbReadFindings, fileProfiles.InventoryCSV))
 			r.Get("/runtime/file-profiles/{workload_id}", s.requireVerb(rbac.VerbReadFindings, fileProfiles.Get))
 			r.Get("/runtime/file-profiles/{workload_id}/export", s.requireVerb(rbac.VerbReadFindings, fileProfiles.Export))
 			r.Post("/runtime/file-profiles/{workload_id}/mode", s.requireVerb(rbac.VerbManageRuntimeRules, fileProfiles.SetMode))
@@ -833,6 +893,7 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/migration/sources", s.requireVerb(rbac.VerbReadFindings, enterprise.MigrationSources))
 			r.Post("/migration/preview", s.requireVerb(rbac.VerbManagePolicies, enterprise.MigrationPreview))
 			r.Get("/migration/imports", s.requireVerb(rbac.VerbManagePolicies, enterprise.MigrationImports))
+			r.Get("/migration/imports/export", s.requireVerb(rbac.VerbManagePolicies, enterprise.MigrationImportsExport))
 			r.Get("/migration/imports/{id}/rollback-bundle", s.requireVerb(rbac.VerbManagePolicies, enterprise.MigrationRollbackBundle))
 			r.Post("/migration/imports/{id}:apply", s.requireVerb(rbac.VerbManagePolicies, enterprise.MigrationApply))
 			r.Post("/migration/imports/{id}:rollback", s.requireVerb(rbac.VerbManagePolicies, enterprise.MigrationRollback))
@@ -848,6 +909,8 @@ func (s *Server) buildRouter() chi.Router {
 			rrv2 := policy.NewResponseRulesV2(s.db, s.auditLog)
 			r.Get("/response-rules-v2", s.requireVerb(rbac.VerbReadFindings, rrv2.List))
 			r.Get("/response-rules-v2/options", s.requireVerb(rbac.VerbReadFindings, rrv2.Options))
+			r.Get("/response-rules-v2:export", s.requireVerb(rbac.VerbManageRuntimeRules, rrv2.ExportYAML))
+			r.Post("/response-rules-v2:import", s.requireVerb(rbac.VerbManageRuntimeRules, rrv2.ImportYAML))
 			r.Post("/response-rules-v2", s.requireVerb(rbac.VerbManageRuntimeRules, rrv2.Create))
 			r.Patch("/response-rules-v2:reorder", s.requireVerb(rbac.VerbManageRuntimeRules, rrv2.Reorder))
 			r.Put("/response-rules-v2/{id}", s.requireVerb(rbac.VerbManageRuntimeRules, rrv2.Update))
@@ -921,7 +984,10 @@ func (s *Server) buildRouter() chi.Router {
 
 			netConv := network.NewNetworkConversations(s.db).WithLiveGraph(s.live)
 			r.Get("/network/conversations", s.requireVerb(rbac.VerbReadFindings, netConv.List))
+			r.Get("/network/conversations.csv", s.requireVerb(rbac.VerbReadFindings, netConv.ListCSV))
 			r.Get("/network/conversations/entries", s.requireVerb(rbac.VerbReadFindings, netConv.Detail))
+			r.Get("/network/conversations/streams", s.requireVerb(rbac.VerbReadFindings, netConv.EntriesInventory))
+			r.Get("/network/conversations/streams.csv", s.requireVerb(rbac.VerbReadFindings, netConv.EntriesCSV))
 			// Plan B5: StreamFlows SSE fallback, only when the hot graph is on.
 			if s.live != nil {
 				streamFlows := network.NewStreamFlows(s.live)
@@ -937,6 +1003,7 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/system-health/clusters/{cluster_id}", s.requireVerb(rbac.VerbReadFindings, systemHealth.Cluster))
 			components := handler.NewComponentsInventory(s.db)
 			r.Get("/components", s.requireVerb(rbac.VerbReadFindings, components.List))
+			r.Get("/components/export.csv", s.requireVerb(rbac.VerbReadFindings, components.ExportCSV))
 			r.Get("/components/{id}", s.requireVerb(rbac.VerbReadFindings, components.Get))
 			r.Get("/components/{id}/diagnostics", s.requireVerb(rbac.VerbManageOrg, components.Diagnostics))
 			// /api/v1/version is read-only; gated by read-findings so any
@@ -982,6 +1049,10 @@ func (s *Server) buildRouter() chi.Router {
 			r.Post("/scanner/refresh", s.requireVerb(rbac.VerbManageSystemConfig, sysConfig.RefreshScanner))
 			supportBundle := handler.NewSupportBundle(s.db, s.auditLog)
 			r.Get("/support/bundle", s.requireVerb(rbac.VerbManageSystemConfig, supportBundle.Download))
+			r.Post("/support/bundle/jobs", s.requireVerb(rbac.VerbManageSystemConfig, s.supportBundleJobs.CreateJob))
+			r.Get("/support/bundle/jobs", s.requireVerb(rbac.VerbManageSystemConfig, s.supportBundleJobs.ListJobs))
+			r.Get("/support/bundle/jobs/{id}", s.requireVerb(rbac.VerbManageSystemConfig, s.supportBundleJobs.GetJob))
+			r.Get("/support/bundle/jobs/{id}/download", s.requireVerb(rbac.VerbManageSystemConfig, s.supportBundleJobs.DownloadJob))
 
 			// B4: DB-backed auth-provider (IdP) CRUD. GET redacts provider secrets; a mutation
 			// hot-reloads the live verifier set the login endpoints read through. All routes are
@@ -990,6 +1061,8 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/auth-servers", s.requireVerb(rbac.VerbManageAuthServers, authServers.List))
 			r.Post("/auth-servers", s.requireVerb(rbac.VerbManageAuthServers, authServers.Create))
 			r.Get("/auth-servers/{id}", s.requireVerb(rbac.VerbManageAuthServers, authServers.Get))
+			r.Post("/auth-servers/{id}/role-preview", s.requireVerb(rbac.VerbManageAuthServers, authServers.PreviewRoles))
+			r.Post("/auth-servers/{id}/test", s.requireVerb(rbac.VerbManageAuthServers, authServers.TestConnection))
 			r.Put("/auth-servers/{id}", s.requireVerb(rbac.VerbManageAuthServers, authServers.Update))
 			r.Delete("/auth-servers/{id}", s.requireVerb(rbac.VerbManageAuthServers, authServers.Delete))
 
@@ -1013,6 +1086,8 @@ func (s *Server) buildRouter() chi.Router {
 			r.Patch("/settings/org", s.requireVerb(rbac.VerbManageOrg, settings.PatchOrg))
 			r.Get("/settings/user", s.requireVerb(rbac.VerbReadFindings, settings.GetUser))
 			r.Patch("/settings/user", s.requireVerb(rbac.VerbReadFindings, settings.PatchUser))
+			r.Get("/me/preferences", s.requireVerb(rbac.VerbReadFindings, settings.GetPreferences))
+			r.Put("/me/preferences", s.requireVerb(rbac.VerbReadFindings, settings.PutPreferences))
 
 			receivers := handler.NewReceivers(s.db, s.auditLog, s.dispatcher)
 			r.Get("/integrations/receivers", s.requireVerb(rbac.VerbReadFindings, receivers.List))
@@ -1060,8 +1135,10 @@ func (s *Server) buildRouter() chi.Router {
 			)
 			r.Get("/compliance/frameworks", s.requireVerb(rbac.VerbReadFindings, compl.Frameworks))
 			r.Get("/compliance/checks", s.requireVerb(rbac.VerbReadFindings, compl.Checks))
+			r.Get("/compliance/checks/export.csv", s.requireVerb(rbac.VerbReadFindings, compl.ChecksCSV))
 			r.Get("/compliance/summary", s.requireVerb(rbac.VerbReadFindings, compl.Summary))
 			r.Get("/compliance/evidence", s.requireVerb(rbac.VerbReadFindings, compl.Evidence))
+			r.Get("/compliance/evidence.csv", s.requireVerb(rbac.VerbReadFindings, compl.EvidenceCSV))
 			r.Get("/compliance/nodes", s.requireVerb(rbac.VerbReadFindings, compl.NodeEvidence))
 			r.Get("/compliance/workloads", s.requireVerb(rbac.VerbReadFindings, compl.WorkloadEvidence))
 			r.Get("/compliance/kubernetes", s.requireVerb(rbac.VerbReadFindings, compl.KubernetesEvidence))
@@ -1074,6 +1151,10 @@ func (s *Server) buildRouter() chi.Router {
 			// ingest) drains the queue in watch mode.
 			r.Post("/compliance/bench/run", s.requireVerb(rbac.VerbManagePolicies, compl.RunBench))
 			r.Post("/compliance/bench/claim", s.requireVerb(rbac.VerbManagePolicies, compl.ClaimBenchRun))
+			r.Post("/compliance/bench/requests", s.requireVerb(rbac.VerbManagePolicies, compl.CreateBenchRequest))
+			r.Get("/compliance/bench/requests", s.requireVerb(rbac.VerbReadFindings, compl.ListBenchRequests))
+			r.Get("/compliance/bench/requests/{id}", s.requireVerb(rbac.VerbReadFindings, compl.GetBenchRequest))
+			r.Post("/compliance/bench/requests/{id}/retry", s.requireVerb(rbac.VerbManagePolicies, compl.RetryBenchRequest))
 
 			// Wave N8: production-grade scheduled compliance runs backed by the
 			// compliance_schedules + compliance_runs tables (migration 039). The
@@ -1118,7 +1199,10 @@ func (s *Server) buildRouter() chi.Router {
 			assetVuln := handler.NewAssetVuln(s.db)
 			imageAcceptances := handler.NewImageAcceptances(s.db, s.auditLog)
 			r.Get("/assets", s.requireVerb(rbac.VerbReadFindings, assets.List))
+			r.Get("/assets.csv", s.requireVerb(rbac.VerbReadFindings, assets.ExportCSV))
 			r.Get("/assets/{id}", s.requireVerb(rbac.VerbReadFindings, assets.Get))
+			r.Get("/assets/{id}/findings", s.requireVerb(rbac.VerbReadFindings, assets.Findings))
+			r.Get("/assets/{id}/findings.csv", s.requireVerb(rbac.VerbReadFindings, assets.FindingsCSV))
 			r.Get("/assets/{id}/vulnerabilities", s.requireVerb(rbac.VerbReadFindings, assetVuln.Get))
 			r.Get("/assets/{id}/image-acceptances", s.requireVerb(rbac.VerbReadFindings, imageAcceptances.List))
 			r.Post("/assets/{id}/image-acceptances", s.requireVerb(rbac.VerbAcceptRisk, imageAcceptances.Create))
@@ -1155,13 +1239,17 @@ func (s *Server) buildRouter() chi.Router {
 			// metadata is served from it when cve_records has no row.
 			cve := findings.NewCVE(s.db, "")
 			r.Get("/cve/search", s.requireVerb(rbac.VerbReadFindings, cve.Search))
+			r.Get("/cve/search.csv", s.requireVerb(rbac.VerbReadFindings, cve.SearchCSV))
 			r.Get("/cve/stats", s.requireVerb(rbac.VerbReadFindings, cve.Stats))
 			r.Get("/cve/bundle/status", s.requireVerb(rbac.VerbReadFindings, cve.BundleStatus))
 			r.Get("/cve/{id}/affected", s.requireVerb(rbac.VerbReadFindings, cve.Affected))
+			r.Get("/cve/{id}/affected/{view}", s.requireVerb(rbac.VerbReadFindings, cve.AffectedInventory))
+			r.Get("/cve/{id}/affected/{view}.csv", s.requireVerb(rbac.VerbReadFindings, cve.AffectedInventoryCSV))
 			r.Get("/cve/{id}", s.requireVerb(rbac.VerbReadFindings, cve.Get))
 
 			auditHandler := handler.NewAudit(s.db)
 			r.Get("/audit/events", s.requireVerb(rbac.VerbReadAudit, auditHandler.List))
+			r.Get("/audit/events.csv", s.requireVerb(rbac.VerbReadAudit, auditHandler.ExportCSV))
 			r.Post("/audit/verify", s.requireVerb(rbac.VerbReadAudit, auditHandler.Verify))
 			// E2: compliance evidence path. ControlMappings is the static
 			// table (no PII / org data) so we put it under VerbReadAudit
@@ -1182,6 +1270,7 @@ func (s *Server) buildRouter() chi.Router {
 			// agent token can't read findings, etc.
 			eventsRead := runtime.NewEventsIngest(s.db, s.auditLog, baselines.BaselineMode)
 			r.Get("/events", s.requireVerb(rbac.VerbReadFindings, eventsRead.List))
+			r.Get("/events.csv", s.requireVerb(rbac.VerbReadFindings, eventsRead.ListCSV))
 
 			// Host-facts read path. Write path is in the runtime-agent token
 			// group below (POST /host-facts:report). One row per (cluster, node);
@@ -1214,6 +1303,7 @@ func (s *Server) buildRouter() chi.Router {
 			r.Post("/repository-packages:report", s.requireVerb(rbac.VerbManagePolicies, repositoryPkgs.Report))
 			repositoryInventory := handler.NewRepositoryInventory(s.db)
 			r.Get("/repository-scans", s.requireVerb(rbac.VerbReadFindings, repositoryInventory.List))
+			r.Get("/repository-scans/export.csv", s.requireVerb(rbac.VerbReadFindings, repositoryInventory.ExportCSV))
 			r.Get("/repository-scans/{id}", s.requireVerb(rbac.VerbReadFindings, repositoryInventory.Get))
 			scanAttestations := scanning.NewScanAttestationsWithAudit(s.db, s.auditLog)
 			r.Get("/repository-scan-attestation-trust-policies", s.requireVerb(rbac.VerbReadFindings, scanAttestations.ListTrustPolicies))
@@ -1230,6 +1320,7 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/image-scan-results/{id}/attestations", s.requireVerb(rbac.VerbReadFindings, scanAttestations.ListForImageScanResult))
 			serverlessInventory := scanning.NewServerlessInventory(s.db)
 			r.Get("/serverless-functions", s.requireVerb(rbac.VerbReadFindings, serverlessInventory.List))
+			r.Get("/serverless-functions/export.csv", s.requireVerb(rbac.VerbReadFindings, serverlessInventory.ExportCSV))
 			r.Get("/serverless-functions/{id}", s.requireVerb(rbac.VerbReadFindings, serverlessInventory.Get))
 
 			// Host vulnerabilities. Read-only view backed by unified findings
@@ -1266,6 +1357,7 @@ func (s *Server) buildRouter() chi.Router {
 			r.Post("/registries/{id}/sync-now", s.requireVerb(rbac.VerbManageRegistries, registries.SyncNow))
 			r.Post("/registries/{id}/cancel-scans", s.requireVerb(rbac.VerbManageRegistries, registries.CancelActiveScans))
 			r.Get("/registries/{id}/images", s.requireVerb(rbac.VerbReadFindings, registries.Images))
+			r.Get("/registries/{id}/images.csv", s.requireVerb(rbac.VerbReadFindings, registries.ImagesCSV))
 
 			// User-facing scan-job endpoints.
 			jobs := scanning.NewScanJobs(s.db, s.auditLog)
@@ -1277,6 +1369,7 @@ func (s *Server) buildRouter() chi.Router {
 			// trigger routes below. A read-only auditor must not be able to drive it.
 			r.Post("/scan-jobs", s.requireVerb(rbac.VerbManagePolicies, jobs.Enqueue))
 			r.Get("/scan-jobs", s.requireVerb(rbac.VerbReadFindings, jobs.List))
+			r.Get("/scan-jobs.csv", s.requireVerb(rbac.VerbReadFindings, jobs.ExportCSV))
 			r.Get("/scan-jobs/{id}/attempts", s.requireVerb(rbac.VerbReadFindings, jobs.Attempts))
 			r.Get("/scan-targets/{id}/impacted-workloads", s.requireVerb(rbac.VerbReadFindings, jobs.ImpactedWorkloads))
 			r.Get("/scan/status", s.requireVerb(rbac.VerbReadFindings, jobs.Status))
@@ -1293,6 +1386,7 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/scanner-cache/{scanner_id}/stat", s.requireVerb(rbac.VerbReadFindings, scannerCache.Stat))
 			r.Get("/scanner-cache/{scanner_id}/data", s.requireVerb(rbac.VerbReadFindings, scannerCache.Data))
 			r.Get("/image-scan-results", s.requireVerb(rbac.VerbReadFindings, imageScanResults.List))
+			r.Get("/image-scan-results/export.csv", s.requireVerb(rbac.VerbReadFindings, imageScanResults.ExportCSV))
 			r.Get("/image-scan-results/{id}", s.requireVerb(rbac.VerbReadFindings, imageScanResults.Get))
 			r.Get("/image-scan-results/{id}/findings.csv", s.requireVerb(rbac.VerbReadFindings, imageScanResults.FindingsCSV))
 			r.Get("/image-scan-results/{id}/packages", s.requireVerb(rbac.VerbReadFindings, imageScanResults.Packages))
@@ -1315,6 +1409,8 @@ func (s *Server) buildRouter() chi.Router {
 			backups := handler.NewBackups(s.db, s.auditLog)
 			r.Post("/backups", s.requireVerb(rbac.VerbManageOrg, backups.Create))
 			r.Get("/backups", s.requireVerb(rbac.VerbManageOrg, backups.List))
+			r.Get("/backups/inventory", s.requireVerb(rbac.VerbManageOrg, backups.Inventory))
+			r.Get("/backups/inventory.csv", s.requireVerb(rbac.VerbManageOrg, backups.InventoryCSV))
 			r.Get("/backups/{id}", s.requireVerb(rbac.VerbManageOrg, backups.Get))
 			r.Get("/backups/{id}/download", s.requireVerb(rbac.VerbManageOrg, backups.Download))
 			r.Post("/backups/verify", s.requireVerb(rbac.VerbManageOrg, backups.Verify))
@@ -1427,6 +1523,9 @@ func (s *Server) buildRouter() chi.Router {
 			rap := runtime.NewResponseActions(s.db)
 			r.Get("/runtime/response-actions:pending", rap.Pending)
 			r.Post("/runtime/response-actions:result", rap.Result)
+			// V2 isolates exact-process requests from legacy agents during rollout.
+			r.Get("/runtime/response-actions/v2/pending", rap.PendingV2)
+			r.Post("/runtime/response-actions/v2/result", rap.ResultV2)
 
 			// E1: enabled declarative response rules for the agent's stream evaluator,
 			// priority-ordered. Same :sync pull shape + runtime-agent-token auth as the
@@ -1509,6 +1608,18 @@ func (s *Server) buildRouter() chi.Router {
 				s.dispatcher,
 			)
 			r.Post("/host-cis:report", hostCIS.Report)
+			// Benchmark runners use the cluster-bound credential already mounted by
+			// the chart; user authoring routes retain JWT/PAT and policy RBAC.
+			agentCompliance := compliance.NewCompliance(s.db, s.auditLog).WithResponseAlerts(
+				runtime.NewResponseDispatch(s.db, s.dispatcher),
+				policy.NewResponseRuleDefs(s.db, s.auditLog).WithDispatcher(s.dispatcher).Evaluate,
+				s.dispatcher,
+			)
+			r.Post("/agent/compliance/ingest", agentCompliance.AgentIngest)
+			r.Post("/agent/compliance/bench/claim", agentCompliance.AgentClaimBenchRun)
+			r.Post("/agent/compliance/bench/requests/claim", agentCompliance.ClaimBenchRequest)
+			r.Post("/agent/compliance/bench/requests/{id}/heartbeat", agentCompliance.HeartbeatBenchRequest)
+			r.Post("/agent/compliance/bench/requests/{id}/result", agentCompliance.ResultBenchRequest)
 		})
 
 		// D1: federation sync (per-cluster fed credential auth, NOT user JWT). A joint
@@ -1564,6 +1675,9 @@ func (s *Server) Run(ctx context.Context) error {
 		s.tel.Logger.Info("listening", slog.String("addr", s.cfg.ListenAddr))
 		errCh <- srv.ListenAndServe()
 	}()
+	if addr := strings.TrimSpace(s.cfg.AdminListenAddr); addr != "" {
+		telemetry.StartAdmin(ctx, addr, s.AdminHandler(), s.tel.Logger)
+	}
 
 	// D5: the HTTP server above runs on every replica (so each pod serves the
 	// API + readiness), but the singleton background loops must run on exactly
@@ -1571,6 +1685,7 @@ func (s *Server) Run(ctx context.Context) error {
 	// — identical to the historical single-replica behavior. With it enabled we
 	// start them only while this replica holds the lease.
 	s.startBackgroundWork(ctx)
+	go s.supportBundleJobs.RunWorker(ctx)
 
 	// A5: hot-reload the session signing keys so a `--rotate-jwt-key` rotation
 	// propagates to this already-running replica without a restart. Only runs on
@@ -1690,24 +1805,114 @@ func (s *Server) runAuthProviderReloader(ctx context.Context) {
 
 // ---------------- middleware ----------------
 
-func (s *Server) slogMiddleware(next http.Handler) http.Handler {
+// correlationID carries chi's request id on the context as the logging
+// correlation id, so every line logged during the request (slog or zerolog)
+// and the summary line share correlation_id.
+func correlationID(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id := chimw.GetReqID(r.Context())
+		if id != "" {
+			w.Header().Set(apiutil.RequestIDHeader, id)
+		}
+		next.ServeHTTP(w, r.WithContext(logging.WithCorrelationID(r.Context(), id)))
+	})
+}
+
+// requestSummary emits exactly one request-summary line per request (guide
+// ch.05): route pattern, method, status, bytes, duration, correlation id and —
+// when the auth middleware ran — the principal and org (read after the handler
+// so the deferred log sees authctx).
+func (s *Server) requestSummary(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		next.ServeHTTP(w, r)
-		s.tel.Logger.Info("http",
-			slog.String("method", r.Method),
-			slog.String("path", r.URL.Path),
-			slog.String("request_id", chimw.GetReqID(r.Context())),
-			slog.Duration("dur", time.Since(start)),
-		)
+		ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
+		ctx, slot := authctx.WithSlot(r.Context())
+		r = r.WithContext(ctx)
+		next.ServeHTTP(ww, r)
+		reqLog := logging.Ctx(r.Context(), s.log)
+		ev := reqLog.Info()
+		if ww.Status() >= http.StatusInternalServerError {
+			ev = reqLog.Error()
+		}
+		ev = ev.Str("method", r.Method).Str("path", r.URL.Path).Int("status", ww.Status()).
+			Int("bytes", ww.BytesWritten()).Dur("duration", time.Since(start))
+		if rc := chi.RouteContext(r.Context()); rc != nil {
+			ev = ev.Str("route", rc.RoutePattern())
+		}
+		if subj, ok := slot.Subject(); ok {
+			ev = ev.Str("principal", subj.UserID.String()).Str("org_id", subj.OrgID.String())
+		}
+		ev.Msg("http")
+	})
+}
+
+// requestTimeout bounds every request except the long-lived streaming/export routes,
+// which carry their own cancellation.
+func (s *Server) requestTimeout() func(http.Handler) http.Handler {
+	d := s.cfg.RequestTimeout
+	if d <= 0 {
+		d = 60 * time.Second
+	}
+	timeout := chimw.Timeout(d)
+	return func(next http.Handler) http.Handler {
+		timed := timeout(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if isStreamingPath(r.URL.Path) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			timed.ServeHTTP(w, r)
+		})
+	}
+}
+
+func isStreamingPath(p string) bool {
+	return strings.HasSuffix(p, ":stream") || strings.HasSuffix(p, ".csv") || strings.Contains(p, "/export")
+}
+
+// maxBodyBytes caps request bodies before any handler runs. Handlers that accept large
+// uploads keep their own, tighter MaxBytesReader; this is the global ceiling.
+func (s *Server) maxBodyBytes() func(http.Handler) http.Handler {
+	limit := s.cfg.MaxBodyBytes
+	if limit <= 0 {
+		limit = 64 << 20
+	}
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Body != nil && r.Body != http.NoBody {
+				r.Body = http.MaxBytesReader(w, r.Body, limit)
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// AdminHandler serves the operator-only surface: liveness, readiness (DB ping), Prometheus
+// metrics and, when enabled, pprof.
+func (s *Server) AdminHandler() http.Handler {
+	return s.tel.AdminHandler(telemetry.AdminOptions{
+		Ready:       s.db.Health,
+		EnablePprof: s.cfg.EnablePprof,
 	})
 }
 
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Precedence: an explicit Authorization header wins; the session cookie is only
+		// consulted when no bearer is presented. This deliberately deviates from guide ch.06
+		// ("cookie takes precedence"): the browser-session security suite
+		// (browser_sessions_security_test.go) asserts that a cookie can never lend its
+		// privilege to a request that explicitly authenticates with a scoped or foreign
+		// bearer, and that a tracked session cannot be swapped by a cookie. Cookie-origin
+		// requests are still CSRF-guarded by browserCSRF.
 		tok := bearerToken(r)
+		if r.Header.Get("Authorization") == "" {
+			if cookie, err := r.Cookie(auth.AccessCookie); err == nil {
+				tok = cookie.Value
+			}
+		}
 		if tok == "" {
-			writeError(w, http.StatusUnauthorized, "missing bearer token")
+			writeError(w, http.StatusUnauthorized, "missing session")
 			return
 		}
 		// PAT (Personal Access / API token) auth path. Tokens are minted via
@@ -1743,7 +1948,7 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			mustChange   bool
 		)
 		err = s.db.Pool().QueryRow(r.Context(),
-			`SELECT disabled, session_epoch, must_change_password FROM users WHERE id = $1`, claims.UserID,
+			`SELECT disabled, session_epoch, must_change_password FROM users WHERE id = $1 AND org_id = $2`, claims.UserID, claims.OrgID,
 		).Scan(&disabled, &sessionEpoch, &mustChange)
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusUnauthorized, "user not found")
@@ -1757,28 +1962,25 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "user disabled")
 			return
 		}
-		if claims.Epoch < sessionEpoch {
+		if claims.Epoch != sessionEpoch {
 			writeError(w, http.StatusUnauthorized, "session revoked")
 			return
 		}
-		// A3: concurrent-session cap. A login records its JWT's session id in
-		// user_sessions and evicts the oldest beyond the cap; a JWT whose session row is
-		// gone has been evicted (logged in on too many devices) and is rejected here.
-		// Legacy/test tokens minted without session tracking carry a session id too, so
-		// we only enforce this when at least one session row exists for the user — an
-		// empty set means tracking was never recorded (or was cleared on logout, which
-		// also bumped the epoch and was already caught above).
+		if claims.Tracked && claims.SessionID() == uuid.Nil {
+			writeError(w, http.StatusUnauthorized, "invalid session")
+			return
+		}
 		if sid := claims.SessionID(); sid != uuid.Nil {
 			var (
 				exists, anySession bool
 				lastSeen           *time.Time
 			)
 			if qerr := s.db.Pool().QueryRow(r.Context(), `
-SELECT EXISTS (SELECT 1 FROM user_sessions WHERE session_id = $1),
+SELECT EXISTS (SELECT 1 FROM user_sessions WHERE session_id = $1 AND user_id = $2),
        EXISTS (SELECT 1 FROM user_sessions WHERE user_id = $2),
-       (SELECT last_seen_at FROM user_sessions WHERE session_id = $1)`,
+       (SELECT last_seen_at FROM user_sessions WHERE session_id = $1 AND user_id = $2)`,
 				sid, claims.UserID).Scan(&exists, &anySession, &lastSeen); qerr == nil {
-				if anySession && !exists {
+				if (claims.Tracked || anySession) && !exists {
 					writeError(w, http.StatusUnauthorized, "session evicted")
 					return
 				}
@@ -1789,23 +1991,29 @@ SELECT EXISTS (SELECT 1 FROM user_sessions WHERE session_id = $1),
 				// Untracked legacy/test tokens (no session row) skip this entirely.
 				// A1: a per-org SecurityPolicy may override the deploy-time idle window
 				// (falls back to the SESSION_IDLE_TIMEOUT env default when unconfigured).
-				idle := s.cfg.SessionIdleTimeout
+				var idle time.Duration
 				if pol, _, perr := auth.LoadSecurityPolicy(r.Context(), s.db.Pool(), claims.OrgID); perr == nil {
 					idle = pol.IdleTimeout(s.cfg.SessionIdleTimeout)
+				} else {
+					writeError(w, http.StatusInternalServerError, "load session policy")
+					return
 				}
 				if exists && idle > 0 && lastSeen != nil {
 					if time.Since(*lastSeen) > idle {
-						// Hard-stop the idle session so a later request can't revive it.
-						// Deleting the row alone is NOT enough: once it's gone, anySession
-						// can be false and the same still-within-TTL JWT would be treated
-						// as an untracked token and slip past on replay. Bumping the user's
-						// session_epoch makes the epoch check above reject every later
-						// replay of this (and any sibling) token. Best-effort: a bookkeeping
-						// failure still 401s this request.
-						_, _ = s.db.Pool().Exec(r.Context(),
-							`DELETE FROM user_sessions WHERE session_id = $1`, sid)
-						_, _ = s.db.Pool().Exec(r.Context(),
-							`UPDATE users SET session_epoch = session_epoch + 1 WHERE id = $1`, claims.UserID)
+						deleted, deleteErr := s.db.Pool().Exec(r.Context(),
+							`DELETE FROM user_sessions WHERE session_id = $1 AND last_seen_at <= $2`, sid, *lastSeen)
+						if deleteErr != nil {
+							writeError(w, http.StatusInternalServerError, "expire idle session")
+							return
+						}
+						if deleted.RowsAffected() == 0 {
+							writeError(w, http.StatusUnauthorized, "session state changed; retry authentication")
+							return
+						}
+						if !claims.Tracked {
+							_, _ = s.db.Pool().Exec(r.Context(),
+								`UPDATE users SET session_epoch = session_epoch + 1 WHERE id = $1`, claims.UserID)
+						}
 						// RSP-AUDIT-05: an idle-timeout session rejection is a security-relevant
 						// auth event; record it so inactivity expiries are visible in /audit/events
 						// and the SIEM alongside failed logins.
@@ -1819,10 +2027,13 @@ SELECT EXISTS (SELECT 1 FROM user_sessions WHERE session_id = $1),
 						return
 					}
 					if _, uerr := s.db.Pool().Exec(r.Context(),
-						`UPDATE user_sessions SET last_seen_at = now() WHERE session_id = $1`, sid); uerr != nil {
+						`UPDATE user_sessions SET last_seen_at = GREATEST(last_seen_at, clock_timestamp()) WHERE session_id = $1`, sid); uerr != nil {
 						s.tel.Logger.Warn("update session last_seen_at", slog.String("err", uerr.Error()))
 					}
 				}
+			} else {
+				writeError(w, http.StatusInternalServerError, "load session")
+				return
 			}
 		}
 		// A4: forced password reset. While must_change_password is set, the only thing the
@@ -1952,6 +2163,73 @@ func (s *Server) requireVerb(verb rbac.Verb, h http.HandlerFunc) http.HandlerFun
 			custom = s.customRoles.VerbsForOrg(r.Context(), subj.OrgID)
 		}
 		if err := rbac.AuthorizeWithCustom(subj.Assignments, verb, res, custom); err != nil {
+			writeError(w, http.StatusForbidden, "forbidden: "+string(verb))
+			return
+		}
+		h(w, r)
+	}
+}
+
+func (s *Server) requireGroupEdgeVerb(verb rbac.Verb, h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		subj, ok := authctx.SubjectFrom(r.Context())
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "no subject")
+			return
+		}
+		if !subj.HasTokenScope(verb) {
+			writeError(w, http.StatusForbidden, "forbidden: token lacks scope "+string(verb))
+			return
+		}
+		var clusterID uuid.UUID
+		if edgeID := chi.URLParam(r, "id"); edgeID != "" {
+			id, err := uuid.Parse(edgeID)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid id")
+				return
+			}
+			err = s.db.Pool().QueryRow(r.Context(), `SELECT cluster_id FROM group_rule_edges WHERE id=$1 AND org_id=$2`, id, subj.OrgID).Scan(&clusterID)
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeError(w, http.StatusNotFound, "not found")
+				return
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to read edge")
+				return
+			}
+		} else if r.Method == http.MethodGet {
+			var err error
+			clusterID, err = uuid.Parse(strings.TrimSpace(r.URL.Query().Get("cluster_id")))
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "cluster_id is required")
+				return
+			}
+		} else {
+			body, err := io.ReadAll(io.LimitReader(r.Body, (1<<20)+1))
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid body")
+				return
+			}
+			if len(body) > 1<<20 {
+				writeError(w, http.StatusRequestEntityTooLarge, "body too large")
+				return
+			}
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			var request struct {
+				ClusterID uuid.UUID `json:"cluster_id"`
+			}
+			if err := json.Unmarshal(body, &request); err != nil || request.ClusterID == uuid.Nil {
+				writeError(w, http.StatusBadRequest, "cluster_id is required")
+				return
+			}
+			clusterID = request.ClusterID
+		}
+		resource := rbac.Resource{OrgID: subj.OrgID, ClusterID: &clusterID}
+		var custom map[string][]rbac.Verb
+		if s.customRoles != nil {
+			custom = s.customRoles.VerbsForOrg(r.Context(), subj.OrgID)
+		}
+		if err := rbac.AuthorizeWithCustom(subj.Assignments, verb, resource, custom); err != nil {
 			writeError(w, http.StatusForbidden, "forbidden: "+string(verb))
 			return
 		}
@@ -2116,12 +2394,10 @@ func rateLimited(w http.ResponseWriter, _ *http.Request) {
 	writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
 }
 
-// trustedProxyRealIP returns middleware that applies chi's RealIP rewrite (which
-// derives RemoteAddr from X-Forwarded-For / X-Real-IP / True-Client-IP) ONLY for
-// requests whose direct TCP peer falls inside a trusted-proxy CIDR. For every
-// other peer RemoteAddr is left as the real socket address. This closes the
-// credential-spray bypass: without the gate, any client could spoof a forwarded
-// header to mint a fresh per-IP auth rate-limit bucket on each request.
+// trustedProxyRealIP resolves X-Forwarded-For from right to left, starting at
+// the trusted socket peer and stopping at the first untrusted address. Other
+// forwarding headers cannot override that chain. Missing or invalid evidence
+// leaves the socket address intact for rate limits and audit attribution.
 //
 // Trusted CIDRs come from CONSTELLATION_TRUSTED_PROXIES (comma-separated CIDRs or
 // bare IPs). When unset, we default to loopback + RFC1918/RFC4193 private ranges
@@ -2129,14 +2405,17 @@ func rateLimited(w http.ResponseWriter, _ *http.Request) {
 // with no configuration, while a directly internet-exposed server ignores
 // forwarded headers from public clients.
 func (s *Server) trustedProxyRealIP() func(http.Handler) http.Handler {
-	trusted := parseTrustedProxies(os.Getenv("CONSTELLATION_TRUSTED_PROXIES"))
-	realIP := chimw.RealIP
+	rawTrusted := os.Getenv("CONSTELLATION_TRUSTED_PROXIES")
+	trusted := parseTrustedProxies(rawTrusted)
+	explicitTrust := strings.TrimSpace(rawTrusted) != ""
 	return func(next http.Handler) http.Handler {
-		honored := realIP(next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if ipInNets(remoteHostIP(r.RemoteAddr), trusted) {
-				honored.ServeHTTP(w, r)
-				return
+			peerTrusted := ipInNets(remoteHostIP(r.RemoteAddr), trusted)
+			r = r.WithContext(authctx.WithTrustedProxy(r.Context(), peerTrusted && explicitTrust))
+			if peerTrusted {
+				if ip := forwardedClientIP(r.Header.Values("X-Forwarded-For"), trusted); ip != nil {
+					r.RemoteAddr = ip.String()
+				}
 			}
 			next.ServeHTTP(w, r)
 		})
@@ -2234,8 +2513,10 @@ func bearerToken(r *http.Request) string {
 	return strings.TrimPrefix(h, "Bearer ")
 }
 
+// writeError is the legacy status-first helper; apiutil keeps the body shape
+// and scrubs 5xx messages. New code returns typed errors to apiutil.WriteError.
 func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
+	apiutil.WriteStatus(context.Background(), w, status, msg)
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
@@ -2245,7 +2526,7 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 }
 
 // loadRoleAssignments queries role_assignments for the user. The inline pgx query below is
-// the source of truth; the schema lives in db/migrations.
+// the source of truth; the schema lives in internal/server/database/migrations.
 func loadRoleAssignments(ctx context.Context, database *db.DB, userID uuid.UUID) ([]rbac.RoleAssignment, error) {
 	// P0-11: an assignment mirrored from an expiring role binding stops authorizing once its
 	// expires_at passes. This is the single per-request loader, so filtering here enforces

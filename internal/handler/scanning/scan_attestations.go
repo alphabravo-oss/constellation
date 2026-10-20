@@ -309,7 +309,7 @@ INSERT INTO scan_result_attestations (
     predicate_type, format, payload, payload_sha256, envelope, signature,
     verification_status, trusted, signer_identity, signer_issuer, verified_at,
     observed_at, expires_at, metadata
-) VALUES (
+) SELECT
     $1, $2, $3, $4, $5,
     $6, $7, $8, NULLIF($9, ''),
     $10, $11, $12,
@@ -317,7 +317,14 @@ INSERT INTO scan_result_attestations (
     $21, $22, $23::jsonb, $24, NULLIF($25::jsonb, 'null'::jsonb), NULLIF($26::jsonb, 'null'::jsonb),
     $27, $28, NULLIF($29, ''), NULLIF($30, ''), $31,
     $32, $33, $34::jsonb
-)
+  FROM scan_targets st
+ WHERE st.id = $2 AND st.org_id = $1
+   AND ($3::uuid IS NULL OR EXISTS (
+       SELECT 1 FROM scan_jobs sj WHERE sj.id = $3 AND sj.org_id = $1 AND sj.target_id = st.id))
+   AND ($4::uuid IS NULL OR EXISTS (
+       SELECT 1 FROM scan_evidence se WHERE se.id = $4 AND se.org_id = $1 AND se.scan_target_id = st.id))
+   AND ($5::uuid IS NULL OR EXISTS (
+       SELECT 1 FROM image_scan_results ir WHERE ir.id = $5 AND ir.org_id = $1 AND ir.scan_target_id = st.id))
 ON CONFLICT (org_id, subject_kind, subject_digest, predicate_type, payload_sha256) DO UPDATE SET
     scan_target_id = EXCLUDED.scan_target_id,
     scan_job_id = EXCLUDED.scan_job_id,
@@ -362,6 +369,10 @@ RETURNING id`,
 		req.PredicateType, req.Format, string(payload), payloadHash, string(nullJSON(envelope)), string(nullJSON(signature)),
 		status, trusted, req.SignerIdentity, req.SignerIssuer, verifiedAt,
 		observedAt, req.ExpiresAt, string(metadata)).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		jsonError(w, http.StatusNotFound, "linked scan result not found")
+		return
+	}
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, "attestation: "+err.Error())
 		return
@@ -766,6 +777,23 @@ func (h *ScanAttestations) ListForImageScanResult(w http.ResponseWriter, r *http
 	h.list(w, r, "image_scan_result_id", chi.URLParam(r, "id"))
 }
 
+const scanAttestationLinkScope = `
+   AND EXISTS (SELECT 1 FROM scan_targets st
+                WHERE st.id = scan_result_attestations.scan_target_id
+                  AND st.org_id = scan_result_attestations.org_id)
+   AND (scan_job_id IS NULL OR EXISTS (SELECT 1 FROM scan_jobs sj
+                WHERE sj.id = scan_result_attestations.scan_job_id
+                  AND sj.org_id = scan_result_attestations.org_id
+                  AND sj.target_id = scan_result_attestations.scan_target_id))
+   AND (scan_evidence_id IS NULL OR EXISTS (SELECT 1 FROM scan_evidence se
+                WHERE se.id = scan_result_attestations.scan_evidence_id
+                  AND se.org_id = scan_result_attestations.org_id
+                  AND se.scan_target_id = scan_result_attestations.scan_target_id))
+   AND (image_scan_result_id IS NULL OR EXISTS (SELECT 1 FROM image_scan_results ir
+                WHERE ir.id = scan_result_attestations.image_scan_result_id
+                  AND ir.org_id = scan_result_attestations.org_id
+                  AND ir.scan_target_id = scan_result_attestations.scan_target_id))`
+
 func (h *ScanAttestations) list(w http.ResponseWriter, r *http.Request, column string, rawID string) {
 	subj, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
@@ -787,7 +815,7 @@ SELECT id, scan_target_id, scan_job_id, scan_evidence_id, image_scan_result_id,
        COALESCE(signer_identity, ''), COALESCE(signer_issuer, ''), verified_at, observed_at, expires_at,
        created_at, metadata, NULL::jsonb, NULL::jsonb, NULL::jsonb
   FROM scan_result_attestations
- WHERE org_id = $1 AND %s = $2
+ WHERE org_id = $1 AND %s = $2`+scanAttestationLinkScope+`
  ORDER BY observed_at DESC, created_at DESC
  LIMIT 100`, column)
 	rows, err := h.db.Pool().Query(r.Context(), query, subj.OrgID, id)
@@ -1123,7 +1151,7 @@ SELECT id, scan_target_id, scan_job_id, scan_evidence_id, image_scan_result_id,
        COALESCE(signer_identity, ''), COALESCE(signer_issuer, ''), verified_at, observed_at, expires_at,
        created_at, metadata, payload, envelope, signature
   FROM scan_result_attestations
- WHERE org_id = $1
+ WHERE org_id = $1`+scanAttestationLinkScope+`
    AND NOT trusted
  ORDER BY observed_at DESC, created_at DESC
  LIMIT $2`, orgID, limit)
@@ -1201,7 +1229,7 @@ func (h *ScanAttestations) verifyAttestationWithPolicy(ctx context.Context, orgI
 		return scanAttestationDTO{}, false, "", verifyErr, fmt.Errorf("verification metadata: %w", err)
 	}
 	now := time.Now().UTC()
-	if _, err := h.db.Pool().Exec(ctx, `
+	tag, err := h.db.Pool().Exec(ctx, `
 UPDATE scan_result_attestations
    SET verification_status = $1,
        trusted = $2,
@@ -1212,8 +1240,12 @@ UPDATE scan_result_attestations
        trust_policy_id = $7,
        verification_reason = NULLIF($8, '')
  WHERE org_id = $9
-   AND id = $10`, status, trusted, identity, issuer, now, string(metadata), policy.ID, reason, orgID, item.ID); err != nil {
+   AND id = $10`+scanAttestationLinkScope, status, trusted, identity, issuer, now, string(metadata), policy.ID, reason, orgID, item.ID)
+	if err != nil {
 		return scanAttestationDTO{}, false, reason, verifyErr, fmt.Errorf("update attestation verification: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return scanAttestationDTO{}, false, reason, verifyErr, errors.New("attestation links no longer valid")
 	}
 	updated, err := h.getAttestation(ctx, orgID, item.ID, true)
 	if err != nil {
@@ -1267,12 +1299,14 @@ INSERT INTO scan_attestation_verifications (
     status, trusted, reason, error, signer_identity, signer_issuer,
     subject_ref, subject_digest, predicate_type, payload_sha256,
     require_rekor, policy_snapshot, verifier_metadata, verified_by, auto_verified
-) VALUES (
+) SELECT
     $1,$2,$3,$4,
     $5,$6,$7,$8,$9,$10,
     $11,$12,$13,$14,
     $15,$16::jsonb,$17::jsonb,$18,$19
-) RETURNING id`,
+  FROM scan_result_attestations
+ WHERE org_id = $1 AND id = $2`+scanAttestationLinkScope+`
+ RETURNING id`,
 		orgID, item.ID, policy.ID, policy.Name,
 		status, trusted, strings.TrimSpace(reason), errString, strings.TrimSpace(identity), strings.TrimSpace(issuer),
 		item.SubjectRef, item.SubjectDigest, item.PredicateType, item.PayloadSHA256,
@@ -1355,7 +1389,7 @@ SELECT id, scan_target_id, scan_job_id, scan_evidence_id, image_scan_result_id,
        COALESCE(signer_identity, ''), COALESCE(signer_issuer, ''), verified_at, observed_at, expires_at,
        created_at, metadata, `+payloadSelect+`
   FROM scan_result_attestations
- WHERE org_id = $1 AND id = $2`, orgID, id)
+ WHERE org_id = $1 AND id = $2`+scanAttestationLinkScope, orgID, id)
 	return scanAttestationRow(row, includePayload)
 }
 
@@ -1391,9 +1425,10 @@ func (h *ScanAttestations) resolveAttestationTarget(ctx context.Context, orgID u
 	if targetID == nil && imageResultID != nil {
 		var id uuid.UUID
 		err := h.db.Pool().QueryRow(ctx, `
-SELECT scan_target_id
-  FROM image_scan_results
- WHERE org_id = $1 AND id = $2 AND scan_target_id IS NOT NULL`, orgID, *imageResultID).Scan(&id)
+SELECT ir.scan_target_id
+  FROM image_scan_results ir
+  JOIN scan_targets st ON st.id = ir.scan_target_id AND st.org_id = ir.org_id
+ WHERE ir.org_id = $1 AND ir.id = $2`, orgID, *imageResultID).Scan(&id)
 		if err != nil {
 			return handler.ScanTarget{}, nil, fmt.Errorf("image scan result target: %w", err)
 		}
@@ -1412,12 +1447,13 @@ SELECT scan_target_id
 	if imageResultID == nil && req.SubjectKind == "image" && req.SubjectDigest != "" {
 		var id uuid.UUID
 		err := h.db.Pool().QueryRow(ctx, `
-SELECT id
-  FROM image_scan_results
- WHERE org_id = $1
-   AND scan_target_id = $2
-   AND image_digest = $3
- ORDER BY last_scanned_at DESC
+SELECT ir.id
+  FROM image_scan_results ir
+  JOIN scan_targets st ON st.id = ir.scan_target_id AND st.org_id = ir.org_id
+ WHERE ir.org_id = $1
+   AND ir.scan_target_id = $2
+   AND ir.image_digest = $3
+ ORDER BY ir.last_scanned_at DESC
  LIMIT 1`, orgID, target.ID, req.SubjectDigest).Scan(&id)
 		if err == nil {
 			imageResultID = &id
@@ -1429,15 +1465,24 @@ SELECT id
 }
 
 func (h *ScanAttestations) requireEvidenceForTarget(ctx context.Context, orgID, targetID, evidenceID uuid.UUID) error {
-	return requireLinkedTarget(ctx, h.db.Pool().QueryRow(ctx, `SELECT scan_target_id FROM scan_evidence WHERE org_id = $1 AND id = $2`, orgID, evidenceID), targetID, "scan evidence")
+	return requireLinkedTarget(ctx, h.db.Pool().QueryRow(ctx, `
+SELECT se.scan_target_id FROM scan_evidence se
+JOIN scan_targets st ON st.id = se.scan_target_id AND st.org_id = se.org_id
+WHERE se.org_id = $1 AND se.id = $2`, orgID, evidenceID), targetID, "scan evidence")
 }
 
 func (h *ScanAttestations) requireJobForTarget(ctx context.Context, orgID, targetID, jobID uuid.UUID) error {
-	return requireLinkedTarget(ctx, h.db.Pool().QueryRow(ctx, `SELECT target_id FROM scan_jobs WHERE org_id = $1 AND id = $2`, orgID, jobID), targetID, "scan job")
+	return requireLinkedTarget(ctx, h.db.Pool().QueryRow(ctx, `
+SELECT sj.target_id FROM scan_jobs sj
+JOIN scan_targets st ON st.id = sj.target_id AND st.org_id = sj.org_id
+WHERE sj.org_id = $1 AND sj.id = $2`, orgID, jobID), targetID, "scan job")
 }
 
 func (h *ScanAttestations) requireImageResultForTarget(ctx context.Context, orgID, targetID, resultID uuid.UUID) error {
-	return requireLinkedTarget(ctx, h.db.Pool().QueryRow(ctx, `SELECT scan_target_id FROM image_scan_results WHERE org_id = $1 AND id = $2 AND scan_target_id IS NOT NULL`, orgID, resultID), targetID, "image scan result")
+	return requireLinkedTarget(ctx, h.db.Pool().QueryRow(ctx, `
+SELECT ir.scan_target_id FROM image_scan_results ir
+JOIN scan_targets st ON st.id = ir.scan_target_id AND st.org_id = ir.org_id
+WHERE ir.org_id = $1 AND ir.id = $2`, orgID, resultID), targetID, "image scan result")
 }
 
 func requireLinkedTarget(_ context.Context, row pgx.Row, targetID uuid.UUID, label string) error {

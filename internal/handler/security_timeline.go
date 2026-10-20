@@ -20,10 +20,15 @@ package handler
 // (all $N placeholders are always referenced) which keeps pgx happy.
 
 import (
+	"encoding/csv"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/db"
 )
@@ -37,15 +42,18 @@ type SecurityTimeline struct {
 func NewSecurityTimeline(database *db.DB) *SecurityTimeline { return &SecurityTimeline{db: database} }
 
 type timelineItem struct {
-	Source     string    `json:"source"` // dpi_threat | runtime_event | network_violation | audit
-	ID         string    `json:"id"`
-	Severity   string    `json:"severity"` // info | low | medium | high | critical
-	At         time.Time `json:"at"`
-	Title      string    `json:"title"`
-	WorkloadID string    `json:"workload_id,omitempty"`
-	Namespace  string    `json:"namespace,omitempty"`
-	ClusterID  string    `json:"cluster_id,omitempty"`
-	Ref        string    `json:"ref,omitempty"` // source-specific reference (threat_id, verdict, policy, target_kind)
+	PlatformRole *string `json:"platform_role,omitempty"`
+	roleLabels   json.RawMessage
+	Source       string    `json:"source"` // dpi_threat | runtime_event | network_violation | audit
+	ID           string    `json:"id"`
+	Severity     string    `json:"severity"` // info | low | medium | high | critical
+	At           time.Time `json:"at"`
+	Title        string    `json:"title"`
+	WorkloadID   string    `json:"workload_id,omitempty"`
+	Namespace    string    `json:"namespace,omitempty"`
+	ClusterID    string    `json:"cluster_id,omitempty"`
+	Verdict      string    `json:"verdict,omitempty"`
+	Ref          string    `json:"ref,omitempty"` // source-specific reference (threat_id, verdict, policy, target_kind)
 }
 
 // validTimelineSeverities is the normalised text vocabulary the union emits.
@@ -58,7 +66,13 @@ var validTimelineSeverities = map[string]bool{
 var allTimelineSources = []string{"dpi_threat", "runtime_event", "network_violation", "audit"}
 
 // List handles GET /api/v1/security/timeline.
-func (t *SecurityTimeline) List(w http.ResponseWriter, r *http.Request) {
+func (t *SecurityTimeline) List(w http.ResponseWriter, r *http.Request) { t.read(w, r, false) }
+
+// ExportCSV uses the identical filters and snapshot as List; pagination is
+// intentionally ignored and a documented 10,000-record export limit applies.
+func (t *SecurityTimeline) ExportCSV(w http.ResponseWriter, r *http.Request) { t.read(w, r, true) }
+
+func (t *SecurityTimeline) read(w http.ResponseWriter, r *http.Request, export bool) {
 	subj, ok := SubjectFrom(r.Context())
 	if !ok {
 		jsonError(w, http.StatusUnauthorized, "no subject")
@@ -69,26 +83,24 @@ func (t *SecurityTimeline) List(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if clusterArg != nil {
+		var owned bool
+		if err := t.db.Pool().QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM clusters WHERE id = $1 AND org_id = $2)`, clusterArg, subj.OrgID).Scan(&owned); err != nil {
+			jsonError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if !owned {
+			jsonError(w, http.StatusNotFound, "cluster not found")
+			return
+		}
+	}
 
-	// Time window. Defaults to the last 7 days so the first page is bounded.
-	to := time.Now().Add(time.Minute)
-	from := to.Add(-7 * 24 * time.Hour)
-	if v := strings.TrimSpace(r.URL.Query().Get("from")); v != "" {
-		if parsed, perr := time.Parse(time.RFC3339, v); perr == nil {
-			from = parsed
-		} else {
-			jsonError(w, http.StatusBadRequest, "invalid from (want RFC3339)")
-			return
-		}
+	window, err := parseTimelineWindow(r.URL.Query(), time.Now())
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
 	}
-	if v := strings.TrimSpace(r.URL.Query().Get("to")); v != "" {
-		if parsed, perr := time.Parse(time.RFC3339, v); perr == nil {
-			to = parsed
-		} else {
-			jsonError(w, http.StatusBadRequest, "invalid to (want RFC3339)")
-			return
-		}
-	}
+	from, to := window.from, window.to
 
 	// Type filter → per-source include flags. When a cluster is selected we
 	// exclude audit events: audit_events has no cluster_id column and is an
@@ -108,16 +120,23 @@ func (t *SecurityTimeline) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 500 {
-		limit = 100
+	verdicts, err := parseTimelineVerdicts(r.URL.Query().Get("verdict"))
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
 	}
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	if offset < 0 {
-		offset = 0
+	if len(verdicts) > 0 && (!inclEvent || inclThreat || inclViolation || enabled["audit"]) {
+		jsonError(w, http.StatusBadRequest, "verdict requires the runtime_event source only")
+		return
 	}
-	// The timeline UNIONs four event tables, so an exact COUNT would be expensive.
-	// Fetch one extra row to learn whether a next page exists (cursor has_more paging).
+	limit, offset, err := parseTimelinePagination(r.URL.Query())
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if export {
+		limit, offset = 10000, 0
+	}
 	fetch := limit + 1
 
 	qFilter := strings.TrimSpace(r.URL.Query().Get("q"))
@@ -133,7 +152,7 @@ func (t *SecurityTimeline) List(w http.ResponseWriter, r *http.Request) {
 	// via CASE. events/violations already carry text severity; audit rows
 	// are informational.
 	const q = `
-SELECT source, id, severity, at, title, workload_id, namespace, cluster_id, ref
+SELECT source, id, severity, at, title, workload_id, namespace, cluster_id, verdict, ref, role_labels
   FROM (
     SELECT 'dpi_threat' AS source, id::text AS id,
            CASE WHEN severity >= 8 THEN 'critical'
@@ -143,51 +162,76 @@ SELECT source, id, severity, at, title, workload_id, namespace, cluster_id, ref
                 ELSE 'info' END AS severity,
            at, COALESCE(NULLIF(msg,''), 'DPI threat') AS title,
            COALESCE(workload_id,'') AS workload_id, COALESCE(namespace,'') AS namespace,
-           cluster_id::text AS cluster_id, threat_id::text AS ref
+           cluster_id::text AS cluster_id, ''::text AS verdict, threat_id::text AS ref, NULL::jsonb AS role_labels
       FROM runtime_threats
-     WHERE $8 AND org_id = $1 AND ($2::uuid IS NULL OR cluster_id = $2)
-       AND at >= $3 AND at < $4
+     WHERE $6 AND org_id = $1 AND ($2::uuid IS NULL OR cluster_id = $2)
+       AND (($14 AND at > $3) OR (NOT $14 AND at >= $3)) AND (NOT $15 OR at < $4)
     UNION ALL
     SELECT 'runtime_event', id::text,
            lower(severity), at, COALESCE(NULLIF(kind,''),'runtime event'),
-           COALESCE(workload_id,''), '',
-           cluster_id::text, COALESCE(source,'') || CASE WHEN verdict <> '' THEN ' · '||verdict ELSE '' END
+           COALESCE(workload_id,''), COALESCE(namespace,''),
+           cluster_id::text, COALESCE(verdict,''), COALESCE(source,'') || CASE WHEN verdict <> '' THEN ' · '||verdict ELSE '' END, NULL::jsonb
       FROM events
-     WHERE $9 AND org_id = $1 AND ($2::uuid IS NULL OR cluster_id = $2)
-       AND at >= $3 AND at < $4
+     WHERE $7 AND org_id = $1 AND ($2::uuid IS NULL OR cluster_id = $2)
+       AND (($14 AND at > $3) OR (NOT $14 AND at >= $3)) AND (NOT $15 OR at < $4)
+       AND (NOT $16 OR $5::text[] IS NULL OR severity = ANY($5))
     UNION ALL
     SELECT 'network_violation', v.id::text,
            lower(v.severity), v.at, COALESCE(NULLIF(v.message,''), v.kind),
            COALESCE(d.name,''), COALESCE(d.namespace,''),
-           COALESCE(d.cluster_id::text,''), COALESCE(v.policy_name,'')
+           COALESCE(d.cluster_id::text,''), '', COALESCE(v.policy_name,''), COALESCE(d.labels,'{}'::jsonb)
       FROM violations v
-      LEFT JOIN deployments d ON d.id = v.deployment_id
-     WHERE $10 AND v.org_id = $1 AND ($2::uuid IS NULL OR d.cluster_id = $2)
-       AND v.at >= $3 AND v.at < $4
+      LEFT JOIN deployments d ON d.id = v.deployment_id AND d.org_id = v.org_id
+     WHERE $8 AND v.org_id = $1 AND ($2::uuid IS NULL OR d.cluster_id = $2)
+       AND (($14 AND v.at > $3) OR (NOT $14 AND v.at >= $3)) AND (NOT $15 OR v.at < $4)
     UNION ALL
     SELECT 'audit', a.id::text,
            'info', a.at, a.action,
-           '', '', '', COALESCE(a.target_kind,'')
+           '', '', '', '', COALESCE(a.target_kind,''), NULL::jsonb
       FROM audit_events a
-     WHERE $11 AND a.org_id = $1 AND ($2::uuid IS NULL)
-       AND a.at >= $3 AND a.at < $4
+     WHERE $9 AND a.org_id = $1 AND ($2::uuid IS NULL)
+       AND (($14 AND a.at > $3) OR (NOT $14 AND a.at >= $3)) AND (NOT $15 OR a.at < $4)
   ) t
  WHERE ($5::text[] IS NULL OR severity = ANY($5))
-   AND ($12 = '' OR title ILIKE '%' || $12 || '%'
-        OR workload_id ILIKE '%' || $12 || '%'
-        OR namespace ILIKE '%' || $12 || '%'
-        OR ref ILIKE '%' || $12 || '%'
-        OR id ILIKE '%' || $12 || '%')
-   AND ($13 = '' OR namespace ILIKE '%' || $13 || '%')
-   AND ($14 = '' OR workload_id ILIKE '%' || $14 || '%')
-   AND ($15 = '' OR ref ILIKE '%' || $15 || '%')
- ORDER BY at DESC
- LIMIT $6 OFFSET $7`
+   AND ($17::text[] IS NULL OR verdict = ANY($17))
+   AND ($10 = '' OR title ILIKE '%' || $10 || '%'
+        OR workload_id ILIKE '%' || $10 || '%'
+        OR namespace ILIKE '%' || $10 || '%'
+        OR ref ILIKE '%' || $10 || '%'
+        OR id ILIKE '%' || $10 || '%')
+   AND ($11 = '' OR namespace ILIKE '%' || $11 || '%')
+   AND ($12 = '' OR workload_id ILIKE '%' || $12 || '%')
+   AND ($13 = '' OR ref ILIKE '%' || $13 || '%')
+`
 
-	rows, err := t.db.Pool().Query(r.Context(), q,
-		subj.OrgID, clusterArg, from, to, sevArr, fetch, offset,
-		inclThreat, inclEvent, inclViolation, inclAudit,
-		qFilter, namespaceFilter, workloadFilter, refFilter)
+	args := []any{subj.OrgID, clusterArg, from, to, sevArr, inclThreat, inclEvent, inclViolation, inclAudit, qFilter, namespaceFilter, workloadFilter, refFilter, window.exclusive, window.upperBound, window.lowerOnly, verdicts}
+	// Exact event-only counts are affordable and correspond to Dashboard event
+	// units. Broad mixed-source browsing retains its existing has_more contract.
+	var total *int
+	var tx pgx.Tx
+	if export || inclEvent && !inclThreat && !inclViolation && !inclAudit {
+		tx, err = t.db.Pool().BeginTx(r.Context(), pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+		if err != nil {
+			jsonError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		defer tx.Rollback(r.Context())
+		var count int
+		if err = tx.QueryRow(r.Context(), "SELECT COUNT(*)::int FROM ("+q+") matched", args...).Scan(&count); err != nil {
+			jsonError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		total = &count
+	}
+	pageSQL := q + " ORDER BY at DESC, source, id DESC LIMIT $18 OFFSET $19"
+	pageArgs := append(append([]any{}, args...), fetch, offset)
+	var rows pgx.Rows
+	if tx != nil {
+		rows, err = tx.Query(r.Context(), pageSQL, pageArgs...)
+	} else {
+		rows, err = t.db.Pool().Query(r.Context(), pageSQL, pageArgs...)
+	}
+
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -198,7 +242,7 @@ SELECT source, id, severity, at, title, workload_id, namespace, cluster_id, ref
 	for rows.Next() {
 		var it timelineItem
 		if err := rows.Scan(&it.Source, &it.ID, &it.Severity, &it.At, &it.Title,
-			&it.WorkloadID, &it.Namespace, &it.ClusterID, &it.Ref); err != nil {
+			&it.WorkloadID, &it.Namespace, &it.ClusterID, &it.Verdict, &it.Ref, &it.roleLabels); err != nil {
 			jsonError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -214,14 +258,76 @@ SELECT source, id, severity, at, title, workload_id, namespace, cluster_id, ref
 		hasMore = true
 		out = out[:limit]
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"items":    out,
-		"limit":    limit,
-		"offset":   offset,
-		"has_more": hasMore,
-		"from":     from.UTC().Format(time.RFC3339),
-		"to":       to.UTC().Format(time.RFC3339),
-	})
+	rows.Close()
+	// Threat and runtime rows retain their actual cluster. Violations already
+	// join an exact tenant-owned deployment, so use its actual labels rather
+	// than guessing an owner from a name that can span workload kinds.
+	identities := []PlatformWorkloadIdentity{}
+	indices := []int{}
+	for i := range out {
+		if out[i].Source == "audit" {
+			continue
+		}
+		role := ""
+		if out[i].Source == "network_violation" {
+			role = PlatformRoleJSON(out[i].Namespace, out[i].roleLabels)
+			out[i].PlatformRole = &role
+			continue
+		}
+		cluster, _ := uuid.Parse(out[i].ClusterID)
+		identities = append(identities, PlatformWorkloadIdentity{ClusterID: cluster, Workload: out[i].WorkloadID, Namespace: out[i].Namespace})
+		indices = append(indices, i)
+	}
+	var roleQuery PlatformRoleQuerier = t.db.Pool()
+	if tx != nil {
+		roleQuery = tx
+	}
+	roles, err := EvidencePlatformRoles(r.Context(), roleQuery, subj.OrgID, identities)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	for i, index := range indices {
+		out[index].PlatformRole = &roles[i]
+	}
+	if tx != nil {
+		if err := tx.Commit(r.Context()); err != nil {
+			jsonError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+	}
+	if export {
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		w.Header().Set("Content-Disposition", `attachment; filename="constellation-security-events.csv"`)
+		w.Header().Set("X-Export-Total", strconv.Itoa(*total))
+		w.Header().Set("X-Export-Limit", strconv.Itoa(limit))
+		w.Header().Set("X-Export-Truncated", strconv.FormatBool(*total > limit))
+		writer := csv.NewWriter(w)
+		_ = writer.Write([]string{"id", "source", "cluster_id", "at", "severity", "verdict", "title", "namespace", "workload_id", "reference", "platform_role"})
+		for _, item := range out {
+			role := ""
+			if item.PlatformRole != nil {
+				role = *item.PlatformRole
+			}
+			_ = writer.Write([]string{item.ID, item.Source, item.ClusterID, item.At.UTC().Format(time.RFC3339Nano), item.Severity, item.Verdict, item.Title, item.Namespace, item.WorkloadID, item.Ref, role})
+		}
+		writer.Flush()
+		return
+	}
+	response := map[string]any{
+		"items":           out,
+		"limit":           limit,
+		"offset":          offset,
+		"has_more":        hasMore,
+		"from":            from.UTC().Format(time.RFC3339Nano),
+		"to":              to.UTC().Format(time.RFC3339Nano),
+		"lower_only":      window.lowerOnly,
+		"after_exclusive": window.exclusive,
+	}
+	if total != nil {
+		response["total"] = *total
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 // parseTimelineSources turns a ?type=a,b,c filter into a per-source enable map.

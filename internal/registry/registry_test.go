@@ -96,12 +96,12 @@ func TestConfigHTTPClient_WiredClientUsed(t *testing.T) {
 type rewriteTransport struct{ target string }
 
 func (rt rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	u, err := http.NewRequest(req.Method, rt.target, req.Body)
+	u, err := http.NewRequestWithContext(req.Context(), req.Method, rt.target, req.Body)
 	if err != nil {
 		return nil, err
 	}
 	u.Header = req.Header
-	return http.DefaultTransport.RoundTrip(u.WithContext(req.Context()))
+	return http.DefaultTransport.RoundTrip(u)
 }
 
 func TestAllRegistries_IncludesAllConfiguredProviders(t *testing.T) {

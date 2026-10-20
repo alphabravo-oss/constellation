@@ -1,7 +1,7 @@
 Constellation runtime-agent — vendored NeuVector data-plane
 ============================================================
 
-This directory contains code copied verbatim from the NeuVector project,
+This directory contains code copied from the NeuVector project,
 which is licensed under the Apache License, Version 2.0. The full text of
 that license is in ./LICENSE.
 
@@ -27,7 +27,7 @@ Contents vendored
 
   LICENSE    Apache License 2.0 (NeuVector upstream).
 
-Why a verbatim copy
+Why vendored source
 -------------------
 A clean fork keeps `git diff` against neuvector/main legible and lets us
 absorb upstream CVE / performance patches with a low-friction rebase.
@@ -38,9 +38,24 @@ that consumes the wire formats defined here).
 
 Modifications
 -------------
-None — files are byte-for-byte identical to the upstream revision listed
-above. Build artifacts (.objs/, .deps/, *.o, *.d, compile_commands.json)
-are excluded from the vendor.
+Three declared downstream patches are retained (recorded 2026-10-17):
+- local-patches/000-existing-threat-controls.patch records only the threat-toggle
+  IPC and threat defaults already present in snapshot 6a8057c; it adds no behavior
+  relative to that snapshot and corrects the prior pristine-mirror claim.
+- local-patches/010-connection-lookup-application.patch is the reviewed new
+  connection lookup correctness fix.
+It zero-initializes conn4_key_t and sets application from DPMsgSession in
+DP IPv4 connection reporting; upstream conn4_match already compares this field.
+- local-patches/011-connection-report-wall-time.patch is the reviewed report-only
+  timestamp correction: use checked wall time minus existing coarse Idle rather
+  than the startup-relative timer. Native directed-packet diagnostics observed
+  the one-second timestamp boundary failure; the existing strict matcher stays
+  unchanged. Nonzero Idle remains an approximate last-activity duration. No
+  timeout, rate/debug clock, aggregate identity or enforcement semantics change.
+All other upstream source remains unchanged. The patch records the original
+upstream revision and the actual-native regression test; it is not represented
+as an upstream release. Build artifacts (.objs/, .deps/, *.o, *.d,
+compile_commands.json) remain excluded from the vendor.
 
 License
 -------

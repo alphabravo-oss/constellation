@@ -146,6 +146,7 @@ func dnsRules(rule map[string]any) (any, bool) {
 // every DNS name — allow-egress-to-any-FQDN. It must be rejected and, lacking
 // any other peer identity, the flow dropped.
 func TestFailClosed_BareWildcardFqdn(t *testing.T) {
+	t.Parallel()
 	flow := Flow{SrcNamespace: "default", SrcWorkload: "frontend", Fqdn: "*", Protocol: "TCP", Port: 443, Count: 1}
 	manifest := GenerateCilium("frontend", "default", nil, []Flow{flow})
 	// (The DNS-visibility rule legitimately carries dns matchPattern "*"; the
@@ -162,6 +163,7 @@ func TestFailClosed_BareWildcardFqdn(t *testing.T) {
 // An exact name with surrounding whitespace, mixed case, and a trailing dot
 // must normalize to a clean matchName.
 func TestFqdn_NormalizationDedup(t *testing.T) {
+	t.Parallel()
 	flows := []Flow{
 		{SrcNamespace: "default", SrcWorkload: "frontend", Fqdn: "API.GitHub.com.", Protocol: "TCP", Port: 443, Count: 1},
 		{SrcNamespace: "default", SrcWorkload: "frontend", Fqdn: "api.github.com", Protocol: "TCP", Port: 443, Count: 1},
@@ -178,6 +180,7 @@ func TestFqdn_NormalizationDedup(t *testing.T) {
 // DNS pinholes must open both UDP and TCP/53 (DNS-over-TCP) on the native and
 // Calico flavors.
 func TestDNSPinhole_UDPAndTCP(t *testing.T) {
+	t.Parallel()
 	native := GenerateNative("frontend", "default", nil, nil)
 	if !strings.Contains(native, "protocol: UDP") || !strings.Contains(native, "protocol: TCP") {
 		t.Fatalf("native DNS pinhole must allow UDP and TCP/53:\n%s", native)

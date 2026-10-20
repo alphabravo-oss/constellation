@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
@@ -81,7 +83,7 @@ func (h *ResponseRules) List(w http.ResponseWriter, r *http.Request) {
 			var err error
 			rules, err = h.applyOverrides(r, subj.OrgID.String(), rules)
 			if err != nil {
-				httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 				return
 			}
 		}
@@ -109,7 +111,7 @@ func (h *ResponseRules) Preview(w http.ResponseWriter, r *http.Request) {
 
 func (h *ResponseRules) Update(w http.ResponseWriter, r *http.Request) {
 	if h.db == nil {
-		httpx.WriteJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "response rule storage unavailable"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusServiceUnavailable, "response rule storage unavailable")
 		return
 	}
 	subj, _ := authctx.SubjectFrom(r.Context())
@@ -120,14 +122,14 @@ func (h *ResponseRules) Update(w http.ResponseWriter, r *http.Request) {
 	// ENT-2: a fed (master-authored) override is read-only on a joint; it may only
 	// change via the next sync, otherwise the joint drifts from its master.
 	if isFed, err := handler.ResponseRuleOverrideIsFed(r.Context(), h.db.Pool(), subj.OrgID, current.ID); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	} else if isFed {
-		httpx.WriteJSON(w, http.StatusForbidden, map[string]string{"error": handler.ErrFedReadOnly().Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusForbidden, handler.ErrFedReadOnly().Error())
 		return
 	}
 	if strings.TrimSpace(next.OverrideReason) == "" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "reason is required for response rule changes"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "reason is required for response rule changes")
 		return
 	}
 	now := time.Now().UTC()
@@ -141,7 +143,7 @@ ON CONFLICT (org_id, rule_id) DO UPDATE SET
     updated_by = EXCLUDED.updated_by,
     updated_at = NOW()`,
 		subj.OrgID, next.ID, next.Mode, next.Enabled, next.OverrideReason, subj.UserID); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	next.Managed = true
@@ -290,14 +292,14 @@ func (h *ResponseRules) ruleChangeFromRequest(w http.ResponseWriter, r *http.Req
 	ruleID := strings.TrimSpace(chi.URLParam(r, "id"))
 	current, found := findResponseRule(ruleID, cloneResponseRulesCatalog())
 	if !found {
-		httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "response rule not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "response rule not found")
 		return responseRuleDTO{}, responseRuleDTO{}, false
 	}
 	if h.db != nil {
 		if subj, ok := authctx.SubjectFrom(r.Context()); ok {
 			rules, err := h.applyOverrides(r, subj.OrgID.String(), []responseRuleDTO{current})
 			if err != nil {
-				httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 				return responseRuleDTO{}, responseRuleDTO{}, false
 			}
 			current = rules[0]
@@ -305,14 +307,14 @@ func (h *ResponseRules) ruleChangeFromRequest(w http.ResponseWriter, r *http.Req
 	}
 	var body responseRuleUpdateBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad request")
 		return responseRuleDTO{}, responseRuleDTO{}, false
 	}
 	next := current
 	if body.Mode != nil {
 		mode := strings.TrimSpace(*body.Mode)
 		if !validResponseRuleMode(mode) {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "mode must be learn, monitor, or enforce"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "mode must be learn, monitor, or enforce")
 			return responseRuleDTO{}, responseRuleDTO{}, false
 		}
 		next.Mode = mode

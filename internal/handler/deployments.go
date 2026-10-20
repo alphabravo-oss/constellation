@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
@@ -51,6 +53,7 @@ type deploymentDetailDTO struct {
 	ID              string                         `json:"id"`
 	ClusterID       string                         `json:"cluster_id,omitempty"`
 	Namespace       string                         `json:"namespace"`
+	PlatformRole    string                         `json:"platform_role,omitempty"`
 	Name            string                         `json:"name"`
 	Kind            string                         `json:"kind"`
 	Labels          json.RawMessage                `json:"labels"`
@@ -213,23 +216,26 @@ type deploymentFileRiskFindingDTO struct {
 }
 
 type deploymentNetworkFlowDTO struct {
-	ID         string    `json:"id"`
-	Src        string    `json:"src"`
-	Dst        string    `json:"dst"`
-	SrcAddr    string    `json:"src_addr,omitempty"`
-	DstAddr    string    `json:"dst_addr,omitempty"`
-	SrcPort    int       `json:"src_port,omitempty"`
-	DstPort    int       `json:"dst_port,omitempty"`
-	Protocol   string    `json:"protocol"`
-	L7Protocol string    `json:"l7_protocol,omitempty"`
-	Verdict    string    `json:"verdict"`
-	Source     string    `json:"source,omitempty"`
-	Bytes      int64     `json:"bytes"`
-	Packets    int64     `json:"packets"`
-	Sessions   int64     `json:"sessions,omitempty"`
-	ThreatID   int       `json:"threat_id,omitempty"`
-	Severity   int       `json:"severity,omitempty"`
-	LastSeenAt time.Time `json:"last_seen_at"`
+	ClusterID       uuid.UUID `json:"cluster_id"`
+	SrcPlatformRole string    `json:"src_platform_role"`
+	DstPlatformRole string    `json:"dst_platform_role"`
+	ID              string    `json:"id"`
+	Src             string    `json:"src"`
+	Dst             string    `json:"dst"`
+	SrcAddr         string    `json:"src_addr,omitempty"`
+	DstAddr         string    `json:"dst_addr,omitempty"`
+	SrcPort         int       `json:"src_port,omitempty"`
+	DstPort         int       `json:"dst_port,omitempty"`
+	Protocol        string    `json:"protocol"`
+	L7Protocol      string    `json:"l7_protocol,omitempty"`
+	Verdict         string    `json:"verdict"`
+	Source          string    `json:"source,omitempty"`
+	Bytes           int64     `json:"bytes"`
+	Packets         int64     `json:"packets"`
+	Sessions        int64     `json:"sessions,omitempty"`
+	ThreatID        int64     `json:"threat_id,omitempty"`
+	Severity        int       `json:"severity,omitempty"`
+	LastSeenAt      time.Time `json:"last_seen_at"`
 }
 
 type deploymentProcessBaselineDTO struct {
@@ -326,80 +332,13 @@ type deploymentViolationDTO struct {
 	At         time.Time `json:"at"`
 }
 
-// List returns deployments ranked by risk_score desc.
-func (h *Deployments) List(w http.ResponseWriter, r *http.Request) {
-	subj, _ := SubjectFrom(r.Context())
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 500 {
-		limit = 100
-	}
-	namespace := r.URL.Query().Get("namespace")
-	clusterArg, err := parseClusterIDParam(r)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-	// RBAC-NS-24 row filtering: a namespace-restricted subject (set by requireVerbNS on
-	// the route) sees only its granted namespaces. nil ⇒ no restriction. NULL::text[]
-	// disables the ANY() clause, so an unrestricted caller is unaffected.
-	var nsFilter []string
-	if allowed, ok := NamespaceFilterFrom(r.Context()); ok {
-		nsFilter = allowed
-	}
-
-	rows, err := h.db.Pool().Query(r.Context(), `
-SELECT id, namespace, name, kind, COALESCE(labels,'{}'::jsonb), risk_score, COALESCE(risk_factors,'{}'::jsonb),
-       finding_count, critical_count, high_count, first_seen_at, last_seen_at
-  FROM deployments
- WHERE org_id = $1
-   AND ($2::text = '' OR namespace = $2)
-   AND ($3::uuid IS NULL OR cluster_id = $3)
-   AND ($5::text[] IS NULL OR namespace = ANY($5))
- ORDER BY risk_score DESC, last_seen_at DESC
- LIMIT $4`, subj.OrgID, namespace, clusterArg, limit, nsFilter)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	defer rows.Close()
-
-	out := []map[string]any{}
-	for rows.Next() {
-		var (
-			id                  uuid.UUID
-			ns, name, kind      string
-			labels              []byte
-			risk                int
-			factors             []byte
-			fc, cc, hc          int
-			firstSeen, lastSeen time.Time
-		)
-		if err := rows.Scan(&id, &ns, &name, &kind, &labels, &risk, &factors, &fc, &cc, &hc, &firstSeen, &lastSeen); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "scan: " + err.Error()})
-			return
-		}
-		out = append(out, map[string]any{
-			"id": id, "namespace": ns, "name": name, "kind": kind,
-			"labels":         json.RawMessage(labels),
-			"risk_score":     risk,
-			"risk_factors":   json.RawMessage(factors),
-			"finding_count":  fc,
-			"critical_count": cc,
-			"high_count":     hc,
-			"first_seen_at":  firstSeen.UTC().Format(time.RFC3339),
-			"last_seen_at":   lastSeen.UTC().Format(time.RFC3339),
-		})
-	}
-	writeJSON(w, 200, map[string]any{"deployments": out, "limit": limit})
-}
-
 // Get returns one deployment with the workload evidence needed for the
 // NeuVector-style workload drilldown: image exposure, package evidence, runtime
 // events, network flows, policy lifecycle, direct findings, and violations.
 func (h *Deployments) Get(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	subj, _ := SubjectFrom(r.Context())
@@ -416,10 +355,11 @@ SELECT id::text, COALESCE(cluster_id::text, ''), namespace, name, kind,
 			&labels, &detail.RiskScore, &factors, &detail.FindingCount, &detail.CriticalCount, &detail.HighCount,
 			&detail.ImageRefs, &detail.FirstSeenAt, &detail.LastSeenAt)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "not found")
 		return
 	}
 	detail.Labels = json.RawMessage(labels)
+	detail.PlatformRole = PlatformRoleJSON(detail.Namespace, detail.Labels)
 	detail.RiskFactors = json.RawMessage(factors)
 
 	clusterID := parseOptionalUUID(detail.ClusterID)
@@ -524,6 +464,22 @@ SELECT DISTINCT pod_workload_id
 	return uniqueStrings(out)
 }
 
+// deploymentLinkedImageScanMatchSQL uses the existing l/r query aliases. A known
+// opaque digest is authoritative; mutable references resolve only absent digests.
+const deploymentLinkedImageScanMatchSQL = `              -- A known opaque digest is authoritative. Mutable references can
+              -- resolve a scan only when the workload link has no digest.
+              (btrim(COALESCE(l.image_digest,'')) <> '' AND r.image_digest = l.image_digest)
+           OR (btrim(COALESCE(l.image_digest,'')) = '' AND (
+                 (l.image_ref <> '' AND r.image_ref = l.image_ref)
+              OR (l.image_ref_normalized <> '' AND r.image_ref_normalized = l.image_ref_normalized)
+              OR (l.image_repository IS NOT NULL AND l.image_repository <> ''
+                  AND r.image_repository = l.image_repository
+                  AND l.image_tag IS NOT NULL AND l.image_tag <> ''
+                  AND r.image_tag = l.image_tag)
+              ))`
+
+const deploymentLinkedImageScanOrderSQL = `r.last_scanned_at DESC NULLS LAST, r.id DESC`
+
 func (h *Deployments) deploymentImages(r *http.Request, orgID, deploymentID uuid.UUID) ([]deploymentImageDTO, error) {
 	rows, err := h.db.Pool().Query(r.Context(), `
 SELECT l.image_ref,
@@ -542,6 +498,7 @@ SELECT l.image_ref,
        sr.last_scanned_at,
        l.last_seen_at
   FROM image_workload_links l
+  JOIN deployments d ON d.id=l.deployment_id AND d.org_id=l.org_id AND d.cluster_id=l.cluster_id
   LEFT JOIN LATERAL (
       -- ponytail: severity rollups are computed from image_scan_findings (the
       -- source of truth) rather than denormalized columns on image_scan_results,
@@ -549,23 +506,17 @@ SELECT l.image_ref,
       -- detail query; fold into one GROUP BY only if this shows up in profiling.
       SELECT r.*,
              (SELECT count(*) FROM image_scan_findings f
-               WHERE f.image_scan_result_id = r.id AND lower(f.severity) = 'critical') AS critical_count,
+               WHERE f.image_scan_result_id = r.id AND f.org_id=r.org_id AND lower(f.severity) = 'critical') AS critical_count,
              (SELECT count(*) FROM image_scan_findings f
-               WHERE f.image_scan_result_id = r.id AND lower(f.severity) = 'high') AS high_count,
+               WHERE f.image_scan_result_id = r.id AND f.org_id=r.org_id AND lower(f.severity) = 'high') AS high_count,
              (SELECT COALESCE(max(f.risk_score), 0) FROM image_scan_findings f
-               WHERE f.image_scan_result_id = r.id) AS max_risk_score
+               WHERE f.image_scan_result_id = r.id AND f.org_id=r.org_id) AS max_risk_score
         FROM image_scan_results r
        WHERE r.org_id = l.org_id
          AND (
-              (l.image_digest IS NOT NULL AND l.image_digest <> '' AND r.image_digest = l.image_digest)
-           OR (l.image_ref <> '' AND r.image_ref = l.image_ref)
-           OR (l.image_ref_normalized <> '' AND r.image_ref_normalized = l.image_ref_normalized)
-           OR (l.image_repository IS NOT NULL AND l.image_repository <> ''
-               AND r.image_repository = l.image_repository
-               AND l.image_tag IS NOT NULL AND l.image_tag <> ''
-               AND r.image_tag = l.image_tag)
+`+deploymentLinkedImageScanMatchSQL+`
          )
-       ORDER BY r.last_scanned_at DESC
+       ORDER BY `+deploymentLinkedImageScanOrderSQL+`
        LIMIT 1
   ) sr ON true
  WHERE l.org_id = $1 AND l.deployment_id = $2
@@ -679,13 +630,13 @@ SELECT f.id::text,
 
 func (h *Deployments) deploymentRuntimeEvents(r *http.Request, orgID uuid.UUID, clusterID *uuid.UUID, workloadIDs []string) ([]EventDTO, error) {
 	rows, err := h.db.Pool().Query(r.Context(), `
-SELECT id, at, kind, source, severity, verdict, node_id, workload_id,
+SELECT id, cluster_id, at, kind, source, severity, verdict, node_id, workload_id,
        COALESCE(namespace,''), COALESCE(container_id,''), attack_techniques, payload
   FROM events
  WHERE org_id = $1
-   AND ($2::uuid IS NULL OR cluster_id = $2)
+   AND cluster_id IS NOT DISTINCT FROM $2::uuid
    AND workload_id = ANY($3::text[])
- ORDER BY at DESC
+ ORDER BY at DESC, id ASC
  LIMIT 50`, orgID, clusterID, workloadIDs)
 	if err != nil {
 		return nil, err
@@ -695,7 +646,7 @@ SELECT id, at, kind, source, severity, verdict, node_id, workload_id,
 	for rows.Next() {
 		var item EventDTO
 		var payload []byte
-		if err := rows.Scan(&item.ID, &item.At, &item.Kind, &item.Source, &item.Severity, &item.Verdict,
+		if err := rows.Scan(&item.ID, &item.ClusterID, &item.At, &item.Kind, &item.Source, &item.Severity, &item.Verdict,
 			&item.NodeID, &item.WorkloadID, &item.Namespace, &item.ContainerID, &item.AttackTechniques, &payload); err != nil {
 			return nil, err
 		}
@@ -705,7 +656,22 @@ SELECT id, at, kind, source, severity, verdict, node_id, workload_id,
 		}
 		out = append(out, item)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	identities := make([]PlatformWorkloadIdentity, len(out))
+	for i, item := range out {
+		identities[i] = PlatformWorkloadIdentity{ClusterID: item.ClusterID, Workload: item.WorkloadID, Namespace: item.Namespace}
+	}
+	roles, err := EvidencePlatformRoles(r.Context(), h.db.Pool(), orgID, identities)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].PlatformRole = roles[i]
+	}
+	return out, nil
 }
 
 func (h *Deployments) deploymentThreatPivots(r *http.Request, orgID uuid.UUID, clusterID *uuid.UUID, workloadIDs []string) ([]deploymentThreatPivotDTO, error) {
@@ -829,9 +795,9 @@ SELECT id::text,
 	out := []deploymentThreatPivotDTO{}
 	for rows.Next() {
 		var id, rowClusterID, workloadID, rowNamespace, podName, node, epmac, msg string
-		var threatID, application int32
+		var application int32
 		var severity, action, ipProto int16
-		var dlpNameHash int64
+		var threatID, dlpNameHash int64
 		var srcIP, dstIP string
 		var srcPort, dstPort, pktLen, capLen int
 		var pktIngress, sessIngress bool
@@ -845,7 +811,7 @@ SELECT id::text,
 		if dlpNameHash > 0 {
 			kind = "dlp"
 		}
-		threatName := NeuVectorThreatName(uint32(threatID))
+		threatName := NetworkThreatName(threatID)
 		title := threatName
 		if kind == "dlp" {
 			title = "DLP " + title
@@ -907,20 +873,15 @@ SELECT DISTINCT ON (sr.id, a.id)
        a.payload,
        a.created_at
   FROM image_workload_links l
+  JOIN deployments d ON d.id=l.deployment_id AND d.org_id=l.org_id AND d.cluster_id=l.cluster_id
   JOIN LATERAL (
       SELECT r.*
         FROM image_scan_results r
        WHERE r.org_id = l.org_id
          AND (
-              (l.image_digest IS NOT NULL AND l.image_digest <> '' AND r.image_digest = l.image_digest)
-           OR (l.image_ref <> '' AND r.image_ref = l.image_ref)
-           OR (l.image_ref_normalized <> '' AND r.image_ref_normalized = l.image_ref_normalized)
-           OR (l.image_repository IS NOT NULL AND l.image_repository <> ''
-               AND r.image_repository = l.image_repository
-               AND l.image_tag IS NOT NULL AND l.image_tag <> ''
-               AND r.image_tag = l.image_tag)
+`+deploymentLinkedImageScanMatchSQL+`
          )
-       ORDER BY r.last_scanned_at DESC
+       ORDER BY `+deploymentLinkedImageScanOrderSQL+`
        LIMIT 1
   ) sr ON true
   JOIN image_scan_artifacts a
@@ -977,7 +938,7 @@ SELECT DISTINCT ON (sr.id, a.id)
 
 func (h *Deployments) deploymentNetworkFlows(r *http.Request, orgID uuid.UUID, clusterID *uuid.UUID, workloadIDs []string) ([]deploymentNetworkFlowDTO, error) {
 	rows, err := h.db.Pool().Query(r.Context(), `
-SELECT id::text,
+SELECT id::text, cluster_id,
        src_workload,
        dst_workload,
        COALESCE(src_addr, ''),
@@ -996,12 +957,12 @@ SELECT id::text,
        at
   FROM network_flows
  WHERE org_id = $1
-   AND ($2::uuid IS NULL OR cluster_id = $2)
+   AND cluster_id IS NOT DISTINCT FROM $2::uuid
    AND (
         src_workload = ANY($3::text[])
      OR dst_workload = ANY($3::text[])
    )
- ORDER BY at DESC
+ ORDER BY at DESC, id ASC
  LIMIT 50`, orgID, clusterID, workloadIDs)
 	if err != nil {
 		return nil, err
@@ -1010,14 +971,30 @@ SELECT id::text,
 	out := []deploymentNetworkFlowDTO{}
 	for rows.Next() {
 		var item deploymentNetworkFlowDTO
-		if err := rows.Scan(&item.ID, &item.Src, &item.Dst, &item.SrcAddr, &item.DstAddr,
+		if err := rows.Scan(&item.ID, &item.ClusterID, &item.Src, &item.Dst, &item.SrcAddr, &item.DstAddr,
 			&item.SrcPort, &item.DstPort, &item.Protocol, &item.L7Protocol, &item.Verdict, &item.Source,
 			&item.Bytes, &item.Packets, &item.Sessions, &item.ThreatID, &item.Severity, &item.LastSeenAt); err != nil {
 			return nil, err
 		}
 		out = append(out, item)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	identities := make([]PlatformWorkloadIdentity, 0, len(out)*2)
+	for _, item := range out {
+		identities = append(identities, PlatformWorkloadIdentity{ClusterID: item.ClusterID, Workload: item.Src}, PlatformWorkloadIdentity{ClusterID: item.ClusterID, Workload: item.Dst})
+	}
+	roles, err := EvidencePlatformRoles(r.Context(), h.db.Pool(), orgID, identities)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].SrcPlatformRole = roles[2*i]
+		out[i].DstPlatformRole = roles[2*i+1]
+	}
+	return out, nil
 }
 
 func (h *Deployments) deploymentNetworkPolicyLifecycle(r *http.Request, orgID uuid.UUID, clusterID *uuid.UUID, workloadID string) (any, error) {
@@ -1463,17 +1440,6 @@ SELECT node,
 }
 
 func (h *Deployments) deploymentCompliance(r *http.Request, orgID uuid.UUID, clusterID *uuid.UUID, workloadIDs []string, namespace, name string) ([]deploymentComplianceDTO, error) {
-	collector := complianceevidence.Collector{Pool: h.db.Pool()}
-	result, err := collector.Collect(r.Context(), complianceevidence.Query{
-		OrgID:     orgID,
-		ClusterID: clusterID,
-		Scope:     complianceevidence.ScopeWorkload,
-		Namespace: namespace,
-		Limit:     500,
-	})
-	if err != nil {
-		return nil, err
-	}
 	workloadSet := map[string]bool{}
 	for _, id := range workloadIDs {
 		id = strings.TrimSpace(id)
@@ -1484,6 +1450,24 @@ func (h *Deployments) deploymentCompliance(r *http.Request, orgID uuid.UUID, clu
 	baseWorkloadID := deploymentWorkloadID(namespace, name)
 	if baseWorkloadID != "" {
 		workloadSet[baseWorkloadID] = true
+	}
+
+	targets := make([]string, 0, len(workloadSet))
+	for target := range workloadSet {
+		targets = append(targets, target)
+	}
+	sort.Strings(targets)
+	collector := complianceevidence.Collector{Pool: h.db.Pool()}
+	result, err := collector.Collect(r.Context(), complianceevidence.Query{
+		OrgID:     orgID,
+		ClusterID: clusterID,
+		Scope:     complianceevidence.ScopeWorkload,
+		Namespace: namespace,
+		Limit:     500,
+		Targets:   targets,
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	out := []deploymentComplianceDTO{}
@@ -1667,7 +1651,7 @@ SELECT v.id, v.deployment_id, v.policy_name, v.severity, v.kind, v.message, v.at
  WHERE v.org_id = $1
  ORDER BY v.at DESC LIMIT $2`, subj.OrgID, limit)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()

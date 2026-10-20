@@ -28,6 +28,7 @@ deny[msg] {
 // the chain existed the webhook only ran the built-in PolicyEngine, so a Rego
 // deny silently failed open.
 func TestChainEngine_RegoDenyDenies(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	rego, errs, err := NewRegoEngine(ctx,
 		map[string]string{"block-forbidden-registry": regoDenyByImage},
@@ -75,6 +76,7 @@ func TestChainEngine_RegoDenyDenies(t *testing.T) {
 // and fired no EventAdmission response rule. The chain must now fan the deny out
 // to its DenyHook with the offending policy id.
 func TestChainEngine_RegoDenyFiresOnDeny(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	rego, _, err := NewRegoEngine(ctx,
 		map[string]string{"block-forbidden-registry": regoDenyByImage},
@@ -124,6 +126,7 @@ func TestChainEngine_RegoDenyFiresOnDeny(t *testing.T) {
 // TestChainEngine_CELDenyFiresOnDeny is the CEL counterpart: a CEL enforce deny
 // must also reach the chain's DenyHook.
 func TestChainEngine_CELDenyFiresOnDeny(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	// Deny on image name — something no built-in rule cares about — so the deny
 	// can only come from the CEL engine (proving the chain fired the hook, not
@@ -172,11 +175,54 @@ func TestChainEngine_CELDenyFiresOnDeny(t *testing.T) {
 	}
 }
 
+func TestChainEngine_CompiledPolicyFailureFiresDenyHook(t *testing.T) {
+	ctx := context.Background()
+	rego, regoErrs, err := NewRegoEngine(ctx, map[string]string{"broken-rego": "not actually rego"}, nil)
+	if err != nil || regoErrs["broken-rego"] == nil {
+		t.Fatalf("rego diagnostic missing: %v %v", err, regoErrs)
+	}
+	cel, celErrs, err := NewCELEngine([]*CELRule{{ID: "broken-cel", Expression: "object.", Mode: "enforce"}})
+	if err != nil || celErrs["broken-cel"] == nil {
+		t.Fatalf("cel diagnostic missing: %v %v", err, celErrs)
+	}
+	for _, tc := range []struct {
+		name string
+		want string
+		set  func(*ChainEngine)
+	}{
+		{name: "rego", want: "broken-rego", set: func(chain *ChainEngine) { chain.SetRego(rego) }},
+		{name: "cel", want: "broken-cel", set: func(chain *ChainEngine) { chain.SetCEL(cel) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := make(chan DenyEvent, 1)
+			chain := NewChainEngine(NewEngine())
+			chain.SetOnDeny(func(_ context.Context, event DenyEvent) { got <- event })
+			tc.set(chain)
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "safe", Namespace: "team-a", Annotations: map[string]string{SignatureAnnotation: "true"}},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: "alpine:3"}}},
+			}
+			if resp := chain.Evaluate(ctx, reviewFor(pod)); resp.Allowed {
+				t.Fatal("unavailable enforce policy admitted a pod")
+			}
+			select {
+			case event := <-got:
+				if event.RuleID != tc.want || event.Pod != "safe" {
+					t.Fatalf("deny hook received %+v", event)
+				}
+			default:
+				t.Fatal("deny hook was not invoked")
+			}
+		})
+	}
+}
+
 // TestChainEngine_PolicyDenyDoesNotDoubleFire guards against the chain
 // re-firing OnDeny for a built-in PolicyEngine deny — the PolicyEngine already
 // fires its own OnDeny, so the chain must stay silent on that path (exactly one
 // event total).
 func TestChainEngine_PolicyDenyDoesNotDoubleFire(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	var count int32
 	policy := NewEngine()

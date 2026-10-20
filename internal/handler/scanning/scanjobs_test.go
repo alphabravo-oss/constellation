@@ -1,3 +1,5 @@
+//go:build integration
+
 package scanning
 
 import (
@@ -7,7 +9,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -19,7 +20,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/scanner"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/responserule"
@@ -27,6 +27,7 @@ import (
 )
 
 func TestScannerFindingDetailIncludesVulnDBBundle(t *testing.T) {
+	t.Parallel()
 	exportedAt := time.Date(2026, 6, 12, 1, 2, 3, 0, time.UTC)
 	metadata := &scanner.BundleMetadata{
 		SchemaVersion: "v2",
@@ -154,6 +155,7 @@ func TestScannerFindingDetailIncludesVulnDBBundle(t *testing.T) {
 }
 
 func TestScannerFindingDetailIncludesVulnerabilityProfileDecision(t *testing.T) {
+	t.Parallel()
 	decision := map[string]any{
 		"profile_id":   "profile-1",
 		"profile_name": "Production criticals",
@@ -183,6 +185,7 @@ func TestScannerFindingDetailIncludesVulnerabilityProfileDecision(t *testing.T) 
 }
 
 func TestVulnerabilityProfileDecisionForFinding(t *testing.T) {
+	t.Parallel()
 	clusterID := uuid.New()
 	target := handler.ScanTarget{
 		ClusterID: &clusterID,
@@ -231,9 +234,10 @@ func TestVulnerabilityProfileDecisionForFinding(t *testing.T) {
 }
 
 func TestScanJobs_RejectsExecutableRepositoryTarget(t *testing.T) {
+	t.Parallel()
 	h := NewScanJobs(nil, nil)
 	body, _ := json.Marshal(EnqueueRequest{TargetType: "repository", TargetRef: "github.com/acme/app"})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs", bytes.NewReader(body))
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: uuid.New(), OrgID: uuid.New()}))
 	rec := httptest.NewRecorder()
 	h.Enqueue(rec, req)
@@ -243,19 +247,6 @@ func TestScanJobs_RejectsExecutableRepositoryTarget(t *testing.T) {
 	if got := rec.Body.String(); !bytes.Contains([]byte(got), []byte("repository package evidence")) {
 		t.Fatalf("error body = %s", got)
 	}
-}
-
-func openTestDB(t *testing.T) *db.DB {
-	t.Helper()
-	url := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-	if url == "" {
-		url = "postgres://test:test@localhost:15433/constellation_test?sslmode=disable"
-	}
-	d, err := db.Connect(context.Background(), url)
-	if err != nil {
-		t.Skipf("skipping: cannot reach test DB (%v)", err)
-	}
-	return d
 }
 
 // clearScanQueue removes every claimable (pending/running/paused) scan job for
@@ -275,6 +266,7 @@ func clearScanQueue(t *testing.T, pool *pgxpool.Pool, orgID uuid.UUID) {
 }
 
 func TestScanJobs_QueueLifecycle(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -312,7 +304,7 @@ func TestScanJobs_QueueLifecycle(t *testing.T) {
 	// 1) Enqueue a job as a user.
 	enqueueReq := EnqueueRequest{TargetType: "image", TargetRef: queueImageRef}
 	body, _ := json.Marshal(enqueueReq)
-	r := httptest.NewRequest("POST", "/api/v1/scan-jobs", bytes.NewReader(body))
+	r := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/scan-jobs", bytes.NewReader(body))
 	r = r.WithContext(authctx.WithSubject(r.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	h.Enqueue(w, r)
@@ -324,12 +316,22 @@ func TestScanJobs_QueueLifecycle(t *testing.T) {
 	}
 	_ = json.NewDecoder(w.Body).Decode(&enqRes)
 
+	// Registry association must survive the queue claim envelope.
+	registryID := uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO registries(id,org_id,name,kind,endpoint,auth_kind) VALUES($1,$2,$3,'ghcr','ghcr.io','none')`, registryID, orgID, "queue-registry-"+registryID.String()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = pool.Exec(ctx, `DELETE FROM registries WHERE id=$1`, registryID) }()
+	if _, err := pool.Exec(ctx, `UPDATE scan_targets SET registry_id=$2 WHERE id=(SELECT target_id FROM scan_jobs WHERE id=$1)`, enqRes.ID, registryID); err != nil {
+		t.Fatal(err)
+	}
+
 	// 2) Claim as scanner.
-	r = httptest.NewRequest("POST", "/api/v1/scan-jobs/claim", nil)
+	r = httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/scan-jobs/claim", nil)
 	r.Header.Set("Authorization", "Bearer "+rawToken)
 	// Wrap with the scanner-token middleware to populate context.
 	w = httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(w, r)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(w, currentScanLeaseRequest(t, pool, r))
 	if w.Code != 200 {
 		t.Fatalf("claim status: %d body: %s", w.Code, w.Body.String())
 	}
@@ -337,6 +339,9 @@ func TestScanJobs_QueueLifecycle(t *testing.T) {
 	_ = json.NewDecoder(w.Body).Decode(&claimRes)
 	if claimRes["id"] != enqRes.ID.String() {
 		t.Fatalf("claim returned different id: %v vs %v", claimRes["id"], enqRes.ID)
+	}
+	if claimRes["registry_id"] != registryID.String() {
+		t.Fatalf("claim lost registry association: %v", claimRes["registry_id"])
 	}
 	if claimRes["target_type"] != "image" || claimRes["target_ref"] != queueImageRef {
 		t.Fatalf("claim target = %v/%v", claimRes["target_type"], claimRes["target_ref"])
@@ -371,24 +376,24 @@ func TestScanJobs_QueueLifecycle(t *testing.T) {
 		"findings":        []any{},
 		"bundle_metadata": metadata,
 	})
-	r = httptest.NewRequest("POST", "/api/v1/scan-jobs/"+enqRes.ID.String()+"/complete", bytes.NewReader(completeBody))
+	r = httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/scan-jobs/"+enqRes.ID.String()+"/complete", bytes.NewReader(completeBody))
 	r.Header.Set("Authorization", "Bearer "+rawToken)
 	// chi URL params are normally injected by the router; set them manually for the test.
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", enqRes.ID.String())
 	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
 	w = httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Complete)).ServeHTTP(w, r)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Complete)).ServeHTTP(w, currentScanLeaseRequest(t, pool, r))
 	if w.Code != 200 {
 		t.Fatalf("complete status: %d body: %s", w.Code, w.Body.String())
 	}
-	r = httptest.NewRequest("POST", "/api/v1/scan-jobs/"+enqRes.ID.String()+"/complete", bytes.NewReader(completeBody))
+	r = httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/scan-jobs/"+enqRes.ID.String()+"/complete", bytes.NewReader(completeBody))
 	r.Header.Set("Authorization", "Bearer "+rawToken)
 	rctx = chi.NewRouteContext()
 	rctx.URLParams.Add("id", enqRes.ID.String())
 	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
 	replay := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Complete)).ServeHTTP(replay, r)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Complete)).ServeHTTP(replay, currentScanLeaseRequest(t, pool, r))
 	if replay.Code != 200 {
 		t.Fatalf("replay complete status: %d body: %s", replay.Code, replay.Body.String())
 	}
@@ -417,7 +422,7 @@ func TestScanJobs_QueueLifecycle(t *testing.T) {
 	}
 
 	// 5) Verify list API exposes first-class scan-job bundle provenance.
-	r = httptest.NewRequest("GET", "/api/v1/scan-jobs", nil)
+	r = httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/scan-jobs", nil)
 	r = r.WithContext(authctx.WithSubject(r.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	w = httptest.NewRecorder()
 	h.List(w, r)
@@ -446,6 +451,7 @@ func TestScanJobs_QueueLifecycle(t *testing.T) {
 }
 
 func TestScanJobs_ClaimReclaimsExpiredLeaseAndFailureRequiresWorker(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -491,10 +497,10 @@ func TestScanJobs_ClaimReclaimsExpiredLeaseAndFailureRequiresWorker(t *testing.T
 	}
 
 	h := NewScanJobs(d, audit.New(pool))
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/claim", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/claim", nil)
 	req.Header.Set("Authorization", "Bearer "+newRawToken)
 	rec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(rec, req)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(rec, currentScanLeaseRequest(t, pool, req))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("claim status: %d body: %s", rec.Code, rec.Body.String())
 	}
@@ -522,13 +528,13 @@ func TestScanJobs_ClaimReclaimsExpiredLeaseAndFailureRequiresWorker(t *testing.T
 		t.Fatalf("reclaimed job = status=%s worker=%s lease=%v finished=%v", status, workerID, leaseExpiresAt, finishedAt)
 	}
 
-	failReq := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/"+jobID.String()+"/fail", bytes.NewBufferString(`{"error":"old worker failed late"}`))
+	failReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/"+jobID.String()+"/fail", bytes.NewBufferString(`{"error":"old worker failed late"}`))
 	failReq.Header.Set("Authorization", "Bearer "+oldRawToken)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", jobID.String())
 	failReq = failReq.WithContext(context.WithValue(failReq.Context(), chi.RouteCtxKey, rctx))
 	failRec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Fail)).ServeHTTP(failRec, failReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Fail)).ServeHTTP(failRec, currentScanLeaseRequest(t, pool, failReq))
 	if failRec.Code != http.StatusConflict {
 		t.Fatalf("old worker fail status: %d body: %s", failRec.Code, failRec.Body.String())
 	}
@@ -539,13 +545,13 @@ func TestScanJobs_ClaimReclaimsExpiredLeaseAndFailureRequiresWorker(t *testing.T
 		t.Fatalf("old worker changed status to %s", status)
 	}
 
-	failReq = httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/"+jobID.String()+"/fail", bytes.NewBufferString(`{"error":"scanner failed"}`))
+	failReq = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/"+jobID.String()+"/fail", bytes.NewBufferString(`{"error":"scanner failed"}`))
 	failReq.Header.Set("Authorization", "Bearer "+newRawToken)
 	rctx = chi.NewRouteContext()
 	rctx.URLParams.Add("id", jobID.String())
 	failReq = failReq.WithContext(context.WithValue(failReq.Context(), chi.RouteCtxKey, rctx))
 	failRec = httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Fail)).ServeHTTP(failRec, failReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Fail)).ServeHTTP(failRec, currentScanLeaseRequest(t, pool, failReq))
 	if failRec.Code != http.StatusOK {
 		t.Fatalf("new worker fail status: %d body: %s", failRec.Code, failRec.Body.String())
 	}
@@ -559,6 +565,7 @@ func TestScanJobs_ClaimReclaimsExpiredLeaseAndFailureRequiresWorker(t *testing.T
 }
 
 func TestScanJobs_RenewRequiresSameScannerInstance(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -592,23 +599,23 @@ func TestScanJobs_RenewRequiresSameScannerInstance(t *testing.T) {
 	}
 
 	h := NewScanJobs(d, audit.New(pool))
-	claimReq := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/claim?target_type=image", nil)
+	claimReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/claim?target_type=image", nil)
 	claimReq.Header.Set("Authorization", "Bearer "+rawToken)
 	claimReq.Header.Set("X-Constellation-Scanner-Instance", "scanner-a")
 	claimRec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(claimRec, claimReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(claimRec, currentScanLeaseRequest(t, pool, claimReq))
 	if claimRec.Code != http.StatusOK {
 		t.Fatalf("claim status: %d body: %s", claimRec.Code, claimRec.Body.String())
 	}
 
-	renewReq := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/"+jobID.String()+"/renew", nil)
+	renewReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/"+jobID.String()+"/renew", nil)
 	renewReq.Header.Set("Authorization", "Bearer "+rawToken)
 	renewReq.Header.Set("X-Constellation-Scanner-Instance", "scanner-b")
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", jobID.String())
 	renewReq = renewReq.WithContext(context.WithValue(renewReq.Context(), chi.RouteCtxKey, rctx))
 	renewRec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.RenewLease)).ServeHTTP(renewRec, renewReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.RenewLease)).ServeHTTP(renewRec, currentScanLeaseRequest(t, pool, renewReq))
 	if renewRec.Code != http.StatusConflict {
 		t.Fatalf("different instance renew status: %d body: %s", renewRec.Code, renewRec.Body.String())
 	}
@@ -621,14 +628,14 @@ func TestScanJobs_RenewRequiresSameScannerInstance(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT lease_expires_at FROM scan_jobs WHERE id = $1`, jobID).Scan(&before); err != nil {
 		t.Fatal(err)
 	}
-	renewReq = httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/"+jobID.String()+"/renew", nil)
+	renewReq = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/"+jobID.String()+"/renew", nil)
 	renewReq.Header.Set("Authorization", "Bearer "+rawToken)
 	renewReq.Header.Set("X-Constellation-Scanner-Instance", "scanner-a")
 	rctx = chi.NewRouteContext()
 	rctx.URLParams.Add("id", jobID.String())
 	renewReq = renewReq.WithContext(context.WithValue(renewReq.Context(), chi.RouteCtxKey, rctx))
 	renewRec = httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.RenewLease)).ServeHTTP(renewRec, renewReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.RenewLease)).ServeHTTP(renewRec, currentScanLeaseRequest(t, pool, renewReq))
 	if renewRec.Code != http.StatusOK {
 		t.Fatalf("same instance renew status: %d body: %s", renewRec.Code, renewRec.Body.String())
 	}
@@ -640,20 +647,21 @@ func TestScanJobs_RenewRequiresSameScannerInstance(t *testing.T) {
 		t.Fatalf("lease did not renew far enough: before=%v after=%v", before, after)
 	}
 
-	completeReq := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/"+jobID.String()+"/complete", bytes.NewBufferString(`{"image_ref":"registry.example.test/renew:latest","image_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","findings":[]}`))
+	completeReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/"+jobID.String()+"/complete", bytes.NewBufferString(`{"image_ref":"registry.example.test/renew:latest","image_digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","findings":[]}`))
 	completeReq.Header.Set("Authorization", "Bearer "+rawToken)
 	completeReq.Header.Set("X-Constellation-Scanner-Instance", "scanner-b")
 	rctx = chi.NewRouteContext()
 	rctx.URLParams.Add("id", jobID.String())
 	completeReq = completeReq.WithContext(context.WithValue(completeReq.Context(), chi.RouteCtxKey, rctx))
 	completeRec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Complete)).ServeHTTP(completeRec, completeReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Complete)).ServeHTTP(completeRec, currentScanLeaseRequest(t, pool, completeReq))
 	if completeRec.Code != http.StatusConflict {
 		t.Fatalf("different instance complete status: %d body: %s", completeRec.Code, completeRec.Body.String())
 	}
 }
 
 func TestScanJobs_RetryBackoffAndMaxAttempts(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -695,14 +703,14 @@ func TestScanJobs_RetryBackoffAndMaxAttempts(t *testing.T) {
 	}
 
 	h := NewScanJobs(d, audit.New(pool))
-	failReq := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/"+jobID.String()+"/fail", bytes.NewBufferString(`{"error":"registry timeout","retryable":true}`))
+	failReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/"+jobID.String()+"/fail", bytes.NewBufferString(`{"error":"registry timeout","retryable":true}`))
 	failReq.Header.Set("Authorization", "Bearer "+rawToken)
 	failReq.Header.Set("X-Constellation-Scanner-Instance", "retry-a")
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", jobID.String())
 	failReq = failReq.WithContext(context.WithValue(failReq.Context(), chi.RouteCtxKey, rctx))
 	failRec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Fail)).ServeHTTP(failRec, failReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Fail)).ServeHTTP(failRec, currentScanLeaseRequest(t, pool, failReq))
 	if failRec.Code != http.StatusOK {
 		t.Fatalf("retryable fail status: %d body: %s", failRec.Code, failRec.Body.String())
 	}
@@ -727,11 +735,11 @@ SELECT status, COALESCE(error, ''), finished_at, next_attempt_at
 		t.Fatalf("retry attempt = status=%s error=%q finished=%v next=%v", attemptStatus, attemptError, attemptFinishedAt, attemptNextAt)
 	}
 
-	claimReq := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/claim", nil)
+	claimReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/claim", nil)
 	claimReq.Header.Set("Authorization", "Bearer "+rawToken)
 	claimReq.Header.Set("X-Constellation-Scanner-Instance", "retry-a")
 	claimRec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(claimRec, claimReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(claimRec, currentScanLeaseRequest(t, pool, claimReq))
 	if claimRec.Code != http.StatusNoContent {
 		t.Fatalf("delayed retry claim status: %d body: %s", claimRec.Code, claimRec.Body.String())
 	}
@@ -739,11 +747,11 @@ SELECT status, COALESCE(error, ''), finished_at, next_attempt_at
 	if _, err := pool.Exec(ctx, `UPDATE scan_jobs SET next_attempt_at = NOW() - INTERVAL '1 second' WHERE id = $1`, jobID); err != nil {
 		t.Fatal(err)
 	}
-	claimReq = httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/claim", nil)
+	claimReq = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/claim", nil)
 	claimReq.Header.Set("Authorization", "Bearer "+rawToken)
 	claimReq.Header.Set("X-Constellation-Scanner-Instance", "retry-a")
 	claimRec = httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(claimRec, claimReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(claimRec, currentScanLeaseRequest(t, pool, claimReq))
 	if claimRec.Code != http.StatusOK {
 		t.Fatalf("eligible retry claim status: %d body: %s", claimRec.Code, claimRec.Body.String())
 	}
@@ -769,7 +777,7 @@ SELECT status, COALESCE(worker_id, ''), lease_expires_at
 		t.Fatalf("second attempt = status=%s worker=%q lease=%v", attemptStatus, attemptWorker, attemptLease)
 	}
 
-	attemptReq := httptest.NewRequest(http.MethodGet, "/api/v1/scan-jobs/"+jobID.String()+"/attempts", nil)
+	attemptReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scan-jobs/"+jobID.String()+"/attempts", nil)
 	attemptReq = attemptReq.WithContext(authctx.WithSubject(attemptReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rctx = chi.NewRouteContext()
 	rctx.URLParams.Add("id", jobID.String())
@@ -789,14 +797,14 @@ SELECT status, COALESCE(worker_id, ''), lease_expires_at
 		t.Fatalf("attempt history = %+v, want retry_scheduled then running", attemptRes.Attempts)
 	}
 
-	failReq = httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/"+terminalJobID.String()+"/fail", bytes.NewBufferString(`{"error":"registry timeout","retryable":true}`))
+	failReq = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/"+terminalJobID.String()+"/fail", bytes.NewBufferString(`{"error":"registry timeout","retryable":true}`))
 	failReq.Header.Set("Authorization", "Bearer "+rawToken)
 	failReq.Header.Set("X-Constellation-Scanner-Instance", "retry-a")
 	rctx = chi.NewRouteContext()
 	rctx.URLParams.Add("id", terminalJobID.String())
 	failReq = failReq.WithContext(context.WithValue(failReq.Context(), chi.RouteCtxKey, rctx))
 	failRec = httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Fail)).ServeHTTP(failRec, failReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Fail)).ServeHTTP(failRec, currentScanLeaseRequest(t, pool, failReq))
 	if failRec.Code != http.StatusOK {
 		t.Fatalf("terminal fail status: %d body: %s", failRec.Code, failRec.Body.String())
 	}
@@ -817,7 +825,7 @@ SELECT status, COALESCE(error, ''), finished_at
 		t.Fatalf("terminal attempt = status=%s error=%q finished=%v", attemptStatus, attemptError, attemptFinishedAt)
 	}
 
-	retryReq := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/"+terminalJobID.String()+"/retry", nil)
+	retryReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/"+terminalJobID.String()+"/retry", nil)
 	retryReq = retryReq.WithContext(authctx.WithSubject(retryReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rctx = chi.NewRouteContext()
 	rctx.URLParams.Add("id", terminalJobID.String())
@@ -837,6 +845,7 @@ SELECT status, COALESCE(error, ''), finished_at
 }
 
 func TestScanJobs_ClaimFiltersTargetTypes(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -872,10 +881,10 @@ func TestScanJobs_ClaimFiltersTargetTypes(t *testing.T) {
 	}
 
 	h := NewScanJobs(d, audit.New(pool))
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/claim?target_type=host", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/claim?target_type=host", nil)
 	req.Header.Set("Authorization", "Bearer "+rawToken)
 	rec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(rec, req)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(rec, currentScanLeaseRequest(t, pool, req))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("host claim status: %d body: %s", rec.Code, rec.Body.String())
 	}
@@ -890,10 +899,10 @@ func TestScanJobs_ClaimFiltersTargetTypes(t *testing.T) {
 		t.Fatalf("claimed = %+v, want host", claimed)
 	}
 
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/claim?target_type=repository", nil)
+	req = httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/claim?target_type=repository", nil)
 	req.Header.Set("Authorization", "Bearer "+rawToken)
 	rec = httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(rec, req)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(rec, currentScanLeaseRequest(t, pool, req))
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("repository claim status: %d body: %s", rec.Code, rec.Body.String())
 	}
@@ -907,6 +916,7 @@ func TestScanJobs_ClaimFiltersTargetTypes(t *testing.T) {
 // running cluster, while the canonical image_scan_findings row is still preserved. The
 // assertions below were flipped to match the unified per-asset model.
 func TestScanJobs_CompleteWritesCanonicalImageResultWithoutFindingProjection(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -966,7 +976,7 @@ INSERT INTO image_workload_links (
 
 	h := NewScanJobs(d, audit.New(pool))
 	body, _ := json.Marshal(EnqueueRequest{TargetType: "image", TargetRef: imageRef})
-	r := httptest.NewRequest("POST", "/api/v1/scan-jobs", bytes.NewReader(body))
+	r := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/scan-jobs", bytes.NewReader(body))
 	r = r.WithContext(authctx.WithSubject(r.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	h.Enqueue(w, r)
@@ -980,10 +990,10 @@ INSERT INTO image_workload_links (
 		t.Fatal(err)
 	}
 
-	r = httptest.NewRequest("POST", "/api/v1/scan-jobs/claim", nil)
+	r = httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/scan-jobs/claim", nil)
 	r.Header.Set("Authorization", "Bearer "+rawToken)
 	w = httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(w, r)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(w, currentScanLeaseRequest(t, pool, r))
 	if w.Code != 200 {
 		t.Fatalf("claim status: %d body: %s", w.Code, w.Body.String())
 	}
@@ -992,6 +1002,7 @@ INSERT INTO image_workload_links (
 		"image_ref":     imageRef,
 		"image_digest":  imageDigest,
 		"package_count": 1,
+		"engines":       []completeScanEngine{{Engine: "trivy"}, {Engine: "grype", Error: "fixture engine unavailable"}},
 		"findings": []scanner.Finding{{
 			VulnerabilityID: vulnID,
 			Severity:        "high",
@@ -1004,15 +1015,27 @@ INSERT INTO image_workload_links (
 			CanonicalEngine: "vulndb",
 		}},
 	})
-	r = httptest.NewRequest("POST", "/api/v1/scan-jobs/"+enqRes.ID.String()+"/complete", bytes.NewReader(completeBody))
+	r = httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/scan-jobs/"+enqRes.ID.String()+"/complete", bytes.NewReader(completeBody))
 	r.Header.Set("Authorization", "Bearer "+rawToken)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", enqRes.ID.String())
 	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
 	w = httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Complete)).ServeHTTP(w, r)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Complete)).ServeHTTP(w, currentScanLeaseRequest(t, pool, r))
 	if w.Code != 200 {
 		t.Fatalf("complete status: %d body: %s", w.Code, w.Body.String())
+	}
+
+	var storedEngineStatus string
+	if err := pool.QueryRow(ctx, `SELECT engine_status::text FROM image_scan_results WHERE org_id=$1 AND image_digest=$2`, orgID, imageDigest).Scan(&storedEngineStatus); err != nil {
+		t.Fatal(err)
+	}
+	var outcomes map[string]string
+	if err := json.Unmarshal([]byte(storedEngineStatus), &outcomes); err != nil {
+		t.Fatal(err)
+	}
+	if outcomes["trivy"] != "succeeded" || outcomes["grype"] != "failed" {
+		t.Fatalf("scan completion did not persist actual engine outcomes: %s", storedEngineStatus)
 	}
 
 	// The image is running on exactly one cluster (one image_workload_link), so the high
@@ -1056,7 +1079,7 @@ SELECT COUNT(DISTINCT r.id)::int, COUNT(f.id)::int, MIN(r.id::text)
 	}
 
 	imageResults := handler.NewImageScanResults(d)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/image-scan-results/"+resultID.String(), nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/image-scan-results/"+resultID.String(), nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	resultCtx := chi.NewRouteContext()
 	resultCtx.URLParams.Add("id", resultID.String())
@@ -1084,7 +1107,7 @@ SELECT COUNT(DISTINCT r.id)::int, COUNT(f.id)::int, MIN(r.id::text)
 		t.Fatalf("impacted workloads = %+v", resultDetail.ImpactedWorkloads)
 	}
 
-	csvReq := httptest.NewRequest(http.MethodGet, "/api/v1/image-scan-results/"+resultID.String()+"/findings.csv", nil)
+	csvReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/image-scan-results/"+resultID.String()+"/findings.csv", nil)
 	csvReq = csvReq.WithContext(authctx.WithSubject(csvReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	csvCtx := chi.NewRouteContext()
 	csvCtx.URLParams.Add("id", resultID.String())
@@ -1112,6 +1135,7 @@ SELECT COUNT(DISTINCT r.id)::int, COUNT(f.id)::int, MIN(r.id::text)
 }
 
 func TestScanJobs_CompleteWritesImageScanArtifacts(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -1201,7 +1225,7 @@ SELECT EXISTS (
 
 	h := NewScanJobs(d, audit.New(pool))
 	body, _ := json.Marshal(EnqueueRequest{TargetType: "image", TargetRef: imageRef, Platform: "linux/amd64"})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs", bytes.NewReader(body))
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rec := httptest.NewRecorder()
 	h.Enqueue(rec, req)
@@ -1215,10 +1239,10 @@ SELECT EXISTS (
 		t.Fatal(err)
 	}
 
-	claimReq := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/claim", nil)
+	claimReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/claim", nil)
 	claimReq.Header.Set("Authorization", "Bearer "+rawToken)
 	claimRec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(claimRec, claimReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(claimRec, currentScanLeaseRequest(t, pool, claimReq))
 	if claimRec.Code != http.StatusOK {
 		t.Fatalf("claim status: %d body: %s", claimRec.Code, claimRec.Body.String())
 	}
@@ -1316,13 +1340,13 @@ SELECT EXISTS (
 		}
 	}
 	completeBody, _ := json.Marshal(completePayload)
-	completeReq := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/"+enqRes.ID.String()+"/complete", bytes.NewReader(completeBody))
+	completeReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/"+enqRes.ID.String()+"/complete", bytes.NewReader(completeBody))
 	completeReq.Header.Set("Authorization", "Bearer "+rawToken)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", enqRes.ID.String())
 	completeReq = completeReq.WithContext(context.WithValue(completeReq.Context(), chi.RouteCtxKey, rctx))
 	completeRec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Complete)).ServeHTTP(completeRec, completeReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Complete)).ServeHTTP(completeRec, currentScanLeaseRequest(t, pool, completeReq))
 	if completeRec.Code != http.StatusOK {
 		t.Fatalf("complete status: %d body: %s", completeRec.Code, completeRec.Body.String())
 	}
@@ -1384,7 +1408,7 @@ SELECT package_count, payload
 	if len(inventory.Packages[0].Locations) != 1 || inventory.Packages[0].Locations[0].LayerDigest != "sha256:1111111111111111111111111111111111111111111111111111111111111111" {
 		t.Fatalf("inventory package locations = %+v", inventory.Packages[0].Locations)
 	}
-	packagesReq := httptest.NewRequest(http.MethodGet, "/api/v1/image-scan-results/"+completeRes.ImageScanResultID.String()+"/packages", nil)
+	packagesReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/image-scan-results/"+completeRes.ImageScanResultID.String()+"/packages", nil)
 	packagesReq = packagesReq.WithContext(authctx.WithSubject(packagesReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	packagesCtx := chi.NewRouteContext()
 	packagesCtx.URLParams.Add("id", completeRes.ImageScanResultID.String())
@@ -1580,7 +1604,7 @@ SELECT package_count, payload
 	}
 
 	imageResults := handler.NewImageScanResults(d)
-	pkgReq := httptest.NewRequest(http.MethodGet, "/api/v1/image-scan-results/"+completeRes.ImageScanResultID.String()+"/packages", nil)
+	pkgReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/image-scan-results/"+completeRes.ImageScanResultID.String()+"/packages", nil)
 	pkgReq = pkgReq.WithContext(authctx.WithSubject(pkgReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	pkgCtx := chi.NewRouteContext()
 	pkgCtx.URLParams.Add("id", completeRes.ImageScanResultID.String())
@@ -1602,7 +1626,7 @@ SELECT package_count, payload
 		t.Fatalf("packages endpoint = %+v", pkgRes.PackageInventory.Packages)
 	}
 	if secretArtifactsEnabled {
-		secretReq := httptest.NewRequest(http.MethodGet, "/api/v1/image-scan-results/"+completeRes.ImageScanResultID.String()+"/secrets", nil)
+		secretReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/image-scan-results/"+completeRes.ImageScanResultID.String()+"/secrets", nil)
 		secretReq = secretReq.WithContext(authctx.WithSubject(secretReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 		secretCtx := chi.NewRouteContext()
 		secretCtx.URLParams.Add("id", completeRes.ImageScanResultID.String())
@@ -1617,7 +1641,7 @@ SELECT package_count, payload
 		}
 	}
 	if layerArtifactsEnabled {
-		layersReq := httptest.NewRequest(http.MethodGet, "/api/v1/image-scan-results/"+completeRes.ImageScanResultID.String()+"/layers", nil)
+		layersReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/image-scan-results/"+completeRes.ImageScanResultID.String()+"/layers", nil)
 		layersReq = layersReq.WithContext(authctx.WithSubject(layersReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 		layersCtx := chi.NewRouteContext()
 		layersCtx.URLParams.Add("id", completeRes.ImageScanResultID.String())
@@ -1632,7 +1656,7 @@ SELECT package_count, payload
 		}
 	}
 	if fileRiskArtifactsEnabled {
-		fileRiskReq := httptest.NewRequest(http.MethodGet, "/api/v1/image-scan-results/"+completeRes.ImageScanResultID.String()+"/file-risks", nil)
+		fileRiskReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/image-scan-results/"+completeRes.ImageScanResultID.String()+"/file-risks", nil)
 		fileRiskReq = fileRiskReq.WithContext(authctx.WithSubject(fileRiskReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 		fileRiskCtx := chi.NewRouteContext()
 		fileRiskCtx.URLParams.Add("id", completeRes.ImageScanResultID.String())
@@ -1647,7 +1671,7 @@ SELECT package_count, payload
 		}
 	}
 	if signatureArtifactsEnabled {
-		signatureReq := httptest.NewRequest(http.MethodGet, "/api/v1/image-scan-results/"+completeRes.ImageScanResultID.String()+"/signature", nil)
+		signatureReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/image-scan-results/"+completeRes.ImageScanResultID.String()+"/signature", nil)
 		signatureReq = signatureReq.WithContext(authctx.WithSubject(signatureReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 		signatureCtx := chi.NewRouteContext()
 		signatureCtx.URLParams.Add("id", completeRes.ImageScanResultID.String())
@@ -1672,7 +1696,7 @@ SELECT package_count, payload
 		{name: "spdx", path: "/api/v1/image-scan-results/" + completeRes.ImageScanResultID.String() + "/sbom/spdx", handler: imageResults.SPDX, field: "spdxVersion", want: "SPDX-2.3"},
 		{name: "cyclonedx", path: "/api/v1/image-scan-results/" + completeRes.ImageScanResultID.String() + "/sbom/cyclonedx", handler: imageResults.CycloneDX, field: "bomFormat", want: "CycloneDX"},
 	} {
-		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, tc.path, nil)
 		req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 		rctx := chi.NewRouteContext()
 		rctx.URLParams.Add("id", completeRes.ImageScanResultID.String())
@@ -1693,6 +1717,7 @@ SELECT package_count, payload
 }
 
 func TestCompleteScanEnginesToResultsTracksSuccessfulEngines(t *testing.T) {
+	t.Parallel()
 	engines := completeScanEnginesToResults([]completeScanEngine{
 		{Engine: " Trivy "},
 		{Engine: "grype", Error: "grype failed"},
@@ -1713,6 +1738,7 @@ func TestCompleteScanEnginesToResultsTracksSuccessfulEngines(t *testing.T) {
 }
 
 func TestImageScanArtifacts_RecordsCleanSecretScanOnlyForSuccessfulTrivy(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -1832,6 +1858,7 @@ SELECT COUNT(*)::int
 }
 
 func TestScanFindingStableKeyIgnoresPackageLocations(t *testing.T) {
+	t.Parallel()
 	base := scanner.Finding{
 		VulnerabilityID: "CVE-2026-0001",
 		Package: scanner.Package{
@@ -1868,6 +1895,7 @@ func TestScanFindingStableKeyIgnoresPackageLocations(t *testing.T) {
 }
 
 func TestScanJobs_RepositorySourceImageScanPreservesProvenance(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -1910,7 +1938,7 @@ func TestScanJobs_RepositorySourceImageScanPreservesProvenance(t *testing.T) {
 		Platform:   "linux/amd64",
 		Metadata:   metadata,
 	})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs", bytes.NewReader(body))
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rec := httptest.NewRecorder()
 	h.Enqueue(rec, req)
@@ -1924,7 +1952,7 @@ func TestScanJobs_RepositorySourceImageScanPreservesProvenance(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/scan-jobs", nil)
+	listReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scan-jobs", nil)
 	listReq = listReq.WithContext(authctx.WithSubject(listReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	listRec := httptest.NewRecorder()
 	h.List(listRec, listReq)
@@ -1948,10 +1976,10 @@ func TestScanJobs_RepositorySourceImageScanPreservesProvenance(t *testing.T) {
 		t.Fatalf("listed repository job = %+v", listed)
 	}
 
-	claimReq := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/claim", nil)
+	claimReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/claim", nil)
 	claimReq.Header.Set("Authorization", "Bearer "+rawToken)
 	claimRec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(claimRec, claimReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Claim)).ServeHTTP(claimRec, currentScanLeaseRequest(t, pool, claimReq))
 	if claimRec.Code != http.StatusOK {
 		t.Fatalf("claim status: %d body: %s", claimRec.Code, claimRec.Body.String())
 	}
@@ -1987,13 +2015,13 @@ func TestScanJobs_RepositorySourceImageScanPreservesProvenance(t *testing.T) {
 			CanonicalEngine: "vulndb",
 		}},
 	})
-	completeReq := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/"+enqRes.ID.String()+"/complete", bytes.NewReader(completeBody))
+	completeReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/"+enqRes.ID.String()+"/complete", bytes.NewReader(completeBody))
 	completeReq.Header.Set("Authorization", "Bearer "+rawToken)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", enqRes.ID.String())
 	completeReq = completeReq.WithContext(context.WithValue(completeReq.Context(), chi.RouteCtxKey, rctx))
 	completeRec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Complete)).ServeHTTP(completeRec, completeReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Complete)).ServeHTTP(completeRec, currentScanLeaseRequest(t, pool, completeReq))
 	if completeRec.Code != http.StatusOK {
 		t.Fatalf("complete status: %d body: %s", completeRec.Code, completeRec.Body.String())
 	}
@@ -2013,7 +2041,7 @@ SELECT id, COALESCE(source_type, ''), COALESCE(source_ref, '')
 	}
 
 	imageResults := handler.NewImageScanResults(d)
-	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/image-scan-results/"+resultID.String(), nil)
+	getReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/image-scan-results/"+resultID.String(), nil)
 	getReq = getReq.WithContext(authctx.WithSubject(getReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	resultCtx := chi.NewRouteContext()
 	resultCtx.URLParams.Add("id", resultID.String())
@@ -2060,6 +2088,7 @@ SELECT id, COALESCE(source_type, ''), COALESCE(source_ref, '')
 }
 
 func TestScanJobs_ImpactedWorkloadsMatchesDigestAndCluster(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -2121,7 +2150,7 @@ INSERT INTO image_workload_links (
 		t.Fatal(err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/scan-targets/"+target.ID.String()+"/impacted-workloads", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scan-targets/"+target.ID.String()+"/impacted-workloads", nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", target.ID.String())
@@ -2156,6 +2185,7 @@ INSERT INTO image_workload_links (
 }
 
 func TestScanJobs_ListIncludesQueueMetricsByTargetType(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -2193,7 +2223,7 @@ VALUES ($1, $2, 'image', 'registry.example.test/app:latest', 'manual', 'registry
 		t.Fatalf("scan jobs: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/scan-jobs", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scan-jobs", nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rec := httptest.NewRecorder()
 	NewScanJobs(d, audit.New(pool)).List(rec, req)
@@ -2230,6 +2260,7 @@ VALUES ($1, $2, 'image', 'registry.example.test/app:latest', 'manual', 'registry
 // idempotency (re-promotion replaces, no dupes) and running-only scoping (an unlinked image
 // produces nothing).
 func TestScanJobs_ImageFindingsPromotedToDashboardAndFindingsList(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -2327,7 +2358,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 	}
 
 	// Dashboard summary now counts the image vulns under the running cluster.
-	dashReq := httptest.NewRequest(http.MethodGet, "/api/v1/dashboard/summary?cluster_id="+clusterID.String(), nil)
+	dashReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/dashboard/summary?cluster_id="+clusterID.String(), nil)
 	dashReq = dashReq.WithContext(authctx.WithSubject(dashReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	dashRec := httptest.NewRecorder()
 	handler.NewDashboard(d).Summary(dashRec, dashReq)
@@ -2412,6 +2443,7 @@ VALUES ($1, $2, 'k', 'CVE-2099-unused', 'unused', 'critical', 90)`, orgID, other
 }
 
 func TestScanJobs_StatusReportsNeuVectorAggregate(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	pool := d.Pool()
@@ -2451,7 +2483,7 @@ VALUES ($1, $2, 'completed', NOW() - INTERVAL '7 minutes', NOW() - INTERVAL '6 m
 		t.Fatalf("scan jobs: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/scan/status", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scan/status", nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rec := httptest.NewRecorder()
 	NewScanJobs(d, audit.New(pool)).Status(rec, req)
@@ -2471,6 +2503,7 @@ VALUES ($1, $2, 'completed', NOW() - INTERVAL '7 minutes', NOW() - INTERVAL '6 m
 }
 
 func TestScanJobs_CanceledRunningWorkerReportsAreDropped(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	pool := d.Pool()
@@ -2507,14 +2540,14 @@ VALUES ($1, $2, $3, 'canceled', $4, NOW() - INTERVAL '5 minutes', NOW() - INTERV
 	}
 	h := NewScanJobs(d, audit.New(pool))
 
-	completeReq := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/"+completeJobID.String()+"/complete", bytes.NewBufferString(`{}`))
+	completeReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/"+completeJobID.String()+"/complete", bytes.NewBufferString(`{}`))
 	completeReq.Header.Set("Authorization", "Bearer "+rawToken)
 	completeReq.Header.Set("X-Constellation-Scanner-Instance", "pod-a")
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", completeJobID.String())
 	completeReq = completeReq.WithContext(context.WithValue(completeReq.Context(), chi.RouteCtxKey, rctx))
 	completeRec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Complete)).ServeHTTP(completeRec, completeReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Complete)).ServeHTTP(completeRec, currentScanLeaseRequest(t, pool, completeReq))
 	if completeRec.Code != http.StatusOK {
 		t.Fatalf("complete canceled status: %d body: %s", completeRec.Code, completeRec.Body.String())
 	}
@@ -2522,14 +2555,14 @@ VALUES ($1, $2, $3, 'canceled', $4, NOW() - INTERVAL '5 minutes', NOW() - INTERV
 		t.Fatalf("complete canceled body = %s", completeRec.Body.String())
 	}
 
-	failReq := httptest.NewRequest(http.MethodPost, "/api/v1/scan-jobs/"+failJobID.String()+"/fail", bytes.NewBufferString(`{"error":"late scanner error"}`))
+	failReq := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs/"+failJobID.String()+"/fail", bytes.NewBufferString(`{"error":"late scanner error"}`))
 	failReq.Header.Set("Authorization", "Bearer "+rawToken)
 	failReq.Header.Set("X-Constellation-Scanner-Instance", "pod-a")
 	rctx = chi.NewRouteContext()
 	rctx.URLParams.Add("id", failJobID.String())
 	failReq = failReq.WithContext(context.WithValue(failReq.Context(), chi.RouteCtxKey, rctx))
 	failRec := httptest.NewRecorder()
-	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Fail)).ServeHTTP(failRec, failReq)
+	handler.ScannerTokenMiddleware(pool)(http.HandlerFunc(h.Fail)).ServeHTTP(failRec, currentScanLeaseRequest(t, pool, failReq))
 	if failRec.Code != http.StatusOK {
 		t.Fatalf("fail canceled status: %d body: %s", failRec.Code, failRec.Body.String())
 	}
@@ -2547,10 +2580,11 @@ VALUES ($1, $2, $3, 'canceled', $4, NOW() - INTERVAL '5 minutes', NOW() - INTERV
 }
 
 func TestScannerTokenMiddleware_Rejects(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
-	r := httptest.NewRequest("POST", "/api/v1/scan-jobs/claim", nil)
+	r := httptest.NewRequestWithContext(t.Context(), "POST", "/api/v1/scan-jobs/claim", nil)
 	r.Header.Set("Authorization", "Bearer not-a-real-token")
 	w := httptest.NewRecorder()
 	called := false
@@ -2614,6 +2648,7 @@ func TestVulnProfileDecisionApplication(t *testing.T) {
 // rescan (re-promotion) preserves the user's manual triage — lifecycle, assignee, accepted_until,
 // priority, and the original first_seen_at — instead of resetting the CVE to a fresh open finding.
 func TestPromoteImageFindingsAppliesSuppressAndCarriesForwardTriage(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -2790,6 +2825,7 @@ SELECT lifecycle, assignee_id, priority, first_seen_at, accepted_until FROM find
 // via image_workload_links and writes a scope='image' quarantine_entries row per cluster, instead
 // of audit-logging enforced=skipped and blocking nothing.
 func TestScanResponseRuleQuarantineEnforcesForRegistryScan(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -2831,6 +2867,14 @@ VALUES ($1, $2, $3, 'payments/api', 'payments', 'api', 'Deployment', $4, $4, $5,
 			orgID, cid, deploymentID, imageRef, repo, digest)
 	}
 
+	// An inconsistent inventory link must not grant authority over another tenant.
+	foreignOrg, foreignCluster, ownedDeployment := uuid.New(), uuid.New(), uuid.New()
+	mustExec(`INSERT INTO orgs(id,name,display_name) VALUES($1,$2,$2)`, foreignOrg, "foreign-quarantine-"+foreignOrg.String())
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id=$1`, foreignOrg) })
+	mustExec(`INSERT INTO clusters(id,org_id,name) VALUES($1,$2,'foreign')`, foreignCluster, foreignOrg)
+	mustExec(`INSERT INTO deployments(id,org_id,cluster_id,namespace,name,kind) VALUES($1,$2,$3,'payments','polluted-link','Deployment')`, ownedDeployment, orgID, clusterA)
+	mustExec(`INSERT INTO image_workload_links(org_id,cluster_id,deployment_id,workload_id,namespace,name,kind,image_ref,image_ref_normalized,image_repository,image_tag,image_digest) VALUES($1,$2,$3,'payments/polluted-link','payments','polluted-link','Deployment',$4,$4,$5,'',$6)`, orgID, foreignCluster, ownedDeployment, imageRef, repo, digest)
+
 	// Registry scan target: type image, cluster_id NULL.
 	target := handler.ScanTarget{
 		ID:        uuid.New(),
@@ -2844,6 +2888,23 @@ VALUES ($1, $2, $3, 'payments/api', 'payments', 'api', 'Deployment', $4, $4, $5,
 
 	h := NewScanJobs(d, audit.New(pool))
 	h.applyScanResponseRuleActions(ctx, orgID, target, identity, ev, []responserule.Action{{Type: responserule.ActionQuarantine}})
+
+	if err := h.recordImageQuarantine(ctx, orgID, foreignCluster, repo, "cross-tenant request"); err == nil {
+		t.Fatal("foreign cluster quarantine accepted")
+	}
+	if err := h.recordImageQuarantine(ctx, orgID, uuid.New(), repo, "missing cluster"); err == nil {
+		t.Fatal("missing cluster quarantine accepted")
+	}
+	if err := h.recordImageQuarantine(ctx, orgID, clusterA, repo, "duplicate owned target"); err != nil {
+		t.Fatalf("owned duplicate should be idempotent: %v", err)
+	}
+	var outcome, enforced, scope string
+	if err := pool.QueryRow(ctx, `SELECT after->>'outcome',after->>'enforced',after->>'admission_scope' FROM audit_events WHERE org_id=$1 AND action='response_rule.action.quarantine' AND target_id=$2 ORDER BY id DESC LIMIT 1`, orgID, imageRef).Scan(&outcome, &enforced, &scope); err != nil {
+		t.Fatal(err)
+	}
+	if outcome != "quarantine_recorded" || enforced != "not_verified" || !strings.Contains(scope, "protected namespaces remain excluded") {
+		t.Fatalf("misleading quarantine outcome: %s %s %s", outcome, enforced, scope)
+	}
 
 	rows, err := pool.Query(ctx, `
 SELECT cluster_id, match_key, scope, origin, source_kind
@@ -2881,6 +2942,7 @@ var _ = pgxpool.New
 // human repo:tag filled in from the workload map (and that an unmapped digest is left
 // untouched rather than guessed).
 func TestResolveEvidenceImageName(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	ctx := context.Background()

@@ -1,0 +1,145 @@
+{{- /*
+Prometheus Operator discovery for every long-lived component (runtime
+hardening monitoring stream, folded in). Gated by metrics.serviceMonitor.enabled
+because the monitoring.coreos.com CRDs are not bundled. The API keeps its own
+ServiceMonitor (api-deployment.yaml) which api.metrics.serviceMonitor.enabled
+OR this toggle renders.
+*/ -}}
+{{- $m := .Values.metrics.serviceMonitor -}}
+{{- if $m.enabled -}}
+{{- $ns := $m.namespace | default .Release.Namespace -}}
+{{- $labels := $m.labels -}}
+{{- if .Values.scanner.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "constellation.fullname" . }}-scanner
+  namespace: {{ $ns }}
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scanner
+    {{- with $labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  jobLabel: app.kubernetes.io/component
+  namespaceSelector:
+    matchNames: [{{ .Release.Namespace }}]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: scanner
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ $m.interval }}
+      scrapeTimeout: {{ $m.scrapeTimeout }}
+---
+{{- end }}
+{{- if .Values.admission.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "constellation.fullname" . }}-admission
+  namespace: {{ $ns }}
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: admission
+    {{- with $labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  jobLabel: app.kubernetes.io/component
+  namespaceSelector:
+    matchNames: [{{ .Release.Namespace }}]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: admission
+  endpoints:
+    # /metrics is served on the webhook's TLS port; the cert is for the
+    # Service DNS name, so verification is skipped for the scrape.
+    - port: https
+      scheme: https
+      path: /metrics
+      interval: {{ $m.interval }}
+      scrapeTimeout: {{ $m.scrapeTimeout }}
+      tlsConfig:
+        insecureSkipVerify: true
+---
+{{- end }}
+{{- if .Values.operator.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "constellation.fullname" . }}-operator
+  namespace: {{ $ns }}
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: operator
+    {{- with $labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  jobLabel: app.kubernetes.io/component
+  namespaceSelector:
+    matchNames: [{{ .Release.Namespace }}]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: operator
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ $m.interval }}
+---
+{{- end }}
+{{- if .Values.runtimeAgent.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "constellation.fullname" . }}-runtime-agent
+  namespace: {{ $ns }}
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: runtime-agent
+    {{- with $labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  jobLabel: app.kubernetes.io/component
+  namespaceSelector:
+    matchNames: [{{ .Release.Namespace }}]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: runtime-agent
+  podMetricsEndpoints:
+    # hostNetwork DaemonSet: the health port also serves /metrics.
+    - port: health
+      path: /metrics
+      interval: {{ $m.interval }}
+---
+{{- end }}
+{{- if and (include "constellation.cnpgInNamespace" .) .Values.postgres.cloudnativepg.monitoring.enablePodMonitor }}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "constellation.fullname" . }}-cnpg
+  namespace: {{ $ns }}
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+    {{- with $labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  namespaceSelector:
+    matchNames: [{{ .Release.Namespace }}]
+  selector:
+    matchLabels:
+      cnpg.io/cluster: {{ .Values.networkPolicies.cnpg.clusterName | default (printf "%s-postgres" (include "constellation.fullname" .)) }}
+  podMetricsEndpoints:
+    # 9187: CNPG instance-manager exporter (pg_* plus barman-cloud plugin metrics).
+    - port: metrics
+      path: /metrics
+      interval: {{ $m.interval }}
+{{- end }}
+{{- end }}

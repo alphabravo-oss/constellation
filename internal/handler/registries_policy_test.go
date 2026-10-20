@@ -1,3 +1,5 @@
+//go:build integration
+
 package handler
 
 import (
@@ -9,10 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alphabravocompany/constellation/internal/registry"
-	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
+	"github.com/alphabravocompany/constellation/internal/registry"
+	"github.com/alphabravocompany/constellation/pkg/audit"
 )
 
 func TestRegistryScanPolicyNormalizeUsesLegacyGlobs(t *testing.T) {
@@ -284,7 +287,7 @@ VALUES ($1, $2, $3, 'pending', NOW() - INTERVAL '5 minutes', NULL, NULL, NULL),
 	}
 
 	h := NewRegistries(d, audit.New(pool))
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/registries/"+registryID.String()+"/cancel-scans", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/registries/"+registryID.String()+"/cancel-scans", nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", registryID.String())
 	req = req.WithContext(WithSubject(context.WithValue(req.Context(), chi.RouteCtxKey, rctx), Subject{UserID: userID, OrgID: orgID}))

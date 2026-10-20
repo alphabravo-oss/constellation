@@ -7,9 +7,14 @@
 # This file is NOT used directly as a Dockerfile target — it's `docker buildx build -f`'d
 # as a base by the role images via the buildkit `# syntax = ` heredoc.
 
-ARG GO_VERSION=1.26
-
-FROM golang:${GO_VERSION}-bookworm AS go-builder
+# GO_VERSION has NO default: the Makefile passes --build-arg GO_VERSION from go.mod
+# (make check-go-version enforces this). The builder is additionally pinned by
+# multi-arch index digest so a Go bump is one value change per file.
+# Refresh with: docker buildx imagetools inspect golang:<ver>-bookworm
+# Pinned to the 1.27.3-bookworm multi-arch index digest of the Go builder (matches go.mod).
+ARG GO_VERSION
+ARG GO_IMAGE_DIGEST=sha256:5c3e9b43cfd3bb95c7937462e29d87ada57b481a96fa23ad0eb61778d7a00110
+FROM golang:${GO_VERSION}-bookworm@${GO_IMAGE_DIGEST} AS go-builder
 WORKDIR /src
 
 COPY go.mod go.sum ./
@@ -18,7 +23,8 @@ RUN go mod download
 COPY . .
 
 ARG VERSION=dev
-ARG COMMIT=unknown
+ARG COMMIT=dev
+ARG BUILD_TIME=
 ENV CGO_ENABLED=0 \
     GOOS=linux
 
@@ -28,6 +34,6 @@ RUN set -eux; \
                constellation-discoverer constellation-k8s-compliance-collector \
                constellation-seed audit-archiver constellationctl; do \
       go build -trimpath \
-        -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" \
+        -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X github.com/alphabravocompany/constellation/pkg/version.Version=${VERSION} -X github.com/alphabravocompany/constellation/pkg/version.Commit=${COMMIT} -X github.com/alphabravocompany/constellation/pkg/version.BuildTime=${BUILD_TIME}" \
         -o "/out/${cmd}" "./cmd/${cmd}"; \
     done

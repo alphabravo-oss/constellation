@@ -34,18 +34,17 @@ func (s *SyftEngine) Scan(ctx context.Context, ref string, opts ScanOptions) (*E
 	if opts.Platform != "" {
 		args = append(args, "--platform", opts.Platform)
 	}
-	if opts.Insecure {
-		args = append(args, "--registry-insecure-skip-tls-verify")
-	}
 
 	ctx, cancel := withTimeout(ctx, opts.Timeout, 5*time.Minute)
 	defer cancel()
 
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd := exec.CommandContext(ctx, bin, args...) //nolint:gosec // G204: bin is the operator-configured scanner binary (LookPath-checked above)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	cmd.Env = registryEnv(opts)
+	// Keep binary-level evidence available to native SBOM consumers. Missing
+	// symbols remain unknown; the matching tools must not infer absence from that.
+	cmd.Env = append(RegistryEnvironment(opts), "SYFT_GOLANG_CAPTURE_SYMBOLS=all")
 
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("syft: %w (stderr=%s)", err, strings.TrimSpace(stderr.String()))
@@ -332,7 +331,7 @@ func withTimeout(parent context.Context, requested, fallback time.Duration) (con
 	return context.WithTimeout(parent, d)
 }
 
-// registryEnv builds the environment for an engine subprocess, exporting
+// RegistryEnvironment builds the environment for an engine subprocess, exporting
 // registry credentials under the variables Trivy, Grype and Syft actually read.
 //
 // The previous DOCKER_USER / DOCKER_PASSWORD pair was dead: no scan tool reads
@@ -340,9 +339,32 @@ func withTimeout(parent context.Context, requested, fallback time.Duration) (con
 // TRIVY_USERNAME / TRIVY_PASSWORD; Grype reads GRYPE_REGISTRY_AUTH_USERNAME /
 // _PASSWORD (+ _AUTHORITY); Syft reads SYFT_REGISTRY_AUTH_USERNAME / _PASSWORD
 // (+ _AUTHORITY). DOCKER_CONFIG points every go-containerregistry-based pull at
-// the per-job docker config.json the caller wrote.
-func registryEnv(opts ScanOptions) []string {
+// the per-job docker config.json the caller wrote. When that isolated config is
+// present, inherited engine registry-auth variables are dropped before applying
+// explicit credentials; scans without it retain their legacy environment.
+func RegistryEnvironment(opts ScanOptions) []string {
 	env := os.Environ()
+	if opts.DockerConfigDir != "" {
+		isolated := env[:0]
+		for _, entry := range env {
+			key, _, _ := strings.Cut(entry, "=")
+			if key == "DOCKER_CONFIG" || key == "DOCKER_AUTH_CONFIG" || key == "TRIVY_USERNAME" || key == "TRIVY_PASSWORD" || strings.HasPrefix(key, "GRYPE_REGISTRY_AUTH_") || strings.HasPrefix(key, "SYFT_REGISTRY_AUTH_") {
+				continue
+			}
+			isolated = append(isolated, entry)
+		}
+		env = isolated
+	}
+	if opts.Insecure {
+		// syft and grype take registry transport options from the environment only
+		// (there is no --registry-insecure-* CLI flag); trivy uses --insecure.
+		env = append(env,
+			"SYFT_REGISTRY_INSECURE_SKIP_TLS_VERIFY=true",
+			"SYFT_REGISTRY_INSECURE_USE_HTTP=true",
+			"GRYPE_REGISTRY_INSECURE_SKIP_TLS_VERIFY=true",
+			"GRYPE_REGISTRY_INSECURE_USE_HTTP=true",
+		)
+	}
 	if opts.Username != "" || opts.Password != "" {
 		env = append(env,
 			"TRIVY_USERNAME="+opts.Username,

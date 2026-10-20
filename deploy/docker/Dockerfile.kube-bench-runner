@@ -1,35 +1,55 @@
 # syntax=docker/dockerfile:1.7
-# constellation-kube-bench-runner — one-shot CronJob image that execs the
+# constellation-kube-bench-runner — worker and one-shot image that execs the
 # upstream kube-bench binary, reads its --json report, and POSTs it to
-# /api/v1/compliance/ingest.
+# the authenticated /api/v1/agent/compliance routes.
 #
-# ponytail: this image MUST bundle the upstream kube-bench binary (and its
+# This image MUST bundle the upstream kube-bench binary (and its
 # cfg/ tree). We copy it straight from the official aquasec/kube-bench image
 # rather than reimplementing the benchmark. Pin KUBE_BENCH_IMAGE for a known
 # kube-bench version.
 
-ARG GO_VERSION=1.26
-ARG RUNTIME_IMAGE=debian:bookworm-slim
-ARG KUBE_BENCH_IMAGE=docker.io/aquasec/kube-bench:v0.10.7
+# GO_VERSION has NO default: the Makefile passes --build-arg GO_VERSION from go.mod
+# (make check-go-version enforces this). The builder is additionally pinned by
+# multi-arch index digest so a Go bump is one value change per file.
+# Refresh with: docker buildx imagetools inspect golang:<ver>-bookworm
+# Pinned to the 1.27.3-bookworm multi-arch index digest of the Go builder (matches go.mod).
+ARG GO_VERSION
+ARG GO_IMAGE_DIGEST=sha256:5c3e9b43cfd3bb95c7937462e29d87ada57b481a96fa23ad0eb61778d7a00110
+# Debian runtime (bundles upstream kube-bench + its cfg tree and procps; see ADR
+# 0005 for why this role is not distroless). Pinned by index digest; refresh with:
+#   docker buildx imagetools inspect debian:bookworm-slim
+ARG RUNTIME_IMAGE=debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
+# Refresh with: docker buildx imagetools inspect docker.io/aquasec/kube-bench:<ver>
+ARG KUBE_BENCH_IMAGE=docker.io/aquasec/kube-bench:v0.10.7@sha256:f0bc1aa9d21bab773a8686d600d449ec256444139504c03a6f535cebbfcbc43e
 
-FROM golang:${GO_VERSION}-bookworm AS build
+FROM golang:${GO_VERSION}-bookworm@${GO_IMAGE_DIGEST} AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 ARG VERSION=dev
+ARG COMMIT=dev
+ARG BUILD_TIME=
 ENV CGO_ENABLED=0 GOOS=linux
-RUN go build -trimpath -ldflags="-s -w -X main.version=${VERSION}" \
+RUN go build -trimpath -ldflags="-s -w -X github.com/alphabravocompany/constellation/pkg/version.Version=${VERSION} -X github.com/alphabravocompany/constellation/pkg/version.Commit=${COMMIT} -X github.com/alphabravocompany/constellation/pkg/version.BuildTime=${BUILD_TIME}" \
       -o /out/constellation-kube-bench-runner ./cmd/constellation-kube-bench-runner
 
 FROM ${KUBE_BENCH_IMAGE} AS kubebench
 
 FROM ${RUNTIME_IMAGE} AS runtime
+ARG VERSION=dev
+ARG COMMIT=dev
+LABEL org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT}"
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates tzdata \
+ && apt-get install -y --no-install-recommends ca-certificates tzdata procps \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=build /out/constellation-kube-bench-runner /usr/local/bin/constellation-kube-bench-runner
 # kube-bench binary + its config tree (the cfg/ dir is required at runtime).
 COPY --from=kubebench /usr/local/bin/kube-bench /usr/local/bin/kube-bench
 COPY --from=kubebench /opt/kube-bench/cfg /opt/kube-bench/cfg
+# Same UID/GID as the chart's shared pod security context. kube-bench reads the
+# host paths the chart mounts read-only; nothing here requires root.
+RUN groupadd -r -g 10001 constellation && useradd -r -u 10001 -g constellation constellation
+USER 10001:10001
 ENTRYPOINT ["/usr/local/bin/constellation-kube-bench-runner"]

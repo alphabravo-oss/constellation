@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Field, TextInput, Textarea, Select, Switch } from "@/components/ui/form";
 import { Collapse } from "@/components/ui/collapse";
+import { apiErrorMessage } from "@/lib/api-error";
 
 /**
  * Network & Proxy — outbound connectivity for the platform: egress proxy, upstream
@@ -72,7 +73,7 @@ export function NetworkProxyPage() {
         toast.error("Config changed elsewhere; reloaded latest — please retry.");
         return;
       }
-      const msg = (error as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      const msg = apiErrorMessage(error);
       toast.error(msg ? `Save failed: ${msg}` : "Failed to save network settings");
     },
   });
@@ -103,11 +104,11 @@ export function NetworkProxyPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Network & Proxy"
+        title="Network and proxy"
         description="Outbound connectivity for the platform — how Constellation reaches the internet and where it mirrors audit events."
       />
 
-      <VerdictBanner
+      <VerdictBanner detailMode={!tlsVerify ? "inline" : "disclosure"}
         status={httpsProxy ? "info" : "ok"}
         title={httpsProxy ? "Egress routed through a proxy" : "Direct egress (no proxy configured)"}
         detail={tlsVerify ? "Upstream TLS verification is on." : "Upstream TLS verification is OFF — connections are not authenticated."}

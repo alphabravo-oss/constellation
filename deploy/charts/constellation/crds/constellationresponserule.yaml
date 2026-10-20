@@ -75,7 +75,7 @@ spec:
                     properties:
                       type:
                         type: string
-                        enum: [quarantine, suppress_log, webhook, tag]
+                        enum: [quarantine, suppress_log, webhook]
                       params:
                         type: object
                         additionalProperties: { type: string }

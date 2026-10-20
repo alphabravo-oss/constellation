@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-const defaultRuntimeAgentTokenFile = "/var/run/constellation/runtime-agent-token/token"
+const defaultRuntimeAgentTokenFile = "/var/run/constellation/runtime-agent-token/token" //nolint:gosec // G101: mount path of the token file, not a credential
 
 // HeartbeatEnvOptions maps the standard Helm/env wiring into a HeartbeatConfig.
 // The direct fields win over environment variables, which lets binaries keep

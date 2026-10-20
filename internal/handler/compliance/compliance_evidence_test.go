@@ -1,3 +1,5 @@
+//go:build integration
+
 package compliance
 
 import (
@@ -171,7 +173,7 @@ VALUES ($1, $2, $3, 'cloud-config', 'AWS-S3-PUBLIC', 'Public S3 bucket', 'bucket
 	}
 
 	h := NewCompliance(d, audit.New(pool))
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/compliance/evidence?cluster_id="+clusterID.String(), nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/compliance/evidence?cluster_id="+clusterID.String(), nil)
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	resp := httptest.NewRecorder()
 	h.Evidence(resp, req)

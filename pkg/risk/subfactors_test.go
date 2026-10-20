@@ -3,6 +3,7 @@ package risk
 import "testing"
 
 func TestDecomposeFourFactors(t *testing.T) {
+	t.Parallel()
 	d := Decompose(SubfactorInputs{
 		Inputs: Inputs{
 			CVSSBase: 9.5, KEVListed: true, EPSSProbability: 0.8,

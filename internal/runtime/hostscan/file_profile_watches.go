@@ -321,7 +321,7 @@ func hashWatchFile(fullPath string, isDir bool, size, maxBytes int64) string {
 	if err != nil {
 		return ""
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	st, err := f.Stat()
 	if err != nil || !st.Mode().IsRegular() || st.Size() > maxBytes {
 		return ""

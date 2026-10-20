@@ -34,7 +34,20 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["/usr/local/bin/constellation-netpolicy-applier"]
           {{- include "constellation.containerSecurityContext" . | nindent 10 }}
+          ports:
+            - { containerPort: 9090, name: admin }
+          {{- include "constellation.adminProbes" . | nindent 10 }}
           env:
+            - name: ADMIN_LISTEN_ADDR
+              value: ":9090"
+            - name: CONSTELLATION_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            {{- with (include "constellation.protectedNamespaces" (dict "ctx" . "extra" .Values.networkPolicyApplier.protectedNamespaces)) | fromJsonArray }}
+            - name: CONSTELLATION_ENFORCEMENT_PROTECTED_NAMESPACES
+              value: {{ join "," . | quote }}
+            {{- end }}
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -96,11 +109,34 @@ kind: ClusterRole
 metadata:
   name: {{ include "constellation.fullname" . }}-network-policy-applier
 rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "nodes"]
+    verbs: ["list"]
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    resourceNames: ["kubernetes"]
+    verbs: ["get"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["list"]
   - apiGroups: ["networking.k8s.io"]
     resources: ["networkpolicies"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["cilium.io"]
+    resources: ["ciliumendpoints", "ciliumidentities"]
+    verbs: ["list"]
+  - apiGroups: ["cilium.io"]
     resources: ["ciliumnetworkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Calico admission checks tier authorization in addition to resource RBAC.
+  # Generated policies use the default tier; other tiers require an explicit grant.
+  - apiGroups: ["projectcalico.org"]
+    resources: ["tiers"]
+    resourceNames: ["default"]
+    verbs: ["get"]
+  - apiGroups: ["projectcalico.org"]
+    resources: ["tier.globalnetworkpolicies"]
+    resourceNames: ["default.*"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["projectcalico.org"]
     resources: ["globalnetworkpolicies"]

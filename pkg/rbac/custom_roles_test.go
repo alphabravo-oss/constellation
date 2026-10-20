@@ -7,6 +7,7 @@ import (
 )
 
 func TestAuthorizeWithCustom(t *testing.T) {
+	t.Parallel()
 	org := uuid.New()
 	asg := []RoleAssignment{{Role: "vuln-viewer", Scope: Scope{OrgID: org}}}
 	res := Resource{OrgID: org}

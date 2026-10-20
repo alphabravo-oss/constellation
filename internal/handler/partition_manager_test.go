@@ -1,8 +1,17 @@
+//go:build integration
+
 package handler
 
 import (
+	"context"
+	"fmt"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/alphabravocompany/constellation/internal/testutil/pgfixture"
 )
 
 func TestPartitionDay(t *testing.T) {
@@ -13,10 +22,10 @@ func TestPartitionDay(t *testing.T) {
 	}{
 		{"events_20260820", true, "2026-08-20"},
 		{"network_flows_20260101", true, "2026-01-01"},
-		{"events_p_default", false, ""},          // default partition — never a drop candidate
-		{"network_flows_p_default", false, ""},   // default partition
-		{"events", false, ""},                    // parent
-		{"events_2026082", false, ""},            // 7 digits, not a valid day tag
+		{"events_p_default", false, ""},        // default partition — never a drop candidate
+		{"network_flows_p_default", false, ""}, // default partition
+		{"events", false, ""},                  // parent
+		{"events_2026082", false, ""},          // 7 digits, not a valid day tag
 	}
 	for _, c := range cases {
 		day, ok := partitionDay(c.name)
@@ -26,6 +35,52 @@ func TestPartitionDay(t *testing.T) {
 		if ok && day.Format("2006-01-02") != c.wantDay {
 			t.Fatalf("%s: day=%s want %s", c.name, day.Format("2006-01-02"), c.wantDay)
 		}
+	}
+}
+
+func TestFlowPartitionExpiryRequiresFoldedHistory(t *testing.T) {
+	database := openTestDB(t)
+	t.Cleanup(database.Close)
+	pool := pgfixture.Schema(t, database.Pool())
+	ctx := context.Background()
+	day := time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -10)
+	child := partitionName("network_flows", day)
+	_, err := pool.Exec(ctx, fmt.Sprintf(`
+ CREATE TABLE network_flows (id int, at timestamptz) PARTITION BY RANGE(at);
+ CREATE TABLE %s PARTITION OF network_flows FOR VALUES FROM ('%s') TO ('%s');
+ CREATE TABLE network_flow_rollup_state (id boolean PRIMARY KEY,watermark timestamptz,raw_pruned_before timestamptz);
+ INSERT INTO network_flow_rollup_state VALUES (true,'1970-01-01','1970-01-01');
+ INSERT INTO network_flows VALUES (1,'%s');`, child, day.Format(time.RFC3339), day.AddDate(0, 0, 1).Format(time.RFC3339), day.Format(time.RFC3339)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err := dropExpiredPartitions(ctx, pool, "network_flows", 1); err != nil || n != 0 {
+		t.Fatalf("unfolded partition dropped: %d %v", n, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE network_flow_rollup_state SET watermark=now()`); err != nil {
+		t.Fatal(err)
+	}
+	// An in-flight ingest's shared state lock must exclude partition expiry.
+	ingest, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ingest.Rollback(ctx)
+	if _, err := ingest.Exec(ctx, `SELECT id FROM network_flow_rollup_state FOR SHARE`); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := dropExpiredPartitions(ctx, pool, "network_flows", 1); err == nil || n != 0 {
+		t.Fatalf("in-flight ingest bypassed: %d %v", n, err)
+	}
+	if err := ingest.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := dropExpiredPartitions(ctx, pool, "network_flows", 1); err != nil || n != 1 {
+		t.Fatalf("folded partition retained: %d %v", n, err)
+	}
+	var boundary time.Time
+	if err := pool.QueryRow(ctx, `SELECT raw_pruned_before FROM network_flow_rollup_state`).Scan(&boundary); err != nil || boundary.Before(day.AddDate(0, 0, 1)) {
+		t.Fatalf("missing replay boundary: %v %v", boundary, err)
 	}
 }
 
@@ -47,5 +102,119 @@ func TestPartitionExpiryBoundary(t *testing.T) {
 	}
 	if expired("2026-08-20") {
 		t.Fatal("today's partition must never be dropped")
+	}
+}
+
+func defaultPartitionFixture(t *testing.T) (*pgxpool.Pool, string, string) {
+	t.Helper()
+	database := openTestDB(t)
+	t.Cleanup(database.Close)
+	pool := database.Pool()
+	parent := "pm_reclaim_" + uuid.NewString()[:8]
+	child := parent + "_p_default"
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`CREATE TABLE %s (id uuid NOT NULL DEFAULT gen_random_uuid(), at timestamptz NOT NULL, payload text NOT NULL, PRIMARY KEY (id, at)) PARTITION BY RANGE (at)`, parent)); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), fmt.Sprintf(`DROP TABLE IF EXISTS %s CASCADE`, parent))
+	})
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`CREATE TABLE %s PARTITION OF %s DEFAULT`, child, parent)); err != nil {
+		t.Fatalf("create default: %v", err)
+	}
+	return pool, parent, child
+}
+
+func fillAndDeleteDefaultPartition(t *testing.T, pool *pgxpool.Pool, parent string) int64 {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`INSERT INTO %s (at, payload) SELECT now(), repeat(md5(random()::text), 32) FROM generate_series(1, 512)`, parent)); err != nil {
+		t.Fatalf("fill default: %v", err)
+	}
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`DELETE FROM %s`, parent)); err != nil {
+		t.Fatalf("delete default rows: %v", err)
+	}
+	var size int64
+	if err := pool.QueryRow(ctx, `SELECT pg_total_relation_size($1::regclass)`, parent+"_p_default").Scan(&size); err != nil {
+		t.Fatalf("default size: %v", err)
+	}
+	return size
+}
+
+func TestReclaimEmptyDefaultPartition(t *testing.T) {
+	pool, parent, child := defaultPartitionFixture(t)
+	size := fillAndDeleteDefaultPartition(t, pool, parent)
+	ctx := context.Background()
+	reclaimed, err := reclaimEmptyDefaultPartition(ctx, pool, parent, size+1)
+	if err != nil || reclaimed {
+		t.Fatalf("below threshold: reclaimed=%v err=%v", reclaimed, err)
+	}
+	reclaimed, err = reclaimEmptyDefaultPartition(ctx, pool, parent, size)
+	if err != nil || !reclaimed {
+		t.Fatalf("empty default: reclaimed=%v err=%v", reclaimed, err)
+	}
+	var after int64
+	if err := pool.QueryRow(ctx, `SELECT pg_total_relation_size($1::regclass)`, child).Scan(&after); err != nil {
+		t.Fatalf("size after reclaim: %v", err)
+	}
+	if after >= size {
+		t.Fatalf("TRUNCATE did not reclaim storage: before=%d after=%d", size, after)
+	}
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`INSERT INTO %s (at, payload) VALUES (now(), 'new')`, parent)); err != nil {
+		t.Fatalf("insert after reclaim: %v", err)
+	}
+	reclaimed, err = reclaimEmptyDefaultPartition(ctx, pool, parent, 0)
+	if err != nil || reclaimed {
+		t.Fatalf("nonempty default must survive: reclaimed=%v err=%v", reclaimed, err)
+	}
+	var count int
+	if err := pool.QueryRow(ctx, fmt.Sprintf(`SELECT count(*) FROM %s`, child)).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("row after reclaim: count=%d err=%v", count, err)
+	}
+}
+
+func TestReclaimDefaultRequiresAttachedDefaultPartition(t *testing.T) {
+	pool, parent, child := defaultPartitionFixture(t)
+	size := fillAndDeleteDefaultPartition(t, pool, parent)
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`ALTER TABLE %s DETACH PARTITION %s`, parent, child)); err != nil {
+		t.Fatalf("detach default: %v", err)
+	}
+	reclaimed, err := reclaimEmptyDefaultPartition(ctx, pool, parent, size)
+	if err != nil || reclaimed {
+		t.Fatalf("detached table must survive: reclaimed=%v err=%v", reclaimed, err)
+	}
+	var after int64
+	if err := pool.QueryRow(ctx, `SELECT pg_total_relation_size($1::regclass)`, child).Scan(&after); err != nil || after != size {
+		t.Fatalf("detached table changed: before=%d after=%d err=%v", size, after, err)
+	}
+}
+
+func TestReclaimDefaultSkipsConcurrentIngestWithoutWaiting(t *testing.T) {
+	pool, parent, child := defaultPartitionFixture(t)
+	size := fillAndDeleteDefaultPartition(t, pool, parent)
+	ctx := context.Background()
+	insert, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer insert.Rollback(context.Background())
+	if _, err := insert.Exec(ctx, fmt.Sprintf(`INSERT INTO %s (at, payload) VALUES (now(), 'in-flight')`, parent)); err != nil {
+		t.Fatalf("start ingest: %v", err)
+	}
+	start := time.Now()
+	reclaimed, err := reclaimEmptyDefaultPartition(ctx, pool, parent, size)
+	if err != nil || reclaimed {
+		t.Fatalf("concurrent ingest: reclaimed=%v err=%v", reclaimed, err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("reclaim waited for ingest for %s", elapsed)
+	}
+	if err := insert.Commit(ctx); err != nil {
+		t.Fatalf("commit ingest: %v", err)
+	}
+	var count int
+	if err := pool.QueryRow(ctx, fmt.Sprintf(`SELECT count(*) FROM %s`, child)).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("ingested row lost: count=%d err=%v", count, err)
 	}
 }

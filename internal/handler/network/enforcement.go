@@ -2,6 +2,7 @@ package network
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -9,8 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
@@ -46,7 +50,7 @@ func (h *Network) EnforcementList(w http.ResponseWriter, r *http.Request) {
 	subj, _ := authctx.SubjectFrom(r.Context())
 	clusterID, err := h.resolveNetworkCluster(r, subj.OrgID)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	state := strings.TrimSpace(r.URL.Query().Get("state"))
@@ -60,7 +64,7 @@ SELECT id::text, kind, target, namespace, workload, direction, manifest_flavor, 
  ORDER BY created_at DESC
  LIMIT 500`, subj.OrgID, clusterID, state)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()
@@ -92,21 +96,27 @@ func (h *Network) EnforcementCreate(w http.ResponseWriter, r *http.Request) {
 		Reason    string `json:"reason"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid body")
 		return
 	}
 	req.Kind = strings.TrimSpace(req.Kind)
 	req.Reason = strings.TrimSpace(req.Reason)
 	if req.Reason == "" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "reason is required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "reason is required")
 		return
 	}
 	clusterID, err := h.resolveNetworkCluster(r, subj.OrgID)
 	if err != nil || clusterID == nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "a specific cluster is required for enforcement"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "a specific cluster is required for enforcement")
 		return
 	}
 
+	tx, err := h.db.Pool().Begin(r.Context())
+	if err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "could not begin enforcement write")
+		return
+	}
+	defer tx.Rollback(r.Context())
 	var (
 		ns, name, flavor, manifest, ref, workload, direction, target string
 	)
@@ -114,10 +124,20 @@ func (h *Network) EnforcementCreate(w http.ResponseWriter, r *http.Request) {
 	case "isolate":
 		ns, name = splitWorkload(strings.TrimSpace(req.Target))
 		if ns == "" || name == "" {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "target must be 'namespace/name'"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "target must be 'namespace/name'")
 			return
 		}
-		labels := h.workloadLabels(r, subj.OrgID, clusterID, ns, name)
+		labels, err := h.workloadLabels(r, tx, subj.OrgID, clusterID, ns, name)
+		if err != nil {
+			status := http.StatusInternalServerError
+			message := "could not resolve workload labels"
+			if errors.Is(err, pgx.ErrNoRows) {
+				status = http.StatusNotFound
+				message = "workload not found in the selected cluster"
+			}
+			apiutil.WriteStatus(r.Context(), w, status, message)
+			return
+		}
 		flavor = "native"
 		manifest, ref = isolateManifest(ns, name, labels)
 		target = req.Target
@@ -125,38 +145,46 @@ func (h *Network) EnforcementCreate(w http.ResponseWriter, r *http.Request) {
 	case "block_ip":
 		ip := strings.TrimSpace(req.Target)
 		if net.ParseIP(ip) == nil {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "target must be a valid IP address"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "target must be a valid IP address")
 			return
 		}
 		// A single-IP block ("allow all except this IP") is only expressible in a
-		// deny-capable CNI (Cilium/Calico). Native NetworkPolicy (flannel/k3s) is
+		// Cilium policy. Native NetworkPolicy (flannel/k3s) is
 		// allow-list only — reject with a clear alternative rather than applying a
-		// CRD the cluster can't enforce.
-		if cni := h.clusterCNI(r, subj.OrgID, clusterID); !denyCapableCNI(cni) {
-			httpx.WriteJSON(w, http.StatusUnprocessableEntity, map[string]string{
-				"error": fmt.Sprintf("this cluster's CNI (%s) can't block a single IP — that needs a deny-capable CNI (Cilium/Calico). Isolate the workload, or kill the live session, instead.", cniLabel(cni)),
-			})
+		// CRD the cluster can't enforce; Calico manifest generation is not implemented.
+		if cni := h.clusterCNI(r, subj.OrgID, clusterID); !strings.Contains(strings.ToLower(cni), "cilium") {
+			apiutil.WriteStatus(r.Context(), w, http.StatusUnprocessableEntity, fmt.Sprintf("single-IP blocking currently generates a Cilium policy; this cluster's CNI (%s) is unsupported. Isolate the workload, or kill the live session, instead.", cniLabel(cni)))
 			return
 		}
 		ns, name = splitWorkload(strings.TrimSpace(req.Workload))
 		if ns == "" || name == "" {
-			httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "workload ('namespace/name') is required to scope an IP block"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "workload ('namespace/name') is required to scope an IP block")
 			return
 		}
 		direction = normalizeDirection(req.Direction)
-		labels := h.workloadLabels(r, subj.OrgID, clusterID, ns, name)
+		labels, err := h.workloadLabels(r, tx, subj.OrgID, clusterID, ns, name)
+		if err != nil {
+			status := http.StatusInternalServerError
+			message := "could not resolve workload labels"
+			if errors.Is(err, pgx.ErrNoRows) {
+				status = http.StatusNotFound
+				message = "workload not found in the selected cluster"
+			}
+			apiutil.WriteStatus(r.Context(), w, status, message)
+			return
+		}
 		flavor = "cilium" // per-IP deny needs a deny-capable policy; native NetworkPolicy is allow-list only
 		workload = req.Workload
 		target = ip
 		manifest, ref = blockIPManifest(ns, name, ip, direction, labels)
 
 	default:
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "kind must be 'isolate' or 'block_ip'"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "kind must be 'isolate' or 'block_ip'")
 		return
 	}
 
 	var id string
-	err = h.db.Pool().QueryRow(r.Context(), `
+	err = tx.QueryRow(r.Context(), `
 INSERT INTO network_enforcement_actions
     (org_id, cluster_id, kind, target, namespace, workload, direction, manifest_flavor, manifest, resource_ref, reason, created_by)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
@@ -164,7 +192,11 @@ RETURNING id::text`,
 		subj.OrgID, clusterID, req.Kind, target, ns, workload, direction, flavor, manifest, ref, req.Reason, subj.Email).
 		Scan(&id)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "could not persist enforcement action")
 		return
 	}
 	httpx.WriteJSON(w, http.StatusCreated, enforcementDTO{
@@ -180,19 +212,19 @@ func (h *Network) EnforcementLift(w http.ResponseWriter, r *http.Request) {
 	subj, _ := authctx.SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid id")
 		return
 	}
 	tag, err := h.db.Pool().Exec(r.Context(), `
 UPDATE network_enforcement_actions
-   SET state = 'lifting', updated_at = NOW()
+   SET state = 'lifting', last_status = '', last_error = '', updated_at = NOW()
  WHERE id = $1 AND org_id = $2 AND state = 'active'`, id, subj.OrgID)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if tag.RowsAffected() == 0 {
-		httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "no active enforcement action with that id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "no active enforcement action with that id")
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]string{"status": "lifting"})
@@ -201,20 +233,23 @@ UPDATE network_enforcement_actions
 // workloadLabels resolves a workload's pod-selector labels from the deployments
 // inventory, falling back to {"app": name} — the same seed the netpolicy candidate
 // generator uses, so isolate selects the same pods a learned policy would.
-func (h *Network) workloadLabels(r *http.Request, orgID uuid.UUID, clusterID *uuid.UUID, ns, name string) map[string]string {
+func (h *Network) workloadLabels(r *http.Request, tx pgx.Tx, orgID uuid.UUID, clusterID *uuid.UUID, ns, name string) (map[string]string, error) {
 	labels := map[string]string{"app": name}
 	var raw []byte
-	err := h.db.Pool().QueryRow(r.Context(), `
+	err := tx.QueryRow(r.Context(), `
 SELECT labels FROM deployments
  WHERE org_id = $1 AND ($2::uuid IS NULL OR cluster_id = $2) AND namespace = $3 AND name = $4
- LIMIT 1`, orgID, clusterID, ns, name).Scan(&raw)
-	if err == nil && len(raw) > 0 {
+ LIMIT 1 FOR SHARE`, orgID, clusterID, ns, name).Scan(&raw)
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > 0 {
 		var parsed map[string]string
 		if json.Unmarshal(raw, &parsed) == nil && len(parsed) > 0 {
 			labels = parsed
 		}
 	}
-	return labels
+	return labels, nil
 }
 
 // clusterCNI returns the most-recently observed CNI name for the cluster (from
@@ -298,7 +333,7 @@ func blockIPManifest(ns, name, ip, direction string, labels map[string]string) (
 
 func managedLabels(kind string) map[string]any {
 	return map[string]any{
-		"app.kubernetes.io/managed-by": "constellation",
+		"app.kubernetes.io/managed-by":  "constellation",
 		"constellation.dev/enforcement": kind,
 	}
 }

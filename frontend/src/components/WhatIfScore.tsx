@@ -49,11 +49,11 @@ export function WhatIfScore() {
       <div className="mb-3 flex items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold">Score what-if</h3>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-micro text-muted-foreground">
             Select severities to resolve and preview the projected risk score.
           </p>
         </div>
-        <span className="rounded-full border border-border px-2 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+        <span className="rounded-full border border-border px-2 py-0.5 text-micro  text-muted-foreground">
           predict
         </span>
       </div>
@@ -67,7 +67,7 @@ export function WhatIfScore() {
               type="button"
               onClick={() => toggle(b)}
               disabled={n === 0}
-              className={`rounded-full border px-2.5 py-0.5 text-[11px] capitalize transition-colors disabled:opacity-40 ${
+              className={`rounded-full border px-2.5 py-0.5 text-micro capitalize transition-colors disabled:opacity-40 ${
                 resolve.has(b)
                   ? "border-primary bg-primary/10 text-primary"
                   : "border-border text-muted-foreground hover:bg-muted/40"
@@ -84,7 +84,7 @@ export function WhatIfScore() {
         <ScoreChip label="Now" score={cur} grade={data?.current.grade} />
         <span className="text-muted-foreground" aria-hidden>→</span>
         <ScoreChip label="Projected" score={proj} grade={data?.projected.grade} highlight={proj !== cur} />
-        <div className="ml-auto text-right text-[11px] text-muted-foreground">
+        <div className="ml-auto text-right text-micro text-muted-foreground">
           {resolved > 0 ? (
             <>
               fix <span className="font-mono text-foreground">{resolved}</span> findings ·{" "}
@@ -114,10 +114,10 @@ function ScoreChip({
     grade === "poor" ? "text-status-error" : grade === "fair" ? "text-status-warning" : "text-status-success";
   return (
     <div className={`rounded-md border px-3 py-1.5 ${highlight ? "border-primary" : "border-border"}`}>
-      <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="text-micro  text-muted-foreground">{label}</div>
       <div className="flex items-baseline gap-1.5">
         <span className={`text-lg font-semibold tabular-nums ${tone}`}>{score}</span>
-        {grade && <span className="text-[10px] capitalize text-muted-foreground">{grade}</span>}
+        {grade && <span className="text-micro capitalize text-muted-foreground">{grade}</span>}
       </div>
     </div>
   );

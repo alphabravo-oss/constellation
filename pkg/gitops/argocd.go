@@ -60,15 +60,15 @@ func (r Resource) Hash() string {
 
 // DriftFinding is one detected out-of-band change.
 type DriftFinding struct {
-	Source        string // "argocd" | "flux"
-	Application   string
-	Kind          string
-	Name          string
-	Namespace     string
-	DeclaredHash  string
-	ObservedHash  string
-	DiffSummary   string
-	Detected      time.Time
+	Source       string // "argocd" | "flux"
+	Application  string
+	Kind         string
+	Name         string
+	Namespace    string
+	DeclaredHash string
+	ObservedHash string
+	DiffSummary  string
+	Detected     time.Time
 }
 
 // ArgoCDClient hits an Argo CD API server.
@@ -99,14 +99,16 @@ func (a *ArgoCDClient) ListApplications(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("argocd: list apps: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("argocd: status %d", resp.StatusCode)
 	}
 	var doc struct {
 		Items []struct {
-			Metadata struct{ Name string `json:"name"` } `json:"metadata"`
+			Metadata struct {
+				Name string `json:"name"`
+			} `json:"metadata"`
 		} `json:"items"`
 	}
 	if err := json.Unmarshal(body, &doc); err != nil {
@@ -135,16 +137,16 @@ func (a *ArgoCDClient) ManagedResources(ctx context.Context, appName string) (de
 	if err != nil {
 		return nil, nil, fmt.Errorf("argocd: managed-resources: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 	if resp.StatusCode != 200 {
 		return nil, nil, fmt.Errorf("argocd: managed-resources status %d", resp.StatusCode)
 	}
 	var doc struct {
 		Items []struct {
-			Kind      string `json:"kind"`
-			Name      string `json:"name"`
-			Namespace string `json:"namespace"`
+			Kind        string `json:"kind"`
+			Name        string `json:"name"`
+			Namespace   string `json:"namespace"`
 			TargetState string `json:"targetState"` // declared JSON-as-string
 			LiveState   string `json:"liveState"`   // observed JSON-as-string
 		} `json:"items"`

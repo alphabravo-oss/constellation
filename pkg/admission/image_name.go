@@ -18,8 +18,8 @@ const AggregationWindow = 8 * time.Minute
 
 // defaultRegistries is the canonical list of registries treated as the docker default.
 var defaultRegistries = map[string]struct{}{
-	"https://docker.io/":           {},
-	"https://index.docker.io/":     {},
+	"https://docker.io/":            {},
+	"https://index.docker.io/":      {},
 	"https://registry-1.docker.io/": {},
 }
 
@@ -34,9 +34,9 @@ type ImageRef struct {
 
 // ContainerImage is one container-from-podspec ref, including sidecars and inits.
 type ContainerImage struct {
-	Name       string // container name from the pod spec
-	Role       string // "init" | "container" | "ephemeral"
-	Image      ImageRef
+	Name  string // container name from the pod spec
+	Role  string // "init" | "container" | "ephemeral"
+	Image ImageRef
 }
 
 // ParseReqImageName parses an image string in the same shape NeuVector's
@@ -87,9 +87,9 @@ func ParseReqImageName(image string) ImageRef {
 	}
 
 	// digest? — split @sha256:... first.
-	if idx := strings.Index(imgName, "@"); idx != -1 {
-		out.Repo = imgName[:idx]
-		out.Digest = imgName[idx+1:]
+	if repo, digest, ok := strings.Cut(imgName, "@"); ok {
+		out.Repo = repo
+		out.Digest = digest
 		// repo may still carry :tag before the @
 		if colon := strings.Index(out.Repo, ":"); colon != -1 {
 			out.Tag = out.Repo[colon+1:]
@@ -129,7 +129,7 @@ func ParseAdmissionContainers(req *admissionv1.AdmissionRequest) ([]ContainerIma
 		out = append(out, ContainerImage{Name: c.Name, Role: "container", Image: ParseReqImageName(c.Image)})
 	}
 	for _, c := range pod.Spec.EphemeralContainers {
-		out = append(out, ContainerImage{Name: c.Name, Role: "ephemeral", Image: ParseReqImageName(c.EphemeralContainerCommon.Image)})
+		out = append(out, ContainerImage{Name: c.Name, Role: "ephemeral", Image: ParseReqImageName(c.Image)})
 	}
 	return out, nil
 }

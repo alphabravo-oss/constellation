@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/alphabravocompany/constellation/internal/securefiles"
 )
 
 // clusterCmd builds the parent `cluster` command + its subcommands.
@@ -63,8 +65,9 @@ func clusterCreateCmd(serverFlag *string) *cobra.Command {
     --distro=k3s --region=us-east-1 --expiry=720h \
     --output cluster-init.yaml`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			outputWriter := commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
 			name := strings.TrimSpace(args[0])
-			cli, err := resolveClient(*serverFlag, email)
+			cli, err := resolveClient(cmd.Context(), *serverFlag, email)
 			if err != nil {
 				return err
 			}
@@ -79,27 +82,27 @@ func clusterCreateCmd(serverFlag *string) *cobra.Command {
 				body["ttl"] = expiry
 			}
 			var resp mintResponse
-			if err := cli.postJSON("/api/v1/cluster-init-bundles", body, &resp); err != nil {
+			if err := cli.postJSON(cmd.Context(), "/api/v1/cluster-init-bundles", body, &resp); err != nil {
 				return err
 			}
 			if output != "" {
-				if err := os.WriteFile(output, []byte(resp.YAML), 0o600); err != nil {
+				if err := securefiles.WritePath(cmd.Context(), output, []byte(resp.YAML)); err != nil {
 					return fmt.Errorf("write %s: %w", output, err)
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "Wrote %s (cluster_id=%s, expires_at=%s)\n",
+				outputWriter.printf("Wrote %s (cluster_id=%s, expires_at=%s)\n",
 					output, resp.ClusterID, resp.ExpiresAt.Format(time.RFC3339))
-				fmt.Fprintln(cmd.OutOrStdout(), "Install on the target cluster with:")
-				fmt.Fprintf(cmd.OutOrStdout(),
+				outputWriter.println("Install on the target cluster with:")
+				outputWriter.printf(
 					"  kubectl create ns constellation-system\n"+
 						"  kubectl -n constellation-system create secret generic constellation-init-bundle \\\n"+
 						"    --from-file=bundle.yaml=%s\n"+
 						"  helm install constellation deploy/charts/constellation -n constellation-system \\\n"+
 						"    --set initBundle.secretName=constellation-init-bundle\n", output)
-				return nil
+				return outputWriter.result()
 			}
 			// No --output: print to stdout.
-			fmt.Fprintln(cmd.OutOrStdout(), resp.YAML)
-			return nil
+			outputWriter.println(resp.YAML)
+			return outputWriter.result()
 		},
 	}
 	cmd.Flags().StringVar(&distro, "distro", "kubernetes", "Cluster distro (kubernetes|k3s|eks|gke|aks|openshift)")
@@ -116,22 +119,23 @@ func clusterListCmd(serverFlag *string) *cobra.Command {
 		Use:   "list",
 		Short: "List cluster init-bundles",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cli, err := resolveClient(*serverFlag, email)
+			outputWriter := commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
+			cli, err := resolveClient(cmd.Context(), *serverFlag, email)
 			if err != nil {
 				return err
 			}
 			var resp struct {
 				Bundles []bundleSummary `json:"bundles"`
 			}
-			if err := cli.getJSON("/api/v1/cluster-init-bundles", &resp); err != nil {
+			if err := cli.getJSON(cmd.Context(), "/api/v1/cluster-init-bundles", &resp); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "%-36s  %-24s  %-10s  %-25s\n", "ID", "NAME", "STATUS", "EXPIRES")
+			outputWriter.printf("%-36s  %-24s  %-10s  %-25s\n", "ID", "NAME", "STATUS", "EXPIRES")
 			for _, b := range resp.Bundles {
-				fmt.Fprintf(cmd.OutOrStdout(), "%-36s  %-24s  %-10s  %-25s\n",
+				outputWriter.printf("%-36s  %-24s  %-10s  %-25s\n",
 					b.ID, truncateStr(b.Name, 24), b.Status, b.ExpiresAt.Format(time.RFC3339))
 			}
-			return nil
+			return outputWriter.result()
 		},
 	}
 	cmd.Flags().StringVar(&email, "email", "", "Email to log into if not already authenticated")
@@ -148,23 +152,24 @@ func clusterRotateCmd(serverFlag *string) *cobra.Command {
 		Short: "Rotate a cluster init-bundle (revokes prior tokens, mints replacement)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cli, err := resolveClient(*serverFlag, email)
+			outputWriter := commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
+			cli, err := resolveClient(cmd.Context(), *serverFlag, email)
 			if err != nil {
 				return err
 			}
 			var resp mintResponse
-			if err := cli.postJSON("/api/v1/cluster-init-bundles/"+args[0]+"/rotate", nil, &resp); err != nil {
+			if err := cli.postJSON(cmd.Context(), "/api/v1/cluster-init-bundles/"+args[0]+"/rotate", nil, &resp); err != nil {
 				return err
 			}
 			if output != "" {
-				if err := os.WriteFile(output, []byte(resp.YAML), 0o600); err != nil {
+				if err := securefiles.WritePath(cmd.Context(), output, []byte(resp.YAML)); err != nil {
 					return err
 				}
-				fmt.Fprintf(cmd.OutOrStdout(), "Rotated. New bundle id=%s; wrote %s\n", resp.ID, output)
-				return nil
+				outputWriter.printf("Rotated. New bundle id=%s; wrote %s\n", resp.ID, output)
+				return outputWriter.result()
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), resp.YAML)
-			return nil
+			outputWriter.println(resp.YAML)
+			return outputWriter.result()
 		},
 	}
 	cmd.Flags().StringVar(&output, "output", "", "Write replacement YAML here")
@@ -179,16 +184,17 @@ func clusterRevokeCmd(serverFlag *string) *cobra.Command {
 		Short: "Revoke a cluster init-bundle (cascades to its scanner + runtime-agent tokens)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cli, err := resolveClient(*serverFlag, email)
+			outputWriter := commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
+			cli, err := resolveClient(cmd.Context(), *serverFlag, email)
 			if err != nil {
 				return err
 			}
 			var resp map[string]any
-			if err := cli.deleteJSON("/api/v1/cluster-init-bundles/"+args[0], &resp); err != nil {
+			if err := cli.deleteJSON(cmd.Context(), "/api/v1/cluster-init-bundles/"+args[0], &resp); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "Revoked bundle %s\n", args[0])
-			return nil
+			outputWriter.printf("Revoked bundle %s\n", args[0])
+			return outputWriter.result()
 		},
 	}
 	cmd.Flags().StringVar(&email, "email", "", "Email to log into if not already authenticated")
@@ -206,7 +212,7 @@ type authedClient struct {
 	http   *http.Client
 }
 
-func resolveClient(serverOverride, email string) (*authedClient, error) {
+func resolveClient(ctx context.Context, serverOverride, email string) (*authedClient, error) {
 	cfg, err := loadConfig()
 	if err != nil {
 		return nil, err
@@ -218,54 +224,45 @@ func resolveClient(serverOverride, email string) (*authedClient, error) {
 	if server == "" {
 		return nil, errors.New("server URL not set; pass --server or run `constellationctl login` first")
 	}
-	cli := &authedClient{server: server, token: cfg.Token, http: &http.Client{Timeout: 30 * time.Second}}
-	if cli.token == "" {
-		if email == "" {
-			return nil, errors.New("no cached token; pass --email to authenticate")
+	cli := &authedClient{server: server, token: cfg.Token, http: newAPIClient()}
+	if cli.token != "" {
+		return cli, nil
+	}
+	if email == "" {
+		return nil, errors.New("no cached token; pass --email to authenticate")
+	}
+	pw := os.Getenv("CONSTELLATION_PASSWORD")
+	if pw == "" {
+		if _, err := fmt.Fprint(os.Stderr, "Password: "); err != nil {
+			return nil, fmt.Errorf("write password prompt: %w", err)
 		}
-		pw := os.Getenv("CONSTELLATION_PASSWORD")
-		if pw == "" {
-			fmt.Fprint(os.Stderr, "Password: ")
-			if _, err := fmt.Fscan(os.Stdin, &pw); err != nil {
-				return nil, fmt.Errorf("read password: %w", err)
-			}
+		if _, err := fmt.Fscan(os.Stdin, &pw); err != nil {
+			return nil, fmt.Errorf("read password: %w", err)
 		}
-		payload := map[string]string{"email": email, "password": pw}
-		body, _ := json.Marshal(payload)
-		resp, err := http.Post(server+"/api/v1/auth/login", "application/json", bytes.NewReader(body))
-		if err != nil {
-			return nil, fmt.Errorf("login: %w", err)
-		}
-		defer resp.Body.Close()
-		rb, _ := io.ReadAll(resp.Body)
-		if resp.StatusCode != 200 {
-			return nil, fmt.Errorf("login failed (%d): %s", resp.StatusCode, rb)
-		}
-		var out struct {
-			Token string `json:"token"`
-		}
-		if err := json.Unmarshal(rb, &out); err != nil {
-			return nil, err
-		}
-		cli.token = out.Token
-		_ = saveConfig(&config{Server: server, Token: out.Token})
+	}
+	cli.token, err = loginToken(ctx, cli.http, server, email, pw)
+	if err != nil {
+		return nil, err
+	}
+	if err := saveConfig(ctx, &config{Server: server, Token: cli.token}); err != nil {
+		return nil, fmt.Errorf("save login: %w", err)
 	}
 	return cli, nil
 }
 
-func (c *authedClient) postJSON(path string, body any, out any) error {
-	return c.do(http.MethodPost, path, body, out)
+func (c *authedClient) postJSON(ctx context.Context, path string, body any, out any) error {
+	return c.do(ctx, http.MethodPost, path, body, out)
 }
 
-func (c *authedClient) getJSON(path string, out any) error {
-	return c.do(http.MethodGet, path, nil, out)
+func (c *authedClient) getJSON(ctx context.Context, path string, out any) error {
+	return c.do(ctx, http.MethodGet, path, nil, out)
 }
 
-func (c *authedClient) deleteJSON(path string, out any) error {
-	return c.do(http.MethodDelete, path, nil, out)
+func (c *authedClient) deleteJSON(ctx context.Context, path string, out any) error {
+	return c.do(ctx, http.MethodDelete, path, nil, out)
 }
 
-func (c *authedClient) do(method, path string, body any, out any) error {
+func (c *authedClient) do(ctx context.Context, method, path string, body any, out any) error {
 	var rdr io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -274,7 +271,7 @@ func (c *authedClient) do(method, path string, body any, out any) error {
 		}
 		rdr = bytes.NewReader(b)
 	}
-	req, err := http.NewRequestWithContext(context.Background(), method, c.server+path, rdr)
+	req, err := http.NewRequestWithContext(ctx, method, c.server+path, rdr)
 	if err != nil {
 		return err
 	}
@@ -286,10 +283,12 @@ func (c *authedClient) do(method, path string, body any, out any) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
-	rb, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("%s %s -> %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(rb)))
+	rb, err := readCommandResponse(resp)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("%s %s -> %d", method, path, resp.StatusCode)
 	}
 	if out != nil && len(rb) > 0 {
 		return json.Unmarshal(rb, out)

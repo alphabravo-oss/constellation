@@ -1,3 +1,5 @@
+// Package db owns the pgx connection pool. The pool is constructed once in a
+// binary's composition root (cmd/<binary>/main.go) and injected downward.
 package db
 
 import (
@@ -5,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -13,8 +16,22 @@ type DB struct {
 	pool *pgxpool.Pool
 }
 
+// Option customises the pool configuration before the pool is created.
+type Option func(*pgxpool.Config)
+
+// WithTracer installs the ConnConfig.Tracer (guide ch.02/05: a composite of
+// otelpgx spans and the DBQueryTracer metrics, see telemetry.PgxTracer).
+func WithTracer(tracer pgx.QueryTracer) Option {
+	return func(cfg *pgxpool.Config) { cfg.ConnConfig.Tracer = tracer }
+}
+
+// WithMaxConns overrides the pool ceiling.
+func WithMaxConns(n int32) Option {
+	return func(cfg *pgxpool.Config) { cfg.MaxConns = n }
+}
+
 // Connect opens a configured connection pool and pings the database.
-func Connect(ctx context.Context, databaseURL string) (*DB, error) {
+func Connect(ctx context.Context, databaseURL string, opts ...Option) (*DB, error) {
 	cfg, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("parsing database URL: %w", err)
@@ -25,6 +42,9 @@ func Connect(ctx context.Context, databaseURL string) (*DB, error) {
 	cfg.MaxConnLifetime = 30 * time.Minute
 	cfg.MaxConnIdleTime = 5 * time.Minute
 	cfg.HealthCheckPeriod = 30 * time.Second
+	for _, opt := range opts {
+		opt(cfg)
+	}
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {

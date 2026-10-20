@@ -9,10 +9,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
@@ -32,19 +34,24 @@ const objectRelPath = "bpf/runtime.bpf.o"
 // linuxLoader is the real-kernel loader. It owns the cilium/ebpf collection, the
 // attached links, and the ring-buffer reader goroutines.
 type linuxLoader struct {
-	opts    Options
-	coll    *ciliumebpf.Collection
-	links   []link.Link
-	rb      *ringbuf.Reader
-	closeMu sync.Mutex
-	closed  bool
-	wg      sync.WaitGroup
+	identityReady atomic.Bool
+	opts          Options
+	coll          *ciliumebpf.Collection
+	links         []link.Link
+	rb            *ringbuf.Reader
+	closeMu       sync.Mutex
+	closed        bool
+	wg            sync.WaitGroup
 }
 
 // newLoader resolves the object file, lifts the memlock rlimit, and prepares — but
 // does NOT yet attach — the eBPF collection. Attaching happens in Start so that the
 // caller can control program lifetime via ctx.
 func newLoader(opts Options) (loader, error) {
+	ringSize, err := validatedRingBufferSize(opts.RingBufferSize)
+	if err != nil {
+		return nil, err
+	}
 	if err := rlimit.RemoveMemlock(); err != nil {
 		return nil, fmt.Errorf("ebpf: remove memlock rlimit: %w", err)
 	}
@@ -56,11 +63,8 @@ func newLoader(opts Options) (loader, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ebpf: load collection spec %s: %w", objPath, err)
 	}
-	// Adjust the ring-buffer size if user asked for a non-default.
-	if opts.RingBufferSize > 0 {
-		if m, ok := spec.Maps["events"]; ok {
-			m.MaxEntries = uint32(opts.RingBufferSize)
-		}
+	if m, ok := spec.Maps["events"]; ok {
+		m.MaxEntries = ringSize
 	}
 	coll, err := ciliumebpf.NewCollection(spec)
 	if err != nil {
@@ -69,11 +73,25 @@ func newLoader(opts Options) (loader, error) {
 	return &linuxLoader{opts: opts, coll: coll}, nil
 }
 
+// Validate the effective size before changing rlimits or creating kernel maps.
+// Zero retains the public Options default; negative or overflowing sizes must
+// not become a different allocation through an unsigned conversion.
+func validatedRingBufferSize(requested int) (uint32, error) {
+	value := int64(requested)
+	if value == 0 {
+		value = 256 << 10
+	}
+	if value < 0 || value > math.MaxUint32 || value&(value-1) != 0 || value%int64(os.Getpagesize()) != 0 {
+		return 0, errors.New("ebpf: ring buffer size must fit uint32 and be a page-aligned positive power of two")
+	}
+	return uint32(value), nil
+}
+
 // resolveObjectPath walks a few candidate locations: $CONSTELLATION_BPF_OBJ,
 // ./bpf/runtime.bpf.o, and the directory of the current source file (dev mode).
 func resolveObjectPath() (string, error) {
-	if p := os.Getenv("CONSTELLATION_BPF_OBJ"); p != "" {
-		if _, err := os.Stat(p); err == nil {
+	if p := filepath.Clean(os.Getenv("CONSTELLATION_BPF_OBJ")); p != "." {
+		if _, err := os.Stat(p); err == nil { //nolint:gosec // G703: CONSTELLATION_BPF_OBJ is an operator-supplied override, reviewed like G304
 			return p, nil
 		}
 	}
@@ -94,9 +112,16 @@ func resolveObjectPath() (string, error) {
 // shared ring buffer, and launches the pump goroutine.
 func (l *linuxLoader) Start(ctx context.Context, cb func(Event)) error {
 	if l.opts.AttachExec {
+		before := len(l.links)
 		if err := l.attachTracepoint("sched", "sched_process_exec", "trace_sched_exec"); err != nil {
 			return err
 		}
+		execReady := len(l.links) > before
+		before = len(l.links)
+		if err := l.attachTracepoint("sched", "sched_process_exit", "trace_sched_exit"); err != nil {
+			l.opts.Logger.Warn("ebpf: exact process response unavailable", "err", err.Error())
+		}
+		l.identityReady.Store(execReady && len(l.links) > before && l.coll.Maps["process_starts"] != nil)
 	}
 	if l.opts.AttachFile {
 		_ = l.attachLSM("file_open", "lsm_file_open")
@@ -209,6 +234,7 @@ type recordHeader struct {
 	PPID     uint32
 	UID      uint32
 	GID      uint32
+	_        [4]byte // Explicit C alignment: binary.Read does not read implicit Go padding.
 	CgroupID uint64
 	TS       uint64 // ns since boot
 }
@@ -243,10 +269,15 @@ func decodeRecord(b []byte) (Event, bool) {
 		filename := readCStr(body[16 : 16+256])
 		argsBlob := readCStr(body[16+256 : 16+256+256])
 		args := splitArgs(argsBlob)
+		var startBootNS uint64
+		if len(body) >= 16+256+256+8 {
+			startBootNS = binary.LittleEndian.Uint64(body[16+256+256:])
+		}
 		return Event{
 			Kind: EventKindProcess, At: at,
 			Process: &ProcessEvent{
-				PID: hdr.PID, PPID: hdr.PPID, UID: hdr.UID, GID: hdr.GID,
+				StartBootNS: startBootNS,
+				PID:         hdr.PID, PPID: hdr.PPID, UID: hdr.UID, GID: hdr.GID,
 				CgroupID: hdr.CgroupID, Comm: comm, Filename: filename, Args: args,
 				ContainerID: containerIDFromCgroup(hdr.CgroupID),
 			},
@@ -365,4 +396,21 @@ func looksLikeContainerID(s string) bool {
 		return false
 	}
 	return true
+}
+
+func (l *linuxLoader) ProcessStartIdentity(pid uint32) (uint64, bool) {
+	l.closeMu.Lock()
+	defer l.closeMu.Unlock()
+	if l.closed || !l.identityReady.Load() {
+		return 0, false
+	}
+	starts := l.coll.Maps["process_starts"]
+	if starts == nil {
+		return 0, false
+	}
+	var value uint64
+	if starts.Lookup(pid, &value) != nil || value == 0 {
+		return 0, false
+	}
+	return value, true
 }

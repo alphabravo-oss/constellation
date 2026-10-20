@@ -1,22 +1,27 @@
-import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Clock, Download, Fingerprint, GitBranch, PackageSearch, Search, ShieldAlert } from "lucide-react";
+import { Download } from "lucide-react";
 import { toast } from "sonner";
 
 import { repositoryScanAttestations, repositoryScans, type RepositoryScan } from "@/api/client";
-import { useCluster } from "@/hooks/useCluster";
+import { INVENTORY_PAGE_SIZE, scanInventoryResponseValid, InventorySearch, useScanInventoryExport, useInventoryScope, useInventoryRoute, InventoryScopeState, InventoryLoadState, ScanInventoryContinuation } from "./inventory-workspace";
+import { Button } from "@/components/ui/button";
+import { ErrorState, LoadingState } from "@/components/ui/states";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { Collapse } from "@/components/ui/collapse";
 import { PageHeader } from "@/components/ui/page";
-import { StatCard } from "@/components/ui/stat-card";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { cn } from "@/lib/cn";
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
+import { Select, TextInput } from "@/components/ui/form";
+import { sentenceValue } from "@/components/ui/status-pill";
 
-const scanStatuses = ["all", "pending", "running", "completed", "failed", "paused", "canceled"];
+const scanStatuses = ["all", "pending", "running", "completed", "failed", "paused", "canceled", "not-queued"];
 
 const repositoryColumns: Column<RepositoryScan>[] = [
   {
-    id: "repository",
-    header: "Repository",
+    id: "repository", sort: () => 0, exportValue: item => item.repository_ref,
+    header: "Repository", kind: "name", size: 320, minSize: 240, wrap: true,
     cell: (item) => (
       <>
         <div className="flex flex-wrap items-center gap-1.5">
@@ -26,140 +31,128 @@ const repositoryColumns: Column<RepositoryScan>[] = [
           {item.critical_findings > 0 ? <Pill tone="danger">critical {item.critical_findings}</Pill> : null}
         </div>
         <div className="mt-2 break-all font-mono text-xs font-medium">{item.repository_ref}</div>
-        <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{item.repository_url || item.id}</div>
+        <div className="mt-1 break-all font-mono text-micro text-muted-foreground">{item.repository_url || item.id}</div>
       </>
     ),
   },
   {
-    id: "source",
-    header: "Source",
+    id: "source", sort: () => 0, exportValue: item => [item.branch, item.commit_sha || item.source_ref, item.workflow].filter(Boolean).join(" · "),
+    header: "Source", kind: "text", size: 220, maxSize: 360, wrap: true,
     className: "text-xs",
     cell: (item) => (
       <>
         <div className="font-medium">{item.branch || "branch unknown"}</div>
-        <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{shortCommit(item.commit_sha || item.source_ref)}</div>
+        <div className="mt-1 break-all font-mono text-micro text-muted-foreground">{shortCommit(item.commit_sha || item.source_ref)}</div>
         <div className="mt-1 text-muted-foreground">{item.workflow || "workflow unknown"}</div>
       </>
     ),
   },
   {
-    id: "packages",
-    header: "Packages",
+    id: "packages", sort: () => 0, exportValue: item => `${item.package_count} packages; ${item.open_findings} open findings; ${item.inventory_hash || ""}`,
+    header: "Packages", kind: "count", size: 180, minSize: 140, maxSize: 240, wrap: true,
     className: "text-xs",
     cell: (item) => (
       <>
         <div className="font-medium">{item.package_count} packages</div>
         <div className="mt-1 text-muted-foreground">{item.open_findings} open findings</div>
-        <div className="mt-1 truncate font-mono text-[10px] text-muted-foreground">{item.inventory_hash || "hash pending"}</div>
+        <div className="mt-1 truncate font-mono text-micro text-muted-foreground">{item.inventory_hash || "hash pending"}</div>
       </>
     ),
   },
   {
-    id: "scan",
-    header: "Scan",
+    id: "scan", sort: () => 0, exportValue: item => [item.latest_job_status, item.latest_observed_at || item.last_seen_at, item.latest_job_id].filter(Boolean).join(" · "),
+    header: "Scan", kind: "text", size: 220, minSize: 180, maxSize: 320, wrap: true,
     className: "text-xs",
     cell: (item) => (
       <>
         <ScanStatus status={item.latest_job_status} />
         <div className="mt-1 text-muted-foreground">{formatDate(item.latest_observed_at || item.last_seen_at)}</div>
-        <div className="mt-1 break-all font-mono text-[10px] text-muted-foreground">{item.latest_job_id || "job not queued"}</div>
+        <div className="mt-1 break-all font-mono text-micro text-muted-foreground">{item.latest_job_id || "job not queued"}</div>
       </>
     ),
   },
 ];
 
 export function RepositoryScansPage() {
-  const { clusterId, isLoading: clusterLoading } = useCluster();
-  const [query, setQuery] = useState("");
-  const [status, setStatus] = useState("all");
-  const [selectedID, setSelectedID] = useState<string | null>(null);
-
+  const scope = useInventoryScope();
+  const { clusterId } = scope;
+  const route = useInventoryRoute();
+  const { query, setQuery, selectedID, setSelectedID } = route;
+  const status = route.params.get("status") || "all";
+  const setStatus = (value: string) => route.update({ status: value === "all" ? null : value });
+  const sort = route.params.get("sort") || "scan";
+  const order = route.params.get("order") || "desc";
+  const validFilters = scanStatuses.includes(status) && ['repository', 'source', 'packages', 'scan'].includes(sort) && ["asc", "desc"].includes(order);
+  const request = { q: route.debouncedQuery || undefined, branch: route.params.get("branch") || undefined, workflow: route.params.get("workflow") || undefined, limit: INVENTORY_PAGE_SIZE, offset: route.offset, status: status === "all" ? undefined : status, sort, order: order as "asc" | "desc" };
   const q = useQuery({
-    queryKey: ["repository-scans"],
-    queryFn: () => repositoryScans.list({ limit: 500 }),
+    queryKey: ["repository-scans", scope.owner, clusterId, request],
+    queryFn: () => repositoryScans.list(request),
+    enabled: scope.ready && !route.debouncing && validFilters,
   });
+  const rawRows = q.data?.repository_scans ?? [];
+  const invalid = Boolean(q.data && (!Array.isArray(q.data.repository_scans) || !scanInventoryResponseValid(q.data, rawRows.length, route.offset, sort, order, ['total', 'packages', 'findings', 'critical_high', 'with_evidence', 'active_jobs', 'stale_evidence', 'attestations', 'trusted_attestations', 'unverified_attestations', 'branches', 'workflows'])));
+  const available = scope.ready && q.isSuccess && !route.debouncing && validFilters && !invalid;
+  const filtered = available ? rawRows : [];
+  const hasMore = available && q.data?.has_more === true;
+  const selected = filtered.find((item) => item.id === selectedID) ?? null;
+  const summary = available ? q.data!.summary! : {};
+  const scans = filtered;
 
-  const scans = useMemo(() => q.data?.repository_scans ?? [], [q.data?.repository_scans]);
-  const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return scans.filter((item) => {
-      if (status !== "all" && (item.latest_job_status || "not queued") !== status) return false;
-      if (!needle) return true;
-      return [
-        item.repository_ref,
-        item.repository_url ?? "",
-        item.source_ref ?? "",
-        item.commit_sha ?? "",
-        item.branch ?? "",
-        item.path ?? "",
-        item.workflow ?? "",
-        item.run_id ?? "",
-        item.latest_job_status ?? "",
-      ].some((value) => value.toLowerCase().includes(needle));
-    });
-  }, [query, scans, status]);
-  const selected = filtered.find((item) => item.id === selectedID) ?? filtered[0] ?? null;
-  const summary = useMemo(() => summarize(scans), [scans]);
-
-  if (clusterLoading) return <p className="text-sm text-muted-foreground">Loading cluster...</p>;
+  const matching = useScanInventoryExport({ context: JSON.stringify([scope.owner, clusterId, request]), disabled: !available || q.isFetching, download: shouldDownload => repositoryScans.exportCSV(request, shouldDownload) });
+  if (!scope.ready) return <div className="space-y-4"><PageHeader title="Repositories" description="Organization-wide repository evidence; the selected cluster provides navigation context only." /><InventoryScopeState scope={scope} /></div>;
 
   return (
     <div className="space-y-4" data-testid="repository-scans-page" data-cluster-id={clusterId ?? ""}>
       <PageHeader
         title="Repositories"
-        description="Source-repository scans — package inventory, scan jobs, findings, and provenance attestations."
+        description="Source-repository scans: packages, scan jobs, findings and provenance attestations."
+        actions={<Button disabled={q.isFetching || route.debouncing || !scope.ready || !validFilters} onClick={() => void q.refetch()}>Refresh</Button>}
       />
 
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5" data-testid="repository-summary">
-        <StatCard label="Repositories" value={summary.total.toLocaleString()} icon={<GitBranch className="h-3.5 w-3.5" />} hint={`${summary.branches} branches · ${summary.workflows} workflows`} />
-        <StatCard label="Packages" value={summary.packages.toLocaleString()} icon={<PackageSearch className="h-3.5 w-3.5" />} hint={`${summary.withEvidence} with evidence`} />
-        <StatCard label="Open Findings" value={summary.findings.toLocaleString()} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={summary.criticalHigh > 0 ? "high" : "neutral"} hint={`${summary.criticalHigh} critical/high`} />
-        <StatCard label="Active Jobs" value={summary.activeJobs.toLocaleString()} icon={<Clock className="h-3.5 w-3.5" />} hint={`${summary.staleEvidence} stale evidence`} />
-        <StatCard label="Attestations" value={summary.attestations.toLocaleString()} icon={<Fingerprint className="h-3.5 w-3.5" />} hint={`${summary.trustedAttestations} trusted · ${summary.unverifiedAttestations} unverified`} />
-      </section>
-
-      <section className="rounded-lg border border-border bg-card p-3">
-        <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_170px]">
-          <label className="relative block">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search repository, commit, branch, workflow, run"
-              className="w-full rounded-md border border-border bg-background py-2 pl-9 pr-3 text-sm"
-              data-testid="repository-search"
-            />
-          </label>
-          <select
-            value={status}
-            onChange={(event) => setStatus(event.target.value)}
-            className="rounded-md border border-border bg-background p-2 text-sm"
-            data-testid="repository-status-filter"
-          >
-            {scanStatuses.map((item) => (
-              <option key={item} value={item}>{item === "all" ? "All jobs" : item}</option>
-            ))}
-          </select>
-        </div>
-      </section>
-
+      <VerdictBanner status={q.isError || invalid || !validFilters ? "degraded" : "info"} title={q.isError || invalid || !validFilters ? "Repository scans are unavailable" : !available ? "Loading repository scans" : summary.total ? `${summary.total.toLocaleString()} matching repositories` : "No matching repository scans"}
+        numbers={available ? [
+          { label: "repositories", value: summary.total.toLocaleString(), title: `${summary.branches} branches · ${summary.workflows} workflows` },
+          { label: "open findings", value: summary.findings.toLocaleString(), tone: summary.critical_high > 0 ? "high" : "default", title: `${summary.critical_high} critical or high` },
+          { label: "active jobs", value: summary.active_jobs.toLocaleString() },
+          { label: "attestations", value: summary.attestations.toLocaleString(), title: `${summary.trusted_attestations} trusted · ${summary.unverified_attestations} unverified` },
+        ] : undefined}
+        detail={<div className="space-y-1">
+          {available && <p data-testid="repository-summary">Matching repositories {summary.total.toLocaleString()} ({summary.branches} branches · {summary.workflows} workflows) · packages {summary.packages.toLocaleString()} ({summary.with_evidence} with evidence) · open findings {summary.findings.toLocaleString()} ({summary.critical_high} critical/high) · active jobs {summary.active_jobs.toLocaleString()} ({summary.stale_evidence} stale evidence) · attestations {summary.attestations.toLocaleString()} ({summary.trusted_attestations} trusted · {summary.unverified_attestations} unverified)</p>}
+          <p>Organization-wide repository evidence; the selected cluster provides navigation context only. Matching CSV includes fixed inventory columns across all pages (up to 100,000 records).</p>
+        </div>} />
+      {q.isFetching && q.isSuccess && <p role="status" className="text-sm text-muted-foreground">Refreshing scan inventory…</p>}
+      {matching.status}
+      {!validFilters && <ErrorState title="The requested server filter or sort is invalid. Choose a listed value to recover." action={<Button onClick={() => route.update({ sort: null, order: null, status: null })}>Reset filters and sort</Button>} />}
+      {available && selectedID && !selected && <ErrorState title="The selected record is unavailable on this page or hidden by its filters." action={<Button onClick={() => setSelectedID(null)}>Clear selection</Button>} />}
       <section className="flex flex-col gap-4">
-        <div data-testid="repository-table">
-          <DataTable
+        <div data-testid={available ? "repository-table" : "repository-table-loading"}>
+          {validFilters && (q.isError || invalid) ? <InventoryLoadState label="Repository scans" query={q} invalid={invalid} debouncing={route.debouncing} /> : validFilters ? <DataTable
             rows={filtered}
+            pagination={false}
+            manualSorting
+            sort={{ id: sort, dir: order as "asc" | "desc" }}
+            onSortChange={next => route.update({ sort: next?.id ?? null, order: next?.dir ?? null })}
+            preferencesKey="repository-scans-inventory"
+            toolbar={<>
+              <InventorySearch value={query} onChange={setQuery} label="Search repositories" placeholder="Search repository, URL or commit" testId="repository-search" />
+              <Select value={status} onChange={(event) => setStatus(event.target.value)} className="h-9" data-testid="repository-status-filter" aria-label="Scan job status filter">
+                {scanStatuses.map((item) => <option key={item} value={item}>{item === "all" ? "Any job status" : sentenceValue(item)}</option>)}
+              </Select>
+              <TextInput aria-label="Branch filter" placeholder="Branch" className="h-9 w-32" value={route.params.get("branch") ?? ""} onChange={event => route.update({ branch: event.target.value }, true, true)} />
+              <TextInput aria-label="Workflow filter" placeholder="Workflow" className="h-9 w-32" value={route.params.get("workflow") ?? ""} onChange={event => route.update({ workflow: event.target.value }, true, true)} />
+            </>}
+            exportOptions={[matching.option]}
+            exportFileName="constellation-repository-scans-server-page"
+            exportLabel="This page"
             columns={repositoryColumns}
             rowKey={(item) => item.id}
             onRowClick={(item) => setSelectedID(item.id)}
             selected={selected ? new Set([selected.id]) : new Set<string>()}
-            emptyState={
-              <div className="px-3 py-8 text-center text-xs text-muted-foreground">
-                {q.isPending ? "Loading repository scans..." : "No repository scans match the current filters."}
-              </div>
-            }
-          />
+            emptyState={!available ? <InventoryLoadState label="Repository scans" query={q} invalid={invalid} debouncing={route.debouncing} /> : <div className="px-3 py-8 text-center text-sm text-muted-foreground">No repository scans match the current filters.</div>}
+          /> : null}
         </div>
-
-        <RepositoryPreview item={selected} />
+        {available && <ScanInventoryContinuation total={q.data?.total} page={route.page} rows={scans.length} matching={filtered.length} hasMore={hasMore} onPage={route.setPage} />}
+        {selected && <Collapse label="Selected record summary"><RepositoryPreview item={selected} /></Collapse>}
       </section>
     </div>
   );
@@ -237,27 +230,31 @@ function RepositoryPreview({ item }: { item: RepositoryScan | null }) {
 }
 
 function AttestationHistoryPanel({ item }: { item: RepositoryScan }) {
+  const identity = useTablePreferencesIdentity();
+  const owner = `${identity?.org_id}:${identity?.user_id}`;
   const attestationsQ = useQuery({
-    queryKey: ["repository-scan-attestations", item.id],
+    queryKey: ["repository-scan-attestations", owner, item.id],
     queryFn: () => repositoryScans.attestations(item.id),
     enabled: Boolean(item.latest_attestation),
   });
   const latestID = item.latest_attestation?.id ?? "";
   const verificationsQ = useQuery({
-    queryKey: ["repository-scan-attestation-verifications", latestID],
+    queryKey: ["repository-scan-attestation-verifications", owner, latestID],
     queryFn: () => repositoryScanAttestations.verifications(latestID),
     enabled: Boolean(latestID),
   });
-  const attestations = attestationsQ.data?.attestations ?? [];
-  const verifications = verificationsQ.data?.verifications ?? [];
+  const attestationMismatch = Boolean(attestationsQ.data?.attestations.some(attestation => attestation.scan_target_id !== item.id));
+  const verificationMismatch = Boolean(verificationsQ.data?.verifications.some(verification => verification.attestation_id !== latestID));
+  const attestations = !attestationsQ.isFetching && !attestationsQ.isError && !attestationMismatch ? attestationsQ.data?.attestations ?? [] : [];
+  const verifications = !verificationsQ.isFetching && !verificationsQ.isError && !verificationMismatch ? verificationsQ.data?.verifications ?? [] : [];
   if (!item.latest_attestation) return null;
   return (
     <div className="mt-4 space-y-3 border-t border-border pt-4" data-testid="repository-attestation-history">
       <div className="flex items-center justify-between gap-2">
         <h4 className="text-xs font-semibold">Attestation history</h4>
-        {attestationsQ.isFetching ? <span className="text-[10px] text-muted-foreground">Loading...</span> : null}
+        {attestationsQ.isFetching ? <span className="text-micro text-muted-foreground">Loading...</span> : null}
       </div>
-      {attestations.length > 0 ? (
+      {attestationsQ.isError || attestationMismatch ? <ErrorState title="Attestation history is unavailable." action={<Button onClick={() => void attestationsQ.refetch()}>Retry attestations</Button>} /> : attestationsQ.isFetching || attestationsQ.isPending ? <LoadingState label="Loading attestation history…" /> : attestations.length > 0 ? (
         <div className="space-y-2">
           {attestations.slice(0, 5).map((attestation) => (
             <div key={attestation.id} className="rounded-md border border-border p-2 text-xs">
@@ -290,7 +287,7 @@ function AttestationHistoryPanel({ item }: { item: RepositoryScan }) {
 
       <div>
         <h4 className="text-xs font-semibold">Verification attempts</h4>
-        {verifications.length > 0 ? (
+        {verificationsQ.isError || verificationMismatch ? <ErrorState title="Verification attempts are unavailable." action={<Button onClick={() => void verificationsQ.refetch()}>Retry verifications</Button>} /> : verifications.length > 0 ? (
           <div className="mt-2 space-y-2">
             {verifications.slice(0, 5).map((verification) => (
               <div key={verification.id} className="rounded-md border border-border p-2 text-xs">
@@ -319,25 +316,6 @@ function AttestationHistoryPanel({ item }: { item: RepositoryScan }) {
   );
 }
 
-function summarize(items: RepositoryScan[]) {
-  const branches = new Set(items.map((item) => item.branch).filter(Boolean));
-  const workflows = new Set(items.map((item) => item.workflow).filter(Boolean));
-  return {
-    total: items.length,
-    branches: branches.size,
-    workflows: workflows.size,
-    packages: items.reduce((sum, item) => sum + item.package_count, 0),
-    withEvidence: items.filter((item) => !!item.latest_evidence_id).length,
-    findings: items.reduce((sum, item) => sum + item.open_findings, 0),
-    criticalHigh: items.reduce((sum, item) => sum + item.critical_findings + item.high_findings, 0),
-    activeJobs: items.filter((item) => item.latest_job_status === "pending" || item.latest_job_status === "running").length,
-    staleEvidence: items.filter((item) => isStale(item.latest_observed_at || item.last_seen_at)).length,
-    attestations: items.filter((item) => !!item.latest_attestation).length,
-    trustedAttestations: items.filter((item) => item.latest_attestation?.trusted).length,
-    unverifiedAttestations: items.filter((item) => item.latest_attestation?.verification_status === "unverified").length,
-  };
-}
-
 function ScanStatus({ status }: { status?: string }) {
   const value = status || "not queued";
   let tone: "neutral" | "accent" | "warn" | "danger" = "neutral";
@@ -358,7 +336,7 @@ function AttestationStatus({ status, trusted }: { status: string; trusted: boole
 function MiniMetric({ label, value, tone }: { label: string; value: number; tone: "normal" | "warn" | "danger" }) {
   return (
     <div className={cn("rounded-md border border-border p-2", tone === "danger" && "border-destructive/40 bg-destructive/10", tone === "warn" && "border-status-warning/40 bg-status-warning/10")}>
-      <div className="text-[10px] text-muted-foreground">{label}</div>
+      <div className="text-micro text-muted-foreground">{label}</div>
       <div className="mt-1 text-lg font-semibold">{value}</div>
     </div>
   );
@@ -377,7 +355,7 @@ function Pill({ children, tone }: { children: ReactNode; tone: "neutral" | "acce
   return (
     <span
       className={cn(
-        "inline-flex h-5 items-center rounded px-1.5 text-[10px] font-medium",
+        "inline-flex h-5 items-center rounded px-1.5 text-micro font-medium",
         tone === "neutral" && "bg-muted text-muted-foreground",
         tone === "accent" && "bg-primary/10 text-primary",
         tone === "warn" && "bg-status-warning/10 text-status-warning",

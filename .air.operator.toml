@@ -1,0 +1,21 @@
+# Air live-reload for constellation-operator. One file per binary (guide ch.04).
+root = "."
+tmp_dir = "tmp/operator"
+
+[build]
+  cmd = "go build -trimpath -ldflags=\"-X github.com/alphabravocompany/constellation/pkg/version.Version=dev-air -X github.com/alphabravocompany/constellation/pkg/version.Commit=$(git rev-parse --short HEAD 2>/dev/null || echo dev) -X github.com/alphabravocompany/constellation/pkg/version.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)\" -o tmp/operator/constellation-operator ./cmd/constellation-operator"
+  bin = "tmp/operator/constellation-operator"
+  entrypoint = ["env", "CONSTELLATION_DEV_MODE=true", "tmp/operator/constellation-operator", "--leader-elect=false", "--metrics-bind-address=:18082", "--health-probe-bind-address=:18083"]
+  include_ext = ["go", "yaml", "sql"]
+  exclude_dir = ["tmp", "bin", "frontend", "node_modules", "deploy", "docs", "scripts", "third_party", "tests", "artifacts", "test-results", "db/migrations/README.md", "internal/runtime/ebpf/bpf"]
+  exclude_regex = ["_test\\.go$"]
+  delay = 1000
+  stop_on_error = true
+  send_interrupt = true
+  kill_delay = 3000
+
+[log]
+  time = true
+
+[misc]
+  clean_on_exit = false

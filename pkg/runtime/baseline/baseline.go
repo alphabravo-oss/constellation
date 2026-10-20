@@ -51,8 +51,8 @@ type WorkloadBaseline struct {
 	Mode       Mode
 	LearnUntil time.Time
 
-	Processes map[string]int    // process basename → observation count
-	Endpoints map[string]int    // "METHOD path" → observation count
+	Processes map[string]int // process basename → observation count
+	Endpoints map[string]int // "METHOD path" → observation count
 
 	mu sync.RWMutex
 }
@@ -69,9 +69,9 @@ type Alert struct {
 
 // Engine drives the lifecycle. Caller persists baselines and feeds samples in.
 type Engine struct {
-	mu         sync.Mutex
-	baselines  map[string]*WorkloadBaseline
-	now        func() time.Time
+	mu        sync.Mutex
+	baselines map[string]*WorkloadBaseline
+	now       func() time.Time
 }
 
 // NewEngine constructs an Engine. Pass nil for `now` to use time.Now.

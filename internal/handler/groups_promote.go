@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/google/uuid"
 
 	"github.com/alphabravocompany/constellation/pkg/audit"
@@ -31,7 +33,7 @@ func (h *Groups) Promote(w http.ResponseWriter, r *http.Request) {
 	subj, _ := SubjectFrom(r.Context())
 	clusterArg, err := parseClusterIDParam(r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	var body struct {
@@ -40,32 +42,32 @@ func (h *Groups) Promote(w http.ResponseWriter, r *http.Request) {
 		To        string `json:"to"`        // optional; defaults to the next maturity mode
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid body"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid body")
 		return
 	}
 	from := group.Mode(body.From)
 	if !validGroupMode(from) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "from must be discover, monitor, or protect"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "from must be discover, monitor, or protect")
 		return
 	}
 	to := group.Mode(body.To)
 	if to == "" {
 		to = nextMode(from)
 		if to == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "from must be discover or monitor when to is omitted"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "from must be discover or monitor when to is omitted")
 			return
 		}
 	}
 	if !validGroupMode(to) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "to must be discover, monitor, or protect"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "to must be discover, monitor, or protect")
 		return
 	}
 	if from == to {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "from and to must differ"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "from and to must differ")
 		return
 	}
 	if body.Dimension != "policy" && body.Dimension != "profile" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "dimension must be policy or profile"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "dimension must be policy or profile")
 		return
 	}
 
@@ -82,22 +84,29 @@ UPDATE groups
    AND policy_mode = $3
    AND cfg_type <> 'learned'`, subj.OrgID, clusterArg, string(from), string(to))
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		changed = int(tag.RowsAffected())
 	} else {
 		// Profile mode: change each affected group AND push the new baseline mode down to
 		// its member workloads (matching the per-group Update propagation).
-		rows, err := h.db.Pool().Query(r.Context(), `
+		tx, err := h.db.Pool().Begin(r.Context())
+		if err != nil {
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		defer tx.Rollback(r.Context())
+		rows, err := tx.Query(r.Context(), `
 SELECT id, cluster_id, members
   FROM groups
  WHERE org_id = $1
    AND ($2::uuid IS NULL OR cluster_id IS NULL OR cluster_id = $2)
    AND profile_mode = $3
-   AND cfg_type <> 'learned'`, subj.OrgID, clusterArg, string(from))
+   AND cfg_type <> 'learned'
+ ORDER BY id FOR UPDATE`, subj.OrgID, clusterArg, string(from))
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		type affected struct {
@@ -111,25 +120,37 @@ SELECT id, cluster_id, members
 			var membersRaw []byte
 			if err := rows.Scan(&a.id, &a.clusterID, &membersRaw); err != nil {
 				rows.Close()
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 				return
 			}
 			_ = json.Unmarshal(membersRaw, &a.members)
 			a.members = normalizeGroupMembers(a.members)
 			groups = append(groups, a)
 		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		rows.Close()
 		for _, a := range groups {
-			if _, err := h.db.Pool().Exec(r.Context(),
+			if _, err := tx.Exec(r.Context(),
 				`UPDATE groups SET profile_mode = $2, updated_at = NOW() WHERE id = $1 AND org_id = $3`,
 				a.id, string(to), subj.OrgID); err != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 				return
 			}
 			if a.clusterID != nil {
-				_ = h.propagateGroupProfileMode(r.Context(), subj.OrgID, *a.clusterID, a.members, to)
+				if err := propagateGroupProfileMode(r.Context(), tx, subj.OrgID, *a.clusterID, a.members, to); err != nil {
+					apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
+					return
+				}
 			}
 			changed++
+		}
+		if err := tx.Commit(r.Context()); err != nil {
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
+			return
 		}
 	}
 

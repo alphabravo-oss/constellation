@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/alphabravocompany/constellation/internal/db"
+	"github.com/alphabravocompany/constellation/internal/flowrollup"
 	"github.com/alphabravocompany/constellation/internal/handler"
 )
 
@@ -32,22 +33,21 @@ import (
 // leader-gated so replicas don't race each other or the rollup watermark.
 type FlowBackfiller struct {
 	db       *db.DB
-	rollup   *RollupRefresher
 	interval time.Duration
 	window   time.Duration // trailing scan window
 	limit    int           // max candidate rows scanned per pass (bounded work)
 	batch    int           // rows per UPDATE batch
 }
 
-// NewFlowBackfiller builds a backfiller. The rollup refresher is shared so the
-// backfill can refold the buckets it disturbs. Tunables are env-overridable so
+// NewFlowBackfiller builds a backfiller. Relabels and affected rollups commit
+// together. Tunables are env-overridable so
 // operators can dial the DB load without a rebuild:
 //
 //	CONSTELLATION_NETWORK_FLOW_BACKFILL_INTERVAL  (duration, default 60s; <=0 disables)
 //	CONSTELLATION_NETWORK_FLOW_BACKFILL_WINDOW    (duration, default 30m)
 //	CONSTELLATION_NETWORK_FLOW_BACKFILL_LIMIT     (int, default 5000 candidate rows/pass)
-func NewFlowBackfiller(d *db.DB, rr *RollupRefresher) *FlowBackfiller {
-	b := &FlowBackfiller{db: d, rollup: rr, interval: time.Minute, window: 30 * time.Minute, limit: 5000, batch: 500}
+func NewFlowBackfiller(d *db.DB) *FlowBackfiller {
+	b := &FlowBackfiller{db: d, interval: time.Minute, window: 30 * time.Minute, limit: 5000, batch: 500}
 	if v := strings.TrimSpace(os.Getenv("CONSTELLATION_NETWORK_FLOW_BACKFILL_INTERVAL")); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			b.interval = d
@@ -91,19 +91,13 @@ func (b *FlowBackfiller) Start(ctx context.Context) {
 
 func (b *FlowBackfiller) runOnce(ctx context.Context) {
 	start := time.Now()
-	rewritten, from, to, err := b.backfill(ctx)
+	rewritten, _, _, err := b.backfill(ctx)
 	if err != nil {
 		slog.Warn("network flow backfill", slog.String("err", err.Error()))
 		return
 	}
 	if rewritten == 0 {
 		return
-	}
-	// Raw rows moved off "cluster/<ip>"; the rollup pre-aggregate still holds
-	// their counts under the old labels. Refold the disturbed window so the two
-	// agree again.
-	if err := b.rollup.RefoldWindow(ctx, from, to); err != nil {
-		slog.Warn("network flow backfill refold", slog.String("err", err.Error()))
 	}
 	slog.Info("network flow backfill",
 		slog.Int("rewritten", rewritten),
@@ -112,16 +106,17 @@ func (b *FlowBackfiller) runOnce(ctx context.Context) {
 
 // candidate is one raw flow row that still carries a "cluster/<ip>" label.
 type candidate struct {
-	id      uuid.UUID
-	orgID   uuid.UUID
-	src     string
-	dst     string
-	srcAddr string
-	dstAddr string
-	at      time.Time
+	id        uuid.UUID
+	orgID     uuid.UUID
+	clusterID uuid.UUID
+	src       string
+	dst       string
+	srcAddr   string
+	dstAddr   string
+	at        time.Time
 }
 
-// backfill runs one pass: scan recent cluster/<ip> rows, re-resolve them per org
+// backfill runs one pass: scan recent cluster/<ip> rows, re-resolve them per cluster
 // via the handler IP resolver, and UPDATE the movers. Returns the number of rows
 // rewritten and the [from, to] `at` span they covered (for the caller's refold).
 func (b *FlowBackfiller) backfill(ctx context.Context) (rewritten int, from, to time.Time, err error) {
@@ -132,17 +127,19 @@ func (b *FlowBackfiller) backfill(ctx context.Context) (rewritten int, from, to 
 	// volume) and never reaching the resolvable stragglers. Newest-first so the
 	// most recently-observed misses heal first.
 	rows, err := b.db.Pool().Query(ctx, `
-SELECT f.id, f.org_id, f.src_workload, f.dst_workload,
+SELECT f.id, f.org_id, f.cluster_id, f.src_workload, f.dst_workload,
        COALESCE(f.src_addr, ''), COALESCE(f.dst_addr, ''), f.at
   FROM network_flows f
  WHERE f.at >= now() - ($1::text || ' seconds')::interval
    AND (f.src_workload LIKE 'cluster/%' OR f.dst_workload LIKE 'cluster/%')
    AND (
      EXISTS (SELECT 1 FROM pod_ips p
-              WHERE p.org_id = f.org_id
+             WHERE p.org_id = f.org_id
+                AND p.cluster_id = f.cluster_id
                 AND host(p.ip) IN (substring(f.src_workload from 9), substring(f.dst_workload from 9)))
      OR EXISTS (SELECT 1 FROM cluster_services s
                  WHERE s.org_id = f.org_id
+                   AND s.cluster_id = f.cluster_id
                    AND host(s.cluster_ip) IN (substring(f.src_workload from 9), substring(f.dst_workload from 9)))
    )
  ORDER BY f.at DESC
@@ -154,7 +151,7 @@ SELECT f.id, f.org_id, f.src_workload, f.dst_workload,
 	var all []candidate
 	for rows.Next() {
 		var c candidate
-		if err := rows.Scan(&c.id, &c.orgID, &c.src, &c.dst, &c.srcAddr, &c.dstAddr, &c.at); err != nil {
+		if err := rows.Scan(&c.id, &c.orgID, &c.clusterID, &c.src, &c.dst, &c.srcAddr, &c.dstAddr, &c.at); err != nil {
 			rows.Close()
 			return 0, time.Time{}, time.Time{}, err
 		}
@@ -168,11 +165,12 @@ SELECT f.id, f.org_id, f.src_workload, f.dst_workload,
 		return 0, time.Time{}, time.Time{}, nil
 	}
 
-	// Group by org so the resolver's batched pod_ips/cluster_services lookup runs
-	// once per org (usually one org in single-tenant deployments).
-	byOrg := map[uuid.UUID][]int{}
+	// Group by org and cluster so overlapping pod/service IPs never cross
+	// cluster boundaries during a historical relabel pass.
+	byScope := map[struct{ orgID, clusterID uuid.UUID }][]int{}
 	for i := range all {
-		byOrg[all[i].orgID] = append(byOrg[all[i].orgID], i)
+		key := struct{ orgID, clusterID uuid.UUID }{all[i].orgID, all[i].clusterID}
+		byScope[key] = append(byScope[key], i)
 	}
 
 	updates := make([]flowRelabel, 0, b.batch)
@@ -188,8 +186,8 @@ SELECT f.id, f.org_id, f.src_workload, f.dst_workload,
 		return nil
 	}
 
-	for _, idxs := range byOrg {
-		// Feed the org's rows to the resolver as synthetic ingest rows; it collects
+	for scope, idxs := range byScope {
+		// Feed the cluster's rows to the resolver as synthetic ingest rows; it collects
 		// their distinct addresses (and IPs embedded in cluster/<ip> labels) and
 		// resolves them in two batched SELECTs.
 		req := make(handler.FlowIngestRequest, len(idxs))
@@ -203,7 +201,7 @@ SELECT f.id, f.org_id, f.src_workload, f.dst_workload,
 				At:          c.at,
 			}
 		}
-		resolver := handler.NewIPResolver(ctx, b.db, all[idxs[0]].orgID, req)
+		resolver := handler.NewIPResolverForCluster(ctx, b.db, scope.orgID, scope.clusterID, req)
 		for _, i := range idxs {
 			c := all[i]
 			newSrc, newDst, changed := relabelFlow(resolver.Resolve, c.src, c.dst, c.srcAddr, c.dstAddr, c.at)
@@ -257,19 +255,42 @@ type flowRelabel struct {
 // the (id, at) primary key rather than ctid, so an UPDATE is stable even if the
 // row moved partitions or the table was vacuumed between scan and write.
 func applyRelabels(ctx context.Context, pool *pgxpool.Pool, ops []flowRelabel) error {
+	if len(ops) == 0 {
+		return nil
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(context.Background())
+	_, prunedBefore, err := flowrollup.Lock(ctx, tx, true)
+	if err != nil {
+		return err
+	}
+	from, to := ops[0].at, ops[0].at
 	b := &pgx.Batch{}
 	for _, op := range ops {
-		b.Queue(`UPDATE network_flows
-		            SET src_workload = $1, dst_workload = $2
-		          WHERE id = $3 AND at = $4`,
-			op.src, op.dst, op.id, op.at)
+		if op.at.Before(from) {
+			from = op.at
+		}
+		if op.at.After(to) {
+			to = op.at
+		}
+		b.Queue(`UPDATE network_flows SET src_workload=$1, dst_workload=$2
+     WHERE id=$3 AND at=$4 AND at >= $5`, op.src, op.dst, op.id, op.at, prunedBefore)
 	}
-	br := pool.SendBatch(ctx, b)
-	defer br.Close()
+	br := tx.SendBatch(ctx, b)
 	for range ops {
 		if _, err := br.Exec(); err != nil {
+			_ = br.Close()
 			return err
 		}
 	}
-	return nil
+	if err := br.Close(); err != nil {
+		return err
+	}
+	if err := flowrollup.Rebuild(ctx, tx, from, to); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }

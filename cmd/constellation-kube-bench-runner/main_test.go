@@ -20,7 +20,7 @@ func TestPostReportShapesPayload(t *testing.T) {
 		gotQuery = r.URL.RawQuery
 		gotBody, _ = io.ReadAll(r.Body)
 		w.WriteHeader(http.StatusOK)
-		_, _ = io.WriteString(w, `{"inserted":1}`)
+		_, _ = io.WriteString(w, `{"ingested":1}`)
 	}))
 	defer srv.Close()
 

@@ -1,4 +1,4 @@
-// Wave L4 — screenshot the Process Baselines kanban + the card-detail drawer.
+// Process inventory, lifecycle view, and dedicated rule authoring (read-only Cancel).
 //
 import { test, expect } from "@playwright/test";
 import { login } from "./utils";
@@ -9,7 +9,7 @@ test.beforeEach(async ({ page }) => {
   await login(page, { theme: "dark" });
 });
 
-test("baselines page · main kanban + drawer", async ({ page }) => {
+test("baseline inventory and lifecycle link to dedicated scoped rule forms", async ({ page }) => {
   // Resolve the first demo cluster id through the cluster picker.
   await page.goto("/clusters");
   await page.waitForLoadState("networkidle", { timeout: 12_000 }).catch(() => undefined);
@@ -23,8 +23,10 @@ test("baselines page · main kanban + drawer", async ({ page }) => {
 
   await page.goto(`/clusters/${clusterId}/runtime/baselines`);
   await page.waitForLoadState("networkidle", { timeout: 12_000 }).catch(() => undefined);
-  await page.locator("[data-testid='baselines-columns']").waitFor({ timeout: 12_000 });
-  await page.waitForTimeout(500);
+  await expect(page.getByTestId("baselines-table")).toBeVisible({ timeout: 12_000 });
+  await page.getByRole("tab", { name: "Lifecycle", exact: true }).click();
+  await expect(page).toHaveURL(new RegExp(`/clusters/${clusterId}/runtime/baselines\\?tab=lifecycle$`));
+  await expect(page.getByTestId("baselines-columns")).toBeVisible();
 
   await page.screenshot({
     path: "e2e/screens-baseline/main.png",
@@ -32,12 +34,13 @@ test("baselines page · main kanban + drawer", async ({ page }) => {
     animations: "disabled",
   });
 
-  // Click the first card → drawer
+  // Open the first exact workload profile from the lifecycle view.
   const firstCard = page.locator("[data-testid^='baselines-card-']").first();
   await firstCard.waitFor({ timeout: 10_000 });
   await firstCard.click();
   await page.locator("[data-testid='baselines-drawer-body']").waitFor({ timeout: 10_000 });
-  await page.waitForTimeout(400);
+  await expect(page.getByTestId("baselines-drawer-process-table")).toBeVisible();
+  const detailPath = new URL(page.url()).pathname;
 
   await page.screenshot({
     path: "e2e/screens-baseline/card-drawer.png",
@@ -45,5 +48,15 @@ test("baselines page · main kanban + drawer", async ({ page }) => {
     animations: "disabled",
   });
 
-  expect(true).toBeTruthy();
+  await page.getByRole("tab", { name: "Configured rules", exact: true }).click();
+  await expect(page).toHaveURL(`${detailPath}?tab=rules`);
+  await expect(page.getByTestId("baseline-rules-table")).toBeVisible();
+  await page.getByTestId("baseline-rule-add").click();
+  await expect(page.getByRole("heading", { name: "Add process rule", exact: true })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Process name", exact: true })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Executable path", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save", exact: true })).toBeDisabled();
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(page).toHaveURL(`${detailPath}?tab=rules`);
+  await expect(page.getByTestId("baseline-rules-table")).toBeVisible();
 });

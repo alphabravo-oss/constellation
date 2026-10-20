@@ -27,15 +27,18 @@ spec:
           image: {{ include "constellation.roleImage" (dict "ctx" . "role" "operator") }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           {{- include "constellation.containerSecurityContext" . | nindent 10 }}
-          {{- if or .Values.operator.leaderElection.enabled .Values.operator.args }}
           args:
-            {{- if .Values.operator.leaderElection.enabled }}
-            - --leader-elect=true
-            {{- end }}
+            - --leader-elect={{ .Values.operator.leaderElection.enabled }}
+            # Managed-workload images are always passed explicitly: the operator
+            # has no `:latest` fallback. Derived from the same role images the
+            # chart deploys itself (image.registry/tag or per-role overrides).
+            - --agent-image={{ include "constellation.roleImage" (dict "ctx" . "role" "runtimeAgent") }}
+            - --runtime-agent-image={{ include "constellation.roleImage" (dict "ctx" . "role" "runtimeAgent") }}
+            - --scanner-image={{ include "constellation.roleImage" (dict "ctx" . "role" "scanner") }}
+            - --admission-image={{ include "constellation.roleImage" (dict "ctx" . "role" "admission") }}
             {{- with .Values.operator.args }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-          {{- end }}
           ports:
             - name: metrics
               containerPort: 8081
@@ -113,17 +116,16 @@ rules:
     verbs: ["update"]
   # B7 — broader CRD coverage: DPI/WAF signatures, vuln exception profiles.
   # Reconciled by the SignatureRule/VulnProfile controllers (SetupMatrixControllers)
-  # when --database-url is set. (constellationcomplianceexemptions ships as a scaffold CRD;
-  # its reconciler is TODO(matrix), but the RBAC is included so it activates without an RBAC
-  # change once wired.) (ConstellationDLPSensor was removed in P0-01 — orphan surface.)
+  # when --database-url is set. Only CRDs that ship in crds/ are listed here; the
+  # scaffold constellationcomplianceexemptions CRD was removed.
   - apiGroups: ["constellation.alphabravo.io"]
-    resources: ["constellationsignaturerules", "constellationvulnprofiles", "constellationcomplianceexemptions"]
+    resources: ["constellationsignaturerules", "constellationvulnprofiles"]
     verbs: ["get", "list", "watch", "update", "patch"]
   - apiGroups: ["constellation.alphabravo.io"]
-    resources: ["constellationsignaturerules/status", "constellationvulnprofiles/status", "constellationcomplianceexemptions/status"]
+    resources: ["constellationsignaturerules/status", "constellationvulnprofiles/status"]
     verbs: ["get", "update", "patch"]
   - apiGroups: ["constellation.alphabravo.io"]
-    resources: ["constellationsignaturerules/finalizers", "constellationvulnprofiles/finalizers", "constellationcomplianceexemptions/finalizers"]
+    resources: ["constellationsignaturerules/finalizers", "constellationvulnprofiles/finalizers"]
     verbs: ["update"]
   # P0-08 — policy-groups: NeuVector-style workload groups + group->group network segmentation
   # edges. Reconciled by the Group/NetworkRule controllers (SetupGroupControllers) when
@@ -151,6 +153,11 @@ subjects:
     name: {{ include "constellation.fullname" . }}-operator
     namespace: {{ .Release.Namespace }}
 ---
+{{- /*
+The operator-workloads Role/ClusterRole below also carries the leader-election
+grants (coordination.k8s.io leases + events) that --leader-elect=true needs in
+the release namespace; the Lease is created in OPERATOR_NAMESPACE.
+*/ -}}
 {{- if .Values.namespaced }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

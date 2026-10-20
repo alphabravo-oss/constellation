@@ -20,6 +20,7 @@
 package runtime
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -34,20 +35,26 @@ import (
 // types must stay byte-for-byte identical to runtimePolicyWire in the agent's
 // runtime_policy_sync.go — that struct is the only consumer.
 type agentRuntimePolicyWire struct {
-	ID         string           `json:"id"`
-	DPPolicyID int64            `json:"dp_policy_id"`
-	Workload   string           `json:"workload"`
-	Mode       string           `json:"mode"` // monitor | enforce | disabled
-	DefAction  uint8            `json:"def_action"`
-	ApplyDir   int              `json:"apply_dir"`
-	Rules      []*dp.PolicyRule `json:"rules"`
-	Version    int64            `json:"version"`
+	ID            string                    `json:"id"`
+	DPPolicyID    int64                     `json:"dp_policy_id"`
+	Workload      string                    `json:"workload"`
+	Namespace     string                    `json:"namespace"`
+	BindingStatus string                    `json:"binding_status"`
+	PodBindings   []runtimePolicyPodBinding `json:"pod_bindings"`
+	Mode          string                    `json:"mode"` // monitor | enforce | disabled
+	DefAction     uint8                     `json:"def_action"`
+	ApplyDir      int                       `json:"apply_dir"`
+	Rules         []*dp.PolicyRule          `json:"rules"`
+	Version       int64                     `json:"version"`
 }
 
 // agentRuntimePolicyBundle is the top-level envelope; mirrors the agent's
 // runtimePolicyBundle.
 type agentRuntimePolicyBundle struct {
-	Policies []agentRuntimePolicyWire `json:"policies"`
+	ProtocolVersion int                      `json:"protocol_version"`
+	ClusterID       uuid.UUID                `json:"cluster_id"`
+	SourceComplete  bool                     `json:"source_complete"`
+	Policies        []agentRuntimePolicyWire `json:"policies"`
 }
 
 // AgentPolicyBundle serves a cluster's non-disabled runtime policies to the
@@ -60,6 +67,12 @@ func (h *RuntimePoliciesHTTP) AgentPolicyBundle(w http.ResponseWriter, r *http.R
 	tok, ok := handler.RuntimeAgentTokenFrom(r.Context())
 	if !ok {
 		jsonError(w, http.StatusUnauthorized, "runtime-agent token required")
+		return
+	}
+	// Unqualified legacy agents union policies across every local MAC. Never
+	// send them an envelope whose additive fields they would silently ignore.
+	if versions := r.URL.Query()["protocol"]; len(versions) != 1 || versions[0] != "2" {
+		jsonError(w, http.StatusUpgradeRequired, "runtime policy protocol=2 is required")
 		return
 	}
 	clusterID, err := uuid.Parse(strings.TrimSpace(r.URL.Query().Get("cluster_id")))
@@ -81,6 +94,21 @@ func (h *RuntimePoliciesHTTP) AgentPolicyBundle(w http.ResponseWriter, r *http.R
 		jsonError(w, http.StatusNotFound, "cluster not found")
 		return
 	}
+	// Organization membership alone is insufficient: a cluster-bound agent must
+	// not program another cluster's policy bundle from the same organization.
+	boundCluster, err := handler.ResolveAgentClusterID(r.Context(), h.store.db, tok)
+	if err != nil {
+		if errors.Is(err, handler.ErrAgentClusterScope) {
+			jsonError(w, http.StatusForbidden, "agent token cluster scope mismatch")
+			return
+		}
+		jsonError(w, http.StatusInternalServerError, "resolve cluster failed")
+		return
+	}
+	if boundCluster == nil || *boundCluster != clusterID {
+		jsonError(w, http.StatusForbidden, "agent token cluster scope mismatch")
+		return
+	}
 
 	policies, err := h.store.ListForCluster(r.Context(), tok.OrgID, clusterID)
 	if err != nil {
@@ -99,7 +127,12 @@ func (h *RuntimePoliciesHTTP) AgentPolicyBundle(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	bundle := agentRuntimePolicyBundle{Policies: make([]agentRuntimePolicyWire, 0, len(policies))}
+	bindings, err := loadRuntimePolicyBindings(r.Context(), h.store.db.Pool(), tok.OrgID, clusterID, policies)
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, "workload bindings unavailable")
+		return
+	}
+	bundle := agentRuntimePolicyBundle{ProtocolVersion: 2, ClusterID: clusterID, SourceComplete: true, Policies: make([]agentRuntimePolicyWire, 0, len(policies))}
 	for _, p := range policies {
 		// Emit rules exactly as stored. The worker applies the per-policy mode
 		// mapping and dp_policy_id stamping; doing it here too would double-apply.
@@ -112,14 +145,17 @@ func (h *RuntimePoliciesHTTP) AgentPolicyBundle(w http.ResponseWriter, r *http.R
 			rules = []*dp.PolicyRule{}
 		}
 		bundle.Policies = append(bundle.Policies, agentRuntimePolicyWire{
-			ID:         p.ID.String(),
-			DPPolicyID: p.DPPolicyID,
-			Workload:   p.Workload,
-			Mode:       string(settings.EnforcementOverride.ApplyMode(p.Mode)),
-			DefAction:  settings.DefaultAction.ApplyDefAction(p.DefAction),
-			ApplyDir:   p.ApplyDir,
-			Rules:      rules,
-			Version:    p.Version,
+			ID:            p.ID.String(),
+			DPPolicyID:    p.DPPolicyID,
+			Workload:      p.Workload,
+			Namespace:     p.Namespace,
+			BindingStatus: bindings[p.ID].Status,
+			PodBindings:   bindings[p.ID].Pods,
+			Mode:          string(settings.EnforcementOverride.ApplyMode(p.Mode)),
+			DefAction:     settings.DefaultAction.ApplyDefAction(p.DefAction),
+			ApplyDir:      p.ApplyDir,
+			Rules:         rules,
+			Version:       p.Version,
 		})
 	}
 	httpx.WriteJSON(w, http.StatusOK, bundle)

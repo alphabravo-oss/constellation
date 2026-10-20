@@ -12,8 +12,8 @@ import (
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/syscfg"
+	"github.com/alphabravocompany/constellation/internal/telemetry"
 	"github.com/alphabravocompany/constellation/pkg/audit"
-	"github.com/alphabravocompany/constellation/pkg/observability"
 )
 
 // RouteList walks the live chi router and returns every registered (method,
@@ -74,7 +74,7 @@ func newSpecServer() (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	tel, err := observability.Init(ctx, "openapi-introspect")
+	tel, err := telemetry.Init(ctx, telemetry.ConfigFromEnv("openapi-introspect"))
 	if err != nil {
 		return nil, err
 	}

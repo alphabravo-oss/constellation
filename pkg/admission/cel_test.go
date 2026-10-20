@@ -12,6 +12,7 @@ import (
 )
 
 func TestCELEngine_DeniesHostNetwork(t *testing.T) {
+	t.Parallel()
 	rules := []*CELRule{
 		{
 			ID:                "block-host-network",
@@ -43,6 +44,7 @@ func TestCELEngine_DeniesHostNetwork(t *testing.T) {
 }
 
 func TestCELEngine_AllowsCompliant(t *testing.T) {
+	t.Parallel()
 	rules := []*CELRule{{
 		ID: "block-host-network",
 		// Guard the absent key with has(): a correctly-authored rule does not
@@ -66,6 +68,7 @@ func TestCELEngine_AllowsCompliant(t *testing.T) {
 // (here "no such key" on an absent securityContext) must DENY, not warn-and-
 // admit. A monitor-mode rule with the same error keeps warning (never blocks).
 func TestCELEngine_EnforceEvalErrorFailsClosed(t *testing.T) {
+	t.Parallel()
 	pod := &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "x", Image: "alpine"}}}}
 	raw, _ := json.Marshal(pod)
 	req := &admissionv1.AdmissionRequest{
@@ -96,6 +99,7 @@ func TestCELEngine_EnforceEvalErrorFailsClosed(t *testing.T) {
 }
 
 func TestCELEngine_MonitorEmitsWarnings(t *testing.T) {
+	t.Parallel()
 	rules := []*CELRule{{
 		ID:         "monitor-image-tag",
 		Expression: `object.spec.containers.all(c, !c.image.endsWith(":latest"))`,
@@ -112,5 +116,25 @@ func TestCELEngine_MonitorEmitsWarnings(t *testing.T) {
 	}
 	if len(resp.Warnings) == 0 {
 		t.Fatalf("expected warning")
+	}
+}
+
+func TestCELEngine_CompileErrorFailsClosedOnlyInEnforceMode(t *testing.T) {
+	req := &admissionv1.AdmissionRequest{UID: "compile-error"}
+	for _, mode := range []string{"enforce", "monitor"} {
+		t.Run(mode, func(t *testing.T) {
+			engine, errs, err := NewCELEngine([]*CELRule{{ID: "broken", Expression: "object.", Mode: mode}})
+			if err != nil || errs["broken"] == nil {
+				t.Fatalf("expected compile diagnostic: %v %v", err, errs)
+			}
+			resp, ruleID := engine.evaluate(context.Background(), req)
+			if mode == "enforce" {
+				if resp.Allowed || ruleID != "broken" || resp.Result == nil {
+					t.Fatalf("broken enforce rule must deny with attribution: %+v %q", resp, ruleID)
+				}
+			} else if !resp.Allowed || len(resp.Warnings) == 0 {
+				t.Fatalf("broken monitor rule must warn: %+v", resp)
+			}
+		})
 	}
 }

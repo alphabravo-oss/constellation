@@ -2,6 +2,7 @@ package policy
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"gopkg.in/yaml.v3"
 
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
@@ -119,17 +121,6 @@ func (p *Policies) CreateAdmissionRule(w http.ResponseWriter, r *http.Request) {
 		body.Mode = "monitor"
 	}
 	body.Group = strings.TrimSpace(body.Group)
-	if body.Group != "" {
-		ok, err := p.admissionGroupExists(r.Context(), subj.OrgID, clusterArg, body.Group)
-		if err != nil {
-			jsonError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		if !ok {
-			jsonError(w, http.StatusBadRequest, "group not found")
-			return
-		}
-	}
 	if len(body.Criteria) == 0 {
 		jsonError(w, http.StatusBadRequest, "at least one criterion is required")
 		return
@@ -149,10 +140,19 @@ func (p *Policies) CreateAdmissionRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var id uuid.UUID
-	if err := p.db.Pool().QueryRow(r.Context(), `
+	if body.Group == "" {
+		err = p.db.Pool().QueryRow(r.Context(), `
 INSERT INTO policies (org_id, cluster_id, name, description, engine, category, spec_yaml, enabled, mode)
 VALUES ($1, $2, $3, '', 'constellation-admission', 'admission', $4, TRUE, $5) RETURNING id`,
-		subj.OrgID, clusterArg, body.Name, specYAML, body.Mode).Scan(&id); err != nil {
+			subj.OrgID, clusterArg, body.Name, specYAML, body.Mode).Scan(&id)
+	} else {
+		err = p.createGroupAdmissionRule(r, subj.OrgID, clusterArg, body.Group, body.Name, specYAML, body.Mode, &id)
+	}
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			jsonError(w, http.StatusBadRequest, "group not found")
+			return
+		}
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -165,6 +165,36 @@ VALUES ($1, $2, $3, '', 'constellation-admission', 'admission', $4, TRUE, $5) RE
 		})
 	}
 	httpx.WriteJSON(w, http.StatusCreated, map[string]any{"id": id.String(), "spec_yaml": specYAML})
+}
+
+func (p *Policies) createGroupAdmissionRule(r *http.Request, orgID uuid.UUID, clusterArg any, selector, name, specYAML, mode string, id *uuid.UUID) error {
+	tx, err := p.db.Pool().Begin(r.Context())
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(r.Context())
+	var lockedOrgID uuid.UUID
+	if err := tx.QueryRow(r.Context(), `SELECT id FROM orgs WHERE id=$1 FOR KEY SHARE`, orgID).Scan(&lockedOrgID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(r.Context(), `LOCK TABLE policies IN ROW EXCLUSIVE MODE`); err != nil {
+		return err
+	}
+	var groupID uuid.UUID
+	if err := tx.QueryRow(r.Context(), `
+SELECT id FROM groups
+ WHERE org_id=$1 AND (id::text=$2 OR name=$2)
+   AND (cluster_id IS NULL OR ($3::uuid IS NOT NULL AND cluster_id=$3))
+ FOR KEY SHARE`, orgID, selector, nullableClusterID(clusterArg)).Scan(&groupID); err != nil {
+		return err
+	}
+	if err := tx.QueryRow(r.Context(), `
+INSERT INTO policies (org_id, cluster_id, name, description, engine, category, spec_yaml, enabled, mode)
+VALUES ($1, $2, $3, '', 'constellation-admission', 'admission', $4, TRUE, $5) RETURNING id`,
+		orgID, clusterArg, name, specYAML, mode).Scan(id); err != nil {
+		return err
+	}
+	return tx.Commit(r.Context())
 }
 
 // buildAdmissionSpecYAML translates the builder's criteria rows into the engine's YAML

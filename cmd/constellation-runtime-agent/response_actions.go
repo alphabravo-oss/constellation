@@ -19,17 +19,10 @@
 // Transport: the responder is driven by a pull-poller against the control plane
 // (responseActionWorker), mirroring the other runtime sync workers.
 //
-// STATUS (RT-KILL-02): the responder EXECUTION layer below (killProcess SIGKILL,
-// killSession conntrack-delete, decision logic) is complete and unit-tested, and
-// the poller is gated OFF by default and 404s harmlessly until a producer exists.
-// Pre-exec/inline BLOCKING of a policy violation is already delivered end-to-end
-// by the enforcer path (set runtimeAgent.enforcement.mode=protect — RT-ENFORCE-01,
-// network/L7 inline shipped). What remains for full parity is the server-side
-// PRODUCER — GET /api/v1/runtime/response-actions:pending + a :complete sink + a
-// pkg/response ActionKill that enqueues onto them — so a response RULE can kill an
-// already-RUNNING process/session on a threat. The responder here is that
-// producer's ready-made execution half. Tracked as RT-KILL-02 in
-// docs/NEUVECTOR-PARITY-PLAN-2026-08.md.
+// Exact process actions use the isolated V2 queue and a durable execution journal.
+// Kernel start identity and pidfd verification prevent selecting another process;
+// legacy process requests are refused. The legacy poller still handles sessions.
+// Actual deployed signal/termination proof remains RUN-1 acceptance work.
 package main
 
 import (
@@ -46,7 +39,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -84,13 +76,15 @@ type responderConfig struct {
 	HostRoot           string
 	KillProcessEnabled bool
 	KillSessionEnabled bool
+	Protected          *protectedSet
 	Workloads          *workloadResolver
 	Logger             *slog.Logger
 
-	// conntrackBin / killFn are injection seams for tests. Empty/nil fall back to
-	// the real "conntrack" binary and syscall.Kill.
-	conntrackBin string
-	killFn       func(pid int, sig syscall.Signal) error
+	// Process handles and the conntrack executable are injectable in isolated tests.
+	conntrackRun        func(context.Context, []string) ([]byte, error)
+	openProcess         func(int) (responseProcessHandle, error)
+	currentProcessStart func(uint32) (uint64, bool)
+	sessionProtection   func(context.Context, responseAction) string
 }
 
 type responder struct {
@@ -98,14 +92,17 @@ type responder struct {
 }
 
 func newResponder(cfg responderConfig) *responder {
+	if cfg.openProcess == nil {
+		cfg.openProcess = openResponseProcess
+	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
-	if cfg.killFn == nil {
-		cfg.killFn = func(pid int, sig syscall.Signal) error { return syscall.Kill(pid, sig) }
-	}
-	if strings.TrimSpace(cfg.conntrackBin) == "" {
-		cfg.conntrackBin = "conntrack"
+
+	if cfg.conntrackRun == nil {
+		cfg.conntrackRun = func(ctx context.Context, args []string) ([]byte, error) {
+			return exec.CommandContext(ctx, "conntrack", args...).CombinedOutput()
+		}
 	}
 	return &responder{cfg: cfg}
 }
@@ -121,8 +118,7 @@ func (r *responder) Execute(ctx context.Context, a responseAction) responseActio
 			res.Reason = "disabled"
 			return res
 		}
-		applied, reason := r.killProcess(a)
-		res.Applied, res.Reason = applied, reason
+		res.Reason = "legacy process actions require exact V2 process identity"
 	case "kill_session":
 		if !r.cfg.KillSessionEnabled {
 			res.Reason = "disabled"
@@ -144,41 +140,39 @@ func (r *responder) Execute(ctx context.Context, a responseAction) responseActio
 	return res
 }
 
-// killProcess verifies the target then SIGKILLs it.
-func (r *responder) killProcess(a responseAction) (bool, string) {
-	procRootDir := responderProcRoot(r.cfg.HostRoot)
-	procComm := readProcComm(procRootDir, a.PID)
-	procContainerID := containerIDFromProcCgroup(procRootDir, a.PID)
-	if ok, reason := killProcessDecision(a, procComm, procContainerID); !ok {
-		return false, reason
-	}
-	if err := r.cfg.killFn(a.PID, syscall.SIGKILL); err != nil {
-		return false, "kill failed: " + err.Error()
-	}
-	r.cfg.Logger.Info("responder: killed process",
-		slog.Int("pid", a.PID), slog.String("comm", procComm),
-		slog.String("workload", a.WorkloadID))
-	return true, ""
-}
-
 // killProcessDecision is the pure guard for a kill_process action. It refuses:
 //   - system pids (<= 1): never kill init or the kernel.
+//   - missing requested or live comm: a bare pid is not a verified target.
 //   - comm mismatch: the pid's live comm differs from the requested comm, which
 //     means the pid was recycled — killing it would hit the wrong process.
-//   - container mismatch: the pid is not in the requested container.
+//   - missing live container identity or mismatch when a container was requested.
 //
-// When a verification input is empty (unknown) that check is skipped (fail-open
-// on that dimension), but at least an in-range pid is always required.
+// Failed /proc reads must never remove a requested identity constraint.
 func killProcessDecision(a responseAction, procComm, procContainerID string) (bool, string) {
 	if a.PID <= 1 {
 		return false, "invalid pid"
 	}
-	if want := strings.TrimSpace(a.Comm); want != "" && procComm != "" && want != procComm {
+	wantComm := strings.TrimSpace(a.Comm)
+	if wantComm == "" {
+		return false, "missing target comm"
+	}
+	procComm = strings.TrimSpace(procComm)
+	if procComm == "" {
+		return false, "process comm unavailable"
+	}
+	if wantComm != procComm {
 		return false, "comm mismatch"
 	}
-	if want := normalizeContainerID(a.ContainerID); want != "" && procContainerID != "" &&
-		want != normalizeContainerID(procContainerID) {
-		return false, "container mismatch"
+	if want := normalizeContainerID(a.ContainerID); want != "" {
+		actual := normalizeContainerID(procContainerID)
+		if actual == "" {
+			return false, "process container unavailable"
+		}
+		if want != actual {
+			return false, "container mismatch"
+		}
+	} else if strings.TrimSpace(a.ContainerID) != "" {
+		return false, "invalid target container"
 	}
 	return true, ""
 }
@@ -198,8 +192,13 @@ func (r *responder) killSession(ctx context.Context, a responseAction) (bool, st
 	}
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(cctx, r.cfg.conntrackBin, args...)
-	out, err := cmd.CombinedOutput()
+	if r.cfg.sessionProtection == nil {
+		return false, "session workload protection unavailable"
+	}
+	if reason := r.cfg.sessionProtection(cctx, a); reason != "" {
+		return false, reason
+	}
+	out, err := r.cfg.conntrackRun(cctx, args)
 	if err != nil {
 		// conntrack exits non-zero when no matching flow exists; treat "0 flows
 		// deleted" as not-applied rather than an error the operator must chase.
@@ -217,8 +216,8 @@ func (r *responder) killSession(ctx context.Context, a responseAction) (bool, st
 
 // conntrackDeleteArgs builds the `conntrack -D ...` argument vector for a
 // 5-tuple, or (nil, reason) when the tuple is too incomplete to target safely.
-// Requiring both endpoints avoids a wildcard delete that would tear down every
-// flow to a host.
+// Both IPs, ports and the protocol must be explicit; omitting either port would
+// delete multiple connections rather than the requested session.
 func conntrackDeleteArgs(a responseAction) ([]string, string) {
 	src := strings.TrimSpace(a.SrcIP)
 	dst := strings.TrimSpace(a.DstIP)
@@ -226,20 +225,14 @@ func conntrackDeleteArgs(a responseAction) ([]string, string) {
 		return nil, "invalid src/dst ip"
 	}
 	proto := strings.ToLower(strings.TrimSpace(a.Protocol))
-	if proto == "" {
-		proto = "tcp"
-	}
 	if proto != "tcp" && proto != "udp" {
 		return nil, "unsupported protocol"
 	}
-	args := []string{"-D", "-s", src, "-d", dst, "-p", proto}
-	if a.SrcPort > 0 {
-		args = append(args, "--sport", strconv.Itoa(a.SrcPort))
+	if a.SrcPort < 1 || a.SrcPort > 65535 || a.DstPort < 1 || a.DstPort > 65535 {
+		return nil, "invalid src/dst port"
 	}
-	if a.DstPort > 0 {
-		args = append(args, "--dport", strconv.Itoa(a.DstPort))
-	}
-	return args, ""
+	return []string{"-D", "-s", src, "-d", dst, "-p", proto,
+		"--sport", strconv.Itoa(a.SrcPort), "--dport", strconv.Itoa(a.DstPort)}, ""
 }
 
 func responderProcRoot(hostRoot string) string {
@@ -328,14 +321,11 @@ func (w *responseActionWorker) pollOnce(ctx context.Context) {
 
 // fetch pulls pending response actions for this node.
 //
-// NOTE (RT-KILL-02): this poller only runs when kill-process/kill-session is
-// explicitly enabled (CONSTELLATION_RESPONSE_KILL_PROCESS/_SESSION, default off).
-// The server-side producer endpoint (/api/v1/runtime/response-actions:pending)
-// is NOT yet implemented, so an opted-in agent stays inert (empty on 404) rather
-// than erroring. Pre-exec BLOCKING is instead delivered by the enforcer path
-// (RT-ENFORCE-01: set runtimeAgent.enforcement.mode=protect). Building the full
-// response-action kill pipeline (server producer + result sink + response-rule
-// wiring) is tracked as RT-KILL-02 in docs/NEUVECTOR-PARITY-PLAN-2026-08.md.
+// This poller only runs when kill-process/kill-session is explicitly enabled
+// (CONSTELLATION_RESPONSE_KILL_PROCESS/_SESSION, default off). The server queues
+// response-rule kill actions through /runtime/response-actions:pending and this
+// worker reports the outcome to /runtime/response-actions:result. Live delivery
+// validation is tracked as RUN-1 in docs/NEUVECTOR-PARITY-PLAN.md.
 func (w *responseActionWorker) fetch(ctx context.Context) ([]responseAction, error) {
 	url := strings.TrimRight(w.APIBaseURL, "/") +
 		"/api/v1/runtime/response-actions:pending?cluster_id=" + w.ClusterID +

@@ -21,6 +21,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 )
@@ -60,6 +61,9 @@ func New(token, projectID string) *Connector {
 
 // Scan returns the union of IAM + Storage findings.
 func (c *Connector) Scan(ctx context.Context) ([]Finding, error) {
+	if c.HTTP == nil {
+		return nil, errors.New("gcp: HTTP client required")
+	}
 	if c.Token == "" {
 		return nil, errors.New("gcp: OAuth access token required")
 	}
@@ -68,7 +72,7 @@ func (c *Connector) Scan(ctx context.Context) ([]Finding, error) {
 	}
 	iamF, ierr := c.ScanIAM(ctx)
 	storageF, serr := c.ScanStorage(ctx)
-	out := append(iamF, storageF...)
+	out := slices.Concat(iamF, storageF)
 	// Surface a failure whenever ANY sub-scan fails so a partial scan (e.g. IAM
 	// denied, storage ok) is not reported as a clean, complete scan.
 	if err := errors.Join(ierr, serr); err != nil {
@@ -82,26 +86,14 @@ func (c *Connector) ScanIAM(ctx context.Context) ([]Finding, error) {
 	body := strings.NewReader(`{"options":{"requestedPolicyVersion":3}}`)
 	urlStr := fmt.Sprintf("https://cloudresourcemanager.googleapis.com/v1/projects/%s:getIamPolicy",
 		url.PathEscape(c.ProjectID))
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, urlStr, body)
-	req.Header.Set("Authorization", "Bearer "+c.Token)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("gcp: getIamPolicy: %w", err)
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("gcp: getIamPolicy status %d: %s", resp.StatusCode, raw)
-	}
 	var policy struct {
 		Bindings []struct {
 			Role    string   `json:"role"`
 			Members []string `json:"members"`
 		} `json:"bindings"`
 	}
-	if err := json.Unmarshal(raw, &policy); err != nil {
-		return nil, fmt.Errorf("gcp: decode IAM policy: %w", err)
+	if err := c.requestJSON(ctx, http.MethodPost, urlStr, body, &policy); err != nil {
+		return nil, fmt.Errorf("gcp: getIamPolicy: %w", err)
 	}
 
 	now := time.Now().UTC()
@@ -132,76 +124,114 @@ func (c *Connector) ScanIAM(ctx context.Context) ([]Finding, error) {
 	return out, nil
 }
 
+type gcsPolicy struct {
+	Bindings []struct {
+		Role    string   `json:"role"`
+		Members []string `json:"members"`
+	} `json:"bindings"`
+}
+
+// publicBucketFindings reports every binding that grants a bucket to allUsers
+// or allAuthenticatedUsers.
+func publicBucketFindings(bucket string, pol gcsPolicy, now time.Time) []Finding {
+	var out []Finding
+	for _, binding := range pol.Bindings {
+		for _, member := range binding.Members {
+			if member != "allUsers" && member != "allAuthenticatedUsers" {
+				continue
+			}
+			out = append(out, Finding{
+				ExternalID:  fmt.Sprintf("gcp-gcs-public-%s", bucket),
+				Title:       fmt.Sprintf("GCS bucket %q grants %s to %s", bucket, binding.Role, member),
+				Description: "Bucket-level IAM grants public access.",
+				Severity:    "high",
+				Resource:    "//storage.googleapis.com/" + bucket,
+				Detected:    now,
+				Evidence: map[string]any{
+					"bucket": bucket,
+					"role":   binding.Role,
+					"member": member,
+				},
+			})
+		}
+	}
+	return out
+}
+
 // ScanStorage checks every GCS bucket in the project for public-access bindings.
 func (c *Connector) ScanStorage(ctx context.Context) ([]Finding, error) {
-	listURL := fmt.Sprintf("https://storage.googleapis.com/storage/v1/b?project=%s",
-		url.QueryEscape(c.ProjectID))
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, listURL, nil)
-	req.Header.Set("Authorization", "Bearer "+c.Token)
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("gcp: list buckets: %w", err)
-	}
-	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("gcp: list buckets status %d", resp.StatusCode)
-	}
-	var list struct {
-		Items []struct {
-			Name string `json:"name"`
-		} `json:"items"`
-	}
-	if err := json.Unmarshal(raw, &list); err != nil {
-		return nil, err
-	}
-
 	now := time.Now().UTC()
 	out := []Finding{}
-	for _, b := range list.Items {
-		policyURL := fmt.Sprintf("https://storage.googleapis.com/storage/v1/b/%s/iam",
-			url.PathEscape(b.Name))
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, policyURL, nil)
-		req.Header.Set("Authorization", "Bearer "+c.Token)
-		resp, err := c.HTTP.Do(req)
-		if err != nil {
-			continue
+	pageToken := ""
+	seenPages := map[string]bool{}
+	for {
+		listURL := fmt.Sprintf("https://storage.googleapis.com/storage/v1/b?project=%s", url.QueryEscape(c.ProjectID))
+		if pageToken != "" {
+			listURL += "&pageToken=" + url.QueryEscape(pageToken)
 		}
-		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-		_ = resp.Body.Close()
-		if resp.StatusCode != 200 {
-			continue
+		var list struct {
+			Items []struct {
+				Name string `json:"name"`
+			} `json:"items"`
+			NextPageToken string `json:"nextPageToken"`
 		}
-		var pol struct {
-			Bindings []struct {
-				Role    string   `json:"role"`
-				Members []string `json:"members"`
-			} `json:"bindings"`
+		if err := c.requestJSON(ctx, http.MethodGet, listURL, nil, &list); err != nil {
+			return out, fmt.Errorf("gcp: list buckets: %w", err)
 		}
-		if err := json.Unmarshal(raw, &pol); err != nil {
-			continue
-		}
-		for _, binding := range pol.Bindings {
-			for _, member := range binding.Members {
-				if member == "allUsers" || member == "allAuthenticatedUsers" {
-					out = append(out, Finding{
-						ExternalID:  fmt.Sprintf("gcp-gcs-public-%s", b.Name),
-						Title:       fmt.Sprintf("GCS bucket %q grants %s to %s", b.Name, binding.Role, member),
-						Description: "Bucket-level IAM grants public access.",
-						Severity:    "high",
-						Resource:    "//storage.googleapis.com/" + b.Name,
-						Detected:    now,
-						Evidence: map[string]any{
-							"bucket": b.Name,
-							"role":   binding.Role,
-							"member": member,
-						},
-					})
-				}
+		for _, bucket := range list.Items {
+			if bucket.Name == "" {
+				return out, errors.New("gcp: bucket response has no name")
 			}
+			policyURL := fmt.Sprintf("https://storage.googleapis.com/storage/v1/b/%s/iam",
+				url.PathEscape(bucket.Name))
+			var pol gcsPolicy
+			if err := c.requestJSON(ctx, http.MethodGet, policyURL, nil, &pol); err != nil {
+				return out, fmt.Errorf("gcp: get IAM policy for bucket %q: %w", bucket.Name, err)
+			}
+			out = append(out, publicBucketFindings(bucket.Name, pol, now)...)
 		}
+		if list.NextPageToken == "" {
+			break
+		}
+		if seenPages[list.NextPageToken] {
+			return out, errors.New("gcp: list buckets returned a repeated page token")
+		}
+		seenPages[list.NextPageToken] = true
+		pageToken = list.NextPageToken
 	}
 	return out, nil
+}
+
+func (c *Connector) requestJSON(ctx context.Context, method, endpoint string, body io.Reader, target any) error {
+	request, err := http.NewRequestWithContext(ctx, method, endpoint, body)
+	if err != nil {
+		return errors.New("invalid API request")
+	}
+	request.Header.Set("Authorization", "Bearer "+c.Token)
+	request.Header.Set("Content-Type", "application/json")
+	response, err := c.HTTP.Do(request)
+	if err != nil {
+		return fmt.Errorf("API request failed: %w", err)
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("API returned status %d", response.StatusCode)
+	}
+	const maxResponseBytes = 4 << 20
+	raw, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
+	if err != nil {
+		return fmt.Errorf("read API response: %w", err)
+	}
+	if len(raw) > maxResponseBytes {
+		return errors.New("API response exceeds size limit")
+	}
+	if strings.TrimSpace(string(raw)) == "null" {
+		return errors.New("empty API response")
+	}
+	if err := json.Unmarshal(raw, target); err != nil {
+		return errors.New("invalid API response JSON")
+	}
+	return nil
 }
 
 func isOverPrivilegedRole(role string) bool {

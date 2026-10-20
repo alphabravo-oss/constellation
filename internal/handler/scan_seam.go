@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -27,11 +29,11 @@ import (
 // scan_evidence) keep compiling unchanged, while exported aliases/wrappers let
 // the scanning sub-package reach the same logic without an import cycle.
 
-// jsonError writes a {"error": msg} JSON body with the given status. It
+// jsonError writes the apiutil error body ({"error":{"code","message"}}) with the given status. It
 // formerly lived in scanjobs.go (now relocated to the handler/scanning
 // sub-package); kept here so the rest of package handler still resolves it.
 func jsonError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
+	apiutil.WriteStatus(context.Background(), w, status, msg)
 }
 
 // scannerJobLeaseInterval is the worker lease window used by the scan-job queue
@@ -267,7 +269,7 @@ func NormalizeScanSourceType(sourceType, targetType string) string {
 // Mirrors pkg/risk's high-level shape but stays local so we don't pull pkg/risk into the
 // handler dep tree.
 func severityToScore(sev string, cvss float64, kev bool) int {
-	base := 0
+	var base int
 	switch sev {
 	case "critical":
 		base = 90
@@ -396,7 +398,7 @@ SELECT st.type,
              AND (sj.next_attempt_at IS NULL OR sj.next_attempt_at <= NOW())
        ))::int, 0)
   FROM scan_jobs sj
-  JOIN scan_targets st ON st.id = sj.target_id
+  JOIN scan_targets st ON st.id = sj.target_id AND st.org_id = sj.org_id
  WHERE sj.org_id = $1
  GROUP BY st.type
  ORDER BY

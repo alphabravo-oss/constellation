@@ -43,7 +43,7 @@ type AsyncDenyHook struct {
 // NewAsyncDenyHook wraps inner in a buffered single-worker dispatcher and starts
 // the worker. base is the detached context the inner hook runs under (use
 // context.Background()); buffer is the queue depth (<=0 picks a sane default).
-func NewAsyncDenyHook(base context.Context, inner DenyHook, buffer int) *AsyncDenyHook {
+func NewAsyncDenyHook(base context.Context, inner DenyHook, buffer int) *AsyncDenyHook { //nolint:contextcheck // a nil base means "detached"; Background is the documented default
 	if base == nil {
 		base = context.Background()
 	}

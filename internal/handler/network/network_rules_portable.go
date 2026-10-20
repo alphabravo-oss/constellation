@@ -1,12 +1,17 @@
 package network
 
 import (
+	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"strings"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"gopkg.in/yaml.v3"
 
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
@@ -41,12 +46,12 @@ type networkRuleBundle struct {
 func (h *Network) ExportNetworkRules(w http.ResponseWriter, r *http.Request) {
 	subj, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "subject required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
 		return
 	}
 	clusterID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid cluster id")
 		return
 	}
 	rows, err := h.db.Pool().Query(r.Context(), `
@@ -55,7 +60,7 @@ SELECT from_ep, to_ep, ports, applications, action, disable, comment, priority, 
  WHERE org_id = $1 AND cluster_id = $2
  ORDER BY priority, from_ep, to_ep`, subj.OrgID, clusterID)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()
@@ -63,18 +68,18 @@ SELECT from_ep, to_ep, ports, applications, action, disable, comment, priority, 
 	for rows.Next() {
 		var rule portableNetworkRule
 		if err := rows.Scan(&rule.From, &rule.To, &rule.Ports, &rule.Applications, &rule.Action, &rule.Disable, &rule.Comment, &rule.Priority, &rule.CfgType); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		bundle.Rules = append(bundle.Rules, rule)
 	}
 	if err := rows.Err(); err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	out, err := yaml.Marshal(bundle)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "application/x-yaml")
@@ -89,26 +94,75 @@ SELECT from_ep, to_ep, ports, applications, action, disable, comment, priority, 
 func (h *Network) ImportNetworkRules(w http.ResponseWriter, r *http.Request) {
 	subj, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
-		httpx.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "subject required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
 		return
 	}
 	clusterID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid cluster id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid cluster id")
+		return
+	}
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/x-yaml" {
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnsupportedMediaType, "Content-Type must be application/x-yaml")
 		return
 	}
 	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "read body"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "read body")
 		return
 	}
 	var bundle networkRuleBundle
 	if err := yaml.Unmarshal(raw, &bundle); err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid bundle: " + err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid bundle: "+err.Error())
+		return
+	}
+	if bundle.APIVersion != "constellation/v1" {
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "apiVersion must be constellation/v1")
+		return
+	}
+	if bundle.Kind != "NetworkRuleBundle" {
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "kind must be NetworkRuleBundle")
 		return
 	}
 	if len(bundle.Rules) == 0 {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bundle contains no rules"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bundle contains no rules")
+		return
+	}
+	var ownedCluster bool
+	if err := h.db.Pool().QueryRow(r.Context(), `SELECT EXISTS (SELECT 1 FROM clusters WHERE id=$1 AND org_id=$2)`, clusterID, subj.OrgID).Scan(&ownedCluster); err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to verify cluster")
+		return
+	}
+	if !ownedCluster {
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "cluster not found")
+		return
+	}
+	if h.audit == nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusServiceUnavailable, "audit unavailable")
+		return
+	}
+	orgID, userID := subj.OrgID, subj.UserID
+	attemptID, _, err := h.audit.Log(r.Context(), audit.Event{OrgID: &orgID, ActorID: &userID,
+		Action: "network_rule.import_attempt", TargetKind: "network_rule", TargetID: clusterID.String(),
+		After: map[string]any{"cluster_id": clusterID.String(), "rules": len(bundle.Rules)}})
+	if err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusServiceUnavailable, "audit unavailable")
+		return
+	}
+	tx, err := h.db.Pool().BeginTx(r.Context(), pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to begin import")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	var lockedCluster uuid.UUID
+	if err := tx.QueryRow(r.Context(), `SELECT id FROM clusters WHERE id=$1 AND org_id=$2 FOR UPDATE`, clusterID, orgID).Scan(&lockedCluster); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "cluster not found")
+		} else {
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to verify cluster")
+		}
 		return
 	}
 	type result struct {
@@ -138,21 +192,35 @@ func (h *Network) ImportNetworkRules(w http.ResponseWriter, r *http.Request) {
 			rule.Priority = 1000
 		}
 		rule.Applications = normalizeNetworkRuleApplications(rule.Applications)
+		rowTx, err := tx.Begin(r.Context())
+		if err != nil {
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to begin import row")
+			return
+		}
 		cfgType := "user_created"
 		var learned bool
-		_ = h.db.Pool().QueryRow(r.Context(), `
+		if err := rowTx.QueryRow(r.Context(), `
 SELECT EXISTS (
   SELECT 1 FROM network_flow_rollups
    WHERE org_id = $1 AND cluster_id = $2 AND src_workload = $3 AND dst_workload = $4)`,
-			subj.OrgID, clusterID, rule.From, rule.To).Scan(&learned)
+			subj.OrgID, clusterID, rule.From, rule.To).Scan(&learned); err != nil {
+			if rollbackErr := rowTx.Rollback(r.Context()); rollbackErr != nil {
+				apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to roll back import row")
+				return
+			}
+			res.Status, res.Error = "error", err.Error()
+			results = append(results, res)
+			continue
+		}
 		if learned {
 			cfgType = "learned_override"
 		}
 		var wasInsert bool
-		if err := h.db.Pool().QueryRow(r.Context(), `
+		if err := rowTx.QueryRow(r.Context(), `
 INSERT INTO network_rule_overrides
   (org_id, cluster_id, from_ep, to_ep, ports, applications, action, disable, comment, priority, cfg_type, updated_by, updated_at)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW())
+SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW()
+  FROM clusters WHERE id=$2 AND org_id=$1
 ON CONFLICT (org_id, cluster_id, from_ep, to_ep) DO UPDATE SET
   ports = EXCLUDED.ports, applications = EXCLUDED.applications, action = EXCLUDED.action,
   disable = EXCLUDED.disable, comment = EXCLUDED.comment, priority = EXCLUDED.priority,
@@ -160,9 +228,17 @@ ON CONFLICT (org_id, cluster_id, from_ep, to_ep) DO UPDATE SET
 RETURNING (xmax = 0)`,
 			subj.OrgID, clusterID, rule.From, rule.To, rule.Ports, rule.Applications,
 			rule.Action, rule.Disable, rule.Comment, rule.Priority, cfgType, subj.UserID).Scan(&wasInsert); err != nil {
+			if rollbackErr := rowTx.Rollback(r.Context()); rollbackErr != nil {
+				apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to roll back import row")
+				return
+			}
 			res.Status, res.Error = "error", err.Error()
 			results = append(results, res)
 			continue
+		}
+		if err := rowTx.Commit(r.Context()); err != nil {
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to complete import row")
+			return
 		}
 		if wasInsert {
 			res.Status = "created"
@@ -173,11 +249,15 @@ RETURNING (xmax = 0)`,
 		}
 		results = append(results, res)
 	}
-	if h.audit != nil {
-		oid, uid := subj.OrgID, subj.UserID
-		_, _, _ = h.audit.Log(r.Context(), audit.Event{OrgID: &oid, ActorID: &uid,
-			Action: "network_rule.import", TargetKind: "network_rule", TargetID: "",
-			After: map[string]any{"cluster_id": clusterID.String(), "created": created, "updated": updated, "total": len(bundle.Rules)}})
+	if _, _, err := h.audit.LogInTx(r.Context(), tx, audit.Event{OrgID: &orgID, ActorID: &userID,
+		Action: "network_rule.import", TargetKind: "network_rule", TargetID: clusterID.String(),
+		After: map[string]any{"cluster_id": clusterID.String(), "created": created, "updated": updated, "total": len(bundle.Rules), "audit_attempt_id": attemptID}}); err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusServiceUnavailable, "audit unavailable")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "failed to commit import")
+		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"created": created, "updated": updated, "results": results})
 }

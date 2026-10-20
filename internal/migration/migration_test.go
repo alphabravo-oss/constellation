@@ -6,14 +6,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/alphabravocompany/constellation/internal/migration/aqua"
-	"github.com/alphabravocompany/constellation/internal/migration/neuvector"
-	"github.com/alphabravocompany/constellation/internal/migration/prisma"
-	constellationadmission "github.com/alphabravocompany/constellation/pkg/admission"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+
+	"github.com/alphabravocompany/constellation/internal/migration/aqua"
+	"github.com/alphabravocompany/constellation/internal/migration/neuvector"
+	"github.com/alphabravocompany/constellation/internal/migration/prisma"
+	constellationadmission "github.com/alphabravocompany/constellation/pkg/admission"
 )
 
 const nvExport = `
@@ -33,6 +34,7 @@ response:
 `
 
 func TestNeuVector_Convert(t *testing.T) {
+	t.Parallel()
 	out, err := neuvector.Convert([]byte(nvExport))
 	if err != nil {
 		t.Fatal(err)
@@ -84,6 +86,7 @@ spec:
 `
 
 func TestNeuVector_ConvertFileProfiles(t *testing.T) {
+	t.Parallel()
 	out, err := neuvector.ConvertFileProfiles([]byte(nvFileMonitorExport))
 	if err != nil {
 		t.Fatal(err)
@@ -132,6 +135,7 @@ admission:
 `
 
 func TestNeuVector_ConvertAdmissionProfileBundleParity(t *testing.T) {
+	t.Parallel()
 	bundle, err := neuvector.ConvertAdmissionProfileBundle([]byte(nvAdmissionProfileExport))
 	if err != nil {
 		t.Fatal(err)
@@ -225,6 +229,7 @@ const aquaExport = `
 ]`
 
 func TestAqua_Convert(t *testing.T) {
+	t.Parallel()
 	out, err := aqua.Convert([]byte(aquaExport))
 	if err != nil {
 		t.Fatal(err)
@@ -248,6 +253,7 @@ const prismaExport = `
 ]}`
 
 func TestPrisma_Convert(t *testing.T) {
+	t.Parallel()
 	out, err := prisma.Convert([]byte(prismaExport))
 	if err != nil {
 		t.Fatal(err)

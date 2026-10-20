@@ -1,0 +1,32 @@
+From: Constellation maintainers
+Subject: [local correctness backport] Initialize the IPv4 connection lookup application
+Upstream-base: 4247e24561a9cd225db73a7cfaf5c7b2c99ba0a5
+Recorded: 2026-10-17
+
+conn4_match compares application but dp_ctrl_connect_report did not assign it.
+Initialize the complete key and use the report's actual Application. This
+preserves the existing tuple, counters, timestamp/action and batch semantics;
+it prevents undefined stack contents from splitting identical application rows.
+The lookup occurs before IPC export, so a downstream Go correction cannot
+repair its aggregation. Actual reporter regression: tests/native-policy/connect_report.c.
+Not an upstream merge claim or an explanation of the separate Protect probe gap.
+
+--- a/dp/ctrl.c
++++ b/dp/ctrl.c
+@@ -2651,7 +2651,7 @@
+ 
+     // TODO: Only care IPv4 sessions
+     if (likely(log->EtherType == ETH_P_IP)) {
+-        conn4_key_t key;
++        conn4_key_t key = {0};
+ 
+         DEBUG_LOGGER(DBG_MAC_FORMAT" "DBG_IPV4_FORMAT":%u => "DBG_IPV4_FORMAT":%u"
+                      " app=%u policy=%u action=%d sess=%d violate=%d threat=%u severity=%d\n",
+@@ -2692,6 +2692,7 @@
+             key.ingress = false;
+         }
+         key.port = log->ServerPort;
++        key.application = log->Application;
+         key.ipproto = log->IPProto;
+         key.pol_id = log->PolicyId;
+ 

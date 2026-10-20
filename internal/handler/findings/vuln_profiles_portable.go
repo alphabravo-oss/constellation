@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"gopkg.in/yaml.v3"
 
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
@@ -38,7 +40,7 @@ func (h *VulnProfiles) Export(w http.ResponseWriter, r *http.Request) {
 	subj, _ := authctx.SubjectFrom(r.Context())
 	clusterArg, err := sqlx.ParseClusterIDParam(r)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	rows, err := h.db.Pool().Query(r.Context(), `
@@ -47,7 +49,7 @@ SELECT name, description, active, entries, domain_scope
  WHERE org_id=$1 AND ($2::uuid IS NULL OR cluster_id IS NULL OR cluster_id = $2)
  ORDER BY name`, subj.OrgID, clusterArg)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()
@@ -56,7 +58,7 @@ SELECT name, description, active, entries, domain_scope
 		var pp portableVulnProfile
 		var entriesRaw, domainRaw []byte
 		if err := rows.Scan(&pp.Name, &pp.Description, &pp.Active, &entriesRaw, &domainRaw); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		_ = json.Unmarshal(entriesRaw, &pp.Entries)
@@ -67,7 +69,7 @@ SELECT name, description, active, entries, domain_scope
 	}
 	out, err := yaml.Marshal(bundle)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	w.Header().Set("Content-Type", "application/x-yaml")
@@ -80,21 +82,21 @@ func (h *VulnProfiles) Import(w http.ResponseWriter, r *http.Request) {
 	subj, _ := authctx.SubjectFrom(r.Context())
 	clusterArg, err := sqlx.ParseClusterIDParam(r)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "read body"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "read body")
 		return
 	}
 	var bundle vulnProfileBundle
 	if err := yaml.Unmarshal(raw, &bundle); err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid bundle: " + err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid bundle: "+err.Error())
 		return
 	}
 	if len(bundle.Profiles) == 0 {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "bundle contains no profiles"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bundle contains no profiles")
 		return
 	}
 	type result struct {

@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
@@ -72,7 +73,16 @@ func (h *RuntimePoliciesHTTP) List(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "cluster_id is required")
 		return
 	}
-	rows, err := h.store.ListForCluster(r.Context(), sub.OrgID, clusterID)
+	var owned bool
+	if err := h.store.db.Pool().QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM clusters WHERE id=$1 AND org_id=$2)`, clusterID, sub.OrgID).Scan(&owned); err != nil {
+		jsonError(w, 500, err.Error())
+		return
+	}
+	if !owned {
+		jsonError(w, 404, "cluster not found")
+		return
+	}
+	rows, err := h.store.ListInventoryForCluster(r.Context(), sub.OrgID, clusterID)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -156,16 +166,15 @@ func (h *RuntimePoliciesHTTP) Create(w http.ResponseWriter, r *http.Request) {
 		Rules:     req.Rules,
 		CreatedBy: &sub.UserID,
 	}
-	id, err := h.store.Insert(r.Context(), p, requestIDFrom(r))
-	if err != nil {
-		if strings.Contains(err.Error(), "duplicate") {
-			jsonError(w, http.StatusConflict, "policy with this name already exists for this workload")
-			return
-		}
-		jsonError(w, http.StatusInternalServerError, err.Error())
+	if _, err := policyDatabaseDirection(p); err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	got, _ := h.store.Get(r.Context(), sub.OrgID, id)
+	got, err := h.store.insertLegacyPolicy(r.Context(), p, requestIDFrom(r))
+	if err != nil {
+		writeLegacyPolicyMutationError(w, err)
+		return
+	}
 	httpx.WriteJSON(w, http.StatusCreated, got)
 }
 
@@ -188,56 +197,16 @@ func (h *RuntimePoliciesHTTP) Update(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "invalid body: "+err.Error())
 		return
 	}
-	// Build a SET clause dynamically. Empty body → no-op (we still return
-	// the current row so the UI can refresh).
-	current, err := h.store.Get(r.Context(), sub.OrgID, id)
-	if err != nil {
-		jsonError(w, http.StatusNotFound, "not found")
+	if err := validatePolicyPatch(req.DefAction, req.ApplyDir, req.Rules); err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if req.Rules != nil {
-		if !json.Valid(*req.Rules) {
-			jsonError(w, http.StatusBadRequest, "rules is not valid JSON")
-			return
-		}
-		current.Rules = *req.Rules
-	}
-	if req.DefAction != nil {
-		current.DefAction = *req.DefAction
-	}
-	if req.ApplyDir != nil {
-		current.ApplyDir = *req.ApplyDir
-	}
-	if req.Name != nil {
-		current.Name = *req.Name
-	}
-	_, err = h.store.db.Pool().Exec(r.Context(), `
-UPDATE runtime_policies
-   SET rules = $1::jsonb, def_action = $2, apply_dir = $3, name = $4, updated_by = $5
- WHERE id = $6 AND org_id = $7`,
-		string(current.Rules), int16(current.DefAction), int16(current.ApplyDir),
-		current.Name, sub.UserID, id, sub.OrgID)
+	got, err := h.store.updateLegacyPolicy(r.Context(), sub.OrgID, id, req, sub.UserID, requestIDFrom(r))
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		writeLegacyPolicyMutationError(w, err)
 		return
-	}
-	got, _ := h.store.Get(r.Context(), sub.OrgID, id)
-	// Audit the update with the trimmed snapshot diff. The bump-version
-	// trigger already incremented version + updated_at.
-	if h.store.auditLog != nil {
-		_ = h.store.auditLog.LogPolicyEvent(r.Context(), sub.OrgID, &sub.UserID,
-			audit.ActionPolicyUpdate, ptrSnap(current), ptrSnap(got), requestIDFrom(r))
 	}
 	httpx.WriteJSON(w, http.StatusOK, got)
-}
-
-// ptrSnap is a small helper since LogPolicyEvent takes *PolicySnapshot.
-func ptrSnap(p *RuntimePolicy) *audit.PolicySnapshot {
-	if p == nil {
-		return nil
-	}
-	s := snapshot(p)
-	return &s
 }
 
 // Promote handles POST /api/v1/runtime-policies/{id}/promote — monitor → enforce.
@@ -275,16 +244,11 @@ func (h *RuntimePoliciesHTTP) modeChange(w http.ResponseWriter, r *http.Request,
 		jsonError(w, http.StatusBadRequest, "invalid id")
 		return
 	}
-	if err := h.store.SetMode(r.Context(), sub.OrgID, id, target,
-		sub.UserID, false /*operator-initiated*/, requestIDFrom(r)); err != nil {
-		if errors.Is(err, errors.New("not found")) || strings.Contains(err.Error(), "not found") {
-			jsonError(w, http.StatusNotFound, "not found")
-			return
-		}
-		jsonError(w, http.StatusInternalServerError, err.Error())
+	got, err := h.store.setLegacyPolicyMode(r.Context(), sub.OrgID, id, target, sub.UserID, false, requestIDFrom(r))
+	if err != nil {
+		writeLegacyPolicyMutationError(w, err)
 		return
 	}
-	got, _ := h.store.Get(r.Context(), sub.OrgID, id)
 	httpx.WriteJSON(w, http.StatusOK, got)
 }
 
@@ -301,14 +265,22 @@ func (h *RuntimePoliciesHTTP) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.store.Delete(r.Context(), sub.OrgID, id, &sub.UserID, requestIDFrom(r)); err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			jsonError(w, http.StatusNotFound, "not found")
-			return
-		}
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		writeLegacyPolicyMutationError(w, err)
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"deleted": id})
+}
+
+func writeLegacyPolicyMutationError(w http.ResponseWriter, err error) {
+	var databaseError *pgconn.PgError
+	switch {
+	case errors.Is(err, errLegacyPolicyNotFound), errors.Is(err, errLegacyPolicyClusterNotFound):
+		jsonError(w, http.StatusNotFound, err.Error())
+	case errors.As(err, &databaseError) && databaseError.Code == "23505":
+		jsonError(w, http.StatusConflict, "policy with this name already exists for this workload")
+	default:
+		jsonError(w, http.StatusInternalServerError, "policy mutation could not be committed")
+	}
 }
 
 // requestIDFrom — small helper so audit row gets the request_id if one's

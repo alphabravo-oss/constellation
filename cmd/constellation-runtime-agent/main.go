@@ -11,9 +11,9 @@
 // elapses (whichever happens first), then POSTs the array as JSON to the control-plane
 // at $CONSTELLATION_API_URL/api/v1/events:bulk with Bearer $RUNTIME_AGENT_TOKEN.
 //
-// The POST is retried with exponential backoff up to 3 times (100ms, 400ms, 1.6s). After
-// the final failure the batch is dropped and the agent's `dropped` counter is bumped, so
-// operators can alarm on `constellation_runtime_agent_dropped_total > 0`.
+// Events and flows are persisted to a bounded node-local spool and replayed in
+// producer order until the API acknowledges durable commit. Queue overflow
+// increments dropped counters; upstream kernel/channel buffers remain volatile.
 //
 // Configuration env vars (* required for upload):
 //
@@ -36,20 +36,17 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -73,6 +70,9 @@ const maxInFlightUploads = 4
 // reused instead of reopened per batch.
 var sharedUploadClient = &http.Client{
 	Timeout: 10 * time.Second,
+	// API upload endpoints never redirect. Refuse every hop so a 307/308
+	// cannot replay captured telemetry or turn an unrelated response into an ACK.
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	Transport: &http.Transport{
 		Proxy:                 http.ProxyFromEnvironment,
 		MaxIdleConns:          100,
@@ -213,7 +213,7 @@ func main() {
 		// the whole verdict-capable datapath stays dormant and every workload is on
 		// the TAP mirror path, so nothing is intercepted inline by accident.
 		enforceActive := envTruthy(os.Getenv("CONSTELLATION_DP_ENFORCE")) && (cniNFQueueSafe || enforceOnCilium)
-		tapProvider := selectTapProvider(logger, enforceActive)
+		tapProvider := selectTapProvider(logger, enforceActive, protectedNS)
 		enforceProvider := selectEnforceProvider(tapProvider, enforceActive, logger)
 		if enforceProvider != nil {
 			logger.Info("dp: inline enforcement ENABLED (per-workload, label-scoped)",
@@ -381,11 +381,21 @@ func main() {
 	}
 
 	// Upload goroutine — single writer; events are pushed onto `toUpload` channel.
+	var telemetryUploads sync.WaitGroup
 	var toUpload chan ingestEvent
 	if uploadEnabled {
 		toUpload = make(chan ingestEvent, batchSize*4)
-		go uploadLoop(ctx, logger, withClusterID(apiURL+"/api/v1/events:bulk", clusterID), apiToken, batchSize,
-			time.Duration(batchIntervalMs)*time.Millisecond, toUpload, &nUploaded, &nDropped)
+		target := withClusterID(apiURL+"/api/v1/events:bulk", clusterID)
+		queue, err := openTelemetryQueue("events", target)
+		if err != nil {
+			logger.Error("open event spool", slog.String("error", err.Error()))
+			os.Exit(2)
+		}
+		telemetryUploads.Add(1)
+		go func() {
+			defer telemetryUploads.Done()
+			durableUploadLoop(ctx, logger, queue, target, apiToken, batchSize, time.Duration(batchIntervalMs)*time.Millisecond, toUpload, &nUploaded, &nDropped)
+		}()
 	}
 
 	// Network-flows lane: every dp.EventConnection becomes one row on this
@@ -402,8 +412,17 @@ func main() {
 	if uploadEnabled {
 		flowOut = make(chan flowIngestRow, 8192)
 
-		go flowUploadLoop(ctx, logger, apiURL+"/api/v1/network-flows:bulk", apiToken,
-			200, 5*time.Second, flowOut, &nFlowsUploaded, &nFlowsDropped)
+		target := withClusterID(apiURL+"/api/v1/network-flows:bulk", clusterID)
+		queue, err := openTelemetryQueue("flows", target)
+		if err != nil {
+			logger.Error("open flow spool", slog.String("error", err.Error()))
+			os.Exit(2)
+		}
+		telemetryUploads.Add(1)
+		go func() {
+			defer telemetryUploads.Done()
+			durableUploadLoop(ctx, logger, queue, target, apiToken, 200, 5*time.Second, flowOut, &nFlowsUploaded, &nFlowsDropped)
+		}()
 
 		// Wave 5: threat upload. Only starts when dp is enabled — the BPF
 		// path doesn't produce DPI threat detections.
@@ -495,6 +514,11 @@ func main() {
 			Protected: protectedNS,
 			Sync:      procBaselineWorker,
 			OnDeny: func(event fanotifyDecisionEvent, ruleID string) {
+				wirePID, validPID := processObservationPID(int(event.Pid))
+				if !validPID {
+					nDropped.Add(1)
+					return
+				}
 				if toUpload == nil {
 					return
 				}
@@ -504,7 +528,7 @@ func main() {
 					Node:              node,
 					WorkloadID:        event.WorkloadID,
 					ContainerID:       event.ContainerID,
-					PID:               uint32(event.Pid),
+					PID:               wirePID,
 					Comm:              event.Comm,
 					Path:              event.Path,
 					Blocked:           true,
@@ -523,6 +547,11 @@ func main() {
 			// drift to the server; Blocked reflects whether it was actually denied
 			// (enforce) vs merely observed (monitor). Mirrors OnDeny above.
 			OnExecDeny: func(event fanotifyDecisionEvent, reason string, denied bool) {
+				wirePID, validPID := processObservationPID(int(event.Pid))
+				if !validPID {
+					nDropped.Add(1)
+					return
+				}
 				if toUpload == nil {
 					return
 				}
@@ -532,7 +561,7 @@ func main() {
 					Node:            node,
 					WorkloadID:      event.WorkloadID,
 					ContainerID:     event.ContainerID,
-					PID:             uint32(event.Pid),
+					PID:             wirePID,
 					Comm:            event.Comm,
 					Filename:        event.Path,
 					Blocked:         denied,
@@ -562,6 +591,11 @@ func main() {
 			HashMaxBytes: fileProfileHashMaxBytes(),
 			Logger:       logger,
 			OnChange: func(ev hostFIMEvent) {
+				wirePID, validPID := processObservationPID(int(ev.Pid))
+				if !validPID {
+					nDropped.Add(1)
+					return
+				}
 				if toUpload == nil {
 					return
 				}
@@ -569,7 +603,7 @@ func main() {
 					At:     time.Now().UTC(),
 					Kind:   "host_file_change",
 					Node:   node,
-					PID:    uint32(ev.Pid),
+					PID:    wirePID,
 					Comm:   ev.Comm,
 					Path:   ev.Path,
 					Sha256: ev.Sha256,
@@ -634,6 +668,11 @@ func main() {
 			// Without it CONSTELLATION_PROCESS_ZERO_DRIFT is a no-op.
 			Workloads: workloads,
 			OnKill: func(pid int, workloadID, containerID, comm, filename, reason string) {
+				wirePID, validPID := processObservationPID(pid)
+				if !validPID {
+					nDropped.Add(1)
+					return
+				}
 				if toUpload == nil {
 					return
 				}
@@ -643,7 +682,7 @@ func main() {
 					Node:        node,
 					WorkloadID:  workloadID,
 					ContainerID: containerID,
-					PID:         uint32(pid),
+					PID:         wirePID,
 					Comm:        comm,
 					Filename:    filename,
 					Blocked:     true,
@@ -665,6 +704,11 @@ func main() {
 			// OnAlert surfaces a monitor-mode zero-drift observation (not killed) to
 			// the server, carrying the drift reason. Mirrors OnKill but Blocked=false.
 			OnAlert: func(pid int, workloadID, containerID, comm, filename, reason string) {
+				wirePID, validPID := processObservationPID(pid)
+				if !validPID {
+					nDropped.Add(1)
+					return
+				}
 				if toUpload == nil {
 					return
 				}
@@ -674,7 +718,7 @@ func main() {
 					Node:            node,
 					WorkloadID:      workloadID,
 					ContainerID:     containerID,
-					PID:             uint32(pid),
+					PID:             wirePID,
 					Comm:            comm,
 					Filename:        filename,
 					ZeroDriftReason: reason,
@@ -698,13 +742,24 @@ func main() {
 	killProcEnabled := responseKillProcessEnabledFromEnv(os.Getenv("CONSTELLATION_RESPONSE_KILL_PROCESS"))
 	killSessEnabled := responseKillSessionEnabledFromEnv(os.Getenv("CONSTELLATION_RESPONSE_KILL_SESSION"))
 	if uploadEnabled && (killProcEnabled || killSessEnabled) {
+		var sessionProtection func(context.Context, responseAction) string
+		if killSessEnabled {
+			var err error
+			sessionProtection, err = newSessionProtection(protectedNS)
+			if err != nil {
+				logger.Error("session protection unavailable; session actions will be refused", slog.String("err", err.Error()))
+			}
+		}
 		resp := newResponder(responderConfig{
-			Node:               node,
-			HostRoot:           hostScanHostRootFromEnv(),
-			KillProcessEnabled: killProcEnabled,
-			KillSessionEnabled: killSessEnabled,
-			Workloads:          workloads,
-			Logger:             logger,
+			Node:                node,
+			HostRoot:            hostScanHostRootFromEnv(),
+			KillProcessEnabled:  killProcEnabled,
+			KillSessionEnabled:  killSessEnabled,
+			Workloads:           workloads,
+			Protected:           protectedNS,
+			currentProcessStart: a.ProcessStartIdentity,
+			sessionProtection:   sessionProtection,
+			Logger:              logger,
 		})
 		respWorker := &responseActionWorker{
 			APIBaseURL: apiURL,
@@ -718,6 +773,14 @@ func main() {
 			slog.Bool("kill_process", killProcEnabled),
 			slog.Bool("kill_session", killSessEnabled))
 		go respWorker.Run(ctx)
+		if killProcEnabled {
+			processWorker, err := newProcessResponseWorker(apiURL, apiToken, clusterID, node, resp, logger)
+			if err != nil {
+				logger.Error("exact process responder disabled: durable journal unavailable", "error", err.Error())
+			} else {
+				go processWorker.Run(ctx)
+			}
+		}
 	}
 
 	// Wave C3.5 + C4.5: DP pull-pollers. These depend on dp being up
@@ -999,6 +1062,10 @@ func main() {
 					ie.Args = readProcCmdline(ev.Process.PID)
 				}
 				ie.ContainerID = ev.Process.ContainerID
+				ie.BootID, ie.ProcessStartTicks = captureResponseProcessIdentity(responderProcRoot(hostScanHostRootFromEnv()), ev.Process.PID, ev.Process.StartBootNS)
+				if ie.BootID != "" {
+					ie.ProcessStartBootNS = strconv.FormatUint(ev.Process.StartBootNS, 10)
+				}
 				// RT-4: enrich from /proc — real uid + stdio-socket (reverse shell).
 				// Best-effort and cheap (one readdir + one small read); a missing
 				// /proc entry (exec already exited) leaves the fields at zero.
@@ -1095,16 +1162,16 @@ func main() {
 		logger.Error("runtime-agent: Run returned", slog.String("err", err.Error()))
 	}
 
-	// Drain the upload channel so the last partial batch flushes before exit.
-	if toUpload != nil {
-		close(toUpload)
-	}
+	// Stop producers and let each lane persist its already-buffered records.
+	// Do not close channels while cancellation is propagating to producers.
+	cancel()
 	if flowOut != nil {
 		// Aggregator's Run() exits on ctx cancel; closing flowOut here would
 		// race with that goroutine, so we just leave it for the GC.
 		_ = flowOut
 	}
-	// Give the upload loops a brief window to drain.
+	telemetryUploads.Wait()
+	// Give the remaining best-effort lanes a brief window to drain.
 	if uploadEnabled {
 		time.Sleep(time.Duration(batchIntervalMs)*time.Millisecond + 500*time.Millisecond)
 	}
@@ -1113,114 +1180,6 @@ func main() {
 		nExec.Load(), nFile.Load(), nTotal.Load(),
 		nUploaded.Load(), nDropped.Load(), a.Dropped(),
 		nFlowsUploaded.Load(), nFlowsDropped.Load())
-}
-
-// flowUploadLoop drains bucketed flows into batches and POSTs them to
-// /api/v1/network-flows:bulk. Mirrors uploadLoop above but for flowIngestRow.
-func flowUploadLoop(
-	ctx context.Context,
-	logger *slog.Logger,
-	url, token string,
-	size int,
-	interval time.Duration,
-	in <-chan flowIngestRow,
-	uploaded, dropped *atomic.Uint64,
-) {
-	client := sharedUploadClient
-	sem := make(chan struct{}, maxInFlightUploads)
-	buf := make([]flowIngestRow, 0, size)
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	flush := func() {
-		if len(buf) == 0 {
-			return
-		}
-		batch := buf
-		buf = make([]flowIngestRow, 0, size)
-		// Bound in-flight POSTs: block briefly for a slot so a wedged API
-		// can't leak an unbounded number of upload goroutines + batches.
-		select {
-		case sem <- struct{}{}:
-		case <-ctx.Done():
-			return
-		}
-		go func() {
-			defer func() { <-sem }()
-			if err := postFlowBatch(ctx, client, url, token, batch); err != nil {
-				logger.Warn("flow upload failed; dropping",
-					slog.Int("batch", len(batch)),
-					slog.String("err", err.Error()))
-				dropped.Add(uint64(len(batch)))
-				return
-			}
-			uploaded.Add(uint64(len(batch)))
-		}()
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			flush()
-			return
-		case row, ok := <-in:
-			if !ok {
-				flush()
-				return
-			}
-			buf = append(buf, row)
-			if len(buf) >= size {
-				flush()
-				ticker.Reset(interval)
-			}
-		case <-ticker.C:
-			flush()
-		}
-	}
-}
-
-// postFlowBatch posts a batch of flow rows with the same retry semantics as
-// postBatch.
-func postFlowBatch(ctx context.Context, client *http.Client, url, token string, batch []flowIngestRow) error {
-	body, err := json.Marshal(batch)
-	if err != nil {
-		return fmt.Errorf("marshal: %w", err)
-	}
-	delays := []time.Duration{0, 100 * time.Millisecond, 400 * time.Millisecond, 1600 * time.Millisecond}
-	var lastErr error
-	for _, delay := range delays {
-		if delay > 0 {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(delay):
-			}
-		}
-		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
-		if err != nil {
-			return fmt.Errorf("new request: %w", err)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+token)
-		resp, err := client.Do(req)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		_ = resp.Body.Close()
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			return nil
-		}
-		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
-			return fmt.Errorf("server %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
-		}
-		lastErr = fmt.Errorf("server %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
-	}
-	if lastErr == nil {
-		lastErr = errors.New("unknown flow upload failure")
-	}
-	return lastErr
 }
 
 // ingestEvent is the wire shape sent to POST /api/v1/events:bulk. Kept here as a private
@@ -1235,12 +1194,15 @@ type ingestEvent struct {
 	Pod         string    `json:"pod,omitempty"`
 	ContainerID string    `json:"container_id,omitempty"`
 
-	PID      uint32   `json:"pid,omitempty"`
-	PPID     uint32   `json:"ppid,omitempty"`
-	UID      uint32   `json:"uid,omitempty"`
-	Comm     string   `json:"comm,omitempty"`
-	Filename string   `json:"filename,omitempty"`
-	Args     []string `json:"args,omitempty"`
+	ProcessStartTicks  string   `json:"process_start_ticks,omitempty"`
+	ProcessStartBootNS string   `json:"start_boot_ns,omitempty"`
+	BootID             string   `json:"boot_id,omitempty"`
+	PID                uint32   `json:"pid,omitempty"`
+	PPID               uint32   `json:"ppid,omitempty"`
+	UID                uint32   `json:"uid,omitempty"`
+	Comm               string   `json:"comm,omitempty"`
+	Filename           string   `json:"filename,omitempty"`
+	Args               []string `json:"args,omitempty"`
 
 	// RT-4 /proc enrichment (optional; absent => current behavior). UID above is the
 	// effective uid from the kernel record; Ruid is the real uid read from
@@ -1288,121 +1250,8 @@ type ingestEvent struct {
 	ZeroDriftReason string `json:"zero_drift_reason,omitempty"`
 }
 
-// uploadLoop is the single writer that drains `in` into batches and POSTs each batch.
-// Flush triggers: batch reaches `size`, or `interval` elapses since the last flush.
-//
-// Failures retry up to 3 times with exponential backoff (100ms, 400ms, 1.6s). After the
-// final failure the batch is dropped and `dropped` is bumped by len(batch).
-func uploadLoop(
-	ctx context.Context,
-	logger *slog.Logger,
-	url, token string,
-	size int,
-	interval time.Duration,
-	in <-chan ingestEvent,
-	uploaded, dropped *atomic.Uint64,
-) {
-	client := sharedUploadClient
-	sem := make(chan struct{}, maxInFlightUploads)
-	buf := make([]ingestEvent, 0, size)
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	flush := func() {
-		if len(buf) == 0 {
-			return
-		}
-		// Try POST + retries. Avoid blocking the loop forever on a wedged API: the total
-		// retry budget is ~2.1s.
-		batch := buf
-		buf = make([]ingestEvent, 0, size)
-		// Bound in-flight POSTs: block briefly for a slot so a wedged API
-		// can't leak an unbounded number of upload goroutines + batches.
-		select {
-		case sem <- struct{}{}:
-		case <-ctx.Done():
-			return
-		}
-		go func() {
-			defer func() { <-sem }()
-			if err := postBatch(ctx, client, url, token, batch); err != nil {
-				logger.Warn("upload batch failed; dropping",
-					slog.Int("batch", len(batch)),
-					slog.String("err", err.Error()))
-				dropped.Add(uint64(len(batch)))
-				return
-			}
-			uploaded.Add(uint64(len(batch)))
-		}()
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			flush()
-			return
-		case ev, ok := <-in:
-			if !ok {
-				flush()
-				return
-			}
-			buf = append(buf, ev)
-			if len(buf) >= size {
-				flush()
-				ticker.Reset(interval)
-			}
-		case <-ticker.C:
-			flush()
-		}
-	}
-}
-
-// postBatch marshals + POSTs the batch, with up to 3 retries on transient failures.
-// A non-2xx response is treated as terminal — there's no point retrying a 400. A network
-// error or 5xx is retried.
 func postBatch(ctx context.Context, client *http.Client, url, token string, batch []ingestEvent) error {
-	body, err := json.Marshal(batch)
-	if err != nil {
-		return fmt.Errorf("marshal: %w", err)
-	}
-	delays := []time.Duration{0, 100 * time.Millisecond, 400 * time.Millisecond, 1600 * time.Millisecond}
-	var lastErr error
-	for attempt, delay := range delays {
-		if delay > 0 {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(delay):
-			}
-		}
-		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
-		if err != nil {
-			return fmt.Errorf("new request: %w", err)
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+token)
-		resp, err := client.Do(req)
-		if err != nil {
-			lastErr = err
-			continue // retry
-		}
-		// Drain the body so the connection can be reused.
-		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		_ = resp.Body.Close()
-		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			return nil
-		}
-		// 4xx -> terminal, no point retrying with the same body.
-		if resp.StatusCode >= 400 && resp.StatusCode < 500 {
-			return fmt.Errorf("server %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
-		}
-		lastErr = fmt.Errorf("server %d: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
-		_ = attempt
-	}
-	if lastErr == nil {
-		lastErr = errors.New("unknown upload failure")
-	}
-	return lastErr
+	return postLegacyBatch(ctx, client, url, token, batch)
 }
 
 // selectTapProvider picks how the dp supervisor will discover interfaces to
@@ -1413,7 +1262,7 @@ func postBatch(ctx context.Context, client *http.Client, url, token string, batc
 // of whether CONSTELLATION_DP_TAP_PORTS is set. "podveth" forces sysfs
 // auto-discovery regardless. The defaulted fall-through prefers env-var
 // when explicit ports are configured, else auto-discovery.
-func selectTapProvider(logger *slog.Logger, enforceActive bool) dp.TapProvider {
+func selectTapProvider(logger *slog.Logger, enforceActive bool, protected *protectedSet) dp.TapProvider {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("CONSTELLATION_DP_TAP_PROVIDER"))) {
 	case "none":
 		return nil
@@ -1425,7 +1274,7 @@ func selectTapProvider(logger *slog.Logger, enforceActive bool) dp.TapProvider {
 		// matched against the on-wire (pod-side) MACs. See container_tap.go.
 		return dp.NewPodVethProvider(logger)
 	case "container":
-		return dp.NewContainerTapProvider(logger, crictlContainerLister(enforceActive))
+		return dp.NewContainerTapProvider(logger, crictlContainerLister(enforceActive, protected))
 	}
 	// Explicit env-var ports still win (dev/test bootstrap).
 	if env := dp.NewEnvTapProvider(); env != nil {
@@ -1434,7 +1283,7 @@ func selectTapProvider(logger *slog.Logger, enforceActive bool) dp.TapProvider {
 	// Default: per-container netns tapping (NeuVector's proven model). This
 	// replaces PodVethProvider as the active auto-discovery provider so the
 	// network map sees real traffic.
-	return dp.NewContainerTapProvider(logger, crictlContainerLister(enforceActive))
+	return dp.NewContainerTapProvider(logger, crictlContainerLister(enforceActive, protected))
 }
 
 // selectEnforceProvider returns the inline (NFQUEUE) enforce provider, or nil
@@ -1457,7 +1306,7 @@ func selectEnforceProvider(tp dp.TapProvider, enforceActive bool, logger *slog.L
 // crictlContainerLister adapts hostscan.ListRunningContainers (crictl over the
 // host CRI socket) into dp.ContainerLister. Kept here so the dp package needn't
 // import hostscan (hostscan already imports dp).
-func crictlContainerLister(enforceActive bool) dp.ContainerLister {
+func crictlContainerLister(enforceActive bool, protected *protectedSet) dp.ContainerLister {
 	hostRoot := hostScanHostRootFromEnv()
 	return func(ctx context.Context) ([]dp.RunningContainer, error) {
 		raw, err := hostscan.ListRunningContainers(ctx, hostscan.ListRunningContainersOptions{
@@ -1469,24 +1318,22 @@ func crictlContainerLister(enforceActive bool) dp.ContainerLister {
 		}
 		out := make([]dp.RunningContainer, 0, len(raw))
 		for _, c := range raw {
-			waf, dlp, enforce := dpiOptIn(c.PodLabels)
-			out = append(out, dp.RunningContainer{
-				ID: c.ID, PodName: c.PodName, PID: c.PID,
-				WAF: waf, DLP: dlp,
-				// Pod identity for group→sensor binding resolution (NET-43): the
-				// namespace + user labels the group selectors match on.
-				Namespace: c.PodNS,
-				Labels:    c.PodLabels,
-				// Inline enforcement activates ONLY under the agent gate
-				// (enforceActive = CONSTELLATION_DP_ENFORCE + NFQUEUE-safe CNI);
-				// the pod's enforce label alone is inert. This keeps the Enforce
-				// flag and the ContainerEnforceProvider consistent, so a labeled
-				// pod is never skipped-from-tap without an enforce reconciler to
-				// pick it up.
-				Enforce: enforceActive && enforce,
-			})
+			out = append(out, dpiRunningContainer(c, enforceActive, protected))
 		}
 		return out, nil
+	}
+}
+
+// dpiRunningContainer keeps protected and unattributed workloads on passive taps.
+// The guard is evaluated on every inventory refresh before either provider sees
+// the target. Labels can request inspection, but cannot override protection.
+func dpiRunningContainer(c hostscan.RunningContainer, enforceActive bool, protected *protectedSet) dp.RunningContainer {
+	waf, dlp, enforce := dpiOptIn(c.PodLabels)
+	return dp.RunningContainer{
+		ID: c.ID, PodName: c.PodName, PodUID: c.PodUID, PID: c.PID,
+		Namespace: c.PodNS, Labels: c.PodLabels, WAF: waf, DLP: dlp,
+		Enforce: enforceActive && enforce && protected != nil &&
+			strings.TrimSpace(c.PodNS) != "" && !protected.protects(c.ID, c.PodNS),
 	}
 }
 
@@ -1548,13 +1395,4 @@ func withClusterID(rawURL, clusterID string) string {
 		sep = "&"
 	}
 	return rawURL + sep + "cluster_id=" + url.QueryEscape(clusterID)
-}
-
-// formatAddrPort renders a netip.AddrPort safely. The zero value formats as "invalid
-// AddrPort"; we want the empty string in that case so the server doesn't try to parse it.
-func formatAddrPort(a netip.AddrPort) string {
-	if !a.IsValid() {
-		return ""
-	}
-	return a.String()
 }

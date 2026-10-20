@@ -23,6 +23,7 @@ const dockerBenchJSON = `{
 }`
 
 func TestParseDockerBench(t *testing.T) {
+	t.Parallel()
 	checks, err := ParseDockerBench([]byte(dockerBenchJSON))
 	if err != nil {
 		t.Fatalf("parse: %v", err)

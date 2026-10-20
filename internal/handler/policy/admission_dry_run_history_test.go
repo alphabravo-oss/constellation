@@ -1,3 +1,5 @@
+//go:build integration
+
 package policy
 
 import (
@@ -16,6 +18,7 @@ import (
 )
 
 func TestPolicies_AssessPersistsDryRunHistoryAndAudit(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -75,7 +78,7 @@ VALUES ($1, $2, $3, 'disallow-latest-tag', 'deny latest tag', 'constellation-adm
 	}
 
 	body := []byte(`{"image":"ghcr.io/acme/app:latest","namespace":"prod"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/policies/assess?cluster_id="+clusterID.String(), bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/policies/assess?cluster_id="+clusterID.String(), bytes.NewReader(body))
 	req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	rec := httptest.NewRecorder()
 	NewPolicies(d, audit.New(pool), nil).Assess(rec, req)
@@ -99,7 +102,7 @@ VALUES ($1, $2, $3, 'disallow-latest-tag', 'deny latest tag', 'constellation-adm
 		t.Fatalf("expected latest-tag reason, got %+v", assessed.Matches[0])
 	}
 
-	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/policies/admission/dry-runs?cluster_id="+clusterID.String(), nil)
+	listReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/policies/admission/dry-runs?cluster_id="+clusterID.String(), nil)
 	listReq = listReq.WithContext(authctx.WithSubject(listReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	listRec := httptest.NewRecorder()
 	NewPolicies(d, audit.New(pool), nil).AdmissionDryRunHistory(listRec, listReq)
@@ -138,7 +141,7 @@ SELECT COUNT(*)::int
 		t.Fatalf("assess audit count=%d want 1", auditAssess)
 	}
 
-	clearReq := httptest.NewRequest(http.MethodDelete, "/api/v1/policies/admission/dry-runs?cluster_id="+clusterID.String(), nil)
+	clearReq := httptest.NewRequestWithContext(t.Context(), http.MethodDelete, "/api/v1/policies/admission/dry-runs?cluster_id="+clusterID.String(), nil)
 	clearReq = clearReq.WithContext(authctx.WithSubject(clearReq.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 	clearRec := httptest.NewRecorder()
 	NewPolicies(d, audit.New(pool), nil).ClearAdmissionDryRunHistory(clearRec, clearReq)

@@ -28,7 +28,7 @@ type Attrs struct {
 // verdictRank orders verdicts by severity so folding keeps the worst.
 func verdictRank(v string) int {
 	switch v {
-	case "deny", "block":
+	case "deny", "denied", "block", "blocked":
 		return 3
 	case "violate", "alert":
 		return 2

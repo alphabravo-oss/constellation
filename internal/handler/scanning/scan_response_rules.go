@@ -8,11 +8,13 @@
 // Webhook actions fire inside the injected evaluator (which owns the notify dispatcher, like
 // the runtime path). The returned non-webhook actions are applied here: quarantine reuses the
 // origin='auto' quarantine_entries bridge (scoped to the image, NeuVector's "block this
-// vulnerable image at admission" primitive); suppress_log/tag stay audit-recorded.
+// vulnerable image at admission" primitive); suppress_log reports that scan completion
+// has no security-event log to suppress, and legacy tag actions report unsupported.
 package scanning
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -120,10 +122,11 @@ func (h *ScanJobs) dispatchScanResponseRules(ctx context.Context, orgID uuid.UUI
 
 // applyScanResponseRuleActions applies the ordered E1 actions in the data plane. quarantine
 // records an origin='auto', scope='image' quarantine_entries row (the same insert the runtime
-// bridge uses) so the vulnerable image is blocked at next admission — but only when the scan
-// is attributable to a cluster (target.ClusterID); a registry/repository scan with no cluster
-// has nowhere to enforce, so it is audit-recorded only. suppress_log/tag are metadata-only and
-// stay audit-recorded. Webhook delivery already happened inside the evaluator.
+// bridge uses). Admission remains subject to webhook coverage and protected namespace
+// exclusions. Registry scans resolve owned clusters through image workload links. Scan completion writes operational
+// history, not a security-event log or generic notification; suppress_log has no such output
+// to suppress. Legacy tag actions are explicitly unsupported. Webhook delivery already
+// happened inside the evaluator.
 func (h *ScanJobs) applyScanResponseRuleActions(ctx context.Context, orgID uuid.UUID, target handler.ScanTarget, identity scanImageIdentity, ev *responserule.Event, actions []responserule.Action) {
 	for i := range actions {
 		a := actions[i]
@@ -140,6 +143,14 @@ func (h *ScanJobs) applyScanResponseRuleActions(ctx context.Context, orgID uuid.
 		for k, v := range a.Params {
 			after["param_"+k] = v
 		}
+		if a.Type == responserule.ActionTag {
+			after["enforced"] = "unsupported"
+			after["enforce_error"] = "tag action has no image or workload label side effect"
+		}
+		if a.Type == responserule.ActionSuppressLog {
+			after["enforced"] = "skipped_no_security_event"
+			after["enforce_skip_reason"] = "scan completion emits no security-event log or generic notification"
+		}
 		if a.Type == responserule.ActionQuarantine {
 			matchKey := scanImageMatchKey(target, identity)
 			switch {
@@ -154,8 +165,11 @@ func (h *ScanJobs) applyScanResponseRuleActions(ctx context.Context, orgID uuid.
 					after["enforce_error"] = err.Error()
 					slog.Default().Warn("scan response-rule quarantine", slog.Any("err", err), slog.String("image", matchKey))
 				} else {
-					after["enforced"] = "quarantine"
+					after["enforced"] = "not_verified"
+					after["outcome"] = "quarantine_recorded"
+					after["admission_scope"] = "subject to webhook coverage; protected namespaces remain excluded"
 					after["enforce_match_key"] = matchKey
+					after["recorded_clusters"] = []string{target.ClusterID.String()}
 				}
 			default:
 				// Registry/repository scan (cluster_id NULL): block the image on every cluster
@@ -172,19 +186,21 @@ func (h *ScanJobs) applyScanResponseRuleActions(ctx context.Context, orgID uuid.
 					after["enforced"] = "skipped"
 					after["enforce_skip_reason"] = "image not running on any cluster"
 				default:
-					enforced := make([]string, 0, len(clusters))
+					recorded := make([]string, 0, len(clusters))
 					for _, cid := range clusters {
 						if err := h.recordImageQuarantine(ctx, orgID, cid, matchKey, "response_rule: scan "+ev.Fields["severity"]); err != nil {
 							after["enforce_error"] = err.Error()
 							slog.Default().Warn("scan response-rule quarantine", slog.Any("err", err), slog.String("image", matchKey), slog.String("cluster", cid.String()))
 							continue
 						}
-						enforced = append(enforced, cid.String())
+						recorded = append(recorded, cid.String())
 					}
-					if len(enforced) > 0 {
-						after["enforced"] = "quarantine"
+					if len(recorded) > 0 {
+						after["enforced"] = "not_verified"
+						after["outcome"] = "quarantine_recorded"
+						after["admission_scope"] = "subject to webhook coverage; protected namespaces remain excluded"
 						after["enforce_match_key"] = matchKey
-						after["enforce_clusters"] = enforced
+						after["recorded_clusters"] = recorded
 					}
 				}
 			}
@@ -232,17 +248,18 @@ func (h *ScanJobs) quarantineImageClusters(ctx context.Context, orgID uuid.UUID,
 		normalized = imageid.Parse(ref).Normalized
 	}
 	rows, err := h.db.Pool().Query(ctx, `
-SELECT DISTINCT cluster_id
-  FROM image_workload_links
- WHERE org_id = $1
-   AND cluster_id IS NOT NULL
+SELECT DISTINCT l.cluster_id
+  FROM image_workload_links l
+  JOIN clusters c ON c.id=l.cluster_id AND c.org_id=l.org_id
+ WHERE l.org_id = $1
+   AND l.cluster_id IS NOT NULL
    AND (
         ($2 <> '' AND image_digest = $2)
      OR ($3 <> '' AND image_ref = $3)
      OR ($4 <> '' AND image_ref_normalized = $4)
      OR ($5 <> '' AND image_repository = $5 AND ($6 = '' OR image_tag = $6))
    )
- ORDER BY cluster_id`,
+ ORDER BY l.cluster_id`,
 		orgID, identity.Digest, ref, normalized, identity.Repository, identity.Tag)
 	if err != nil {
 		return nil, err
@@ -266,18 +283,22 @@ SELECT DISTINCT cluster_id
 func (h *ScanJobs) recordImageQuarantine(ctx context.Context, orgID, clusterID uuid.UUID, matchKey, reason string) error {
 	matchKey = strings.TrimSpace(matchKey)
 	if matchKey == "" || clusterID == uuid.Nil {
-		return nil
+		return fmt.Errorf("image quarantine requires a cluster and match key")
 	}
 	if strings.TrimSpace(reason) == "" {
 		reason = "auto-response"
 	}
-	_, err := h.db.Pool().Exec(ctx, `
+	result, err := h.db.Pool().Exec(ctx, `
 INSERT INTO quarantine_entries
     (org_id, cluster_id, scope, match_key, reason, origin, source_kind, expires_at)
-VALUES ($1, $2, $3, $4, $5, 'auto', 'scan', NOW() + INTERVAL '24 hours')`,
+SELECT $1, $2, $3, $4, $5, 'auto', 'scan', NOW() + INTERVAL '24 hours'
+ FROM clusters WHERE org_id=$1 AND id=$2`,
 		orgID, clusterID, string(quarantine.ScopeImage), matchKey, reason)
 	if err != nil && strings.Contains(err.Error(), "uniq_quarantine_active_target") {
 		return nil
+	}
+	if err == nil && result.RowsAffected() == 0 {
+		return fmt.Errorf("image quarantine cluster not found in organization")
 	}
 	return err
 }

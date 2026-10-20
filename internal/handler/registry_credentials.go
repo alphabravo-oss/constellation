@@ -1,32 +1,3 @@
-// Package handler — per-registry credential delivery to scanner workers
-// (gap REG-PRIVAUTH-11).
-//
-// A scan job carries a registry_id (scan_targets.registry_id, surfaced on the
-// claimed JobView). Before REG-PRIVAUTH-11 the scanner never fetched the
-// per-registry credentials, so every private-registry pull ran unauthenticated.
-// This endpoint unseals registries.auth_secret for the job's registry — scoped
-// to the scanner token's org and written to the append-only audit chain — and
-// hands the decrypted username/password/token back to the worker for the
-// duration of one scan. This mirrors NeuVector, which passes decrypted registry
-// credentials to the scanner per ScanImage request
-// (neuvector/controller/scan/image.go ScanImage → ScanImageRequest.Username/
-// Password).
-//
-// ─────────────────────────────────────────────────────────────────────────────
-// ROUTE TO WIRE (do NOT wired here — add by hand in internal/server/server.go,
-// inside the EXISTING scanner-token group that already applies
-// handler.ScannerTokenMiddleware, next to the "/scanner/config" route ~line
-// 1328). No new middleware is needed — the group's ScannerTokenMiddleware is
-// the auth. Exact line to add:
-//
-//	r.Get("/scanner/registry-credentials", handler.NewRegistryCredentials(s.db, s.auditLog).Get)
-//
-// Full route: method GET, path /api/v1/scanner/registry-credentials
-//
-//	(base "/api/v1" is applied by the enclosing router), query param
-//	registry_id=<uuid>, auth = scanner-token (group middleware).
-//
-// ─────────────────────────────────────────────────────────────────────────────
 package handler
 
 import (
@@ -39,11 +10,12 @@ import (
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/pkg/audit"
+	"github.com/alphabravocompany/constellation/pkg/scanlease"
 )
 
 // RegistryCredentialsDTO is the decrypted-credential envelope returned to a
 // scanner worker. Only ever served over scanner-token auth and scoped to the
-// token's org; never exposed on any user-facing route.
+// token's org and active job lease; never exposed on any user-facing route.
 type RegistryCredentialsDTO struct {
 	RegistryID string `json:"registry_id"`
 	Kind       string `json:"kind"`
@@ -69,10 +41,10 @@ func NewRegistryCredentials(d *db.DB, a *audit.Logger) *RegistryCredentials {
 	return &RegistryCredentials{db: d, audit: a}
 }
 
-// Get unseals registries.auth_secret for ?registry_id=<uuid>, scoped to the
-// scanner token's org, and returns the decrypted credentials. Every call is
-// written to the audit chain.
+// Get unseals the registry attached to a job currently leased to this worker.
+// Every successful credential release requires a redacted audit receipt.
 func (h *RegistryCredentials) Get(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	tok, ok := ScannerTokenFrom(r.Context())
 	if !ok {
 		jsonError(w, http.StatusUnauthorized, "scanner token required")
@@ -90,29 +62,51 @@ func (h *RegistryCredentials) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// org-scoped: a scanner token can only read credentials for registries in
-	// its own org. A registry belonging to another org returns 404, identical
-	// to a registry that does not exist — no cross-org existence oracle.
-	kind, endpoint, authKind, sealed, _, err := loadRegistryRow(r.Context(), h.db.Pool(), tok.OrgID, id)
+	jobID, err := uuid.Parse(strings.TrimSpace(r.URL.Query().Get("job_id")))
+	if err != nil {
+		jsonError(w, http.StatusBadRequest, "valid job_id required")
+		return
+	}
+	leaseID, leaseErr := scanlease.FromRequest(r)
+	if leaseErr != nil {
+		jsonError(w, http.StatusBadRequest, leaseErr.Error())
+		return
+	}
+	workerID := ScannerWorkerIDFromRequest(tok, r)
+	var kind, endpoint, authKind string
+	var sealed []byte
+	// Check every ownership edge as well as the unexpired lease. An unrelated,
+	// expired or foreign job returns the same response as a missing registry.
+	err = h.db.Pool().QueryRow(r.Context(), `
+SELECT reg.kind, reg.endpoint, reg.auth_kind, reg.auth_secret
+  FROM registries reg
+  JOIN scan_targets st ON st.registry_id = reg.id AND st.org_id = reg.org_id
+  JOIN scan_jobs sj ON sj.target_id = st.id AND sj.org_id = st.org_id
+ WHERE reg.id = $1 AND reg.org_id = $2 AND sj.id = $3
+   AND st.type = 'image' AND sj.status = 'running'
+   AND sj.worker_id = $4 AND sj.lease_expires_at > clock_timestamp()
+ AND sj.lease_id IS NOT DISTINCT FROM $5::uuid`,
+		id, tok.OrgID, jobID, workerID, leaseID).Scan(&kind, &endpoint, &authKind, &sealed)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			jsonError(w, http.StatusNotFound, "registry not found")
 			return
 		}
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		jsonError(w, http.StatusInternalServerError, "credential lookup failed")
 		return
 	}
 
 	creds, err := openCredentials(r.Context(), h.db.Pool(), sealed)
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, "decrypt credentials: "+err.Error())
+		jsonError(w, http.StatusInternalServerError, "credential decryption failed")
 		return
 	}
 
-	// AUDITED: record that a scanner fetched decrypted credentials for this
-	// registry. Actor is the scanner token (a service credential, not a user),
-	// so ActorID stays nil and the scanner identity lives in the After payload.
-	_, _, _ = h.audit.Log(r.Context(), audit.Event{
+	if h.audit == nil {
+		jsonError(w, http.StatusServiceUnavailable, "credential audit unavailable")
+		return
+	}
+	_, _, err = h.audit.Log(r.Context(), audit.Event{
 		OrgID:      &tok.OrgID,
 		Action:     "registry.credentials-issued",
 		TargetKind: "registry",
@@ -120,10 +114,17 @@ func (h *RegistryCredentials) Get(w http.ResponseWriter, r *http.Request) {
 		After: map[string]any{
 			"scanner":          tok.Name,
 			"scanner_token_id": tok.ID.String(),
+			"job_id":           jobID.String(),
+			"lease_id":         leaseID,
+			"worker_id":        workerID,
 			"auth_kind":        authKind,
 			"has_credentials":  creds["username"] != "" || creds["password"] != "" || creds["token"] != "",
 		},
 	})
+	if err != nil {
+		jsonError(w, http.StatusServiceUnavailable, "credential audit unavailable")
+		return
+	}
 
 	writeJSON(w, http.StatusOK, RegistryCredentialsDTO{
 		RegistryID: id.String(),

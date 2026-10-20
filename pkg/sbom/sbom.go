@@ -7,7 +7,8 @@
 package sbom
 
 import (
-	"crypto/sha1"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -247,15 +248,22 @@ func spdxRef(s string) string {
 }
 
 func sha1Hex(s string) string {
-	h := sha1.Sum([]byte(s))
+	h := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(h[:])
 }
 
-// uuidV4 returns a UUID-shaped string. We use a stable construction (sha1 of input + time)
-// because pulling google/uuid into this hot-path is unnecessary; the only consumer is
-// CycloneDX's serialNumber field which only needs uniqueness, not crypto guarantees.
+// uuidV4 returns a random RFC 4122 version-4 UUID string. The only consumer is
+// CycloneDX's serialNumber field, which needs uniqueness; crypto/rand is the
+// simplest source that never collides and keeps google/uuid out of this hot path.
 func uuidV4() string {
-	h := sha1.Sum([]byte(fmt.Sprintf("%d-%d", time.Now().UnixNano(), time.Now().Nanosecond())))
-	hex := hex.EncodeToString(h[:])
-	return fmt.Sprintf("%s-%s-%s-%s-%s", hex[0:8], hex[8:12], "4"+hex[13:16], "8"+hex[17:20], hex[20:32])
+	return randomUUIDv4()
+}
+
+func randomUUIDv4() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:]) // crypto/rand.Read never returns an error on supported platforms
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	hex := hex.EncodeToString(b[:])
+	return fmt.Sprintf("%s-%s-%s-%s-%s", hex[0:8], hex[8:12], hex[12:16], hex[16:20], hex[20:32])
 }

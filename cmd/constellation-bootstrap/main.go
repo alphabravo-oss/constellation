@@ -47,8 +47,8 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/alphabravocompany/constellation/internal/auth"
+	colcrypto "github.com/alphabravocompany/constellation/internal/crypto"
 	"github.com/alphabravocompany/constellation/internal/obslog"
-	regsecrets "github.com/alphabravocompany/constellation/pkg/registry/secrets"
 )
 
 func env(key, def string) string {
@@ -247,7 +247,7 @@ func seedAuthProviders(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID,
 	// declaratively-seeded providers never land cleartext in auth_servers.config. A cipher failure
 	// is logged and we fall back to a nil sealer (plaintext) rather than blocking the bootstrap.
 	var sealer auth.Sealer
-	if cipher, cerr := regsecrets.Default(ctx, pool, logger); cerr != nil {
+	if cipher, cerr := colcrypto.Default(); cerr != nil {
 		logger.Error("auth provider secret cipher unavailable — seeding without at-rest sealing", "err", cerr)
 	} else {
 		sealer = cipher

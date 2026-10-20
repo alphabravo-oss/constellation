@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 )
@@ -56,9 +57,9 @@ func (c *Connector) Scan(ctx context.Context) ([]Finding, error) {
 	}
 	roleF, rerr := c.ScanRoleAssignments(ctx)
 	storF, serr := c.ScanStorage(ctx)
-	out := append(roleF, storF...)
+	out := slices.Concat(roleF, storF)
 	if rerr != nil && serr != nil {
-		return out, fmt.Errorf("azure: both scans failed: %v; %v", rerr, serr)
+		return out, fmt.Errorf("azure: both scans failed: %w; %w", rerr, serr)
 	}
 	return out, nil
 }
@@ -75,7 +76,7 @@ func (c *Connector) ScanRoleAssignments(ctx context.Context) ([]Finding, error) 
 	if err != nil {
 		return nil, fmt.Errorf("azure: list role assignments: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("azure: list role assignments status %d", resp.StatusCode)
@@ -134,7 +135,7 @@ func (c *Connector) ScanStorage(ctx context.Context) ([]Finding, error) {
 	if err != nil {
 		return nil, fmt.Errorf("azure: list storage accounts: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("azure: list storage status %d", resp.StatusCode)

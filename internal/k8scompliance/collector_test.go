@@ -15,6 +15,7 @@ import (
 )
 
 func TestCollect_FindsKubernetesObjectFailures(t *testing.T) {
+	t.Parallel()
 	yes := true
 	no := false
 	client := fake.NewSimpleClientset(
@@ -72,6 +73,7 @@ func TestCollect_FindsKubernetesObjectFailures(t *testing.T) {
 }
 
 func TestCollect_EmitsPassSummariesForCleanObjects(t *testing.T) {
+	t.Parallel()
 	yes := true
 	no := false
 	client := fake.NewSimpleClientset(

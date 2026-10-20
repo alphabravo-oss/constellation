@@ -19,11 +19,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	cv1alpha1 "github.com/alphabravocompany/constellation/deploy/operator/api/v1alpha1"
-	"github.com/alphabravocompany/constellation/deploy/operator/controllers"
-	"github.com/alphabravocompany/constellation/deploy/operator/policydb"
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/obslog"
+	cv1alpha1 "github.com/alphabravocompany/constellation/internal/operator/api/v1alpha1"
+	"github.com/alphabravocompany/constellation/internal/operator/controllers"
+	"github.com/alphabravocompany/constellation/internal/operator/policydb"
 	"github.com/alphabravocompany/constellation/pkg/version"
 )
 
@@ -43,7 +43,12 @@ func main() {
 	leader := flag.Bool("leader-elect", false, "Enable leader election")
 	namespace := flag.String("namespace", defaultManagedNamespace, "Namespace where managed workloads are created")
 	watchNamespace := flag.String("watch-namespace", defaultWatchNamespace, "Namespace to watch for namespaced resources; empty watches all namespaces")
-	agentImage := flag.String("agent-image", "ghcr.io/alphabravocompany/constellation-agent:latest", "Default agent image")
+	// Per-role default images. The chart passes the release-pinned refs; an empty value
+	// falls back to the versioned ghcr.io path (never a floating :latest tag, ADR 0005/ch.09).
+	agentImage := flag.String("agent-image", "", "Default (legacy combined) agent image; empty uses per-role defaults")
+	scannerImage := flag.String("scanner-image", "", "Default scanner image")
+	admissionImage := flag.String("admission-image", "", "Default admission webhook image")
+	runtimeAgentImage := flag.String("runtime-agent-image", "", "Default runtime-agent image")
 	databaseURL := flag.String("database-url", firstNonEmpty(os.Getenv("CONSTELLATION_DATABASE_URL"), os.Getenv("DATABASE_URL")), "Constellation DB DSN for policy-CR reconciliation; when empty the policy controllers are not started")
 	flag.Parse()
 	*namespace = strings.TrimSpace(*namespace)
@@ -102,10 +107,13 @@ func main() {
 	}
 
 	if err := (&controllers.Reconciler{
-		Client:            mgr.GetClient(),
-		Scheme:            mgr.GetScheme(),
-		OperatorNamespace: *namespace,
-		DefaultAgentImage: *agentImage,
+		Client:                   mgr.GetClient(),
+		Scheme:                   mgr.GetScheme(),
+		OperatorNamespace:        *namespace,
+		DefaultAgentImage:        *agentImage,
+		DefaultScannerImage:      *scannerImage,
+		DefaultAdmissionImage:    *admissionImage,
+		DefaultRuntimeAgentImage: *runtimeAgentImage,
 	}).SetupWithManager(mgr); err != nil {
 		logger.Error("unable to create controller", slog.String("err", err.Error()))
 		os.Exit(1)

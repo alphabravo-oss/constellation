@@ -4,10 +4,15 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
+	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -43,6 +48,7 @@ type imageScanResultDTO struct {
 	ScannerProfile      string                  `json:"scanner_profile"`
 	VulnDBBundleVersion string                  `json:"vulndb_bundle_version,omitempty"`
 	VulnDBBundleHash    string                  `json:"vulndb_bundle_hash,omitempty"`
+	EngineStatus        map[string]string       `json:"engine_status"`
 	PackageCount        int                     `json:"package_count"`
 	LayerCount          int                     `json:"layer_count"`
 	SecretCount         int                     `json:"secret_count"`
@@ -110,25 +116,7 @@ type imagePackageLayerDTO struct {
 	Packages     []scanner.Package `json:"packages"`
 }
 
-func (h *ImageScanResults) List(w http.ResponseWriter, r *http.Request) {
-	subj, _ := SubjectFrom(r.Context())
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 500 {
-		limit = 100
-	}
-	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	digest := r.URL.Query().Get("image_digest")
-	if digest == "" {
-		digest = r.URL.Query().Get("digest")
-	}
-	q := r.URL.Query().Get("q")
-	clusterID, err := parseClusterIDParam(r)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-
-	rows, err := h.db.Pool().Query(r.Context(), `
+const imageInventorySQL = `
 WITH finding_rollup AS (
     SELECT image_scan_result_id,
            COUNT(*)::int AS finding_count,
@@ -192,58 +180,108 @@ SELECT r.id, r.asset_id, r.scan_target_id, r.last_scan_job_id,
 	       r.package_count, COALESCE(ar.layer_count, 0), COALESCE(ar.secret_count, 0), COALESCE(ar.file_risk_count, 0), COALESCE(ar.image_signed, false), COALESCE(ar.signature_status, ''),
        COALESCE(fr.finding_count, r.finding_count), COALESCE(fr.critical_count, 0),
        COALESCE(fr.high_count, 0), COALESCE(fr.medium_count, 0), COALESCE(fr.low_count, 0),
-       COALESCE(fr.info_count, 0), COALESCE(fr.max_risk_score, 0), COALESCE(ir.impacted_count, 0), r.bundle_metadata,
+       COALESCE(fr.info_count, 0), COALESCE(fr.max_risk_score, 0), COALESCE(ir.impacted_count, 0), r.bundle_metadata, r.engine_status,
        r.first_seen_at, r.last_scanned_at, r.updated_at
   FROM image_scan_results r
-  LEFT JOIN scan_targets st ON st.id = r.scan_target_id
+  LEFT JOIN scan_targets st ON st.id = r.scan_target_id AND st.org_id = r.org_id
   LEFT JOIN finding_rollup fr ON fr.image_scan_result_id = r.id
   LEFT JOIN artifact_rollup ar ON ar.image_scan_result_id = r.id
   LEFT JOIN impact_rollup ir ON ir.id = r.id
  WHERE r.org_id = $1
    AND ($2::uuid IS NULL OR COALESCE(ir.impacted_count, 0) > 0)
    AND ($3 = '' OR r.image_digest = $3)
-   AND ($4 = '' OR r.image_ref ILIKE '%' || $4 || '%' OR r.image_repository ILIKE '%' || $4 || '%' OR r.image_digest ILIKE '%' || $4 || '%' OR COALESCE(NULLIF(r.source_ref, ''), st.source_ref, '') ILIKE '%' || $4 || '%')
- ORDER BY r.last_scanned_at DESC
- LIMIT $5 OFFSET $6`, subj.OrgID, clusterID, digest, q, limit, offset)
+   AND ($4 = '' OR strpos(lower(r.image_ref), lower($4)) > 0 OR strpos(lower(r.image_repository), lower($4)) > 0 OR strpos(lower(r.image_digest), lower($4)) > 0 OR strpos(lower(COALESCE(NULLIF(r.source_ref, ''), st.source_ref, '')), lower($4)) > 0)`
+
+func imageInventoryDefinition(r *http.Request) (inventorylist.Definition, inventorylist.Options, error) {
+	subj, ok := SubjectFrom(r.Context())
+	if !ok {
+		return inventorylist.Definition{}, inventorylist.Options{}, fmt.Errorf("subject required")
+	}
+	values, err := inventorylist.Query(r)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return inventorylist.Definition{}, inventorylist.Options{}, err
+	}
+	o, err := inventorylist.Parse(values, map[string]string{"image": "lower(image_ref_normalized)", "risk": "max_risk_score", "exposure": "impacted_count", "scan": "last_scanned_at", "packages": "package_count", "findings": "finding_count"}, "scan")
+	if err != nil {
+		return inventorylist.Definition{}, o, err
+	}
+	severity, err := inventorylist.Filter(values, "severity", "critical", "high", "medium", "low", "info")
+	if err != nil {
+		return inventorylist.Definition{}, o, err
+	}
+	clusterID, err := parseClusterIDParam(r)
+	if err != nil {
+		return inventorylist.Definition{}, o, err
+	}
+	digest := values.Get("image_digest")
+	if digest == "" {
+		digest = values.Get("digest")
+	}
+	args := []any{subj.OrgID, clusterID, digest, strings.TrimSpace(values.Get("q")), severity}
+	where := "$5 = '' OR CASE $5 WHEN 'critical' THEN critical_count WHEN 'high' THEN high_count WHEN 'medium' THEN medium_count WHEN 'low' THEN low_count ELSE info_count END > 0"
+	return inventorylist.Definition{SQL: imageInventorySQL, Columns: "id,asset_id,scan_target_id,last_scan_job_id,source_type,source_ref,scan_target_metadata,image_ref,image_ref_normalized,image_repository,image_tag,image_digest,platform,scanner_profile,vulndb_bundle_version,vulndb_bundle_hash,package_count,layer_count,secret_count,file_risk_count,image_signed,signature_status,finding_count,critical_count,high_count,medium_count,low_count,info_count,max_risk_score,impacted_count,bundle_metadata,engine_status,first_seen_at,last_scanned_at,updated_at", Where: where, Summary: `jsonb_build_object('total',count(*),'packages',COALESCE(sum(package_count),0),'findings',COALESCE(sum(finding_count),0),'critical_high',COALESCE(sum(critical_count+high_count),0),'exposed',count(*) FILTER(WHERE impacted_count>0),'local',count(*) FILTER(WHERE image_ref LIKE 'sha256:%' OR image_repository='' OR image_repository=image_digest),'stale',count(*) FILTER(WHERE last_scanned_at < NOW()-INTERVAL '7 days'),'incomplete',count(*) FILTER(WHERE COALESCE(engine_status->>'syft','')<>'succeeded' OR COALESCE(engine_status->>'trivy','')<>'succeeded' OR COALESCE(engine_status->>'grype','')<>'succeeded' OR EXISTS(SELECT 1 FROM jsonb_each_text(COALESCE(engine_status,'{}'::jsonb)) e WHERE e.value<>'succeeded')))`, Args: args}, o, nil
+}
+
+func (h *ImageScanResults) List(w http.ResponseWriter, r *http.Request) {
+	if _, ok := SubjectFrom(r.Context()); !ok {
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
 		return
 	}
-	defer rows.Close()
-
-	out := []imageScanResultDTO{}
-	for rows.Next() {
-		item, err := scanImageResultRow(rows)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
-		out = append(out, item)
+	d, o, err := imageInventoryDefinition(r)
+	if err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
+		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"image_scan_results": out, "limit": limit, "offset": offset})
+	items, meta, err := inventorylist.Read(r.Context(), h.db.Pool(), d, o, func(row inventorylist.Row) (imageScanResultDTO, error) { return scanImageResultRow(row) })
+	if err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"image_scan_results": items, "limit": o.Limit, "offset": o.Offset, "sort": o.Sort, "order": o.Order, "total": meta.Total, "has_more": meta.HasMore, "summary": meta.Summary})
+}
+
+func (h *ImageScanResults) ExportCSV(w http.ResponseWriter, r *http.Request) {
+	if _, ok := SubjectFrom(r.Context()); !ok {
+		apiutil.WriteStatus(r.Context(), w, http.StatusUnauthorized, "subject required")
+		return
+	}
+	d, o, err := imageInventoryDefinition(r)
+	if err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
+		return
+	}
+	body, meta, err := inventorylist.CSV(r.Context(), h.db.Pool(), d, o, func(row inventorylist.Row) (imageScanResultDTO, error) { return scanImageResultRow(row) }, []string{"ID", "Image", "Digest", "Source", "Source reference", "Profile", "Packages", "Findings", "Critical", "High", "Medium", "Low", "Info", "Risk", "Workloads", "Last scanned", "Engine outcomes"}, func(item imageScanResultDTO) []string {
+		engines, _ := json.Marshal(item.EngineStatus)
+		return []string{item.ID.String(), item.ImageRef, item.ImageDigest, item.SourceType, item.SourceRef, item.ScannerProfile, strconv.Itoa(item.PackageCount), strconv.Itoa(item.FindingCount), strconv.Itoa(item.CriticalCount), strconv.Itoa(item.HighCount), strconv.Itoa(item.MediumCount), strconv.Itoa(item.LowCount), strconv.Itoa(item.InfoCount), strconv.Itoa(item.MaxRiskScore), strconv.Itoa(item.ImpactedCount), item.LastScannedAt.Format(time.RFC3339), string(engines)}
+	})
+	if err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	inventorylist.WriteCSV(w, "constellation-image-scan-results.csv", body, meta)
 }
 
 func (h *ImageScanResults) Packages(w http.ResponseWriter, r *http.Request) {
 	subj, _ := SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	artifact, err := h.getArtifact(r, subj.OrgID, id, "package-inventory", "constellation-package-inventory-v1")
 	if errors.Is(err, pgx.ErrNoRows) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "package inventory not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "package inventory not found")
 		return
 	}
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	var inventory struct {
 		Packages []scanner.Package `json:"packages"`
 	}
 	if err := json.Unmarshal(artifact.Payload, &inventory); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "package inventory decode: " + err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "package inventory decode: "+err.Error())
 		return
 	}
 	layers := []scanner.ImageLayer{}
@@ -252,12 +290,12 @@ func (h *ImageScanResults) Packages(w http.ResponseWriter, r *http.Request) {
 			Layers []scanner.ImageLayer `json:"layers"`
 		}
 		if err := json.Unmarshal(layerArtifact.Payload, &layerPayload); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "layer metadata decode: " + err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "layer metadata decode: "+err.Error())
 			return
 		}
 		layers = layerPayload.Layers
 	} else if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	packageLayers, layerPackageCount, unattributedPackageCount := packageLayerSummary(inventory.Packages, layers)
@@ -278,16 +316,16 @@ func (h *ImageScanResults) Secrets(w http.ResponseWriter, r *http.Request) {
 	subj, _ := SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	artifact, err := h.getArtifact(r, subj.OrgID, id, "secret-scan", "constellation-image-secrets-v1")
 	if errors.Is(err, pgx.ErrNoRows) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "secret report not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "secret report not found")
 		return
 	}
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -304,16 +342,16 @@ func (h *ImageScanResults) Layers(w http.ResponseWriter, r *http.Request) {
 	subj, _ := SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	artifact, err := h.getArtifact(r, subj.OrgID, id, "layer-metadata", "constellation-image-layers-v1")
 	if errors.Is(err, pgx.ErrNoRows) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "layer metadata not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "layer metadata not found")
 		return
 	}
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -330,16 +368,16 @@ func (h *ImageScanResults) FileRisks(w http.ResponseWriter, r *http.Request) {
 	subj, _ := SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	artifact, err := h.getArtifact(r, subj.OrgID, id, "file-risk", "constellation-image-file-risk-v1")
 	if errors.Is(err, pgx.ErrNoRows) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "file risk report not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "file risk report not found")
 		return
 	}
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -358,16 +396,16 @@ func (h *ImageScanResults) ConfigChecks(w http.ResponseWriter, r *http.Request) 
 	subj, _ := SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	artifact, err := h.getArtifact(r, subj.OrgID, id, "config-checks", "constellation-image-config-checks-v1")
 	if errors.Is(err, pgx.ErrNoRows) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "config-check report not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "config-check report not found")
 		return
 	}
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -384,16 +422,16 @@ func (h *ImageScanResults) Signature(w http.ResponseWriter, r *http.Request) {
 	subj, _ := SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	artifact, err := h.getArtifact(r, subj.OrgID, id, "signature-scan", "constellation-image-signature-v1")
 	if errors.Is(err, pgx.ErrNoRows) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "signature report not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "signature report not found")
 		return
 	}
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -417,22 +455,22 @@ func (h *ImageScanResults) Get(w http.ResponseWriter, r *http.Request) {
 	subj, _ := SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	result, err := h.getResult(r, subj.OrgID, id)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "not found")
 		return
 	}
 	findings, err := h.getFindings(r, subj.OrgID, id)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	impacts, err := h.getImpactedWorkloads(r, subj.OrgID, result)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	result.ImpactedCount = len(impacts)
@@ -449,17 +487,17 @@ func (h *ImageScanResults) FindingsCSV(w http.ResponseWriter, r *http.Request) {
 	subj, _ := SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	result, err := h.getResult(r, subj.OrgID, id)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "not found")
 		return
 	}
 	findings, err := h.getFindings(r, subj.OrgID, id)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -530,16 +568,16 @@ func (h *ImageScanResults) writeSBOMArtifact(w http.ResponseWriter, r *http.Requ
 	subj, _ := SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	artifact, err := h.getArtifact(r, subj.OrgID, id, "sbom", format)
 	if errors.Is(err, pgx.ErrNoRows) {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "sbom not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "sbom not found")
 		return
 	}
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpx.WriteRawSBOM(w, artifact.Payload, filename)
@@ -664,17 +702,17 @@ func (h *ImageScanResults) AffectedWorkloads(w http.ResponseWriter, r *http.Requ
 	subj, _ := SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	result, err := h.getResult(r, subj.OrgID, id)
 	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "not found")
 		return
 	}
 	impacts, err := h.getImpactedWorkloads(r, subj.OrgID, result)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -703,7 +741,7 @@ func scanImageResultRow(row imageScanResultRowScanner) (imageScanResultDTO, erro
 		&item.ImageDigest, &item.Platform, &item.ScannerProfile, &item.VulnDBBundleVersion, &item.VulnDBBundleHash,
 		&item.PackageCount, &item.LayerCount, &item.SecretCount, &item.FileRiskCount, &item.ImageSigned, &item.SignatureStatus, &item.FindingCount, &item.CriticalCount,
 		&item.HighCount, &item.MediumCount, &item.LowCount,
-		&item.InfoCount, &item.MaxRiskScore, &item.ImpactedCount, &bundleRaw,
+		&item.InfoCount, &item.MaxRiskScore, &item.ImpactedCount, &bundleRaw, &item.EngineStatus,
 		&item.FirstSeenAt, &item.LastScannedAt, &item.UpdatedAt,
 	); err != nil {
 		return imageScanResultDTO{}, err
@@ -773,7 +811,7 @@ SELECT r.id, r.asset_id, r.scan_target_id, r.last_scan_job_id,
 	       r.package_count, COALESCE(ar.layer_count, 0), COALESCE(ar.secret_count, 0), COALESCE(ar.file_risk_count, 0), COALESCE(ar.image_signed, false), COALESCE(ar.signature_status, ''),
        COALESCE(fr.finding_count, r.finding_count), COALESCE(fr.critical_count, 0),
        COALESCE(fr.high_count, 0), COALESCE(fr.medium_count, 0), COALESCE(fr.low_count, 0),
-       COALESCE(fr.info_count, 0), COALESCE(fr.max_risk_score, 0), 0, r.bundle_metadata,
+       COALESCE(fr.info_count, 0), COALESCE(fr.max_risk_score, 0), 0, r.bundle_metadata, r.engine_status,
        r.first_seen_at, r.last_scanned_at, r.updated_at
   FROM image_scan_results r
   LEFT JOIN scan_targets st ON st.id = r.scan_target_id

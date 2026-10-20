@@ -8,8 +8,11 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"gopkg.in/yaml.v3"
 )
 
@@ -61,13 +64,13 @@ type groupUsageDTO struct {
 func (h *Groups) Usage(w http.ResponseWriter, r *http.Request) {
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "bad id")
 		return
 	}
 	subj, _ := SubjectFrom(r.Context())
 	clusterArg, err := parseClusterIDParam(r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -80,7 +83,7 @@ SELECT name, members
    AND org_id = $2
    AND ($3::uuid IS NULL OR cluster_id IS NULL OR cluster_id = $3)`,
 		id, subj.OrgID, clusterArg).Scan(&name, &membersRaw); err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "not found")
 		return
 	}
 	members := []string{}
@@ -88,33 +91,33 @@ SELECT name, members
 	members = normalizeGroupMembers(members)
 
 	refs := []groupUsageReferenceDTO{}
-	networkRefs, err := h.groupNetworkEdgeUsage(r, subj.OrgID, clusterArg, name)
+	networkRefs, err := h.groupNetworkEdgeUsage(r, subj.OrgID, nil, name)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	refs = append(refs, networkRefs...)
-	dpiRefs, err := h.groupDPIBindingUsage(r, subj.OrgID, clusterArg, id)
+	dpiRefs, err := h.groupDPIBindingUsage(r, subj.OrgID, nil, id)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	refs = append(refs, dpiRefs...)
-	responseRefs, err := h.groupResponseRuleUsage(r, subj.OrgID, clusterArg, id, name)
+	responseRefs, err := h.groupResponseRuleUsage(r, subj.OrgID, nil, id, name)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	refs = append(refs, responseRefs...)
-	admissionRefs, err := h.groupAdmissionRuleUsage(r.Context(), subj.OrgID, clusterArg, id, name)
+	admissionRefs, err := h.groupAdmissionRuleUsage(r.Context(), subj.OrgID, nil, id, name)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	refs = append(refs, admissionRefs...)
 	profileRefs, err := h.groupMemberProfileUsage(r, subj.OrgID, clusterArg, members)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	refs = append(refs, profileRefs...)
@@ -285,7 +288,16 @@ SELECT id::text, COALESCE(cluster_id::text, '') AS cluster_id, name, event_type,
 }
 
 func (h *Groups) groupAdmissionRuleUsage(ctx context.Context, orgID uuid.UUID, clusterArg any, groupID uuid.UUID, groupName string) ([]groupUsageReferenceDTO, error) {
-	rows, err := h.db.Pool().Query(ctx, `
+	return groupAdmissionRuleUsage(ctx, h.db.Pool(), orgID, clusterArg, groupID, groupName)
+}
+
+type groupReferenceQuerier interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+func groupAdmissionRuleUsage(ctx context.Context, queryer groupReferenceQuerier, orgID uuid.UUID, clusterArg any, groupID uuid.UUID, groupName string) ([]groupUsageReferenceDTO, error) {
+	rows, err := queryer.Query(ctx, `
 SELECT id::text,
        COALESCE(cluster_id::text, '') AS cluster_id,
        name,
@@ -471,20 +483,19 @@ func normalizeGroupMembers(in []string) []string {
 	return out
 }
 
-func (h *Groups) groupBlockingReferenceCount(ctx context.Context, orgID uuid.UUID, clusterArg any, groupID uuid.UUID, groupName string) (int, error) {
+func groupBlockingReferenceCount(ctx context.Context, queryer groupReferenceQuerier, orgID uuid.UUID, groupID uuid.UUID, groupName string) (int, error) {
 	total := 0
 	var networkCount int
-	if err := h.db.Pool().QueryRow(ctx, `
+	if err := queryer.QueryRow(ctx, `
 SELECT COUNT(*)
   FROM group_rule_edges
  WHERE org_id = $1
-   AND ($2::uuid IS NULL OR cluster_id = $2)
-   AND (from_group = $3 OR to_group = $3)`, orgID, clusterArg, groupName).Scan(&networkCount); err != nil {
+   AND (from_group = $2 OR to_group = $2)`, orgID, groupName).Scan(&networkCount); err != nil {
 		return 0, err
 	}
 	total += networkCount
 	var dpiCount int
-	if err := h.db.Pool().QueryRow(ctx, `
+	if err := queryer.QueryRow(ctx, `
 SELECT COUNT(*)
   FROM group_dpi_sensor_bindings
  WHERE org_id = $1
@@ -493,17 +504,16 @@ SELECT COUNT(*)
 	}
 	total += dpiCount
 	var responseCount int
-	if err := h.db.Pool().QueryRow(ctx, `
+	if err := queryer.QueryRow(ctx, `
 SELECT COUNT(*)
   FROM response_rules_v2
  WHERE org_id = $1
-   AND ($2::uuid IS NULL OR cluster_id IS NULL OR cluster_id = $2)
-   AND (workload_match->>'group' = $3 OR workload_match->>'group' = $4)`,
-		orgID, clusterArg, groupName, groupID.String()).Scan(&responseCount); err != nil {
+   AND (workload_match->>'group' = $2 OR workload_match->>'group' = $3)`,
+		orgID, groupName, groupID.String()).Scan(&responseCount); err != nil {
 		return 0, err
 	}
 	total += responseCount
-	admissionRefs, err := h.groupAdmissionRuleUsage(ctx, orgID, clusterArg, groupID, groupName)
+	admissionRefs, err := groupAdmissionRuleUsage(ctx, queryer, orgID, nil, groupID, groupName)
 	if err != nil {
 		return 0, err
 	}

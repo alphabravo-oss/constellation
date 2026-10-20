@@ -17,6 +17,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -103,6 +104,13 @@ type ThreatIngestRow struct {
 	ReportedAt time.Time `json:"reported_at,omitempty"`
 }
 
+// runtimeThreatApplication also rejects the no-signature sentinel, which is
+// valid on flow records but cannot represent a runtime threat observation.
+func runtimeThreatApplication(row *ThreatIngestRow) (int32, bool) {
+	application, valid := handler.NetworkApplicationID(row.Application)
+	return application, valid && row.ThreatID != 0
+}
+
 // ThreatIngestResponse summarizes the result of a bulk POST.
 type ThreatIngestResponse struct {
 	Accepted int `json:"accepted"`
@@ -122,7 +130,7 @@ const maxThreatBatchSize = 500
 const maxThreatPacketBytes = 4096
 
 // Bulk inserts a batch of threats. Auth is runtime-agent-token; cluster_id
-// is resolved best-effort against the agent's org.
+// comes from the issuing token's cluster binding.
 func (h *RuntimeThreats) Bulk(w http.ResponseWriter, r *http.Request) {
 	tok, ok := handler.RuntimeAgentTokenFrom(r.Context())
 	if !ok {
@@ -146,18 +154,21 @@ func (h *RuntimeThreats) Bulk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve the org's primary cluster_id as the fallback when we can't
-	// map a row to a specific cluster. The agent doesn't know its cluster
-	// — we trust the token's org and pick the agent's connected cluster.
-	var defaultCluster uuid.UUID
-	_ = h.db.Pool().QueryRow(r.Context(),
-		`SELECT id FROM clusters WHERE org_id = $1
-		 ORDER BY CASE WHEN state = 'connected' THEN 0 ELSE 1 END,
-		          last_heartbeat_at DESC NULLS LAST, created_at ASC
-		 LIMIT 1`, tok.OrgID).
-		Scan(&defaultCluster)
+	boundCluster, err := handler.ResolveAgentClusterID(r.Context(), h.db, tok)
+	if err != nil {
+		if errors.Is(err, handler.ErrAgentClusterScope) {
+			jsonError(w, http.StatusForbidden, "agent token cluster scope mismatch")
+			return
+		}
+		jsonError(w, http.StatusInternalServerError, "resolve cluster: "+err.Error())
+		return
+	}
+	if boundCluster == nil {
+		jsonError(w, http.StatusForbidden, "agent token cluster scope is ambiguous")
+		return
+	}
 
-	ipResolver := handler.NewIPResolver(r.Context(), h.db, tok.OrgID, flowRowsForThreatAttribution(rows))
+	ipResolver := handler.NewIPResolverForCluster(r.Context(), h.db, tok.OrgID, *boundCluster, flowRowsForThreatAttribution(rows))
 
 	tx, err := h.db.Pool().Begin(r.Context())
 	if err != nil {
@@ -192,10 +203,10 @@ VALUES ($1,$2, NULLIF($3,''), NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), NULLI
 	pending := make([]pendingThreatAlert, 0, len(rows))
 	for i := range rows {
 		row := &rows[i]
-		if row.ThreatID == 0 {
-			// A zero ThreatID means "no signature fired" — dp shouldn't
-			// emit a threat log for that, but defend against agents that
-			// upload bad rows anyway.
+		application, valid := runtimeThreatApplication(row)
+		if !valid {
+			// Reject the no-signature sentinel and application values the
+			// native uint16 record cannot emit before persistence or alerting.
 			rejected++
 			continue
 		}
@@ -211,15 +222,7 @@ VALUES ($1,$2, NULLIF($3,''), NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), NULLI
 		if len(pkt) > maxThreatPacketBytes {
 			pkt = pkt[:maxThreatPacketBytes]
 		}
-		// Cluster resolution: best-effort lookup via ep_mac → pod_ips →
-		// deployment.cluster_id is more than this wave needs; we fall back
-		// to the org's primary cluster. Future wave (when the operator's
-		// pod resolver lands) can plumb a real per-flow lookup here.
-		cid := defaultCluster
-		if cid == uuid.Nil {
-			rejected++
-			continue
-		}
+		cid := *boundCluster
 		workloadID, namespace, podName := runtimeThreatAttribution(row, ipResolver)
 		pendingAlert := pendingThreatAlert{
 			row:        row,
@@ -238,8 +241,8 @@ VALUES ($1,$2, NULLIF($3,''), NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), NULLI
 		if _, err := tx.Exec(r.Context(), insertSQL,
 			tok.OrgID, cid, strings.TrimSpace(row.Node), strings.ToLower(strings.TrimSpace(row.EPMAC)),
 			workloadID, namespace, podName,
-			int32(row.ThreatID), int16(row.Severity), int16(row.Action),
-			int32(row.Application), strings.TrimSpace(row.Msg), int64(row.DlpNameHash),
+			int64(row.ThreatID), int16(row.Severity), int16(row.Action),
+			application, strings.TrimSpace(row.Msg), int64(row.DlpNameHash),
 			int16(row.IPProto), int32(row.EtherType),
 			strings.TrimSpace(row.SrcIP), row.SrcPort, strings.TrimSpace(row.DstIP), row.DstPort,
 			int16(row.ICMPCode), int16(row.ICMPType),
@@ -343,125 +346,39 @@ func runtimeThreatWorkloadSeed(row *ThreatIngestRow) (workloadID, addr string) {
 // captured packet bytes by default — too noisy for a list view; the user
 // fetches Get(id) for the full row when drilling in.
 type RuntimeThreatRow struct {
-	ID          string    `json:"id"`
-	OrgID       string    `json:"org_id"`
-	ClusterID   string    `json:"cluster_id"`
-	Node        string    `json:"node,omitempty"`
-	EPMAC       string    `json:"ep_mac,omitempty"`
-	WorkloadID  string    `json:"workload_id,omitempty"`
-	Namespace   string    `json:"namespace,omitempty"`
-	PodName     string    `json:"pod_name,omitempty"`
-	ThreatID    int32     `json:"threat_id"`
-	ThreatName  string    `json:"threat_name,omitempty"` // pretty label derived from ID
-	Category    string    `json:"category,omitempty"`    // "ips" | "dlp" | "waf", derived from threat_id range
-	Severity    int16     `json:"severity"`
-	Action      int16     `json:"action"`
-	Application int32     `json:"application,omitempty"`
-	Msg         string    `json:"msg,omitempty"`
-	IPProto     int16     `json:"ip_proto,omitempty"`
-	SrcIP       string    `json:"src_ip,omitempty"`
-	SrcPort     int       `json:"src_port,omitempty"`
-	DstIP       string    `json:"dst_ip,omitempty"`
-	DstPort     int       `json:"dst_port,omitempty"`
-	PktLen      int       `json:"pkt_len,omitempty"`
-	CapLen      int       `json:"cap_len,omitempty"`
-	PktIngress  bool      `json:"pkt_ingress"`
-	SessIngress bool      `json:"sess_ingress"`
-	ReportedAt  time.Time `json:"reported_at"`
-	At          time.Time `json:"at"`
+	PlatformRole string    `json:"platform_role"`
+	ID           string    `json:"id"`
+	OrgID        string    `json:"org_id"`
+	ClusterID    string    `json:"cluster_id"`
+	Node         string    `json:"node,omitempty"`
+	EPMAC        string    `json:"ep_mac,omitempty"`
+	WorkloadID   string    `json:"workload_id,omitempty"`
+	Namespace    string    `json:"namespace,omitempty"`
+	PodName      string    `json:"pod_name,omitempty"`
+	ThreatID     int64     `json:"threat_id"`
+	ThreatName   string    `json:"threat_name,omitempty"` // pretty label derived from ID
+	Category     string    `json:"category,omitempty"`    // "ips" | "dlp" | "waf", derived from threat_id range
+	Severity     int16     `json:"severity"`
+	Action       int16     `json:"action"`
+	Application  int32     `json:"application,omitempty"`
+	Msg          string    `json:"msg,omitempty"`
+	IPProto      int16     `json:"ip_proto,omitempty"`
+	SrcIP        string    `json:"src_ip,omitempty"`
+	SrcPort      int       `json:"src_port,omitempty"`
+	DstIP        string    `json:"dst_ip,omitempty"`
+	DstPort      int       `json:"dst_port,omitempty"`
+	PktLen       int       `json:"pkt_len,omitempty"`
+	CapLen       int       `json:"cap_len,omitempty"`
+	PktIngress   bool      `json:"pkt_ingress"`
+	SessIngress  bool      `json:"sess_ingress"`
+	ReportedAt   time.Time `json:"reported_at"`
+	At           time.Time `json:"at"`
 }
 
 // List returns recent threats. Filters: ?hours= (default 24, max 720),
 // ?severity_min= (1..9), ?cluster_id=, ?workload_id=, ?category=dlp|waf,
 // ?group= group id or name.
-func (h *RuntimeThreats) List(w http.ResponseWriter, r *http.Request) {
-	sub, ok := authctx.SubjectFrom(r.Context())
-	if !ok {
-		jsonError(w, http.StatusUnauthorized, "auth required")
-		return
-	}
-	hours := clampInt(parseIntDefault(r.URL.Query().Get("hours"), 24), 1, 720)
-	sevMin := clampInt(parseIntDefault(r.URL.Query().Get("severity_min"), 0), 0, 9)
-	clusterID := strings.TrimSpace(r.URL.Query().Get("cluster_id"))
-	workloadIDFilter := strings.TrimSpace(r.URL.Query().Get("workload_id"))
-	categoryFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("category")))
-	if categoryFilter != "" && categoryFilter != "dlp" && categoryFilter != "waf" && categoryFilter != "ips" {
-		jsonError(w, http.StatusBadRequest, "category must be dlp, waf, or ips")
-		return
-	}
-	var clusterUUID *uuid.UUID
-	if clusterID != "" {
-		if parsed, err := uuid.Parse(clusterID); err == nil {
-			clusterUUID = &parsed
-		}
-	}
-	groupMembers, groupName, groupActive, err := handler.ResolveGroupFilterMembers(r.Context(), h.db.Pool(), sub.OrgID, clusterUUID, r.URL.Query().Get("group"))
-	if err != nil {
-		jsonError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	rows, err := h.db.Pool().Query(r.Context(), `
-SELECT id::text, org_id::text, cluster_id::text,
-       COALESCE(node,''), COALESCE(ep_mac,''), COALESCE(workload_id,''), COALESCE(namespace,''), COALESCE(pod_name,''),
-       threat_id, severity, action,
-       COALESCE(application,0), COALESCE(msg,''),
-       COALESCE(ip_proto,0::smallint),
-       COALESCE(src_ip,''), COALESCE(src_port,0),
-       COALESCE(dst_ip,''), COALESCE(dst_port,0),
-       COALESCE(pkt_len,0), COALESCE(cap_len,0),
-       pkt_ingress, sess_ingress,
-       reported_at, at
-  FROM runtime_threats
- WHERE org_id = $1
-   AND at >= NOW() - ($2::text || ' hours')::interval
-   AND ($3::text = '' OR cluster_id::text = $3)
-   AND severity >= $4::smallint
-	   AND ($5::text = '' OR workload_id = $5)
-	   AND ($6::text = '' OR (CASE
-	            WHEN threat_id >= 40000 AND threat_id < 50000 THEN 'waf'
-	            WHEN threat_id >= 20000 AND threat_id < 40000 THEN 'dlp'
-	            ELSE 'ips'
-	        END) = $6)
-	   AND (NOT $7::boolean OR workload_id = ANY($8::text[]))
-	 ORDER BY at DESC
-	 LIMIT 500`,
-		sub.OrgID, fmt.Sprintf("%d", hours), clusterID, int16(sevMin), workloadIDFilter, categoryFilter, groupActive, groupMembers)
-	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	defer rows.Close()
-
-	out := make([]RuntimeThreatRow, 0, 32)
-	for rows.Next() {
-		var t RuntimeThreatRow
-		if err := rows.Scan(
-			&t.ID, &t.OrgID, &t.ClusterID,
-			&t.Node, &t.EPMAC, &t.WorkloadID, &t.Namespace, &t.PodName,
-			&t.ThreatID, &t.Severity, &t.Action,
-			&t.Application, &t.Msg,
-			&t.IPProto,
-			&t.SrcIP, &t.SrcPort,
-			&t.DstIP, &t.DstPort,
-			&t.PktLen, &t.CapLen,
-			&t.PktIngress, &t.SessIngress,
-			&t.ReportedAt, &t.At,
-		); err != nil {
-			jsonError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		t.ThreatName = resolveThreatName(uint32(t.ThreatID))
-		t.Category = threatCategory(t.ThreatID)
-		out = append(out, t)
-	}
-	response := map[string]any{"threats": out}
-	if groupActive {
-		response["selected_group"] = groupName
-		response["selected_group_members"] = len(groupMembers)
-	}
-	httpx.WriteJSON(w, http.StatusOK, response)
-}
+func (h *RuntimeThreats) List(w http.ResponseWriter, r *http.Request) { h.threatInventory(w, r, false) }
 
 // VerbList is the rbac verb gate for List.
 func (h *RuntimeThreats) VerbList() rbac.Verb { return rbac.VerbReadFindings }
@@ -561,7 +478,14 @@ SELECT id::text, org_id::text, cluster_id::text,
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	t.ThreatName = resolveThreatName(uint32(t.ThreatID))
+	cluster, _ := uuid.Parse(t.ClusterID)
+	roles, err := handler.EvidencePlatformRoles(r.Context(), h.db.Pool(), sub.OrgID, []handler.PlatformWorkloadIdentity{{ClusterID: cluster, Workload: t.WorkloadID, Namespace: t.Namespace}})
+	if err != nil {
+		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	t.PlatformRole = roles[0]
+	t.ThreatName = storedThreatName(t.ThreatID)
 	t.Category = threatCategory(t.ThreatID)
 	t.Packet = packet
 	if preview := parsePacketL7(packet, t.DstPort); preview != nil {
@@ -594,7 +518,7 @@ func pathTail(p string) string {
 // 2001-2027, e.g. PING_DEATH, TCP_SMURF, SQL_INJECTION) — is "ips". The old filter keyed on
 // dlp_name_hash, which mislabeled every built-in IPS signature (hash=0) as 'waf' and put real
 // custom WAF hits (hash>0) in 'dlp'; the threat_id range is the authoritative discriminator.
-func threatCategory(threatID int32) string {
+func threatCategory(threatID int64) string {
 	switch {
 	case threatID >= 40000 && threatID < 50000:
 		return "waf"
@@ -621,4 +545,11 @@ func clampInt(n, lo, hi int) int {
 		return hi
 	}
 	return n
+}
+
+func storedThreatName(value int64) string {
+	if id, ok := handler.NetworkThreatID(value); ok {
+		return resolveThreatName(id)
+	}
+	return fmt.Sprintf("signature %d", value)
 }

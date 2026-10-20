@@ -1,0 +1,21 @@
+# Preserve the qualified Barman/plugin runtime; refresh Expat from signed Debian
+# repositories without adding a shell or package manager to the final image.
+FROM debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f AS packages
+ARG EXPAT_VERSION=2.9.0-1~deb13u1
+RUN apt-get update \
+    && mkdir /download /out /control \
+    && cd /download \
+    && apt-get download "libexpat1=${EXPAT_VERSION}" \
+    && dpkg-deb --extract ./*.deb /out \
+    && dpkg-deb --control ./*.deb /control \
+    && mkdir -p /out/var/lib/dpkg/status.d \
+    && cp /control/control /out/var/lib/dpkg/status.d/libexpat1 \
+    && cp /control/md5sums /out/var/lib/dpkg/status.d/libexpat1.md5sums
+
+FROM ghcr.io/alphabravo-oss/constellation/barman-sidecar@sha256:61b55f0807293213c68d3d7a5572c41d5b7fa164dba2f956d0c660952779f261
+USER 0
+# Remove superseded versioned libraries as well as replacing their symlinks.
+RUN ["/venv/bin/python3", "-c", "import os; [os.unlink('/usr/lib/x86_64-linux-gnu/' + n) for n in ('libexpat.so.1.12.3', 'libexpatw.so.1.12.3') if os.path.lexists('/usr/lib/x86_64-linux-gnu/' + n)]"]
+COPY --from=packages /out/ /
+USER 26:26
+RUN ["/venv/bin/python3", "-c", "import pyexpat; assert pyexpat.EXPAT_VERSION == 'expat_2.9.0', pyexpat.EXPAT_VERSION; pyexpat.ParserCreate().Parse('<backup/>', True)"]

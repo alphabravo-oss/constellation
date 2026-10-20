@@ -7,7 +7,7 @@
 
 import { useMemo, useState } from "react";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { ArrowLeft, Check, ClipboardCopy, KeyRound, ShieldAlert } from "lucide-react";
 
@@ -19,7 +19,7 @@ import {
 import { PageHeader } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Field, TextInput } from "@/components/ui/form";
+import { Field, TextInput, Checkbox } from "@/components/ui/form";
 
 const EXPIRY_PRESETS: Array<{ id: string; label: string; durationHours: number | null; warn?: boolean }> = [
   { id: "24h", label: "24 hours", durationHours: 24 },
@@ -135,12 +135,11 @@ export function ApiTokenCreatePage() {
                 </p>
                 {groups.map(([category, items]) => (
                   <fieldset key={category} className="rounded-md border border-border p-3">
-                    <legend className="px-1 text-xs font-medium uppercase text-muted-foreground">{category}</legend>
+                    <legend className="px-1 text-xs font-medium  text-muted-foreground">{category}</legend>
                     <div className="space-y-2">
                       {items.map((v) => (
                         <label key={v.name} className="flex items-start gap-2 text-sm">
-                          <input
-                            type="checkbox"
+                          <Checkbox
                             checked={scopes.has(v.name)}
                             onChange={(e) => {
                               const next = new Set(scopes);
@@ -148,7 +147,6 @@ export function ApiTokenCreatePage() {
                               else next.delete(v.name);
                               setScopes(next);
                             }}
-                            className="mt-1"
                             data-testid={`wizard-scope-${v.name}`}
                           />
                           <span>
@@ -237,7 +235,7 @@ export function ApiTokenCreatePage() {
             )}
 
             <div className="flex items-center justify-between pt-2">
-              <Button type="button" variant="ghost" size="lg" onClick={() => navigate("/settings/api-tokens")}>
+              <Button type="button" variant="ghost" size="lg" onClick={() => navigate({ href: "/settings/api-tokens" })}>
                 Cancel
               </Button>
               <div className="inline-flex gap-2">
@@ -281,7 +279,7 @@ export function ApiTokenCreatePage() {
       ) : (
         <RevealSection
           response={revealed}
-          onDone={() => navigate("/settings/api-tokens")}
+          onDone={() => navigate({ href: "/settings/api-tokens" })}
         />
       )}
     </div>
@@ -298,7 +296,7 @@ function StepBar({ step }: { step: Step }) {
         return (
           <li key={l} className="flex items-center gap-1">
             <span
-              className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] ${
+              className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-micro ${
                 active ? "bg-primary text-primary-foreground" : done ? "bg-status-success/30 text-status-success" : "bg-muted text-muted-foreground"
               }`}
             >
@@ -368,8 +366,7 @@ function RevealSection({
         {response.hint && <p className="text-xs text-muted-foreground">{response.hint}</p>}
 
         <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={acknowledged}
             onChange={(e) => setAcknowledged(e.target.checked)}
             data-testid="reveal-ack"

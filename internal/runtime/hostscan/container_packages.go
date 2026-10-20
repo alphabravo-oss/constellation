@@ -130,12 +130,12 @@ func CollectContainerPackages(ctx context.Context, opts ContainerPackagesOptions
 // tap (/proc/<PID>/ns/net) so dp captures packets with the pod's real
 // on-wire MAC instead of the host-side veth MAC.
 type RunningContainer struct {
-	ID        string
-	Name      string
-	PodName   string
-	PodNS     string
-	PodUID    string
-	PID       int
+	ID      string
+	Name    string
+	PodName string
+	PodNS   string
+	PodUID  string
+	PID     int
 	// PodLabels are the user labels on the container's pod sandbox (from
 	// `crictl pods`), keyed by the pod UID. Used to opt a workload into DPI
 	// (WAF/DLP) per NeuVector's per-group model. Empty if the sandbox lookup
@@ -175,7 +175,7 @@ func ListRunningContainers(ctx context.Context, opts ListRunningContainersOption
 
 	listCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	listCmd := exec.CommandContext(listCtx, bin,
+	listCmd := exec.CommandContext(listCtx, bin, //nolint:gosec // G204: bin is the configured crictl path; socket comes from the runtime-socket allow-list
 		"--runtime-endpoint", "unix://"+socket,
 		"ps", "-o", "json", // running only (no -a)
 	)
@@ -242,7 +242,7 @@ type crictlPodsResponse struct {
 func listPodSandboxLabels(ctx context.Context, bin, socket string, timeout time.Duration) map[string]map[string]string {
 	ctx2, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx2, bin,
+	cmd := exec.CommandContext(ctx2, bin, //nolint:gosec // G204: bin is the configured crictl path; socket comes from the runtime-socket allow-list
 		"--runtime-endpoint", "unix://"+socket,
 		"pods", "-o", "json",
 	)
@@ -275,7 +275,7 @@ func listPodSandboxLabels(ctx context.Context, bin, socket string, timeout time.
 func inspectContainer(ctx context.Context, bin, socket, containerID string, timeout time.Duration) (crictlInspectResponse, error) {
 	ctx2, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx2, bin,
+	cmd := exec.CommandContext(ctx2, bin, //nolint:gosec // G204: bin is the configured crictl path; containerID is a runtime-reported ID
 		"--runtime-endpoint", "unix://"+socket,
 		"inspect", "-o", "json", containerID,
 	)

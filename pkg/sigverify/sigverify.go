@@ -8,7 +8,7 @@
 //	require_rekor: true
 //	require_attestations: ["slsa.dev/provenance/v1"]
 //
-// Verification is shelled out to cosign 2.x which is already pinned in the scanner image.
+// Verification is shelled out to cosign 3.x which is already pinned in the scanner image.
 // We do NOT vendor cosign's Go API at v1 (it's still pre-1.0 + frequently breaks).
 package sigverify
 
@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -70,6 +71,8 @@ type AttestationResult struct {
 type Verifier struct {
 	CosignBinary string // default: "cosign" from PATH
 	Timeout      time.Duration
+	// Env is the subprocess environment. Nil inherits the current process.
+	Env []string
 }
 
 // New returns a Verifier with defaults.
@@ -112,10 +115,8 @@ func (v *Verifier) verifyRoot(ctx context.Context, imageRef string, root RootOfT
 	args = append(args, imageRef)
 
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, v.CosignBinary, args...)
-	if len(env) > 0 {
-		cmd.Env = append(os.Environ(), env...)
-	}
+	cmd := exec.CommandContext(ctx, v.CosignBinary, args...) //nolint:gosec // G204: CosignBinary is the operator-configured cosign path
+	cmd.Env = v.commandEnv(env...)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -172,7 +173,8 @@ func (v *Verifier) VerifyAttestation(ctx context.Context, subjectRef string, pol
 	args = append(args, subjectRef)
 
 	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, v.CosignBinary, args...)
+	cmd := exec.CommandContext(ctx, v.CosignBinary, args...) //nolint:gosec // G204: CosignBinary is the operator-configured cosign path
+	cmd.Env = v.commandEnv()
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -430,7 +432,10 @@ func cosignAttestationType(predicateTypes []string) string {
 		return ""
 	}
 	switch strings.TrimSpace(predicateTypes[0]) {
-	case "https://slsa.dev/provenance/v1", "slsa.dev/provenance/v1", "slsaprovenance":
+	case "https://slsa.dev/provenance/v1", "slsa.dev/provenance/v1":
+		// The slsaprovenance alias selects v0.2, not v1. Preserve the URI.
+		return "https://slsa.dev/provenance/v1"
+	case "slsaprovenance":
 		return "slsaprovenance"
 	case "spdx", "https://spdx.dev/Document":
 		return "spdx"
@@ -442,15 +447,20 @@ func cosignAttestationType(predicateTypes []string) string {
 }
 
 func extractAttestationStatements(raw []byte) []map[string]any {
-	var decoded any
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
-	if err := dec.Decode(&decoded); err != nil {
-		return nil
-	}
 	out := []map[string]any{}
-	walkAttestationJSON(decoded, &out)
-	return out
+	// Cosign may emit one JSON envelope per line when several attestations verify.
+	for {
+		var decoded any
+		if err := dec.Decode(&decoded); err != nil {
+			if errors.Is(err, io.EOF) {
+				return out
+			}
+			return nil
+		}
+		walkAttestationJSON(decoded, &out)
+	}
 }
 
 func walkAttestationJSON(value any, out *[]map[string]any) {
@@ -460,8 +470,7 @@ func walkAttestationJSON(value any, out *[]map[string]any) {
 			*out = append(*out, typed)
 		}
 		for key, child := range typed {
-			switch strings.ToLower(key) {
-			case "payload":
+			if strings.EqualFold(key, "payload") {
 				if decoded, ok := decodeEmbeddedPayload(child); ok {
 					walkAttestationJSON(decoded, out)
 					continue
@@ -477,7 +486,8 @@ func walkAttestationJSON(value any, out *[]map[string]any) {
 }
 
 func isInTotoStatement(value map[string]any) bool {
-	if strings.TrimSpace(fmt.Sprint(value["_type"])) != "https://in-toto.io/Statement/v1" {
+	typ := strings.TrimSpace(fmt.Sprint(value["_type"]))
+	if typ != "https://in-toto.io/Statement/v1" && typ != "https://in-toto.io/Statement/v0.1" {
 		return false
 	}
 	return strings.TrimSpace(fmt.Sprint(value["predicateType"])) != ""
@@ -525,4 +535,14 @@ func stringInList(value string, allowed []string) bool {
 		}
 	}
 	return false
+}
+
+// commandEnv copies the base environment so concurrent verification never mutates
+// another job's environment. exec.Cmd uses the last occurrence of duplicate keys.
+func (v *Verifier) commandEnv(overrides ...string) []string {
+	base := v.Env
+	if base == nil {
+		base = os.Environ()
+	}
+	return append(append([]string{}, base...), overrides...)
 }

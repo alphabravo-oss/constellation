@@ -8,6 +8,7 @@ import (
 )
 
 func TestExecuteSnapshot(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	q, err := New(Options{OutputDir: dir, DryRun: false}, CollectorSet{
 		Cordon: LocalCordonCollector(),
@@ -29,6 +30,11 @@ func TestExecuteSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := q.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	tgt := Target{
 		Namespace: "default", Pod: "web-1", WorkloadID: "default/Deployment/web",
 		PID: 1234, Veth: "veth1234",
@@ -71,6 +77,7 @@ func TestExecuteSnapshot(t *testing.T) {
 }
 
 func TestDryRunSkipsCordon(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	q, err := New(Options{OutputDir: dir, DryRun: true}, CollectorSet{
 		Cordon: LocalCordonCollector(),
@@ -78,6 +85,11 @@ func TestDryRunSkipsCordon(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
+	t.Cleanup(func() {
+		if err := q.Close(); err != nil {
+			t.Error(err)
+		}
+	})
 	res, err := q.Execute(context.Background(), Target{Namespace: "ns", Pod: "p"}, Trigger{})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -88,6 +100,7 @@ func TestDryRunSkipsCordon(t *testing.T) {
 }
 
 func TestRenderCordonYAML(t *testing.T) {
+	t.Parallel()
 	y := RenderCordonYAML(Target{Namespace: "ns", Pod: "web-1", WorkloadID: "ns/Deployment/web"})
 	if !strings.Contains(y, "podSelector") || !strings.Contains(y, "kube-dns") {
 		t.Fatalf("bad yaml: %s", y)

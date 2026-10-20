@@ -17,8 +17,9 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/alphabravocompany/constellation/internal/runtime/hostscan"
 	"golang.org/x/sys/unix"
+
+	"github.com/alphabravocompany/constellation/internal/runtime/hostscan"
 )
 
 type fileProfileEnforcerConfig struct {
@@ -1022,6 +1023,10 @@ func (e *fanotifyExecEnforcer) handleEvents(cfg fileProfileEnforcerConfig, buf [
 // fanotify event, using the host proc view. Returns (drift, reason). Fail-open on
 // unknown container / start time.
 func execEnforcerZeroDriftDecision(cfg fileProfileEnforcerConfig, event fanotifyDecisionEvent) (bool, string) {
+	wirePID, ok := processPID(int(event.Pid))
+	if !ok {
+		return false, ""
+	}
 	procRootDir := fileProfileEnforcerProcRoot(cfg.HostRoot)
 	cid := containerIDFromProcCgroup(procRootDir, int(event.Pid))
 	if cid == "" {
@@ -1034,7 +1039,7 @@ func execEnforcerZeroDriftDecision(cfg fileProfileEnforcerConfig, event fanotify
 	if ident.StartUnixNano == 0 {
 		return false, "" // unknown start -> fail open
 	}
-	z := zeroDriftContextFromProc(procRootDir, uint32(event.Pid), cid, ident.StartUnixNano)
+	z := zeroDriftContextFromProc(procRootDir, wirePID, cid, ident.StartUnixNano)
 	if !execIsDrift(z) {
 		return false, ""
 	}

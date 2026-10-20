@@ -1,20 +1,27 @@
 package handler
 
 import (
+	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"path"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/alphabravocompany/constellation/internal/migration/aqua"
 	"github.com/alphabravocompany/constellation/internal/migration/neuvector"
@@ -25,6 +32,7 @@ import (
 	"github.com/alphabravocompany/constellation/pkg/group"
 	"github.com/alphabravocompany/constellation/pkg/netpolicy"
 	"github.com/alphabravocompany/constellation/pkg/rbac"
+	"github.com/alphabravocompany/constellation/pkg/vulnprofile"
 )
 
 type migrationPreviewRequest struct {
@@ -153,41 +161,47 @@ type migrationDPIPatternDTO struct {
 }
 
 type migrationPreviewSummaryDTO struct {
-	Source          string         `json:"source"`
-	Total           int            `json:"total"`
-	SourceTotal     int            `json:"source_total,omitempty"`
-	SourceCounts    map[string]int `json:"source_counts,omitempty"`
-	Unaccounted     int            `json:"unaccounted_source,omitempty"`
-	Create          int            `json:"create"`
-	Update          int            `json:"update"`
-	Enforce         int            `json:"enforce"`
-	Monitor         int            `json:"monitor"`
-	Enabled         int            `json:"enabled"`
-	FileProfiles    int            `json:"file_profiles"`
-	ProcessProfiles int            `json:"process_profiles"`
-	Groups          int            `json:"groups"`
-	DPIRules        int            `json:"dpi_rules"`
-	DPIBindings     int            `json:"dpi_bindings"`
-	NetworkRules    int            `json:"network_rules"`
-	Unsupported     int            `json:"unsupported"`
-	Engines         map[string]int `json:"engines"`
-	Categories      map[string]int `json:"categories"`
-	ReadOnly        bool           `json:"read_only"`
-	RollbackHint    string         `json:"rollback_hint"`
+	VulnerabilityProfiles int            `json:"vulnerability_profiles"`
+	Registries            int            `json:"registries"`
+	Unchanged             int            `json:"unchanged"`
+	Source                string         `json:"source"`
+	Total                 int            `json:"total"`
+	SourceTotal           int            `json:"source_total,omitempty"`
+	SourceCounts          map[string]int `json:"source_counts,omitempty"`
+	Unaccounted           int            `json:"unaccounted_source,omitempty"`
+	Create                int            `json:"create"`
+	Update                int            `json:"update"`
+	Enforce               int            `json:"enforce"`
+	Monitor               int            `json:"monitor"`
+	Enabled               int            `json:"enabled"`
+	FileProfiles          int            `json:"file_profiles"`
+	ProcessProfiles       int            `json:"process_profiles"`
+	Groups                int            `json:"groups"`
+	DPIRules              int            `json:"dpi_rules"`
+	DPIBindings           int            `json:"dpi_bindings"`
+	NetworkRules          int            `json:"network_rules"`
+	Unsupported           int            `json:"unsupported"`
+	Engines               map[string]int `json:"engines"`
+	Categories            map[string]int `json:"categories"`
+	ReadOnly              bool           `json:"read_only"`
+	RollbackHint          string         `json:"rollback_hint"`
 }
 
 type migrationPreviewDTO struct {
-	ImportID        string                              `json:"import_id,omitempty"`
-	Summary         migrationPreviewSummaryDTO          `json:"summary"`
-	Policies        []migrationPreviewPolicyDTO         `json:"policies"`
-	FileProfiles    []migrationPreviewFileProfileDTO    `json:"file_profiles"`
-	ProcessProfiles []migrationPreviewProcessProfileDTO `json:"process_profiles"`
-	Groups          []migrationPreviewGroupDTO          `json:"groups"`
-	DPIRules        []migrationPreviewDPIRuleDTO        `json:"dpi_rules"`
-	DPIBindings     []migrationPreviewDPIBindingDTO     `json:"dpi_bindings"`
-	NetworkRules    []migrationPreviewNetworkRuleDTO    `json:"network_rules"`
-	Unsupported     []migrationUnsupportedDTO           `json:"unsupported,omitempty"`
-	RollbackBundle  string                              `json:"rollback_bundle"`
+	VulnerabilityProfiles []migrationPreviewVulnerabilityProfileDTO `json:"vulnerability_profiles"`
+	Registries            []migrationPreviewRegistryDTO             `json:"registries"`
+	ImportID              string                                    `json:"import_id,omitempty"`
+	TargetClusterID       string                                    `json:"target_cluster_id,omitempty"`
+	Summary               migrationPreviewSummaryDTO                `json:"summary"`
+	Policies              []migrationPreviewPolicyDTO               `json:"policies"`
+	FileProfiles          []migrationPreviewFileProfileDTO          `json:"file_profiles"`
+	ProcessProfiles       []migrationPreviewProcessProfileDTO       `json:"process_profiles"`
+	Groups                []migrationPreviewGroupDTO                `json:"groups"`
+	DPIRules              []migrationPreviewDPIRuleDTO              `json:"dpi_rules"`
+	DPIBindings           []migrationPreviewDPIBindingDTO           `json:"dpi_bindings"`
+	NetworkRules          []migrationPreviewNetworkRuleDTO          `json:"network_rules"`
+	Unsupported           []migrationUnsupportedDTO                 `json:"unsupported,omitempty"`
+	RollbackBundle        string                                    `json:"rollback_bundle"`
 }
 
 type migrationUnsupportedDTO struct {
@@ -199,16 +213,17 @@ type migrationUnsupportedDTO struct {
 }
 
 type migrationImportListItemDTO struct {
-	ID             string                     `json:"id"`
-	Source         string                     `json:"source"`
-	Status         string                     `json:"status"`
-	Summary        migrationPreviewSummaryDTO `json:"summary"`
-	AppliedSummary map[string]int             `json:"applied_summary,omitempty"`
-	Unsupported    []migrationUnsupportedDTO  `json:"unsupported,omitempty"`
-	Error          string                     `json:"error,omitempty"`
-	CreatedAt      string                     `json:"created_at"`
-	AppliedAt      string                     `json:"applied_at,omitempty"`
-	RolledBackAt   string                     `json:"rolled_back_at,omitempty"`
+	ID              string                     `json:"id"`
+	Source          string                     `json:"source"`
+	Status          string                     `json:"status"`
+	TargetClusterID string                     `json:"target_cluster_id,omitempty"`
+	Summary         migrationPreviewSummaryDTO `json:"summary"`
+	AppliedSummary  map[string]int             `json:"applied_summary,omitempty"`
+	Unsupported     []migrationUnsupportedDTO  `json:"unsupported,omitempty"`
+	Error           string                     `json:"error,omitempty"`
+	CreatedAt       string                     `json:"created_at"`
+	AppliedAt       string                     `json:"applied_at,omitempty"`
+	RolledBackAt    string                     `json:"rolled_back_at,omitempty"`
 }
 
 type policyRollbackSnapshot struct {
@@ -403,22 +418,60 @@ type migrationProcessProfileRollbackDTO struct {
 
 var migrationRollbackFilenameUnsafe = regexp.MustCompile(`[^a-z0-9._-]+`)
 
+type migrationPreviewVulnerabilityProfileDTO struct {
+	Name        string                  `json:"name"`
+	Description string                  `json:"description"`
+	Active      bool                    `json:"active"`
+	Entries     []vulnprofile.Entry     `json:"entries"`
+	DomainScope vulnprofile.DomainScope `json:"domain_scope"`
+	ClusterID   string                  `json:"cluster_id,omitempty"`
+	Imported    map[string]string       `json:"imported_from,omitempty"`
+	DiffAction  string                  `json:"diff_action"`
+}
+
+type migrationPreviewRegistryDTO struct {
+	Name                string            `json:"name"`
+	Kind                string            `json:"kind"`
+	Endpoint            string            `json:"endpoint"`
+	ImageGlobs          []string          `json:"image_globs"`
+	AuthKind            string            `json:"auth_kind"`
+	ScanCadence         string            `json:"scan_cadence"`
+	CredentialsRequired bool              `json:"credentials_required"`
+	Imported            map[string]string `json:"imported_from,omitempty"`
+	DiffAction          string            `json:"diff_action"`
+}
+
+type migrationVulnerabilityRollbackDTO struct {
+	ID                string                                   `json:"id"`
+	Action            string                                   `json:"action"`
+	Before            *migrationPreviewVulnerabilityProfileDTO `json:"before,omitempty"`
+	AppliedAt         time.Time                                `json:"applied_at"`
+	BeforeEntries     json.RawMessage                          `json:"before_entries,omitempty"`
+	BeforeDomainScope json.RawMessage                          `json:"before_domain_scope,omitempty"`
+}
+
+type migrationRegistryRollbackDTO struct {
+	ID        string    `json:"id"`
+	Action    string    `json:"action"`
+	AppliedAt time.Time `json:"applied_at"`
+}
+
 func (h *Enterprise) MigrationPreview(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
 	var req migrationPreviewRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid migration preview request"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid migration preview request")
 		return
 	}
 	source := strings.ToLower(strings.TrimSpace(req.Source))
 	raw := []byte(req.Export)
 	if source == "" || len(strings.TrimSpace(req.Export)) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "source and export are required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "source and export are required")
 		return
 	}
 	sourceCounts, err := countMigrationSourceObjects(source, raw)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -427,12 +480,17 @@ func (h *Enterprise) MigrationPreview(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusUnauthorized, "no subject")
 		return
 	}
+	vulnerabilityProfiles, registries, remainingUnsupported, err := h.convertMigrationRemaining(r, subj.OrgID, source, raw, strings.TrimSpace(req.ClusterID))
+	if err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
+		return
+	}
 	policies, err := convertMigrationPreview(source, raw)
 	if err != nil {
 		if hasSubject {
 			h.auditMigration(r, subj, "migration.import.preview.failed", source, map[string]any{"source": source, "error": err.Error()})
 		}
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	fileProfiles, err := convertMigrationFileProfiles(source, raw)
@@ -440,7 +498,7 @@ func (h *Enterprise) MigrationPreview(w http.ResponseWriter, r *http.Request) {
 		if hasSubject {
 			h.auditMigration(r, subj, "migration.import.preview.failed", source, map[string]any{"source": source, "error": err.Error()})
 		}
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	processProfiles, processUnsupported, err := convertMigrationProcessProfiles(source, raw)
@@ -448,7 +506,7 @@ func (h *Enterprise) MigrationPreview(w http.ResponseWriter, r *http.Request) {
 		if hasSubject {
 			h.auditMigration(r, subj, "migration.import.preview.failed", source, map[string]any{"source": source, "error": err.Error()})
 		}
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	groups, groupUnsupported, err := convertMigrationGroups(source, raw)
@@ -456,7 +514,7 @@ func (h *Enterprise) MigrationPreview(w http.ResponseWriter, r *http.Request) {
 		if hasSubject {
 			h.auditMigration(r, subj, "migration.import.preview.failed", source, map[string]any{"source": source, "error": err.Error()})
 		}
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	dpiRules, dpiBindings, dpiUnsupported, err := convertMigrationDPIRules(source, raw)
@@ -464,7 +522,7 @@ func (h *Enterprise) MigrationPreview(w http.ResponseWriter, r *http.Request) {
 		if hasSubject {
 			h.auditMigration(r, subj, "migration.import.preview.failed", source, map[string]any{"source": source, "error": err.Error()})
 		}
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	networkRules, networkUnsupported, err := convertMigrationNetworkRules(source, raw)
@@ -472,17 +530,18 @@ func (h *Enterprise) MigrationPreview(w http.ResponseWriter, r *http.Request) {
 		if hasSubject {
 			h.auditMigration(r, subj, "migration.import.preview.failed", source, map[string]any{"source": source, "error": err.Error()})
 		}
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
 		return
 	}
 	clusterIDRaw := strings.TrimSpace(req.ClusterID)
 	needsCluster := len(groups) > 0 || len(processProfiles) > 0 || len(dpiRules) > 0 || len(dpiBindings) > 0 || len(networkRules) > 0
-	if needsCluster || (len(fileProfiles) > 0 && clusterIDRaw != "") {
+	if needsCluster || clusterIDRaw != "" {
 		clusterID, err := uuid.Parse(strings.TrimSpace(req.ClusterID))
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "target cluster_id is required for NeuVector group, process profile, network rule, and DLP/WAF imports"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "target cluster_id is required for NeuVector group, process profile, network rule, and DLP/WAF imports")
 			return
 		}
+		clusterIDRaw = clusterID.String()
 		if h != nil && h.db != nil {
 			ok, err := h.migrationClusterExists(r, subj.OrgID, clusterID)
 			if err != nil {
@@ -493,7 +552,7 @@ func (h *Enterprise) MigrationPreview(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if !ok {
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "target cluster_id does not belong to this organization"})
+				apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "target cluster_id does not belong to this organization")
 				return
 			}
 		}
@@ -603,25 +662,54 @@ func (h *Enterprise) MigrationPreview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out := migrationPreviewDTO{
-		Summary:         summarizeMigrationPreview(source, sourceCounts, policies, fileProfiles, processProfiles, groups, dpiRules, dpiBindings, networkRules),
-		Policies:        policies,
-		FileProfiles:    fileProfiles,
-		ProcessProfiles: processProfiles,
-		Groups:          groups,
-		DPIRules:        dpiRules,
-		DPIBindings:     dpiBindings,
-		NetworkRules:    networkRules,
-		RollbackBundle:  renderMigrationRollbackBundle(source, policies, fileProfiles, processProfiles, groups, dpiRules, dpiBindings, networkRules),
+		VulnerabilityProfiles: vulnerabilityProfiles,
+		Registries:            registries,
+		TargetClusterID:       clusterIDRaw,
+		Summary:               summarizeMigrationPreview(source, sourceCounts, policies, fileProfiles, processProfiles, groups, dpiRules, dpiBindings, networkRules),
+		Policies:              policies,
+		FileProfiles:          fileProfiles,
+		ProcessProfiles:       processProfiles,
+		Groups:                groups,
+		DPIRules:              dpiRules,
+		DPIBindings:           dpiBindings,
+		NetworkRules:          networkRules,
+		RollbackBundle:        renderMigrationRollbackBundle(source, policies, fileProfiles, processProfiles, groups, dpiRules, dpiBindings, networkRules),
 	}
 	out.Unsupported = migrationUnsupportedFromPreview(fileProfiles, clusterIDRaw, append(append(append(groupUnsupported, processUnsupported...), dpiUnsupported...), networkUnsupported...))
+	out.Unsupported = append(out.Unsupported, remainingUnsupported...)
+	out.Summary.VulnerabilityProfiles = len(vulnerabilityProfiles)
+	out.Summary.Registries = len(registries)
+	out.Summary.Total += len(vulnerabilityProfiles) + len(registries)
+	for _, profile := range vulnerabilityProfiles {
+		addMigrationRemainingDiff(&out.Summary, profile.DiffAction)
+		if profile.Active {
+			out.Summary.Enabled++
+		}
+	}
+	for _, registry := range registries {
+		addMigrationRemainingDiff(&out.Summary, registry.DiffAction)
+	}
+	var bundle map[string]any
+	if json.Unmarshal([]byte(out.RollbackBundle), &bundle) == nil {
+		bundle["vulnerability_profiles"] = vulnerabilityProfiles
+		bundle["registries"] = registries
+		encoded, _ := json.MarshalIndent(bundle, "", "  ")
+		out.RollbackBundle = string(encoded)
+	}
 	out.Summary.Unsupported = len(out.Unsupported)
-	if out.Summary.SourceTotal > out.Summary.Total+out.Summary.Unsupported {
-		out.Summary.Unaccounted = out.Summary.SourceTotal - out.Summary.Total - out.Summary.Unsupported
+	accounted := out.Summary.Total + out.Summary.Unsupported
+	for _, unsupported := range remainingUnsupported {
+		if unsupported.Kind == "registry_credentials" || unsupported.Kind == "registry_settings" {
+			accounted--
+		}
+	}
+	if out.Summary.SourceTotal > accounted {
+		out.Summary.Unaccounted = out.Summary.SourceTotal - accounted
 	}
 	if h != nil && h.db != nil {
 		id, err := h.persistMigrationPreview(r, subj, source, raw, out)
 		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		out.ImportID = id.String()
@@ -630,8 +718,56 @@ func (h *Enterprise) MigrationPreview(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Enterprise) MigrationImports(w http.ResponseWriter, r *http.Request) {
+	limit := 25
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 100 {
+			jsonError(w, http.StatusBadRequest, "limit must be between 1 and 100")
+			return
+		}
+		limit = parsed
+	}
+	offset := 0
+	if raw := r.URL.Query().Get("offset"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 || parsed > 1000000 {
+			jsonError(w, http.StatusBadRequest, "offset must be between 0 and 1000000")
+			return
+		}
+		offset = parsed
+	}
+	var cursorTime *time.Time
+	var cursorID *uuid.UUID
+	if raw := r.URL.Query().Get("cursor"); raw != "" {
+		if r.URL.Query().Has("offset") {
+			jsonError(w, http.StatusBadRequest, "cursor and offset cannot be combined")
+			return
+		}
+		if len(raw) > 200 {
+			jsonError(w, http.StatusBadRequest, "invalid cursor")
+			return
+		}
+		decoded, err := base64.RawURLEncoding.DecodeString(raw)
+		if err != nil || len(decoded) > 100 {
+			jsonError(w, http.StatusBadRequest, "invalid cursor")
+			return
+		}
+		stamp, idText, ok := strings.Cut(string(decoded), "|")
+		if !ok {
+			jsonError(w, http.StatusBadRequest, "invalid cursor")
+			return
+		}
+		parsedTime, timeErr := time.Parse(time.RFC3339Nano, stamp)
+		parsedID, idErr := uuid.Parse(idText)
+		if timeErr != nil || idErr != nil {
+			jsonError(w, http.StatusBadRequest, "invalid cursor")
+			return
+		}
+		cursorTime = &parsedTime
+		cursorID = &parsedID
+	}
 	if h == nil || h.db == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"imports": []migrationImportListItemDTO{}})
+		writeJSON(w, http.StatusOK, map[string]any{"imports": []migrationImportListItemDTO{}, "has_more": false})
 		return
 	}
 	subj, ok := SubjectFrom(r.Context())
@@ -644,14 +780,16 @@ SELECT id, source, status, preview_json, applied_json, unsupported_json, error,
        created_at, applied_at, rolled_back_at
   FROM migration_imports
  WHERE org_id = $1
- ORDER BY created_at DESC
- LIMIT 25`, subj.OrgID)
+   AND ($2::timestamptz IS NULL OR (created_at, id) < ($2::timestamptz, $3::uuid))
+ ORDER BY created_at DESC, id DESC
+ LIMIT $4 OFFSET $5`, subj.OrgID, cursorTime, cursorID, limit+1, offset)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()
 	out := []migrationImportListItemDTO{}
+	lastCursor := ""
 	for rows.Next() {
 		var (
 			id             uuid.UUID
@@ -677,7 +815,8 @@ SELECT id, source, status, preview_json, applied_json, unsupported_json, error,
 		_ = json.Unmarshal(unsupportedRaw, &unsupported)
 		item := migrationImportListItemDTO{
 			ID: id.String(), Source: source, Status: status, Summary: preview.Summary,
-			AppliedSummary: applied, Unsupported: unsupported, Error: errorText,
+			TargetClusterID: preview.TargetClusterID,
+			AppliedSummary:  applied, Unsupported: unsupported, Error: errorText,
 			CreatedAt: createdAt.UTC().Format(time.RFC3339),
 		}
 		if appliedAt != nil {
@@ -687,12 +826,23 @@ SELECT id, source, status, preview_json, applied_json, unsupported_json, error,
 			item.RolledBackAt = rolledBackAt.UTC().Format(time.RFC3339)
 		}
 		out = append(out, item)
+		if len(out) == limit {
+			lastCursor = base64.RawURLEncoding.EncodeToString([]byte(createdAt.UTC().Format(time.RFC3339Nano) + "|" + id.String()))
+		}
 	}
 	if err := rows.Err(); err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"imports": out})
+	response := map[string]any{"imports": out, "has_more": len(out) > limit}
+	if len(out) > limit {
+		response["imports"] = out[:limit]
+		response["next_cursor"] = lastCursor
+		if cursorTime == nil {
+			response["next_offset"] = offset + limit
+		}
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h *Enterprise) MigrationRollbackBundle(w http.ResponseWriter, r *http.Request) {
@@ -723,7 +873,7 @@ func (h *Enterprise) MigrationRollbackBundle(w http.ResponseWriter, r *http.Requ
 SELECT source, status, rollback_json
   FROM migration_imports
  WHERE id=$1 AND org_id=$2`, id, subj.OrgID).Scan(&source, &status, &rollbackRaw); err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			h.auditMigration(r, subj, "migration.import.rollback_bundle.failed", id.String(), map[string]any{"reason": "not_found"})
 			jsonError(w, http.StatusNotFound, "migration import not found")
 			return
@@ -787,11 +937,11 @@ func (h *Enterprise) MigrationApply(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	defer tx.Rollback(r.Context()) //nolint:errcheck
+	defer func() { _ = tx.Rollback(r.Context()) }()
 
 	source, status, preview, err := h.loadMigrationImportForUpdate(r, tx, subj.OrgID, id)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			h.auditMigration(r, subj, "migration.import.apply.failed", id.String(), map[string]any{"reason": "not_found"})
 			jsonError(w, http.StatusNotFound, "migration import not found")
 			return
@@ -812,6 +962,20 @@ func (h *Enterprise) MigrationApply(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusConflict, "migration import is not applyable from status "+status)
 		return
 	}
+	if len(preview.Registries) > 0 && !h.authorizeMigrationVerb(r, subj, rbac.VerbManageRegistries) {
+		jsonError(w, http.StatusForbidden, "forbidden: "+string(rbac.VerbManageRegistries))
+		return
+	}
+	if err := lockMigrationGroupReferences(r, tx, subj.OrgID, len(preview.Groups) > 0, len(preview.NetworkRules) > 0); err != nil {
+		jsonError(w, migrationGroupErrorStatus(err), err.Error())
+		return
+	}
+	remainingApplied, vulnerabilityRollback, registryRollback, err := h.applyMigrationRemaining(r, tx, subj, preview)
+	if err != nil {
+		h.auditMigration(r, subj, "migration.import.apply.failed", id.String(), map[string]any{"reason": "remaining_family_conflict"})
+		jsonError(w, http.StatusConflict, err.Error())
+		return
+	}
 
 	applied, rollback, err := h.applyMigrationPolicies(r, tx, subj.OrgID, preview.Policies)
 	if err != nil {
@@ -824,9 +988,11 @@ func (h *Enterprise) MigrationApply(w http.ResponseWriter, r *http.Request) {
 	groupApplied, groupRollback, err := h.applyMigrationGroups(r, tx, subj, preview.Groups)
 	if err != nil {
 		_ = tx.Rollback(r.Context())
-		_, _ = h.db.Pool().Exec(r.Context(), `UPDATE migration_imports SET status='failed', error=$3 WHERE id=$1 AND org_id=$2`, id, subj.OrgID, err.Error())
+		if !errors.Is(err, errMigrationGroupConflict) {
+			_, _ = h.db.Pool().Exec(r.Context(), `UPDATE migration_imports SET status='failed', error=$3 WHERE id=$1 AND org_id=$2`, id, subj.OrgID, err.Error())
+		}
 		h.auditMigration(r, subj, "migration.import.apply.failed", id.String(), map[string]any{"source": source, "reason": "apply_failed", "error": err.Error()})
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		jsonError(w, migrationGroupErrorStatus(err), err.Error())
 		return
 	}
 	mergeAppliedCounts(applied, groupApplied)
@@ -851,9 +1017,11 @@ func (h *Enterprise) MigrationApply(w http.ResponseWriter, r *http.Request) {
 	networkApplied, networkRollback, err := h.applyMigrationNetworkRules(r, tx, subj, preview.NetworkRules)
 	if err != nil {
 		_ = tx.Rollback(r.Context())
-		_, _ = h.db.Pool().Exec(r.Context(), `UPDATE migration_imports SET status='failed', error=$3 WHERE id=$1 AND org_id=$2`, id, subj.OrgID, err.Error())
+		if !errors.Is(err, errMigrationGroupConflict) {
+			_, _ = h.db.Pool().Exec(r.Context(), `UPDATE migration_imports SET status='failed', error=$3 WHERE id=$1 AND org_id=$2`, id, subj.OrgID, err.Error())
+		}
 		h.auditMigration(r, subj, "migration.import.apply.failed", id.String(), map[string]any{"source": source, "reason": "apply_failed", "error": err.Error()})
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		jsonError(w, migrationGroupErrorStatus(err), err.Error())
 		return
 	}
 	mergeAppliedCounts(applied, networkApplied)
@@ -875,6 +1043,7 @@ func (h *Enterprise) MigrationApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mergeAppliedCounts(applied, bindingApplied)
+	mergeAppliedCounts(applied, remainingApplied)
 	unsupported := preview.Unsupported
 	if len(unsupported) == 0 {
 		unresolvedFileProfiles := make([]migrationPreviewFileProfileDTO, 0)
@@ -890,7 +1059,7 @@ func (h *Enterprise) MigrationApply(w http.ResponseWriter, r *http.Request) {
 		newStatus = "partial_applied"
 	}
 	appliedRaw, _ := json.Marshal(applied)
-	rollbackRaw, _ := json.Marshal(map[string]any{"source": source, "generated_at": time.Now().UTC().Format(time.RFC3339), "policies": rollback, "groups": groupRollback, "file_profiles": fileProfileRollback, "process_profiles": processProfileRollback, "network_rules": networkRollback, "dpi_rules": dpiRollback, "dpi_bindings": bindingRollback})
+	rollbackRaw, _ := json.Marshal(map[string]any{"source": source, "generated_at": time.Now().UTC().Format(time.RFC3339), "policies": rollback, "groups": groupRollback, "file_profiles": fileProfileRollback, "process_profiles": processProfileRollback, "network_rules": networkRollback, "dpi_rules": dpiRollback, "dpi_bindings": bindingRollback, "vulnerability_profiles": vulnerabilityRollback, "registries": registryRollback})
 	unsupportedRaw, _ := json.Marshal(unsupported)
 	if _, err := tx.Exec(r.Context(), `
 UPDATE migration_imports
@@ -938,7 +1107,7 @@ func (h *Enterprise) MigrationRollback(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	defer tx.Rollback(r.Context()) //nolint:errcheck
+	defer func() { _ = tx.Rollback(r.Context()) }()
 
 	var source string
 	var status string
@@ -948,13 +1117,17 @@ SELECT source, status, rollback_json
   FROM migration_imports
  WHERE id=$1 AND org_id=$2
  FOR UPDATE`, id, subj.OrgID).Scan(&source, &status, &rollbackRaw); err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			h.auditMigration(r, subj, "migration.import.rollback.failed", id.String(), map[string]any{"reason": "not_found"})
 			jsonError(w, http.StatusNotFound, "migration import not found")
 			return
 		}
 		h.auditMigration(r, subj, "migration.import.rollback.failed", id.String(), map[string]any{"reason": "load_failed", "error": err.Error()})
 		jsonError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if status == "rolled_back" {
+		writeJSON(w, http.StatusOK, map[string]any{"id": id.String(), "status": status, "already_rolled_back": true})
 		return
 	}
 	if status != "applied" && status != "partial_applied" {
@@ -964,18 +1137,33 @@ SELECT source, status, rollback_json
 		return
 	}
 	var rollback struct {
-		Policies        []migrationPolicyRollbackDTO         `json:"policies"`
-		Groups          []migrationGroupRollbackDTO          `json:"groups"`
-		FileProfiles    []migrationFileProfileRollbackDTO    `json:"file_profiles"`
-		ProcessProfiles []migrationProcessProfileRollbackDTO `json:"process_profiles"`
-		NetworkRules    []migrationNetworkRuleRollbackDTO    `json:"network_rules"`
-		DPIRules        []migrationDPIRuleRollbackDTO        `json:"dpi_rules"`
-		DPIBindings     []migrationDPIBindingRollbackDTO     `json:"dpi_bindings"`
+		VulnerabilityProfiles []migrationVulnerabilityRollbackDTO  `json:"vulnerability_profiles"`
+		Registries            []migrationRegistryRollbackDTO       `json:"registries"`
+		Policies              []migrationPolicyRollbackDTO         `json:"policies"`
+		Groups                []migrationGroupRollbackDTO          `json:"groups"`
+		FileProfiles          []migrationFileProfileRollbackDTO    `json:"file_profiles"`
+		ProcessProfiles       []migrationProcessProfileRollbackDTO `json:"process_profiles"`
+		NetworkRules          []migrationNetworkRuleRollbackDTO    `json:"network_rules"`
+		DPIRules              []migrationDPIRuleRollbackDTO        `json:"dpi_rules"`
+		DPIBindings           []migrationDPIBindingRollbackDTO     `json:"dpi_bindings"`
 	}
 	if err := json.Unmarshal(rollbackRaw, &rollback); err != nil {
 		_ = tx.Rollback(r.Context())
 		h.auditMigration(r, subj, "migration.import.rollback.failed", id.String(), map[string]any{"source": source, "reason": "invalid_rollback_bundle", "error": err.Error()})
 		jsonError(w, http.StatusInternalServerError, "rollback bundle is invalid")
+		return
+	}
+	if len(rollback.Registries) > 0 && !h.authorizeMigrationVerb(r, subj, rbac.VerbManageRegistries) {
+		jsonError(w, http.StatusForbidden, "forbidden: "+string(rbac.VerbManageRegistries))
+		return
+	}
+	if err := lockMigrationGroupReferences(r, tx, subj.OrgID, len(rollback.Groups) > 0, len(rollback.NetworkRules) > 0); err != nil {
+		jsonError(w, migrationGroupErrorStatus(err), err.Error())
+		return
+	}
+	remainingRestored, remainingDeleted, err := rollbackMigrationRemaining(r, tx, subj.OrgID, rollback.VulnerabilityProfiles, rollback.Registries)
+	if err != nil {
+		jsonError(w, http.StatusConflict, err.Error())
 		return
 	}
 	restored, deleted, err := h.rollbackMigrationPolicies(r, tx, subj.OrgID, rollback.Policies)
@@ -985,6 +1173,8 @@ SELECT source, status, rollback_json
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	restored += remainingRestored
+	deleted += remainingDeleted
 	dpiRestored, dpiDeleted, err := h.rollbackMigrationDPIRules(r, tx, subj.OrgID, rollback.DPIRules)
 	if err != nil {
 		_ = tx.Rollback(r.Context())
@@ -1007,7 +1197,7 @@ SELECT source, status, rollback_json
 	if err != nil {
 		_ = tx.Rollback(r.Context())
 		h.auditMigration(r, subj, "migration.import.rollback.failed", id.String(), map[string]any{"source": source, "reason": "rollback_failed", "error": err.Error()})
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		jsonError(w, migrationGroupErrorStatus(err), err.Error())
 		return
 	}
 	restored += networkRestored
@@ -1034,7 +1224,7 @@ SELECT source, status, rollback_json
 	if err != nil {
 		_ = tx.Rollback(r.Context())
 		h.auditMigration(r, subj, "migration.import.rollback.failed", id.String(), map[string]any{"source": source, "reason": "rollback_failed", "error": err.Error()})
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		jsonError(w, migrationGroupErrorStatus(err), err.Error())
 		return
 	}
 	restored += groupRestored
@@ -1058,14 +1248,287 @@ UPDATE migration_imports
 }
 
 func (h *Enterprise) authorizeMigrationMutation(r *http.Request, subj Subject) bool {
-	if !subj.HasTokenScope(rbac.VerbManagePolicies) {
+	return h.authorizeMigrationVerb(r, subj, rbac.VerbManagePolicies)
+}
+
+func (h *Enterprise) authorizeMigrationVerb(r *http.Request, subj Subject, verb rbac.Verb) bool {
+	if !subj.HasTokenScope(verb) {
 		return false
 	}
 	var custom map[string][]rbac.Verb
 	if h != nil && h.customRoles != nil {
 		custom = h.customRoles.VerbsForOrg(r.Context(), subj.OrgID)
 	}
-	return rbac.AuthorizeWithCustom(subj.Assignments, rbac.VerbManagePolicies, rbac.Resource{OrgID: subj.OrgID}, custom) == nil
+	return rbac.AuthorizeWithCustom(subj.Assignments, verb, rbac.Resource{OrgID: subj.OrgID}, custom) == nil
+}
+
+func addMigrationRemainingDiff(summary *migrationPreviewSummaryDTO, action string) {
+	switch action {
+	case "update":
+		summary.Update++
+	case "unchanged":
+		summary.Unchanged++
+	default:
+		summary.Create++
+	}
+}
+
+func (h *Enterprise) convertMigrationRemaining(r *http.Request, orgID uuid.UUID, source string, raw []byte, clusterRaw string) ([]migrationPreviewVulnerabilityProfileDTO, []migrationPreviewRegistryDTO, []migrationUnsupportedDTO, error) {
+	profiles := []migrationPreviewVulnerabilityProfileDTO{}
+	registries := []migrationPreviewRegistryDTO{}
+	unsupported := []migrationUnsupportedDTO{}
+	if source != "neuvector" {
+		return profiles, registries, unsupported, nil
+	}
+	converted, err := neuvector.ConvertRemainingFamilies(raw)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("invalid NeuVector remaining-family export")
+	}
+	for _, item := range converted.Unsupported {
+		unsupported = append(unsupported, migrationUnsupportedDTO{Kind: item.Kind, Name: item.Name, Reason: item.Reason, Suggestion: item.Suggestion, Source: item.Source})
+	}
+	profileNames, registryNames := map[string]int{}, map[string]int{}
+	for _, item := range converted.VulnerabilityProfiles {
+		profileNames[item.Name]++
+	}
+	for _, item := range converted.Registries {
+		registryNames[item.Name]++
+	}
+	if len(converted.VulnerabilityProfiles) > 0 && clusterRaw != "" {
+		clusterID, err := uuid.Parse(clusterRaw)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("invalid target cluster_id")
+		}
+		clusterRaw = clusterID.String()
+		if h != nil && h.db != nil {
+			exists, err := h.migrationClusterExists(r, orgID, clusterID)
+			if err != nil || !exists {
+				return nil, nil, nil, fmt.Errorf("target cluster_id does not belong to this organization")
+			}
+		}
+	}
+	for _, item := range converted.VulnerabilityProfiles {
+		if profileNames[item.Name] > 1 {
+			unsupported = append(unsupported, migrationUnsupportedDTO{Kind: "vulnerability_profile", Name: "REDACTED", Reason: "duplicate destination names are ambiguous", Suggestion: "Give every vulnerability profile a unique name before importing."})
+			continue
+		}
+		profile := migrationPreviewVulnerabilityProfileDTO{Name: item.Name, Description: item.Description, Active: item.Active, Entries: item.Entries, DomainScope: item.DomainScope, ClusterID: clusterRaw, Imported: item.ImportedFrom, DiffAction: "create"}
+		if h != nil && h.db != nil {
+			_, _, before, err := migrationVulnerabilitySnapshot(r, h.db.Pool(), orgID, profile.Name, false)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return nil, nil, nil, fmt.Errorf("cannot inspect vulnerability profile destination")
+			}
+			if err == nil {
+				if before.ClusterID != profile.ClusterID {
+					unsupported = append(unsupported, migrationUnsupportedDTO{Kind: "vulnerability_profile", Name: profile.Name, Reason: "existing profile has a different cluster scope", Suggestion: "Rename the source profile or choose the existing target scope."})
+					continue
+				}
+				profile.DiffAction = "update"
+				if migrationVulnerabilityEqual(before, profile) {
+					profile.DiffAction = "unchanged"
+				}
+			}
+		}
+		profiles = append(profiles, profile)
+	}
+	for _, item := range converted.Registries {
+		if registryNames[item.Name] > 1 {
+			unsupported = append(unsupported, migrationUnsupportedDTO{Kind: "registry", Name: "REDACTED", Reason: "duplicate destination names are ambiguous", Suggestion: "Give every registry a unique name before importing."})
+			continue
+		}
+		registry := migrationPreviewRegistryDTO{Name: item.Name, Kind: item.Kind, Endpoint: item.Endpoint, ImageGlobs: item.ImageGlobs, AuthKind: "none", ScanCadence: "manual", CredentialsRequired: item.CredentialsRequired, Imported: item.ImportedFrom, DiffAction: "create"}
+		if registry.ImageGlobs == nil {
+			registry.ImageGlobs = []string{}
+		}
+		if h != nil && h.db != nil {
+			_, _, matches, err := migrationRegistrySnapshot(r, h.db.Pool(), orgID, registry, false)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return nil, nil, nil, fmt.Errorf("cannot inspect registry destination")
+			}
+			if err == nil {
+				if !matches {
+					unsupported = append(unsupported, migrationUnsupportedDTO{Kind: "registry", Name: registry.Name, Reason: "existing registry configuration is not identical; credentials and operational settings will not be overwritten", Suggestion: "Rename the imported registry or reconcile it using registry management."})
+					continue
+				}
+				registry.DiffAction = "unchanged"
+			}
+		}
+		registries = append(registries, registry)
+	}
+	return profiles, registries, unsupported, nil
+}
+
+type migrationRowQuerier interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+func migrationVulnerabilitySnapshot(r *http.Request, query migrationRowQuerier, orgID uuid.UUID, name string, lock bool) (string, time.Time, migrationPreviewVulnerabilityProfileDTO, error) {
+	statement := `SELECT id::text, updated_at, name, description, active, entries, domain_scope, COALESCE(cluster_id::text, '') FROM vuln_profiles WHERE org_id=$1 AND name=$2`
+	if lock {
+		statement += " FOR UPDATE"
+	}
+	var id string
+	var updated time.Time
+	var profile migrationPreviewVulnerabilityProfileDTO
+	var entries, scope []byte
+	err := query.QueryRow(r.Context(), statement, orgID, name).Scan(&id, &updated, &profile.Name, &profile.Description, &profile.Active, &entries, &scope, &profile.ClusterID)
+	if err == nil {
+		err = json.Unmarshal(entries, &profile.Entries)
+	}
+	if err == nil {
+		err = json.Unmarshal(scope, &profile.DomainScope)
+	}
+	return id, updated, profile, err
+}
+
+func migrationVulnerabilityEqual(before, after migrationPreviewVulnerabilityProfileDTO) bool {
+	before.Imported, after.Imported = nil, nil
+	before.DiffAction, after.DiffAction = "", ""
+	beforeRaw, _ := json.Marshal(before)
+	afterRaw, _ := json.Marshal(after)
+	return string(beforeRaw) == string(afterRaw)
+}
+
+func migrationRegistrySnapshot(r *http.Request, query migrationRowQuerier, orgID uuid.UUID, registry migrationPreviewRegistryDTO, lock bool) (string, time.Time, bool, error) {
+	statement := `SELECT id::text, updated_at, kind=$3 AND endpoint=$4 AND image_globs=$5 AND auth_kind='none' AND auth_secret IS NULL AND scan_cadence='manual' AND scan_policy @> '{"rescan_after_db_update":false}'::jsonb FROM registries WHERE org_id=$1 AND name=$2`
+	if lock {
+		statement += " FOR UPDATE"
+	}
+	var id string
+	var updated time.Time
+	var matches bool
+	err := query.QueryRow(r.Context(), statement, orgID, registry.Name, registry.Kind, registry.Endpoint, registry.ImageGlobs).Scan(&id, &updated, &matches)
+	return id, updated, matches, err
+}
+
+func (h *Enterprise) applyMigrationRemaining(r *http.Request, tx pgx.Tx, subj Subject, preview migrationPreviewDTO) (map[string]int, []migrationVulnerabilityRollbackDTO, []migrationRegistryRollbackDTO, error) {
+	counts := map[string]int{"vulnerability_profiles": 0, "registries": 0, "unchanged": 0}
+	profiles := []migrationVulnerabilityRollbackDTO{}
+	registries := []migrationRegistryRollbackDTO{}
+	if len(preview.VulnerabilityProfiles)+len(preview.Registries) == 0 {
+		return counts, profiles, registries, nil
+	}
+	if _, err := tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, "migration-remaining:"+subj.OrgID.String()); err != nil {
+		return nil, nil, nil, fmt.Errorf("cannot lock remaining-family import")
+	}
+	for _, profile := range preview.VulnerabilityProfiles {
+		validation := vulnprofile.Profile{Name: profile.Name, Active: profile.Active, Entries: profile.Entries, DomainScope: profile.DomainScope}
+		if err := validation.Validate(); err != nil {
+			return nil, nil, nil, fmt.Errorf("invalid vulnerability profile in stored preview")
+		}
+		if profile.ClusterID != "" {
+			var exists bool
+			if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM clusters WHERE id=$1 AND org_id=$2)`, profile.ClusterID, subj.OrgID).Scan(&exists); err != nil || !exists {
+				return nil, nil, nil, fmt.Errorf("vulnerability profile target cluster is unavailable")
+			}
+		}
+		id, _, before, err := migrationVulnerabilitySnapshot(r, tx, subj.OrgID, profile.Name, true)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil, nil, fmt.Errorf("cannot inspect vulnerability profile")
+		}
+		rollback := migrationVulnerabilityRollbackDTO{ID: id, Action: "create"}
+		if err == nil {
+			if before.ClusterID != profile.ClusterID {
+				return nil, nil, nil, fmt.Errorf("vulnerability profile cluster scope conflict")
+			}
+			if migrationVulnerabilityEqual(before, profile) {
+				counts["unchanged"]++
+				continue
+			}
+			rollback.Action, rollback.Before = "update", &before
+			if err := tx.QueryRow(r.Context(), `SELECT entries, domain_scope FROM vuln_profiles WHERE id=$1 AND org_id=$2`, id, subj.OrgID).Scan(&rollback.BeforeEntries, &rollback.BeforeDomainScope); err != nil {
+				return nil, nil, nil, fmt.Errorf("cannot snapshot vulnerability profile")
+			}
+		}
+		entries, _ := json.Marshal(profile.Entries)
+		scope, _ := json.Marshal(profile.DomainScope)
+		if rollback.Action == "create" {
+			err = tx.QueryRow(r.Context(), `INSERT INTO vuln_profiles (org_id, cluster_id, name, description, active, entries, domain_scope, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id::text, updated_at`, subj.OrgID, nullableUUIDText(profile.ClusterID), profile.Name, profile.Description, profile.Active, entries, scope, subj.UserID).Scan(&rollback.ID, &rollback.AppliedAt)
+		} else {
+			err = tx.QueryRow(r.Context(), `UPDATE vuln_profiles SET description=$3, active=$4, entries=$5, domain_scope=$6, updated_at=clock_timestamp() WHERE id=$1 AND org_id=$2 RETURNING updated_at`, id, subj.OrgID, profile.Description, profile.Active, entries, scope).Scan(&rollback.AppliedAt)
+		}
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("cannot persist vulnerability profile; retry a fresh preview")
+		}
+		if rollback.Action == "create" {
+			counts["created"]++
+		} else {
+			counts["updated"]++
+		}
+		counts["vulnerability_profiles"]++
+		profiles = append(profiles, rollback)
+	}
+	for _, registry := range preview.Registries {
+		_, _, matches, err := migrationRegistrySnapshot(r, tx, subj.OrgID, registry, true)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil, nil, fmt.Errorf("cannot inspect registry")
+		}
+		if err == nil {
+			if !matches {
+				return nil, nil, nil, fmt.Errorf("registry configuration changed; credentials and operational settings will not be overwritten")
+			}
+			counts["unchanged"]++
+			continue
+		}
+		rollback := migrationRegistryRollbackDTO{Action: "create"}
+		err = tx.QueryRow(r.Context(), `INSERT INTO registries (org_id, name, kind, endpoint, auth_kind, auth_secret, scan_cadence, image_globs, scan_policy, created_by) VALUES ($1,$2,$3,$4,'none',NULL,'manual',$5,'{"include_repos":["*"],"exclude_repos":[],"tag_selection":"all","rescan_after_db_update":false,"scan_layers":true,"block_promotion_threshold":"critical"}'::jsonb,$6) RETURNING id::text, updated_at`, subj.OrgID, registry.Name, registry.Kind, registry.Endpoint, registry.ImageGlobs, subj.UserID).Scan(&rollback.ID, &rollback.AppliedAt)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("cannot persist registry metadata; retry a fresh preview")
+		}
+		counts["created"]++
+		counts["registries"]++
+		registries = append(registries, rollback)
+	}
+	return counts, profiles, registries, nil
+}
+
+func rollbackMigrationRemaining(r *http.Request, tx pgx.Tx, orgID uuid.UUID, profiles []migrationVulnerabilityRollbackDTO, registries []migrationRegistryRollbackDTO) (int, int, error) {
+	if len(profiles)+len(registries) == 0 {
+		return 0, 0, nil
+	}
+	if _, err := tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, "migration-remaining:"+orgID.String()); err != nil {
+		return 0, 0, fmt.Errorf("cannot lock remaining-family rollback")
+	}
+	restored, deleted := 0, 0
+	for _, registry := range registries {
+		var lockedID string
+		if err := tx.QueryRow(r.Context(), `SELECT id::text FROM registries WHERE id=$1 AND org_id=$2 FOR UPDATE`, registry.ID, orgID).Scan(&lockedID); err != nil {
+			return 0, 0, fmt.Errorf("registry is unavailable; reconcile before rollback")
+		}
+		tag, err := tx.Exec(r.Context(), `DELETE FROM registries WHERE id=$1 AND org_id=$2 AND updated_at=$3 AND auth_kind='none' AND auth_secret IS NULL AND scan_cadence='manual' AND NOT EXISTS(SELECT 1 FROM registry_images WHERE registry_id=$1) AND NOT EXISTS(SELECT 1 FROM scan_targets WHERE registry_id=$1)`, registry.ID, orgID, registry.AppliedAt)
+		if err != nil || tag.RowsAffected() != 1 {
+			return 0, 0, fmt.Errorf("registry changed or was used after import; reconcile before rollback")
+		}
+		deleted++
+	}
+	for _, profile := range profiles {
+		if profile.Action == "create" {
+			tag, err := tx.Exec(r.Context(), `DELETE FROM vuln_profiles WHERE id=$1 AND org_id=$2 AND updated_at=$3`, profile.ID, orgID, profile.AppliedAt)
+			if err != nil || tag.RowsAffected() != 1 {
+				return 0, 0, fmt.Errorf("vulnerability profile changed after import; reconcile before rollback")
+			}
+			deleted++
+			continue
+		}
+		if profile.Action != "update" || profile.Before == nil {
+			return 0, 0, fmt.Errorf("invalid vulnerability profile rollback snapshot")
+		}
+		before := profile.Before
+		entries, _ := json.Marshal(before.Entries)
+		scope, _ := json.Marshal(before.DomainScope)
+		if len(profile.BeforeEntries) > 0 {
+			entries = profile.BeforeEntries
+		}
+		if len(profile.BeforeDomainScope) > 0 {
+			scope = profile.BeforeDomainScope
+		}
+		tag, err := tx.Exec(r.Context(), `UPDATE vuln_profiles SET description=$4, active=$5, entries=$6, domain_scope=$7, updated_at=clock_timestamp() WHERE id=$1 AND org_id=$2 AND updated_at=$3`, profile.ID, orgID, profile.AppliedAt, before.Description, before.Active, entries, scope)
+		if err != nil || tag.RowsAffected() != 1 {
+			return 0, 0, fmt.Errorf("vulnerability profile changed after import; reconcile before rollback")
+		}
+		restored++
+	}
+	return restored, deleted, nil
 }
 
 func migrationRollbackBundleFilename(source string, id uuid.UUID) string {
@@ -1770,7 +2233,7 @@ SELECT id, name
    AND (cluster_id IS NULL OR cluster_id=$3)
  ORDER BY CASE WHEN cluster_id=$3 THEN 0 ELSE 1 END, updated_at DESC
  LIMIT 1`, orgID, name, clusterID).Scan(&id, &targetName)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return uuid.Nil, "", false, nil
 	}
 	if err != nil {
@@ -2112,6 +2575,78 @@ RETURNING id`, orgID, policy.Name, policy.Description, policy.Engine, policy.Cat
 	return applied, rollback, nil
 }
 
+var errMigrationGroupConflict = errors.New("migration group reference conflict")
+
+func migrationGroupErrorStatus(err error) int {
+	if errors.Is(err, errMigrationGroupConflict) {
+		return http.StatusConflict
+	}
+	return http.StatusInternalServerError
+}
+
+func migrationGroupLockError(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "55P03" {
+		return fmt.Errorf("%w: group is being changed; retry", errMigrationGroupConflict)
+	}
+	return err
+}
+
+func lockMigrationGroupReferences(r *http.Request, tx pgx.Tx, orgID uuid.UUID, changeGroups, changeEdges bool) error {
+	if !changeGroups && !changeEdges {
+		return nil
+	}
+	var lockedOrgID uuid.UUID
+	if err := tx.QueryRow(r.Context(), `SELECT id FROM orgs WHERE id=$1 FOR KEY SHARE NOWAIT`, orgID).Scan(&lockedOrgID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("%w: organization no longer exists", errMigrationGroupConflict)
+		}
+		return migrationGroupLockError(err)
+	}
+	lock := `LOCK TABLE group_rule_edges IN ROW EXCLUSIVE MODE NOWAIT`
+	if changeGroups {
+		lock = `LOCK TABLE group_rule_edges, group_dpi_sensor_bindings, response_rules_v2, policies IN SHARE ROW EXCLUSIVE MODE NOWAIT`
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		if _, err := tx.Exec(r.Context(), `SAVEPOINT migration_group_reference_lock`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(r.Context(), lock)
+		if err == nil {
+			_, err = tx.Exec(r.Context(), `RELEASE SAVEPOINT migration_group_reference_lock`)
+			return err
+		}
+		if _, rollbackErr := tx.Exec(r.Context(), `ROLLBACK TO SAVEPOINT migration_group_reference_lock`); rollbackErr != nil {
+			return rollbackErr
+		}
+		if _, releaseErr := tx.Exec(r.Context(), `RELEASE SAVEPOINT migration_group_reference_lock`); releaseErr != nil {
+			return releaseErr
+		}
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "55P03" {
+			return err
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("%w: group references are being changed; retry", errMigrationGroupConflict)
+		}
+		select {
+		case <-r.Context().Done():
+			return r.Context().Err()
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+}
+
+func lockMigrationGroupCluster(r *http.Request, tx pgx.Tx, orgID, clusterID uuid.UUID) error {
+	var lockedClusterID uuid.UUID
+	err := tx.QueryRow(r.Context(), `SELECT id FROM clusters WHERE id=$1 AND org_id=$2 FOR KEY SHARE NOWAIT`, clusterID, orgID).Scan(&lockedClusterID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("%w: target cluster no longer exists in this organization", errMigrationGroupConflict)
+	}
+	return migrationGroupLockError(err)
+}
+
 func (h *Enterprise) applyMigrationGroups(r *http.Request, tx pgx.Tx, subj Subject, groups []migrationPreviewGroupDTO) (map[string]int, []migrationGroupRollbackDTO, error) {
 	applied := map[string]int{"created": 0, "updated": 0, "groups": 0}
 	rollback := make([]migrationGroupRollbackDTO, 0, len(groups))
@@ -2121,15 +2656,11 @@ func (h *Enterprise) applyMigrationGroups(r *http.Request, tx pgx.Tx, subj Subje
 		if err != nil {
 			return nil, nil, fmt.Errorf("group %s is missing a valid target cluster_id", item.Name)
 		}
-		ok, cached := clusterCache[clusterID]
-		if !cached {
-			if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM clusters WHERE org_id=$1 AND id=$2)`, subj.OrgID, clusterID).Scan(&ok); err != nil {
-				return nil, nil, err
+		if !clusterCache[clusterID] {
+			if err := lockMigrationGroupCluster(r, tx, subj.OrgID, clusterID); err != nil {
+				return nil, nil, fmt.Errorf("group %s: %w", item.Name, err)
 			}
-			clusterCache[clusterID] = ok
-		}
-		if !ok {
-			return nil, nil, fmt.Errorf("group %s targets a cluster outside this organization", item.Name)
+			clusterCache[clusterID] = true
 		}
 		criteria, err := migrationGroupCriteria(item.Criteria)
 		if err != nil {
@@ -2155,9 +2686,33 @@ func (h *Enterprise) applyMigrationGroups(r *http.Request, tx pgx.Tx, subj Subje
 		membersJSON, _ := json.Marshal(members)
 		before, exists, err := migrationGroupSnapshot(r, tx, subj.OrgID, g.Name)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, migrationGroupLockError(err)
 		}
 		if exists {
+			if before.ClusterID != "" && before.ClusterID != clusterID.String() {
+				return nil, nil, fmt.Errorf("%w: group %s belongs to another cluster", errMigrationGroupConflict, g.Name)
+			}
+			var previousMembers []string
+			if err := json.Unmarshal(before.Members, &previousMembers); err != nil {
+				return nil, nil, err
+			}
+			changes := groupReferenceSensitiveChanges(before.Name, group.Kind(before.Kind), before.Criteria, before.LearnedFrom, before.CfgType, g)
+			if (&group.Group{Members: normalizeGroupMembers(previousMembers)}).MembersChanged(normalizeGroupMembers(members)) {
+				changes = append(changes, "members")
+			}
+			if len(changes) > 0 {
+				groupID, err := uuid.Parse(before.ID)
+				if err != nil {
+					return nil, nil, err
+				}
+				refs, err := groupBlockingReferenceCount(r.Context(), tx, subj.OrgID, groupID, before.Name)
+				if err != nil {
+					return nil, nil, err
+				}
+				if refs > 0 {
+					return nil, nil, fmt.Errorf("%w: group %s has %d policy references", errMigrationGroupConflict, g.Name, refs)
+				}
+			}
 			if _, err := tx.Exec(r.Context(), `
 UPDATE groups
    SET kind=$3, comment=$4, criteria=$5::jsonb, members=$6::jsonb,
@@ -2356,15 +2911,11 @@ func (h *Enterprise) applyMigrationNetworkRules(r *http.Request, tx pgx.Tx, subj
 		if err != nil {
 			return nil, nil, fmt.Errorf("network rule %s is missing a valid target cluster_id", rule.Name)
 		}
-		ok, cached := clusterCache[clusterID]
-		if !cached {
-			if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM clusters WHERE org_id=$1 AND id=$2)`, subj.OrgID, clusterID).Scan(&ok); err != nil {
-				return nil, nil, err
+		if !clusterCache[clusterID] {
+			if err := lockMigrationGroupCluster(r, tx, subj.OrgID, clusterID); err != nil {
+				return nil, nil, fmt.Errorf("network rule %s: %w", rule.Name, err)
 			}
-			clusterCache[clusterID] = ok
-		}
-		if !ok {
-			return nil, nil, fmt.Errorf("network rule %s targets a cluster outside this organization", rule.Name)
+			clusterCache[clusterID] = true
 		}
 		ports, err := migrationNetworkPorts(rule.Ports)
 		if err != nil {
@@ -2389,7 +2940,7 @@ func (h *Enterprise) applyMigrationNetworkRules(r *http.Request, tx pgx.Tx, subj
 		}
 		before, exists, err := migrationNetworkRuleSnapshot(r, tx, subj.OrgID, clusterID, edge.FromGroup, edge.ToGroup)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, migrationGroupLockError(err)
 		}
 		if exists {
 			if _, err := tx.Exec(r.Context(), `
@@ -2535,7 +3086,7 @@ SELECT id::text
  WHERE org_id=$1 AND group_id=$2 AND sensor_kind=$3
  ORDER BY created_at ASC
  LIMIT 1`, subj.OrgID, groupID, kind).Scan(&existingID)
-		if err != nil && err != pgx.ErrNoRows {
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil, err
 		}
 		if err == nil {
@@ -2575,7 +3126,7 @@ SELECT id::text, name, COALESCE(description,''), engine, category, spec_yaml, en
  WHERE org_id=$1 AND name=$2
  ORDER BY version DESC, updated_at DESC
  LIMIT 1`, orgID, name).Scan(&snap.ID, &snap.Name, &snap.Description, &snap.Engine, &snap.Category, &snap.SpecYAML, &snap.Enabled, &snap.Mode, &snap.Version, &snap.CfgType, &snap.Source)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return policyRollbackSnapshot{}, false, nil
 	}
 	if err != nil {
@@ -2598,7 +3149,7 @@ SELECT id::text, cluster_id::text, name, category, apply_dir, severity, mode,
 		&snap.ID, &snap.ClusterID, &snap.Name, &snap.Category, &snap.ApplyDir, &snap.Severity, &snap.Mode,
 		&patternsText, &scopeText, &snap.Description, &snap.Source, &snap.CfgType, &snap.SourcePath, &snap.Version,
 	)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return dpiRuleRollbackSnapshot{}, false, nil
 	}
 	if err != nil {
@@ -2621,11 +3172,12 @@ SELECT id::text, COALESCE(cluster_id::text,''), name, kind, COALESCE(comment,'')
   FROM groups
  WHERE org_id=$1 AND name=$2
  ORDER BY updated_at DESC
- LIMIT 1`, orgID, name).Scan(
+ LIMIT 1
+ FOR UPDATE NOWAIT`, orgID, name).Scan(
 		&snap.ID, &snap.ClusterID, &snap.Name, &snap.Kind, &snap.Comment,
 		&criteriaText, &membersText, &snap.LearnedFrom, &snap.CfgType, &snap.PolicyMode, &snap.ProfileMode,
 	)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return groupRollbackSnapshot{}, false, nil
 	}
 	if err != nil {
@@ -2644,10 +3196,11 @@ SELECT id::text, cluster_id::text, from_group, to_group, ports::text, mode, COAL
   FROM group_rule_edges
  WHERE org_id=$1 AND cluster_id=$2 AND from_group=$3 AND to_group=$4
  ORDER BY updated_at DESC
- LIMIT 1`, orgID, clusterID, fromGroup, toGroup).Scan(
+ LIMIT 1
+ FOR UPDATE NOWAIT`, orgID, clusterID, fromGroup, toGroup).Scan(
 		&snap.ID, &snap.ClusterID, &snap.FromGroup, &snap.ToGroup, &portsText, &snap.Mode, &snap.Comment,
 	)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return networkRuleRollbackSnapshot{}, false, nil
 	}
 	if err != nil {
@@ -2668,7 +3221,7 @@ SELECT id::text, cluster_id::text, workload_id, namespace, name, mode,
 		&snap.ID, &snap.ClusterID, &snap.WorkloadID, &snap.Namespace, &snap.Name, &snap.Mode,
 		&snap.LearnStartedAt, &snap.MonitorStartedAt, &snap.EnforceStartedAt,
 	)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return fileProfileStateRollbackSnapshot{}, false, nil
 	}
 	if err != nil {
@@ -2688,7 +3241,7 @@ SELECT id::text, cluster_id::text, workload_id, filter, path, regex, recursive,
 		&snap.ID, &snap.ClusterID, &snap.WorkloadID, &snap.Filter, &snap.Path, &snap.Regex,
 		&snap.Recursive, &snap.Behavior, &snap.Applications, &snap.Enabled, &snap.Description,
 	)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return fileProfileRuleRollbackSnapshot{}, false, nil
 	}
 	if err != nil {
@@ -2708,7 +3261,7 @@ SELECT id::text, cluster_id::text, workload_id, namespace, name, mode,
 		&snap.ID, &snap.ClusterID, &snap.WorkloadID, &snap.Namespace, &snap.Name, &snap.Mode,
 		&snap.LearnStartedAt, &snap.MonitorStartedAt, &snap.EnforceStartedAt,
 	)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return processBaselineStateRollbackSnapshot{}, false, nil
 	}
 	if err != nil {
@@ -2729,7 +3282,7 @@ SELECT id::text, cluster_id::text, workload_id, name, path,
 		&snap.ID, &snap.ClusterID, &snap.WorkloadID, &snap.Name, &snap.Path, &snap.SHA256,
 		&snap.ParentName, &snap.Action, &snap.User, &snap.AllowUpdate, &snap.Enabled, &snap.Description,
 	)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return processProfileRuleRollbackSnapshot{}, false, nil
 	}
 	if err != nil {
@@ -2833,7 +3386,7 @@ SELECT members
    AND (cluster_id IS NULL OR cluster_id=$3)
  ORDER BY CASE WHEN cluster_id=$3 THEN 0 ELSE 1 END, updated_at DESC
  LIMIT 1`, orgID, strings.TrimSpace(groupName), clusterID).Scan(&raw)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, nil
 	}
 	if err != nil {
@@ -2856,7 +3409,7 @@ SELECT members
    AND (cluster_id IS NULL OR cluster_id=$3)
  ORDER BY CASE WHEN cluster_id=$3 THEN 0 ELSE 1 END, updated_at DESC
  LIMIT 1`, orgID, strings.TrimSpace(groupName), clusterID).Scan(&raw)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, nil
 	}
 	if err != nil {
@@ -2880,7 +3433,7 @@ SELECT namespace, name
   FROM deployments
  WHERE org_id=$1 AND cluster_id=$2 AND namespace=$3 AND name=$4
  LIMIT 1`, orgID, clusterID, namespace, name).Scan(&wl.Namespace, &wl.Name)
-	if err == pgx.ErrNoRows {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return migrationObservedWorkload{}, false, nil
 	}
 	if err != nil {
@@ -3070,19 +3623,22 @@ func migrationNetworkGroupsExist(r *http.Request, tx pgx.Tx, orgID, clusterID uu
 		if groupName == "" {
 			return fmt.Errorf("group name is required")
 		}
-		var exists bool
-		if err := tx.QueryRow(r.Context(), `
-SELECT EXISTS(
-  SELECT 1
-    FROM groups
-   WHERE org_id=$1
-     AND name=$2
-     AND (cluster_id IS NULL OR cluster_id=$3)
-)`, orgID, groupName, clusterID).Scan(&exists); err != nil {
-			return err
+		if groupName == "external" || groupName == "nodes" {
+			continue
 		}
-		if !exists {
-			return fmt.Errorf("target group %s no longer exists", groupName)
+		var groupID uuid.UUID
+		if err := tx.QueryRow(r.Context(), `
+SELECT id FROM groups
+ WHERE org_id=$1 AND name=$2 AND (cluster_id IS NULL OR cluster_id=$3)
+ FOR KEY SHARE NOWAIT`, orgID, groupName, clusterID).Scan(&groupID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("%w: target group %s no longer exists", errMigrationGroupConflict, groupName)
+			}
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "55P03" {
+				return fmt.Errorf("%w: target group %s is being changed; retry", errMigrationGroupConflict, groupName)
+			}
+			return err
 		}
 	}
 	return nil
@@ -3107,7 +3663,7 @@ SELECT id
  WHERE org_id=$1 AND name=$2
  ORDER BY updated_at DESC
  LIMIT 1`, orgID, name).Scan(&groupID); err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return uuid.Nil, fmt.Errorf("DLP/WAF binding target group %s no longer exists", name)
 		}
 		return uuid.Nil, err
@@ -3217,6 +3773,16 @@ func (h *Enterprise) rollbackMigrationNetworkRules(r *http.Request, tx pgx.Tx, o
 				continue
 			}
 			before := item.Before
+			clusterID, err := uuid.Parse(before.ClusterID)
+			if err != nil {
+				return restored, deleted, fmt.Errorf("%w: edge rollback has invalid cluster", errMigrationGroupConflict)
+			}
+			if err := lockMigrationGroupCluster(r, tx, orgID, clusterID); err != nil {
+				return restored, deleted, err
+			}
+			if err := migrationNetworkGroupsExist(r, tx, orgID, clusterID, before.FromGroup, before.ToGroup); err != nil {
+				return restored, deleted, err
+			}
 			ports := before.Ports
 			if len(ports) == 0 {
 				ports = json.RawMessage(`[]`)
@@ -3374,10 +3940,42 @@ UPDATE file_profile_states
 func (h *Enterprise) rollbackMigrationGroups(r *http.Request, tx pgx.Tx, orgID uuid.UUID, groups []migrationGroupRollbackDTO) (int, int, error) {
 	var restored, deleted int
 	for _, item := range groups {
+		if item.ID == "" {
+			continue
+		}
+		groupID, err := uuid.Parse(item.ID)
+		if err != nil {
+			return restored, deleted, fmt.Errorf("%w: invalid group rollback ID", errMigrationGroupConflict)
+		}
+		var currentName string
+		err = tx.QueryRow(r.Context(), `SELECT name FROM groups WHERE id=$1 AND org_id=$2 FOR UPDATE NOWAIT`, groupID, orgID).Scan(&currentName)
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return restored, deleted, migrationGroupLockError(err)
+		}
+		if currentName != item.Name {
+			return restored, deleted, fmt.Errorf("%w: group %s changed after import", errMigrationGroupConflict, item.Name)
+		}
+		current, found, err := migrationGroupSnapshot(r, tx, orgID, currentName)
+		if err != nil {
+			return restored, deleted, migrationGroupLockError(err)
+		}
+		if !found || current.ID != item.ID {
+			return restored, deleted, fmt.Errorf("%w: group %s changed after import", errMigrationGroupConflict, item.Name)
+		}
+		var refs int
+		if item.Action == "delete" || item.Action == "restore" {
+			refs, err = groupBlockingReferenceCount(r.Context(), tx, orgID, groupID, currentName)
+			if err != nil {
+				return restored, deleted, err
+			}
+		}
 		switch item.Action {
 		case "delete":
-			if item.ID == "" {
-				continue
+			if refs > 0 {
+				return restored, deleted, fmt.Errorf("%w: group %s has %d policy references", errMigrationGroupConflict, currentName, refs)
 			}
 			tag, err := tx.Exec(r.Context(), `DELETE FROM groups WHERE id=$1::uuid AND org_id=$2`, item.ID, orgID)
 			if err != nil {
@@ -3389,6 +3987,36 @@ func (h *Enterprise) rollbackMigrationGroups(r *http.Request, tx pgx.Tx, orgID u
 				continue
 			}
 			before := item.Before
+			if before.ID != item.ID || before.Name != item.Name {
+				return restored, deleted, fmt.Errorf("%w: group rollback snapshot does not match", errMigrationGroupConflict)
+			}
+			if before.ClusterID != "" {
+				clusterID, err := uuid.Parse(before.ClusterID)
+				if err != nil {
+					return restored, deleted, fmt.Errorf("%w: group rollback has invalid cluster", errMigrationGroupConflict)
+				}
+				if err := lockMigrationGroupCluster(r, tx, orgID, clusterID); err != nil {
+					return restored, deleted, err
+				}
+			}
+			var currentMembers, beforeMembers []string
+			if err := json.Unmarshal(current.Members, &currentMembers); err != nil {
+				return restored, deleted, err
+			}
+			if err := json.Unmarshal(before.Members, &beforeMembers); err != nil {
+				return restored, deleted, err
+			}
+			next := &group.Group{Name: before.Name, Kind: group.Kind(before.Kind), LearnedFrom: before.LearnedFrom, CfgType: before.CfgType}
+			if err := json.Unmarshal(before.Criteria, &next.Criteria); err != nil {
+				return restored, deleted, err
+			}
+			changes := groupReferenceSensitiveChanges(current.Name, group.Kind(current.Kind), current.Criteria, current.LearnedFrom, current.CfgType, next)
+			if current.ClusterID != before.ClusterID || (&group.Group{Members: normalizeGroupMembers(currentMembers)}).MembersChanged(normalizeGroupMembers(beforeMembers)) {
+				changes = append(changes, "scope or members")
+			}
+			if len(changes) > 0 && refs > 0 {
+				return restored, deleted, fmt.Errorf("%w: group %s has %d policy references", errMigrationGroupConflict, currentName, refs)
+			}
 			criteria := before.Criteria
 			if len(criteria) == 0 {
 				criteria = json.RawMessage(`[]`)

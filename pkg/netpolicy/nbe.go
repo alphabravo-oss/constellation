@@ -90,7 +90,9 @@ func EvaluateNBE(srcNS, dstNS string, mode NBEMode) NBEDecision {
 		return NBEDecision{CrossNamespace: true, Flagged: true}
 	case NBEProtect:
 		return NBEDecision{CrossNamespace: true, Flagged: true, Deny: true}
-	default: // NBEOff / unknown -> observe-nothing, block-nothing
+	case NBEOff:
+		return NBEDecision{CrossNamespace: true}
+	default: // unknown -> observe-nothing, block-nothing
 		return NBEDecision{CrossNamespace: true}
 	}
 }

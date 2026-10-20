@@ -285,7 +285,7 @@ metadata:
   namespace: {{ .Release.Namespace }}
   annotations:
     "helm.sh/hook": post-install,post-upgrade
-    # Weight -9 puts us BEFORE the migrate-job (-5) and the bootstrap
+    # Weight -9 puts us BEFORE the bootstrap
     # jobs (5/10) since admission denials matter from the first pod
     # create — but AFTER the patch-script ConfigMap (also a post-install
     # hook at weight -10), so the kubelet finds the ConfigMap mount when

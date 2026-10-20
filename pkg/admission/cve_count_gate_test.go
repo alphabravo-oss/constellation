@@ -3,6 +3,7 @@ package admission
 import "testing"
 
 func TestRuleFromYAMLParsesCVECountGate(t *testing.T) {
+	t.Parallel()
 	rule, supported, err := RuleFromYAML("cve-count", "cve-count", "", "enforce", `apiVersion: constellation.alphabravo.io/v1alpha1
 kind: AdmissionRule
 metadata:

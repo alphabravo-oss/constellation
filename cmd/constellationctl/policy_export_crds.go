@@ -16,6 +16,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -25,7 +26,8 @@ import (
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/yaml"
 
-	"github.com/alphabravocompany/constellation/deploy/operator/policydb"
+	"github.com/alphabravocompany/constellation/internal/operator/policydb"
+	"github.com/alphabravocompany/constellation/internal/securefiles"
 )
 
 func policyExportCRDsCmd() *cobra.Command {
@@ -130,23 +132,7 @@ CONSTELLATION_DATABASE_URL / DATABASE_URL.`,
 				}
 			}
 
-			var buf bytes.Buffer
-			for i, d := range docs {
-				if i > 0 {
-					buf.WriteString("---\n")
-				}
-				buf.Write(d)
-			}
-
-			if output != "" {
-				if err := os.WriteFile(output, buf.Bytes(), 0o644); err != nil {
-					return fmt.Errorf("write %s: %w", output, err)
-				}
-				fmt.Fprintf(cmd.OutOrStdout(), "wrote %d CR document(s) to %s\n", len(docs), output)
-				return nil
-			}
-			_, err = cmd.OutOrStdout().Write(buf.Bytes())
-			return err
+			return writePolicyCRDOutput(ctx, cmd.OutOrStdout(), output, docs)
 		},
 	}
 	cmd.Flags().StringVar(&databaseURL, "database-url", "", "Policy store DSN (else CONSTELLATION_DATABASE_URL / DATABASE_URL)")
@@ -165,4 +151,26 @@ func firstNonEmptyStr(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// writePolicyCRDOutput keeps generated documents separate from store reads, so
+// publication can be exercised without a database or credentials.
+func writePolicyCRDOutput(ctx context.Context, writer io.Writer, path string, docs [][]byte) error {
+	var buf bytes.Buffer
+	for i, doc := range docs {
+		if i > 0 {
+			buf.WriteString("---\n")
+		}
+		buf.Write(doc)
+	}
+	out := &commandOutput{ctx: ctx, writer: writer}
+	if path != "" {
+		if err := securefiles.WritePath(ctx, path, buf.Bytes()); err != nil {
+			return fmt.Errorf("write %s: %w", path, err)
+		}
+		out.printf("wrote %d CR document(s) to %s\n", len(docs), path)
+	} else {
+		out.write(buf.String())
+	}
+	return out.result()
 }

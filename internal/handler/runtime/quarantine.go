@@ -8,9 +8,12 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/api/apiutil"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -24,12 +27,15 @@ import (
 )
 
 type Quarantine struct {
-	db    *db.DB
-	audit *auditlog.Logger
+	db            *db.DB
+	audit         *auditlog.Logger
+	protection    quarantineProtection
+	protectionErr error
 }
 
 func NewQuarantine(database *db.DB, audit *auditlog.Logger) *Quarantine {
-	return &Quarantine{db: database, audit: audit}
+	protection, err := parseQuarantineProtection(os.Getenv("CONSTELLATION_QUARANTINE_PROTECTED_NAMESPACES"))
+	return &Quarantine{db: database, audit: audit, protection: protection, protectionErr: err}
 }
 
 type quarantineDTO struct {
@@ -71,27 +77,67 @@ func (h *Quarantine) Create(w http.ResponseWriter, r *http.Request) {
 		ExpiresInHours *int      `json:"expires_in_hours,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
 	if req.ClusterID == uuid.Nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "cluster_id is required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "cluster_id is required")
 		return
 	}
 	switch pkgquar.Scope(req.Scope) {
 	case pkgquar.ScopeWorkload, pkgquar.ScopeImage, pkgquar.ScopeNamespace:
 	default:
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{
-			"error": "scope must be one of: workload, image, namespace",
-		})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "scope must be one of: workload, image, namespace")
 		return
 	}
 	req.MatchKey = strings.TrimSpace(req.MatchKey)
 	req.Reason = strings.TrimSpace(req.Reason)
 	if req.MatchKey == "" || req.Reason == "" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{
-			"error": "match_key and reason are required",
-		})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "match_key and reason are required")
+		return
+	}
+	tx, err := h.db.Pool().Begin(r.Context())
+	if err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "could not begin quarantine write")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	var ownedCluster uuid.UUID
+	if err := tx.QueryRow(r.Context(), `SELECT id FROM clusters WHERE org_id=$1 AND id=$2 FOR KEY SHARE`, subj.OrgID, req.ClusterID).Scan(&ownedCluster); err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, pgx.ErrNoRows) {
+			status = http.StatusNotFound
+		}
+		apiutil.WriteStatus(r.Context(), w, status, "cluster not found in this organization")
+		return
+	}
+	protectedNamespace := ""
+	if req.Scope == "namespace" {
+		protectedNamespace = req.MatchKey
+	}
+	if req.Scope == "workload" {
+		ns, name, found := strings.Cut(req.MatchKey, "/")
+		if !found || ns == "" || name == "" {
+			apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "workload match_key must be namespace/name")
+			return
+		}
+		protectedNamespace = ns
+		var workloadID uuid.UUID
+		if err := tx.QueryRow(r.Context(), `SELECT id FROM deployments WHERE org_id=$1 AND cluster_id=$2 AND namespace=$3 AND name=$4 LIMIT 1 FOR KEY SHARE`, subj.OrgID, req.ClusterID, ns, name).Scan(&workloadID); err != nil {
+			status := http.StatusInternalServerError
+			if errors.Is(err, pgx.ErrNoRows) {
+				status = http.StatusNotFound
+			}
+			apiutil.WriteStatus(r.Context(), w, status, "workload not found in the selected cluster")
+			return
+		}
+	}
+	if h.protectionErr != nil {
+		apiutil.WriteStatusCode(r.Context(), w, http.StatusServiceUnavailable, "protection_unavailable", "quarantine protection configuration is invalid")
+		return
+	}
+	if h.protection.protects(req.ClusterID, protectedNamespace) {
+		apiutil.WriteStatusCode(r.Context(), w, http.StatusForbidden, "protected_namespace", "quarantine refused: protected system namespace "+protectedNamespace)
 		return
 	}
 	var expiresAt *time.Time
@@ -100,7 +146,7 @@ func (h *Quarantine) Create(w http.ResponseWriter, r *http.Request) {
 		expiresAt = &t
 	}
 
-	row := h.db.Pool().QueryRow(r.Context(), `
+	row := tx.QueryRow(r.Context(), `
 INSERT INTO quarantine_entries
     (org_id, cluster_id, scope, match_key, reason, origin, created_by, expires_at)
 VALUES ($1, $2, $3, $4, $5, 'manual', $6, $7)
@@ -113,12 +159,14 @@ RETURNING id, created_at`,
 	if err := row.Scan(&id, &createdAt); err != nil {
 		// Unique-index violation → collapse into the existing entry.
 		if strings.Contains(err.Error(), "uniq_quarantine_active_target") {
-			httpx.WriteJSON(w, http.StatusConflict, map[string]string{
-				"error": "an active quarantine entry already exists for this scope+match_key",
-			})
+			apiutil.WriteStatus(r.Context(), w, http.StatusConflict, "an active quarantine entry already exists for this scope+match_key")
 			return
 		}
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "could not persist quarantine")
 		return
 	}
 	// Audit trail. action "quarantine.add" is mapped in pkg/audit/compliance.go.
@@ -170,7 +218,7 @@ SELECT id, org_id, cluster_id, scope, match_key, reason, origin,
  ORDER BY created_at DESC
  LIMIT $5`, subj.OrgID, clusterID, scope, includeLifted, limit)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()
@@ -180,7 +228,7 @@ SELECT id, org_id, cluster_id, scope, match_key, reason, origin,
 		if err := rows.Scan(&d.ID, &d.OrgID, &d.ClusterID, &d.Scope, &d.MatchKey,
 			&d.Reason, &d.Origin, &d.SourceKind, &d.SourceID, &d.CreatedBy,
 			&d.CreatedAt, &d.ExpiresAt, &d.LiftedAt, &d.LiftedBy, &d.LiftedReason); err != nil {
-			httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 			return
 		}
 		out = append(out, d)
@@ -198,7 +246,7 @@ func (h *Quarantine) Lift(w http.ResponseWriter, r *http.Request) {
 	subj, _ := authctx.SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid id")
 		return
 	}
 	var req struct {
@@ -207,7 +255,7 @@ func (h *Quarantine) Lift(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	req.Reason = strings.TrimSpace(req.Reason)
 	if req.Reason == "" {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "reason is required"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "reason is required")
 		return
 	}
 
@@ -217,13 +265,11 @@ UPDATE quarantine_entries
  WHERE id = $1 AND org_id = $2 AND lifted_at IS NULL`,
 		id, subj.OrgID, subj.UserID, req.Reason)
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	if tag.RowsAffected() == 0 {
-		httpx.WriteJSON(w, http.StatusNotFound, map[string]string{
-			"error": "quarantine entry not found or already lifted",
-		})
+		apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "quarantine entry not found or already lifted")
 		return
 	}
 	if h.audit != nil {
@@ -245,7 +291,7 @@ func (h *Quarantine) Get(w http.ResponseWriter, r *http.Request) {
 	subj, _ := authctx.SubjectFrom(r.Context())
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
-		httpx.WriteJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid id"})
+		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, "invalid id")
 		return
 	}
 	var d quarantineDTO
@@ -259,10 +305,10 @@ SELECT id, org_id, cluster_id, scope, match_key, reason, origin,
 		&d.Reason, &d.Origin, &d.SourceKind, &d.SourceID, &d.CreatedBy,
 		&d.CreatedAt, &d.ExpiresAt, &d.LiftedAt, &d.LiftedBy, &d.LiftedReason); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			httpx.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			apiutil.WriteStatus(r.Context(), w, http.StatusNotFound, "not found")
 			return
 		}
-		httpx.WriteJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, d)

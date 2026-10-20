@@ -1,3 +1,5 @@
+//go:build integration
+
 package handler
 
 import (
@@ -6,6 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -83,7 +86,7 @@ VALUES ($1, 'cyclonedx-1.6', '{}'::jsonb, 'sha256:legacy-sbom')`, assetID); err 
 		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgID)
 	})
 
-	r := httptest.NewRequest("GET", "/api/v1/assets/"+assetID.String(), nil)
+	r := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/assets/"+assetID.String(), nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", assetID.String())
 	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
@@ -185,7 +188,7 @@ INSERT INTO image_scan_artifacts (
 		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgID)
 	})
 
-	r := httptest.NewRequest("GET", "/api/v1/assets?limit=10", nil)
+	r := httptest.NewRequestWithContext(t.Context(), "GET", "/api/v1/assets?limit=10", nil)
 	r = r.WithContext(WithSubject(r.Context(), Subject{UserID: userID, OrgID: orgID}))
 	w := httptest.NewRecorder()
 	NewAssets(d).List(w, r)
@@ -245,8 +248,9 @@ VALUES ($1, 'ghcr.io', 'test/accepted', '1.0.0', $2,
 
 	h := NewImageAcceptances(d, audit.New(pool))
 	acceptedUntil := time.Now().UTC().Add(14 * 24 * time.Hour).Format(time.RFC3339)
-	createReq := acceptanceRequest("POST", "/api/v1/assets/"+assetID.String()+"/image-acceptances", assetID, "", userID, orgID,
-		`{"rationale":"Compensating controls verified","accepted_until":"`+acceptedUntil+`"}`)
+	createBody := `{"rationale":"Compensating controls verified","accepted_until":"` + acceptedUntil + `"}`
+	createReq := acceptanceRequest(t.Context(), "POST", "/api/v1/assets/"+assetID.String()+"/image-acceptances", assetID, "", userID, orgID,
+		createBody)
 	createResp := httptest.NewRecorder()
 	h.Create(createResp, createReq)
 	if createResp.Code != http.StatusCreated {
@@ -262,8 +266,14 @@ VALUES ($1, 'ghcr.io', 'test/accepted', '1.0.0', $2,
 	if created.ID == uuid.Nil || len(created.ImageAcceptances) != 1 || created.ImageAcceptances[0].Status != "active" {
 		t.Fatalf("bad create response: %+v", created)
 	}
+	duplicateResp := httptest.NewRecorder()
+	duplicateReq := acceptanceRequest(t.Context(), "POST", "/api/v1/assets/"+assetID.String()+"/image-acceptances", assetID, "", userID, orgID, createBody)
+	h.Create(duplicateResp, duplicateReq)
+	if duplicateResp.Code != http.StatusConflict || strings.Contains(duplicateResp.Body.String(), "image_acceptances_active_expiry_key") {
+		t.Fatalf("duplicate acceptance response: %d %s", duplicateResp.Code, duplicateResp.Body.String())
+	}
 
-	listReq := acceptanceRequest("GET", "/api/v1/assets/"+assetID.String()+"/image-acceptances", assetID, "", userID, orgID, "")
+	listReq := acceptanceRequest(t.Context(), "GET", "/api/v1/assets/"+assetID.String()+"/image-acceptances", assetID, "", userID, orgID, "")
 	listResp := httptest.NewRecorder()
 	h.List(listResp, listReq)
 	if listResp.Code != http.StatusOK {
@@ -279,7 +289,7 @@ VALUES ($1, 'ghcr.io', 'test/accepted', '1.0.0', $2,
 		t.Fatalf("bad list response: %+v", listed)
 	}
 
-	assetReq := acceptanceRequest("GET", "/api/v1/assets/"+assetID.String(), assetID, "", userID, orgID, "")
+	assetReq := acceptanceRequest(t.Context(), "GET", "/api/v1/assets/"+assetID.String(), assetID, "", userID, orgID, "")
 	assetResp := httptest.NewRecorder()
 	NewAssets(d).Get(assetResp, assetReq)
 	if assetResp.Code != http.StatusOK {
@@ -295,7 +305,7 @@ VALUES ($1, 'ghcr.io', 'test/accepted', '1.0.0', $2,
 		t.Fatalf("asset missing active acceptance: %+v", assetGot)
 	}
 
-	revokeReq := acceptanceRequest("POST", "/api/v1/assets/"+assetID.String()+"/image-acceptances/"+created.ID.String()+"/revoke", assetID, created.ID.String(), userID, orgID, "")
+	revokeReq := acceptanceRequest(t.Context(), "POST", "/api/v1/assets/"+assetID.String()+"/image-acceptances/"+created.ID.String()+"/revoke", assetID, created.ID.String(), userID, orgID, "")
 	revokeResp := httptest.NewRecorder()
 	h.Revoke(revokeResp, revokeReq)
 	if revokeResp.Code != http.StatusOK {
@@ -310,6 +320,23 @@ VALUES ($1, 'ghcr.io', 'test/accepted', '1.0.0', $2,
 	if len(revoked.ImageAcceptances) != 1 || revoked.ImageAcceptances[0].Status != "revoked" {
 		t.Fatalf("bad revoke response: %+v", revoked)
 	}
+	reacceptedReq := acceptanceRequest(t.Context(), "POST", "/api/v1/assets/"+assetID.String()+"/image-acceptances", assetID, "", userID, orgID,
+		`{"rationale":"Compensating controls verified again","accepted_until":"`+acceptedUntil+`"}`)
+	reacceptedResp := httptest.NewRecorder()
+	h.Create(reacceptedResp, reacceptedReq)
+	if reacceptedResp.Code != http.StatusCreated {
+		t.Fatalf("reaccept response: %d %s", reacceptedResp.Code, reacceptedResp.Body.String())
+	}
+	var reaccepted struct {
+		ID               uuid.UUID            `json:"id"`
+		ImageAcceptances []imageAcceptanceDTO `json:"image_acceptances"`
+	}
+	if err := json.NewDecoder(reacceptedResp.Body).Decode(&reaccepted); err != nil {
+		t.Fatalf("decode reaccept: %v", err)
+	}
+	if reaccepted.ID == created.ID || len(reaccepted.ImageAcceptances) != 2 || reaccepted.ImageAcceptances[0].Status != "active" || reaccepted.ImageAcceptances[1].Status != "revoked" {
+		t.Fatalf("reaccept did not preserve history: %+v", reaccepted)
+	}
 
 	var auditEvents int
 	if err := pool.QueryRow(ctx, `
@@ -317,24 +344,24 @@ SELECT count(*) FROM audit_events
  WHERE org_id = $1 AND action IN ('image.accept-risk', 'image.accept-risk.revoke')`, orgID).Scan(&auditEvents); err != nil {
 		t.Fatalf("audit count: %v", err)
 	}
-	if auditEvents != 2 {
-		t.Fatalf("expected create and revoke audit events, got %d", auditEvents)
+	if auditEvents != 3 {
+		t.Fatalf("expected create, revoke and reaccept audit events, got %d", auditEvents)
 	}
 }
 
-func acceptanceRequest(method, target string, assetID uuid.UUID, acceptanceID string, userID uuid.UUID, orgID uuid.UUID, body string) *http.Request {
+func acceptanceRequest(ctx context.Context, method, target string, assetID uuid.UUID, acceptanceID string, userID uuid.UUID, orgID uuid.UUID, body string) *http.Request {
 	var buf *bytes.Buffer
 	if body == "" {
 		buf = bytes.NewBuffer(nil)
 	} else {
 		buf = bytes.NewBufferString(body)
 	}
-	r := httptest.NewRequest(method, target, buf)
+	r := httptest.NewRequestWithContext(ctx, method, target, buf)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", assetID.String())
 	if acceptanceID != "" {
 		rctx.URLParams.Add("acceptanceID", acceptanceID)
 	}
-	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
-	return r.WithContext(WithSubject(r.Context(), Subject{UserID: userID, OrgID: orgID}))
+	ctx = context.WithValue(ctx, chi.RouteCtxKey, rctx)
+	return r.WithContext(WithSubject(ctx, Subject{UserID: userID, OrgID: orgID}))
 }

@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	admissionv1 "k8s.io/api/admission/v1"
+
 	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,6 +32,7 @@ func newSourceWith(t *testing.T, entries []quarantine.Entry) *quarantine.Source 
 }
 
 func TestEvaluate_Quarantine_DeniesNamespace(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	e.SetQuarantine(newSourceWith(t, []quarantine.Entry{{
 		ID: uuid.New(), Scope: quarantine.ScopeNamespace, MatchKey: "tainted",
@@ -52,6 +55,7 @@ func TestEvaluate_Quarantine_DeniesNamespace(t *testing.T) {
 }
 
 func TestEvaluate_Quarantine_DeniesImage(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	e.SetQuarantine(newSourceWith(t, []quarantine.Entry{{
 		ID: uuid.New(), Scope: quarantine.ScopeImage,
@@ -72,6 +76,7 @@ func TestEvaluate_Quarantine_DeniesImage(t *testing.T) {
 }
 
 func TestEvaluate_Quarantine_BypassesMonitorMode(t *testing.T) {
+	t.Parallel()
 	// Even if no enforce rules match the pod, quarantine still denies.
 	// Tests the architectural claim that quarantine is not subject to
 	// the policy state machine.
@@ -101,6 +106,7 @@ func TestEvaluate_Quarantine_BypassesMonitorMode(t *testing.T) {
 }
 
 func TestEvaluate_Quarantine_FiresOnDenyHook(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	got := make(chan DenyEvent, 1)
 	e.OnDeny = func(_ context.Context, ev DenyEvent) { got <- ev }
@@ -131,6 +137,7 @@ func TestEvaluate_Quarantine_FiresOnDenyHook(t *testing.T) {
 }
 
 func TestEvaluate_Quarantine_NilSourceIsNoop(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	// e.Quarantine is nil by default — engine should behave exactly as
 	// before E4 (this guards against accidentally requiring the source).
@@ -142,5 +149,38 @@ func TestEvaluate_Quarantine_NilSourceIsNoop(t *testing.T) {
 	// Default rules will warn (monitor mode), not deny.
 	if !resp.Allowed {
 		t.Errorf("nil quarantine source should not affect existing rules; pod was denied: %+v", resp.Result)
+	}
+}
+
+func TestEvaluateAutomaticScanQuarantineRepositoryBoundary(t *testing.T) {
+	e := NewEngine()
+	e.SetQuarantine(newSourceWith(t, []quarantine.Entry{{ID: uuid.New(), Scope: quarantine.ScopeImage, MatchKey: "ghcr.io/acme/api", Origin: "auto", SourceKind: "scan", Reason: "scan finding"}}))
+	for _, tc := range []struct {
+		image   string
+		allowed bool
+	}{{"ghcr.io/acme/api:1", false}, {"ghcr.io/acme/api-helper:1", true}, {"ghcr.io/acme/api/worker:1", true}} {
+		for _, kind := range []string{"regular", "init", "ephemeral"} {
+			t.Run(kind+"/"+tc.image, func(t *testing.T) {
+				pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "payments", Name: "api"}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "safe", Image: "alpine:3"}}}}
+				switch kind {
+				case "regular":
+					pod.Spec.Containers = append(pod.Spec.Containers, corev1.Container{Name: "candidate", Image: tc.image})
+				case "init":
+					pod.Spec.InitContainers = []corev1.Container{{Name: "candidate", Image: tc.image}}
+				case "ephemeral":
+					pod.Spec.EphemeralContainers = []corev1.EphemeralContainer{{EphemeralContainerCommon: corev1.EphemeralContainerCommon{Name: "candidate", Image: tc.image}}}
+				}
+				request := reviewFor(pod)
+				if kind == "ephemeral" {
+					request.SubResource = "ephemeralcontainers"
+					request.Operation = admissionv1.Update
+					request.Resource = metav1.GroupVersionResource{Version: "v1", Resource: "pods"}
+				}
+				result := e.Evaluate(t.Context(), request)
+				if result.Allowed != tc.allowed {
+					t.Fatalf("Allowed=%v want=%v: %+v", result.Allowed, tc.allowed, result.Result)
+				}
+			})
+		}
 	}
 }

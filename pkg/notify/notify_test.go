@@ -1,9 +1,17 @@
 package notify
 
 import (
+	"bufio"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -16,13 +24,14 @@ import (
 func testAlert(sev, cluster, workload string) Alert {
 	return Alert{
 		ID: "a-" + sev, Severity: sev, Title: sev + " thing", Cluster: cluster, Workload: workload,
-		Labels: map[string]string{"severity": sev, "cluster": cluster, "workload": workload},
-		URL:    "https://constellation.example/findings/x",
+		Labels:  map[string]string{"severity": sev, "cluster": cluster, "workload": workload},
+		URL:     "https://constellation.example/findings/x",
 		FiredAt: time.Now().UTC(),
 	}
 }
 
 func TestSlack_PostsToWebhook(t *testing.T) {
+	t.Parallel()
 	var got []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got, _ = io.ReadAll(r.Body)
@@ -39,6 +48,7 @@ func TestSlack_PostsToWebhook(t *testing.T) {
 }
 
 func TestPagerDuty_SendsTriggerEvent(t *testing.T) {
+	t.Parallel()
 	var got []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got, _ = io.ReadAll(r.Body)
@@ -55,7 +65,12 @@ func TestPagerDuty_SendsTriggerEvent(t *testing.T) {
 		"routing_key":  "key123",
 		"event_action": "trigger",
 	})
-	resp, err := http.Post(srv.URL, "application/json", strings.NewReader(string(body)))
+	httpRequest, err := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL, strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpRequest.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(httpRequest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,6 +81,7 @@ func TestPagerDuty_SendsTriggerEvent(t *testing.T) {
 }
 
 func TestWebhook_GenericPost(t *testing.T) {
+	t.Parallel()
 	var got []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got, _ = io.ReadAll(r.Body)
@@ -85,6 +101,7 @@ func TestWebhook_GenericPost(t *testing.T) {
 }
 
 func TestTeams_MessageCardShape(t *testing.T) {
+	t.Parallel()
 	body, err := teamsMessageCard([]Alert{testAlert("critical", "prod", "api")})
 	if err != nil {
 		t.Fatal(err)
@@ -113,6 +130,7 @@ func TestTeams_MessageCardShape(t *testing.T) {
 }
 
 func TestTeams_PostsToWebhook(t *testing.T) {
+	t.Parallel()
 	var got []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got, _ = io.ReadAll(r.Body)
@@ -129,6 +147,7 @@ func TestTeams_PostsToWebhook(t *testing.T) {
 }
 
 func TestSyslog_RFC5424Format(t *testing.T) {
+	t.Parallel()
 	fixed := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
 	s := &Syslog{
 		Network: "udp", Addr: "siem:514", Facility: 16, AppName: "constellation",
@@ -152,6 +171,7 @@ func TestSyslog_RFC5424Format(t *testing.T) {
 }
 
 func TestSyslog_SDEscaping(t *testing.T) {
+	t.Parallel()
 	s := &Syslog{Hostname: "h", AppName: "app"}
 	a := Alert{ID: `a"]b\c`, Severity: "info", FiredAt: time.Unix(0, 0).UTC(), Title: "t"}
 	line := s.formatRFC5424(a)
@@ -161,7 +181,8 @@ func TestSyslog_SDEscaping(t *testing.T) {
 }
 
 func TestSyslog_SendOverUDP(t *testing.T) {
-	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	t.Parallel()
+	pc, err := (&net.ListenConfig{}).ListenPacket(t.Context(), "udp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +203,198 @@ func TestSyslog_SendOverUDP(t *testing.T) {
 	}
 }
 
+func TestSyslog_SendOverVerifiedTLS(t *testing.T) {
+	t.Parallel()
+	certServer := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	cert := certServer.TLS.Certificates[0]
+	ca := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certServer.Certificate().Raw})
+	certServer.Close()
+
+	listener, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	lineCh := make(chan string, 1)
+	go func() {
+		conn, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			lineCh <- ""
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		line, _ := bufio.NewReader(conn).ReadString('\n')
+		lineCh <- line
+	}()
+
+	sender := NewSyslog("tls", listener.Addr().String())
+	sender.CACertPEM = string(ca)
+	sender.ServerName = "example.com"
+	if err := sender.Send(context.Background(), []Alert{testAlert("high", "prod", "api")}); err != nil {
+		t.Fatal(err)
+	}
+	if line := <-lineCh; !strings.HasPrefix(line, "<131>1 ") {
+		t.Fatalf("TLS collector received %q", line)
+	}
+}
+
+func TestSyslog_SendToMTLSCollector(t *testing.T) {
+	clientCA, clientCert, clientKey := testSyslogClientIdentity(t)
+	_, untrustedCert, untrustedKey := testSyslogClientIdentity(t)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	serverCert := server.TLS.Certificates[0]
+	serverCA := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}))
+	server.Close()
+
+	for _, tc := range []struct {
+		name       string
+		serverCA   string
+		clientCert string
+		clientKey  string
+		maxVersion uint16
+		wantError  bool
+	}{
+		{name: "valid client TLS 1.2", serverCA: serverCA, clientCert: clientCert, clientKey: clientKey, maxVersion: tls.VersionTLS12},
+		{name: "valid client TLS 1.3", serverCA: serverCA, clientCert: clientCert, clientKey: clientKey, maxVersion: tls.VersionTLS13},
+		{name: "wrong server CA", serverCA: clientCA, clientCert: clientCert, clientKey: clientKey, maxVersion: tls.VersionTLS12, wantError: true},
+		{name: "missing client credentials", serverCA: serverCA, maxVersion: tls.VersionTLS12, wantError: true},
+		{name: "untrusted client CA", serverCA: serverCA, clientCert: untrustedCert, clientKey: untrustedKey, maxVersion: tls.VersionTLS12, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clientRoots := x509.NewCertPool()
+			if !clientRoots.AppendCertsFromPEM([]byte(clientCA)) {
+				t.Fatal("invalid client CA")
+			}
+			listener, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{
+				Certificates: []tls.Certificate{serverCert},
+				ClientAuth:   tls.RequireAndVerifyClientCert,
+				ClientCAs:    clientRoots,
+				MinVersion:   tls.VersionTLS12,
+				MaxVersion:   tc.maxVersion,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+
+			type collectorResult struct {
+				line       string
+				clientName string
+				version    uint16
+				err        error
+			}
+			results := make(chan collectorResult, 1)
+			go func() {
+				conn, acceptErr := listener.Accept()
+				if acceptErr != nil {
+					results <- collectorResult{err: acceptErr}
+					return
+				}
+				defer conn.Close()
+				_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+				tlsConn := conn.(*tls.Conn)
+				if handshakeErr := tlsConn.HandshakeContext(t.Context()); handshakeErr != nil {
+					results <- collectorResult{err: handshakeErr}
+					return
+				}
+				line, readErr := bufio.NewReader(tlsConn).ReadString('\n')
+				results <- collectorResult{line: line, clientName: tlsConn.ConnectionState().PeerCertificates[0].Subject.CommonName, version: tlsConn.ConnectionState().Version, err: readErr}
+			}()
+
+			sender := NewSyslog("tls", listener.Addr().String())
+			sender.CACertPEM = tc.serverCA
+			sender.ServerName = "example.com"
+			sender.ClientCertPEM = tc.clientCert
+			sender.ClientKeyPEM = tc.clientKey
+			sendErr := sender.Send(context.Background(), []Alert{testAlert("high", "prod", "api")})
+			if tc.wantError && sendErr == nil {
+				t.Fatal("Send() succeeded despite rejected TLS handshake")
+			}
+			if !tc.wantError && sendErr != nil {
+				t.Fatalf("Send() = %v", sendErr)
+			}
+			select {
+			case result := <-results:
+				if tc.wantError {
+					if result.err == nil || result.line != "" {
+						t.Fatalf("collector accepted rejected connection: %+v", result)
+					}
+				} else if result.err != nil || result.clientName != "syslog-client" || result.version != tc.maxVersion || !strings.HasPrefix(result.line, "<131>1 ") || !strings.HasSuffix(result.line, "high thing\n") {
+					t.Fatalf("collector received %+v", result)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("collector did not complete handshake")
+			}
+		})
+	}
+}
+
+func testSyslogClientIdentity(t *testing.T) (string, string, string) {
+	t.Helper()
+	caPublic, caPrivate, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	caTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "syslog-client-ca"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, caPublic, caPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ca, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientPublic, clientPrivate, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "syslog-client"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}
+	clientDER, err := x509.CreateCertificate(rand.Reader, clientTemplate, ca, clientPublic, caPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(clientPrivate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER})),
+		string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: clientDER})),
+		string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}))
+}
+
+func TestSyslog_RejectsPlaintextWithTLSSettings(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		configure func(*Syslog)
+	}{
+		{"CA", func(sender *Syslog) { sender.CACertPEM = "configured CA" }},
+		{"client certificate", func(sender *Syslog) { sender.ClientCertPEM = "configured cert" }},
+		{"client key", func(sender *Syslog) { sender.ClientKeyPEM = "configured key" }},
+		{"server name", func(sender *Syslog) { sender.ServerName = "siem.example" }},
+	} {
+		for _, network := range []string{"", "udp", "tcp"} {
+			t.Run(tc.name+"/"+network, func(t *testing.T) {
+				sender := NewSyslog(network, "127.0.0.1:1")
+				tc.configure(sender)
+				if err := sender.Send(context.Background(), []Alert{testAlert("high", "prod", "api")}); err == nil || !strings.Contains(err.Error(), "TLS transport required") {
+					t.Fatalf("Send() = %v, want TLS transport error", err)
+				}
+			})
+		}
+	}
+}
+
 func TestSyslog_JSONFormat(t *testing.T) {
+	t.Parallel()
 	fixed := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
 	s := &Syslog{Format: "json", Hostname: "node-1", AppName: "constellation"}
 	a := Alert{
@@ -214,6 +426,7 @@ func TestSyslog_JSONFormat(t *testing.T) {
 }
 
 func TestSyslog_CEFFormat(t *testing.T) {
+	t.Parallel()
 	fixed := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
 	s := &Syslog{Format: "cef", Product: "constellation", Version: "1.0", Now: func() time.Time { return fixed }}
 	a := Alert{
@@ -240,6 +453,7 @@ func TestSyslog_CEFFormat(t *testing.T) {
 }
 
 func TestSyslog_CEFEscaping(t *testing.T) {
+	t.Parallel()
 	s := &Syslog{Format: "cef"}
 	a := Alert{Kind: "a|b", Title: "pipe|and\\slash", Severity: "low",
 		Labels: map[string]string{"src": "k=v"}}
@@ -267,6 +481,13 @@ func TestSyslog_LevelAndCategoryFilter(t *testing.T) {
 		{"min high ships high", "high", nil, Alert{Severity: "high", Kind: "finding"}, true},
 		{"min high ships critical", "high", nil, Alert{Severity: "critical", Kind: "runtime"}, true},
 		{"min low drops empty sev", "low", nil, Alert{Severity: "", Kind: "finding"}, false},
+		{"min info drops unknown severity", "info", nil, Alert{Severity: "unexpected", Kind: "finding"}, false},
+		{"unknown min level drops high", "urgent", nil, Alert{Severity: "high", Kind: "finding"}, false},
+		{"unknown min level drops critical", "urgent", nil, Alert{Severity: "critical", Kind: "finding"}, false},
+		{"unknown min level with whitespace drops high", " urgent ", nil, Alert{Severity: "high", Kind: "finding"}, false},
+		{"no filter ships unknown severity", "", nil, Alert{Severity: "unexpected", Kind: "finding"}, true},
+		{"min info ships info", "info", nil, Alert{Severity: "info", Kind: "finding"}, true},
+		{"min level trims whitespace", " HIGH ", nil, Alert{Severity: "high", Kind: "finding"}, true},
 		{"category allow match", "", []string{"runtime"}, Alert{Severity: "high", Kind: "runtime"}, true},
 		{"category allow miss", "", []string{"runtime"}, Alert{Severity: "high", Kind: "finding"}, false},
 		{"category case-insensitive", "", []string{"Runtime"}, Alert{Severity: "high", Kind: "runtime"}, true},
@@ -284,7 +505,8 @@ func TestSyslog_LevelAndCategoryFilter(t *testing.T) {
 }
 
 func TestSyslog_FilterSkipsSendWhenEmpty(t *testing.T) {
-	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	t.Parallel()
+	pc, err := (&net.ListenConfig{}).ListenPacket(t.Context(), "udp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,6 +521,15 @@ func TestSyslog_FilterSkipsSendWhenEmpty(t *testing.T) {
 	_ = pc.SetReadDeadline(time.Now().Add(300 * time.Millisecond))
 	if n, _, err := pc.ReadFrom(buf); err == nil {
 		t.Fatalf("expected no datagram, got %q", buf[:n])
+	}
+}
+
+func TestSyslog_UnknownMinLevelSkipsDial(t *testing.T) {
+	t.Parallel()
+	s := NewSyslog("tcp", "127.0.0.1:1")
+	s.MinLevel = "urgent"
+	if err := s.Send(context.Background(), []Alert{testAlert("critical", "prod", "api")}); err != nil {
+		t.Fatalf("unknown MinLevel must filter before dialing: %v", err)
 	}
 }
 
@@ -317,6 +548,7 @@ func (r *recordingReceiver) Send(_ context.Context, alerts []Alert) error {
 }
 
 func TestRouter_DispatchesMatchingReceivers(t *testing.T) {
+	t.Parallel()
 	rec := &recordingReceiver{}
 	r := &Router{
 		Receivers: map[string]Receiver{"recorder": rec},
@@ -394,10 +626,11 @@ func TestRouter_WalkSiblingRouting(t *testing.T) {
 }
 
 func TestRouter_InhibitsLowerSeverityWhenSourceFiring(t *testing.T) {
+	t.Parallel()
 	rec := &recordingReceiver{}
 	r := &Router{
 		Receivers: map[string]Receiver{"recorder": rec},
-		Tree: Route{Receivers: []string{"recorder"}},
+		Tree:      Route{Receivers: []string{"recorder"}},
 		InhibitRules: []InhibitRule{{
 			SourceMatch: map[string]string{"severity": "critical"},
 			TargetMatch: map[string]string{"severity": "high"},
@@ -415,6 +648,7 @@ func TestRouter_InhibitsLowerSeverityWhenSourceFiring(t *testing.T) {
 }
 
 func TestGroupKey_StableAcrossLabelOrder(t *testing.T) {
+	t.Parallel()
 	a := Alert{Labels: map[string]string{"cluster": "prod", "kind": "vuln", "severity": "high"}}
 	got := GroupKey(a, []string{"severity", "cluster"})
 	want := "cluster=prod,severity=high"

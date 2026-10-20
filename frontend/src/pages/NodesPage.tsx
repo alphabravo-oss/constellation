@@ -1,76 +1,59 @@
-import { useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
-import {
-  Activity,
-  CheckCircle2,
-  Search,
-  Server,
-  ShieldAlert,
-} from "lucide-react";
-import { nodes as nodesApi, type NodeSummary } from "@/api/client";
-import { useCluster } from "@/hooks/useCluster";
+import { InventorySearch, useInventoryRoute, useScanInventoryExport } from "./inventory-workspace";
+import { sentenceValue } from "@/components/ui/status-pill";
+import { useEntityClusterScope } from "./entity-detail-scope";
+import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
+import { Pager } from "@/components/ui/pager";
+import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { Collapse } from "@/components/ui/collapse";
+import { Button } from "@/components/ui/button";
+import { LoadingState, ErrorState } from "@/components/ui/states";
+import { nodes, type NodeListResponse, type NodeSummary, type NodeInventoryParams } from "@/api/client";
 import { PageHeader } from "@/components/ui/page";
-import { StatCard } from "@/components/ui/stat-card";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { cn } from "@/lib/cn";
+import { Select } from "@/components/ui/form";
 
 const agentStatuses = ["all", "healthy", "stale", "missing"];
-const riskFilters = ["all", "critical", "high", "open", "clean"];
-
+const riskFilters = ["all", "critical", "high", "open", "clean", "host-cves"];
 export function NodesPage() {
-  const { clusterId, isLoading: clusterLoading } = useCluster();
-  const [query, setQuery] = useState("");
-  const [agentStatus, setAgentStatus] = useState("all");
-  const [riskFilter, setRiskFilter] = useState("all");
-  const [selectedName, setSelectedName] = useState<string | null>(null);
-
-  const nodesQ = useQuery({
-    queryKey: ["nodes", clusterId],
-    queryFn: () => nodesApi.list(clusterId!),
-    enabled: !!clusterId,
-  });
-
-  const inventory = useMemo(() => nodesQ.data?.items ?? [], [nodesQ.data?.items]);
-  const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return inventory.filter((item) => {
-      if (agentStatus !== "all" && item.runtime_agent_status !== agentStatus) return false;
-      if (!matchesRiskFilter(item, riskFilter)) return false;
-      if (!needle) return true;
-      return [
-        item.node,
-        item.os_id ?? "",
-        item.os_version_id ?? "",
-        item.kernel_release ?? "",
-        item.arch ?? "",
-        item.cni_name ?? "",
-        item.cri_runtime ?? "",
-        item.package_source ?? "",
-        item.inventory_hash ?? "",
-        item.coverage_gaps?.join(" ") ?? "",
-      ].some((value) => value.toLowerCase().includes(needle));
-    });
-  }, [agentStatus, inventory, query, riskFilter]);
-
-  const selected = filtered.find((item) => item.node === selectedName) ?? filtered[0] ?? null;
-  const summary = nodesQ.data?.summary ?? summarizeNodes(inventory);
-
-  if (clusterLoading) {
-    return <p className="text-sm text-muted-foreground" data-testid="nodes-loading">Loading cluster...</p>;
-  }
+  const scope = useEntityClusterScope(); const { clusterId } = scope;
+  const route = useInventoryRoute(); const params = route.params;
+  const identity = useTablePreferencesIdentity(); const owner = `${identity?.org_id}:${identity?.user_id}`;
+  const query = route.query; const agentStatus = params.get("agent") || "all";
+  const riskFilter = params.get("risk") || "all"; const hostCVEs = riskFilter === "host-cves" || params.get("host_cves") === "open";
+  const sort = params.get("sort") || "critical"; const order = params.get("order") || "desc";
+  const selectedName = params.get("selected");
+  const rawPage = params.get("page"); const validPage = rawPage === null || /^\d+$/.test(rawPage) && Number.isSafeInteger(Number(rawPage)) && Number(rawPage) >= 1 && Number(rawPage) <= 10000;
+  const validFilters = validPage && agentStatuses.includes(agentStatus) && riskFilters.includes(riskFilter) && (!params.get("host_cves") || params.get("host_cves") === "open") && ["node", "agent", "os", "critical", "high", "open", "packages", "containers", "cis", "last_scan", "seen"].includes(sort) && ["asc", "desc"].includes(order);
+  const update = (changes: Record<string, string | null>, reset = true, replace = false) => route.update({ ...(reset ? { page: null } : {}), ...changes }, false, replace);
+  const request: NodeInventoryParams = { q: route.debouncedQuery || undefined, agent: agentStatus === "all" ? undefined : agentStatus, risk: riskFilter === "all" ? undefined : riskFilter, host_cves: hostCVEs ? "open" : undefined, sort, order: order as "asc" | "desc", limit: 100, offset: route.offset };
+  const key = ["nodes", clusterId, owner, request]; const context = JSON.stringify(key);
+  const nodesQ = useQuery({ queryKey: key, queryFn: () => nodes.list(clusterId!, request), enabled: scope.ready && validFilters && !route.debouncing });
+  const validResponse = !!nodesQ.data && nodeInventoryMatches(nodesQ.data, clusterId!, request);
+  const available = scope.ready && validFilters && !route.debouncing && nodesQ.isSuccess && validResponse;
+  const filtered = available ? nodesQ.data!.items : []; const summary = available ? nodesQ.data!.summary : undefined; const total = available ? nodesQ.data!.total : undefined;
+  // Inspection is an exact identity from this successful page. An off-page or
+  // filtered selection remains in the URL and never selects another node.
+  const selected = filtered.find(item => item.node === selectedName) ?? null;
+  const selectedHref = selected && clusterId ? `/clusters/${encodeURIComponent(clusterId)}/nodes/${encodeURIComponent(selected.node)}` : undefined;
+  const matching = useScanInventoryExport({ context, disabled: nodesQ.isFetching || !available, download: shouldDownload => nodes.exportCSV(clusterId!, request, shouldDownload) });
+  if (!scope.ready) return <div className="space-y-5" data-testid="nodes-page"><PageHeader title="Nodes" description="Host posture, runtime agents and node vulnerabilities." />{scope.loading ? <LoadingState label="Loading cluster" /> : <ErrorState title="The selected cluster could not be resolved." action={<Button onClick={scope.retry}>Retry cluster</Button>} />}</div>;
 
   const columns: Column<NodeSummary>[] = [
     {
       id: "node",
       header: "Node",
+      kind: "name",
+      code: true,
+      hideable: false,
       cell: (item) => (
         <div>
-          <Link to={`/clusters/${clusterId}/nodes/${encodeURIComponent(item.node)}`} className="block break-all font-mono text-xs font-medium hover:underline">
+          <a href={`/clusters/${clusterId}/nodes/${encodeURIComponent(item.node)}`} className="block font-mono text-sm font-medium hover:underline">
             {item.node}
-          </Link>
-          {item.coverage_gaps?.length ? <div className="mt-1 text-[11px] text-status-warn">{item.coverage_gaps.length} coverage gap{item.coverage_gaps.length === 1 ? "" : "s"}</div> : null}
+          </a>
+          {item.coverage_gaps?.length ? <div className="mt-1 text-micro text-status-warning">{item.coverage_gaps.length} coverage gap{item.coverage_gaps.length === 1 ? "" : "s"}</div> : null}
         </div>
       ),
       sort: (a, b) => a.node.localeCompare(b.node),
@@ -80,6 +63,7 @@ export function NodesPage() {
     {
       id: "agent",
       header: "Agent",
+      kind: "status",
       cell: (item) => <StatusPill status={item.runtime_agent_status} />,
       sort: (a, b) => a.runtime_agent_status.localeCompare(b.runtime_agent_status),
       exportValue: (item) => item.runtime_agent_status,
@@ -87,6 +71,9 @@ export function NodesPage() {
     {
       id: "os",
       header: "Operating system",
+      kind: "text",
+      size: 184,
+      maxSize: 240,
       cell: (item) => <span className="text-xs">{displayOS(item)}</span>,
       sort: (a, b) => displayOS(a).localeCompare(displayOS(b)),
       exportValue: displayOS,
@@ -94,7 +81,12 @@ export function NodesPage() {
     {
       id: "critical",
       header: "Critical",
-      cell: (item) => item.last_scanned_at ? <RiskCount value={item.critical_vulns} tone="danger" /> : <NotCollected label="Not scanned" />,
+      kind: "text",
+      align: "right",
+      size: 112,
+      minSize: 112,
+      maxSize: 136,
+      cell: (item) => item.last_scanned_at || item.critical_vulns > 0 ? <RiskCount value={item.critical_vulns} tone="danger" /> : <NotCollected label="Not scanned" />,
       sort: (a, b) => a.critical_vulns - b.critical_vulns,
       numeric: true,
       exportValue: (item) => item.critical_vulns,
@@ -102,7 +94,12 @@ export function NodesPage() {
     {
       id: "high",
       header: "High",
-      cell: (item) => item.last_scanned_at ? <RiskCount value={item.high_vulns} tone="warn" /> : <NotCollected label="Not scanned" />,
+      kind: "text",
+      align: "right",
+      size: 112,
+      minSize: 112,
+      maxSize: 136,
+      cell: (item) => item.last_scanned_at || item.high_vulns > 0 ? <RiskCount value={item.high_vulns} tone="warn" /> : <NotCollected label="Not scanned" />,
       sort: (a, b) => a.high_vulns - b.high_vulns,
       numeric: true,
       exportValue: (item) => item.high_vulns,
@@ -110,7 +107,12 @@ export function NodesPage() {
     {
       id: "open",
       header: "Open",
-      cell: (item) => item.last_scanned_at ? item.open_vulns.toLocaleString() : <NotCollected label="Not scanned" />,
+      kind: "text",
+      align: "right",
+      size: 112,
+      minSize: 112,
+      maxSize: 136,
+      cell: (item) => item.last_scanned_at || item.open_vulns > 0 ? item.open_vulns.toLocaleString() : <NotCollected label="Not scanned" />,
       sort: (a, b) => a.open_vulns - b.open_vulns,
       numeric: true,
       exportValue: (item) => item.open_vulns,
@@ -118,6 +120,11 @@ export function NodesPage() {
     {
       id: "packages",
       header: "Packages",
+      kind: "text",
+      align: "right",
+      size: 124,
+      minSize: 112,
+      maxSize: 144,
       cell: (item) => item.packages_observed_at ? item.package_count.toLocaleString() : <NotCollected />,
       sort: (a, b) => a.package_count - b.package_count,
       numeric: true,
@@ -126,6 +133,11 @@ export function NodesPage() {
     {
       id: "containers",
       header: "Containers",
+      kind: "text",
+      align: "right",
+      size: 124,
+      minSize: 112,
+      maxSize: 144,
       cell: (item) => item.containers_observed_at ? item.container_count.toLocaleString() : <NotCollected />,
       sort: (a, b) => a.container_count - b.container_count,
       numeric: true,
@@ -134,6 +146,11 @@ export function NodesPage() {
     {
       id: "cis",
       header: "CIS failed",
+      kind: "text",
+      align: "right",
+      size: 124,
+      minSize: 112,
+      maxSize: 144,
       cell: (item) => item.cis_observed_at ? <RiskCount value={item.cis_failed} tone="warn" /> : <NotCollected />,
       sort: (a, b) => a.cis_failed - b.cis_failed,
       numeric: true,
@@ -142,108 +159,65 @@ export function NodesPage() {
     {
       id: "last_scan",
       header: "Last scan",
+      kind: "date",
+      size: 224,
+      minSize: 208,
+      maxSize: 240,
       cell: (item) => formatDate(item.last_scanned_at),
       sort: (a, b) => timestamp(a.last_scanned_at) - timestamp(b.last_scanned_at),
       exportValue: (item) => item.last_scanned_at ?? "",
     },
+    { id: "seen", header: "Last observed", kind: "date", size: 224, minSize: 208, maxSize: 240, sort: (a, b) => timestamp(a.last_seen_at) - timestamp(b.last_seen_at), cell: item => formatDate(item.last_seen_at), exportValue: item => item.last_seen_at },
   ];
 
-  return (
-    <div className="space-y-4" data-testid="nodes-page" data-cluster-id={clusterId ?? ""}>
-      <PageHeader
-        title="Nodes"
-        description="Host posture, package evidence, runtime-agent health, and node CVEs."
-        actions={
-          <div className="flex items-center gap-2">
-            <Link
-              to={selected ? `/clusters/${clusterId}/nodes/${encodeURIComponent(selected.node)}` : `/clusters/${clusterId}/nodes`}
-              className={cn(
-                "inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm hover:bg-accent",
-                !selected && "pointer-events-none opacity-50",
-              )}
-            >
-              <Server className="h-4 w-4" aria-hidden />
-              Open Node
-            </Link>
-          </div>
-        }
-      />
+  const toolbar = <>
+    <InventorySearch value={query} onChange={value => update({ q: value || null }, true, true)} label="Search nodes" placeholder="Search node, OS, kernel or runtime" testId="node-search" />
+    <Select value={agentStatus} onChange={event => update({ agent: event.target.value === "all" ? null : event.target.value })} aria-label="Runtime agent filter" className="h-9" data-testid="node-agent-filter">{agentStatuses.map(item => <option key={item} value={item}>{item === "all" ? "All agents" : sentenceValue(item)}</option>)}</Select>
+    <Select value={riskFilter} onChange={event => update({ risk: event.target.value === "all" ? null : event.target.value, host_cves: null })} aria-label="Host risk filter" className="h-9" data-testid="node-risk-filter">{riskFilters.map(item => <option key={item} value={item}>{item === "all" ? "All risk" : item === "host-cves" ? "Open host CVEs" : sentenceValue(item)}</option>)}</Select>
+  </>;
+  const tone = !available ? nodesQ.isError || nodesQ.isSuccess && !validResponse ? "degraded" as const : "info" as const : summary!.critical_vulns || summary!.high_vulns || summary!.cis_failed || summary!.scan_gaps ? "degraded" as const : "ok" as const;
+  const verdictTitle = !validFilters ? "The requested node filter or sort is invalid" : !available ? nodesQ.isError || nodesQ.isSuccess && !validResponse ? "Node evidence is unavailable" : "Loading node evidence" : !total ? "No nodes match these filters" : summary!.critical_vulns || summary!.high_vulns ? "Host vulnerabilities need review" : summary!.scan_gaps ? "Some nodes lack completed scan evidence" : "No critical or high host vulnerabilities reported";
+  return <div className="space-y-4" data-testid="nodes-page" data-cluster-id={clusterId}>
+    <PageHeader title="Nodes" description="Host posture, runtime agents and node vulnerabilities." actions={<Button disabled={nodesQ.isFetching || !validFilters || route.debouncing} onClick={() => void nodesQ.refetch()} aria-label="Refresh nodes">Refresh</Button>} />
+    <VerdictBanner status={tone} title={verdictTitle}
+      numbers={available ? [
+        { label: "nodes", value: total!.toLocaleString(), testId: "nodes-total" },
+        { label: "critical", value: summary!.critical_vulns.toLocaleString(), tone: summary!.critical_vulns ? "critical" : "default" },
+        { label: "high", value: summary!.high_vulns.toLocaleString(), tone: summary!.high_vulns ? "high" : "default" },
+        { label: "agents healthy", value: `${summary!.runtime_agent_healthy}/${total}`, title: `${summary!.runtime_agent_stale} stale · ${summary!.runtime_agent_missing} missing` },
+      ] : undefined}
+      detail={<div className="space-y-1">
+        {available && <p data-testid="nodes-summary">{summary!.runtime_agent_stale} stale and {summary!.runtime_agent_missing} missing agents · {summary!.cis_failed} CIS failures · {summary!.scan_gaps} scan gaps.</p>}
+        <p>Counts cover all server matches across pages. Agent freshness is inferred from its last heartbeat; a zero vulnerability count without completed scan evidence does not establish a clean host.</p>
+      </div>} />
+    {params.get("host_cves") === "open" && riskFilter !== "host-cves" && <p className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">Source-cluster open host CVE cohort is active. <Button size="sm" onClick={() => update({ host_cves: null })}>Clear host CVE cohort</Button></p>}
+    {!validFilters ? <ErrorState title="Choose supported node filters and sorting." action={<Button onClick={() => update({ agent: null, risk: null, host_cves: null, sort: null, order: null })}>Reset filters and sort</Button>} /> : nodesQ.isError || nodesQ.isSuccess && !validResponse ? <ErrorState title="Node inventory could not be loaded or refreshed." action={<Button onClick={() => void nodesQ.refetch()}>Retry nodes</Button>} /> : <section className="space-y-4">
+      {available && nodesQ.isFetching && <p role="status" className="text-sm text-muted-foreground">Refreshing node evidence…</p>}
+      {matching.status}
+      <div data-testid={available ? "nodes-table" : "nodes-table-loading"}><DataTable rows={filtered} columns={columns} rowKey={item => item.node} onRowClick={item => update({ selected: item.node }, false)} selected={new Set(selected ? [selected.node] : [])} preferencesKey="cluster-nodes" manualSorting sort={{ id: sort, dir: order as "asc" | "desc" }} onSortChange={next => update({ sort: next?.id ?? null, order: next?.dir ?? null })} pagination={false} defaultHiddenColumnIds={["seen", "packages", "containers"]} toolbar={toolbar} exportOptions={[matching.option]} exportFileName="constellation-nodes-page" exportLabel="This page" emptyState={available ? <p className="p-6 text-sm text-muted-foreground">No nodes match the current filters.</p> : <LoadingState label="Loading node inventory" />} /></div>
+      {available && <>
+      {route.page > 0 && !filtered.length && <Button onClick={() => update({ page: null }, false)}>First page</Button>}
+      <Pager page={route.page} pageSize={100} total={total!} rowsOnPage={filtered.length} onPage={page => update({ page: page ? String(page + 1) : null }, false)} />
+      {selectedName && <div className="flex flex-wrap items-center gap-3"><Button size="sm" onClick={() => update({ selected: null }, false)}>Clear selection</Button>{selectedHref ? <a href={selectedHref} className="text-link text-sm">Open selected node</a> : <p role="status" className="text-sm text-muted-foreground">The selected node is outside this page or filter; no other node has been substituted.</p>}</div>}
+      {selected && <Collapse key={`${clusterId}:${selected.node}`} label={`Node inspection · ${selected.node}`} defaultOpen><NodePreview node={selected} clusterId={clusterId} /></Collapse>}
+      </>}
+    </section>}
+  </div>;
+}
 
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="nodes-summary">
-        <StatCard label="Nodes" value={summary.nodes.toLocaleString()} icon={<Server className="h-3.5 w-3.5" />} hint={`${summary.scan_completed} scan-complete`} />
-        <StatCard label="Runtime Agents" value={summary.runtime_agent_healthy.toLocaleString()} icon={<Activity className="h-3.5 w-3.5" />} hint={`${summary.runtime_agent_stale} stale · ${summary.runtime_agent_missing} missing`} />
-        <StatCard label="Critical / High" value={(summary.critical_vulns + summary.high_vulns).toLocaleString()} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={summary.critical_vulns + summary.high_vulns > 0 ? "high" : "neutral"} hint={`${summary.critical_vulns} critical · ${summary.high_vulns} high`} />
-        <StatCard label="CIS Failures" value={summary.cis_failed.toLocaleString()} icon={<CheckCircle2 className="h-3.5 w-3.5" />} tone={summary.cis_failed > 0 ? "medium" : "neutral"} hint={`${summary.scan_gaps} nodes with scan gaps`} />
-      </section>
-
-      <section className="rounded-lg border border-border bg-card p-3">
-        <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_170px_170px]">
-          <label className="relative block">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search node, OS, kernel, runtime, coverage gap"
-              className="w-full rounded-md border border-border bg-background py-2 pl-9 pr-3 text-sm"
-              data-testid="node-search"
-            />
-          </label>
-          <select
-            value={agentStatus}
-            onChange={(event) => setAgentStatus(event.target.value)}
-            className="rounded-md border border-border bg-background p-2 text-sm"
-            data-testid="node-agent-filter"
-          >
-            {agentStatuses.map((item) => (
-              <option key={item} value={item}>{item === "all" ? "All agents" : item}</option>
-            ))}
-          </select>
-          <select
-            value={riskFilter}
-            onChange={(event) => setRiskFilter(event.target.value)}
-            className="rounded-md border border-border bg-background p-2 text-sm"
-            data-testid="node-risk-filter"
-          >
-            {riskFilters.map((item) => (
-              <option key={item} value={item}>{item === "all" ? "All risk" : item}</option>
-            ))}
-          </select>
-        </div>
-      </section>
-
-      <section className="flex flex-col gap-4">
-        <div data-testid="nodes-table">
-          <DataTable
-            rows={filtered}
-            columns={columns}
-            rowKey={(item) => item.node}
-            onRowClick={(item) => setSelectedName(item.node)}
-            selected={selected ? new Set([selected.node]) : new Set()}
-            defaultSort={{ id: "critical", dir: "desc" }}
-            preferencesKey="cluster-nodes"
-            exportFileName="constellation-nodes"
-            emptyState={
-              nodesQ.isPending ? (
-                <div className="px-3 py-8 text-center text-xs text-muted-foreground">Loading nodes...</div>
-              ) : (
-                <div className="px-3 py-8 text-center text-xs text-muted-foreground">No nodes match the current filters.</div>
-              )
-            }
-          />
-        </div>
-
-        <NodePreview node={selected} clusterId={clusterId} />
-      </section>
-    </div>
-  );
+function nodeInventoryMatches(data: NodeListResponse, clusterId: string, request: NodeInventoryParams) {
+ const total = data.total; const offset = request.offset || 0;
+ if (!data.summary || typeof data.summary !== "object" || !Array.isArray(data.items) || data.cluster_id !== clusterId || data.q !== (request.q || "").trim() || data.agent !== (request.agent || "") || data.risk !== (request.risk || "") || data.host_cves !== (request.host_cves || "") || data.sort !== request.sort || data.order !== request.order || data.limit !== 100 || data.offset !== offset || !Number.isSafeInteger(total) || total! < 0 || data.items.length !== Math.min(100, Math.max(0, total! - offset)) || data.has_more !== (total! > offset + data.items.length) || data.summary.nodes !== total || !["nodes", "runtime_agent_healthy", "runtime_agent_stale", "runtime_agent_missing", "scan_completed", "scan_gaps", "critical_vulns", "high_vulns", "cis_failed"].every(key => Number.isSafeInteger(data.summary[key as keyof typeof data.summary]) && data.summary[key as keyof typeof data.summary] >= 0)) return false;
+ const names = new Set<string>();
+ return data.items.every(item => { if (!item.node?.trim() || names.has(item.node) || item.cluster_id !== clusterId || request.agent && item.runtime_agent_status !== request.agent || !matchesRiskFilter(item, request.risk || "all")) return false; names.add(item.node); return true; });
 }
 
 function RiskCount({ value, tone }: { value: number; tone: "warn" | "danger" }) {
-  return <span className={cn("tabular-nums", value > 0 && (tone === "danger" ? "font-semibold text-status-error" : "font-medium text-status-warn"))}>{value.toLocaleString()}</span>;
+  return <span className={cn("tabular-nums", value > 0 && (tone === "danger" ? "font-semibold text-severity-critical" : "font-medium text-status-warning"))}>{value.toLocaleString()}</span>;
 }
 
 function NotCollected({ label = "Not collected" }: { label?: string }) {
-  return <span className="text-xs italic text-muted-foreground">{label}</span>;
+  return <span className="font-sans text-xs italic text-muted-foreground">{label}</span>;
 }
 
 function timestamp(value?: string | null): number {
@@ -269,12 +243,12 @@ function NodePreview({ node, clusterId }: { node: NodeSummary | null; clusterId?
             <p className="mt-1 text-xs text-muted-foreground">{displayOS(node)} · kernel {node.kernel_release || "unknown"}</p>
           </div>
           <div className="flex items-center gap-2">
-            <Link to={`/clusters/${clusterId}/risk/node/${encodeURIComponent(node.node)}`} className="rounded-md border border-border px-2 py-1 text-xs hover:bg-accent" data-testid="node-risk-workspace-link">
+            <a href={`/clusters/${clusterId}/risk/node/${encodeURIComponent(node.node)}`} className="rounded-md border border-border px-2 py-1 text-xs hover:bg-accent" data-testid="node-risk-workspace-link">
               Risk workspace
-            </Link>
-            <Link to={`/clusters/${clusterId}/nodes/${encodeURIComponent(node.node)}`} className="rounded-md border border-border px-2 py-1 text-xs hover:bg-accent">
-              Full Details
-            </Link>
+            </a>
+            <a href={`/clusters/${clusterId}/nodes/${encodeURIComponent(node.node)}`} className="rounded-md border border-border px-2 py-1 text-xs hover:bg-accent">
+              Full details
+            </a>
           </div>
         </div>
 
@@ -321,9 +295,9 @@ function NodePreview({ node, clusterId }: { node: NodeSummary | null; clusterId?
 
 function MiniMetric({ label, value, tone }: { label: string; value: number; tone: "normal" | "warn" | "danger" }) {
   return (
-    <div className={cn("rounded-md border border-border p-2 text-center", tone === "danger" && "border-status-error/30 bg-status-error/10", tone === "warn" && "border-status-warn/30 bg-status-warn/10")}>
-      <div className="text-lg font-semibold">{value.toLocaleString()}</div>
-      <div className="text-[10px] uppercase text-muted-foreground">{label}</div>
+    <div className={cn("rounded-md border border-border p-2 text-center")}>
+      <div className={cn("text-lg font-semibold tabular-nums", tone === "danger" && value > 0 && "text-severity-critical", tone === "warn" && value > 0 && "text-severity-high")}>{value.toLocaleString()}</div>
+      <div className="text-micro  text-muted-foreground">{label}</div>
     </div>
   );
 }
@@ -331,7 +305,7 @@ function MiniMetric({ label, value, tone }: { label: string; value: number; tone
 function Field({ label, value, wide }: { label: string; value: ReactNode; wide?: boolean }) {
   return (
     <div className={cn("grid gap-1", wide && "sm:col-span-2")}>
-      <dt className="text-[10px] uppercase text-muted-foreground">{label}</dt>
+      <dt className="text-micro  text-muted-foreground">{label}</dt>
       <dd className="break-all font-mono text-xs">{value}</dd>
     </div>
   );
@@ -341,7 +315,7 @@ function NodeBadge({ item }: { item: NodeSummary }) {
   const healthy = item.runtime_agent_status === "healthy" && item.scan_status === "completed" && !(item.coverage_gaps?.length);
   return (
     <Pill tone={healthy ? "ok" : item.runtime_agent_status === "missing" ? "danger" : "warn"}>
-      {healthy ? "covered" : item.runtime_agent_status || "unknown"}
+      {healthy ? "Covered" : sentenceValue(item.runtime_agent_status || "unknown")}
     </Pill>
   );
 }
@@ -350,7 +324,7 @@ function StatusPill({ status }: { status: string }) {
   const normalized = status || "missing";
   return (
     <Pill tone={normalized === "healthy" || normalized === "completed" ? "ok" : normalized === "missing" || normalized === "failed" ? "danger" : "warn"}>
-      {normalized}
+      {sentenceValue(normalized)}
     </Pill>
   );
 }
@@ -359,13 +333,10 @@ function Pill({ tone, children }: { tone: "neutral" | "ok" | "warn" | "danger"; 
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium",
-        tone === "neutral" && "bg-muted text-muted-foreground",
-        tone === "ok" && "bg-status-ok/10 text-status-ok",
-        tone === "warn" && "bg-status-warn/10 text-status-warn",
-        tone === "danger" && "bg-status-error/10 text-status-error",
+        "inline-flex h-5 items-center gap-1.5 rounded-full border border-border bg-muted/40 px-2 text-micro font-medium text-foreground",
       )}
     >
+      <span aria-hidden className={cn("h-1.5 w-1.5 rounded-full", tone === "ok" ? "bg-status-success" : tone === "warn" ? "bg-status-warning" : tone === "danger" ? "bg-status-error" : "bg-status-neutral")} />
       {children}
     </span>
   );
@@ -378,40 +349,13 @@ function matchesRiskFilter(item: NodeSummary, filter: string): boolean {
     case "high":
       return item.critical_vulns > 0 || item.high_vulns > 0;
     case "open":
+    case "host-cves":
       return item.open_vulns > 0;
     case "clean":
       return item.open_vulns === 0 && item.cis_failed === 0 && !(item.coverage_gaps?.length);
     default:
       return true;
   }
-}
-
-function summarizeNodes(items: NodeSummary[]) {
-  return items.reduce(
-    (acc, item) => {
-      acc.nodes += 1;
-      if (item.runtime_agent_status === "healthy") acc.runtime_agent_healthy += 1;
-      else if (item.runtime_agent_status === "stale") acc.runtime_agent_stale += 1;
-      else acc.runtime_agent_missing += 1;
-      if (item.scan_status === "completed") acc.scan_completed += 1;
-      else acc.scan_gaps += 1;
-      acc.critical_vulns += item.critical_vulns;
-      acc.high_vulns += item.high_vulns;
-      acc.cis_failed += item.cis_failed;
-      return acc;
-    },
-    {
-      nodes: 0,
-      runtime_agent_healthy: 0,
-      runtime_agent_stale: 0,
-      runtime_agent_missing: 0,
-      scan_completed: 0,
-      scan_gaps: 0,
-      critical_vulns: 0,
-      high_vulns: 0,
-      cis_failed: 0,
-    },
-  );
 }
 
 function displayOS(item: NodeSummary): string {
@@ -423,5 +367,6 @@ function formatDate(value?: string): string {
   if (!value) return "Not collected";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
+  if (date.getTime() <= 0) return "Not collected";
   return date.toLocaleString();
 }

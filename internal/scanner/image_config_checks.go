@@ -40,7 +40,7 @@ type ImageConfigCheckReport struct {
 }
 
 // ScanImageConfigChecks pulls the image config and evaluates the CIS-Docker image controls.
-func ScanImageConfigChecks(ctx context.Context, ref string, platform string, insecure bool) (*ImageConfigCheckReport, error) {
+func ScanImageConfigChecks(ctx context.Context, ref string, platform string, insecure bool, registryOptions ...remote.Option) (*ImageConfigCheckReport, error) {
 	parseOpts := []name.Option{}
 	if insecure {
 		parseOpts = append(parseOpts, name.Insecure)
@@ -51,8 +51,12 @@ func ScanImageConfigChecks(ctx context.Context, ref string, platform string, ins
 	}
 	remoteOpts := []remote.Option{
 		remote.WithContext(ctx),
-		remote.WithAuthFromKeychain(authn.DefaultKeychain),
 		remote.WithUserAgent("constellation-scanner"),
+	}
+	if len(registryOptions) == 0 {
+		remoteOpts = append(remoteOpts, remote.WithAuthFromKeychain(authn.DefaultKeychain))
+	} else {
+		remoteOpts = append(remoteOpts, registryOptions...)
 	}
 	if strings.TrimSpace(platform) != "" {
 		p, err := v1.ParsePlatform(platform)
@@ -109,7 +113,9 @@ func imageConfigChecksFrom(ref, platform string, parsed name.Reference, cfg *v1.
 	if t, ok := parsed.(name.Tag); ok {
 		tag = t.TagStr()
 	}
-	if tag == "" || tag == "latest" {
+	if digest, ok := parsed.(name.Digest); ok {
+		add("image-latest-tag", "Image is pinned to an immutable digest", "pass", "medium", digest.DigestStr(), "")
+	} else if tag == "" || tag == "latest" {
 		add("image-latest-tag", "Image uses a mutable tag (:latest or untagged)", "warn", "medium",
 			fmt.Sprintf("tag %q", firstNonEmptyStr(tag, "none")),
 			"Pin images to an immutable tag or digest for reproducible, auditable deploys.")

@@ -44,6 +44,19 @@ type PackageMatcher interface {
 	MatchPackages(ctx context.Context, ref string, packages []Package, opts ScanOptions) (*EngineResult, error)
 }
 
+// ImageFallbackMatcher opts a package matcher into using the corresponding
+// successful image engine result instead of a second, less precise inventory scan.
+// A missing or failed image engine still runs the package matcher.
+type ImageFallbackMatcher interface {
+	ImageEngineName() string
+}
+
+// SBOMMatcher can consume the original Syft document without losing binary
+// locations, symbol tables, distro metadata, or relationships in normalization.
+type SBOMMatcher interface {
+	MatchSBOM(ctx context.Context, ref string, sbom []byte, opts ScanOptions) (*EngineResult, error)
+}
+
 // ScanOptions caps engine behavior at call time.
 type ScanOptions struct {
 	// SBOMOnly: skip vulnerability matching, emit SBOM packages only. Useful for the
