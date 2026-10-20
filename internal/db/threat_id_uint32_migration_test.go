@@ -14,18 +14,19 @@ import (
 	"github.com/alphabravocompany/constellation/internal/testutil/pgfixture"
 )
 
-func threatMigration(t *testing.T, up bool) string {
+// threatMigration returns the Up section of migration 180. Migrations are forward-only
+// (ADR 0006), so there is no Down section to exercise.
+func threatMigration(t *testing.T) string {
 	t.Helper()
 	body, err := os.ReadFile("../../db/migrations/180_runtime_threat_uint32.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
-	parts := strings.Split(string(body), "-- +goose Down")
-	sql := parts[1]
-	if up {
-		sql = strings.Split(parts[0], "-- +goose Up")[1]
+	parts := strings.SplitN(string(body), "-- +goose Up", 2)
+	if len(parts) != 2 {
+		t.Fatal("migration 180 has no Up section")
 	}
-	return sql
+	return parts[1]
 }
 func threatMigrationFixture(t *testing.T) *pgxpool.Pool {
 	t.Helper()
@@ -64,7 +65,7 @@ func TestThreatUint32MigrationRepairsOnlyProvenHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = p.Exec(ctx, threatMigration(t, true)); err != nil {
+	if _, err = p.Exec(ctx, threatMigration(t)); err != nil {
 		t.Fatal(err)
 	}
 	for name, want := range map[string]bool{"complete": true, "gone": false, "zero": false, "negative": true, "null": true, "partial": false, "pruned": false, "future": false, "watermark": true, "foreign": false, "sibling": false} {
@@ -96,15 +97,8 @@ func TestThreatUint32MigrationRepairsOnlyProvenHistory(t *testing.T) {
 			t.Fatalf("accepted %d", value)
 		}
 	}
-	if _, err = p.Exec(ctx, threatMigration(t, false)); err == nil {
-		t.Fatal("unsafe downgrade accepted")
-	}
-	var complete bool
-	if err = p.QueryRow(ctx, `SELECT threat_id_complete FROM network_flow_rollups WHERE src_workload='zero'`).Scan(&complete); err != nil || complete {
-		t.Fatalf("failed down mutated schema: %v", err)
-	}
 }
-func TestThreatUint32MigrationLocksBeforeSchemaAndGuardedDown(t *testing.T) {
+func TestThreatUint32MigrationLocksBeforeSchema(t *testing.T) {
 	p := threatMigrationFixture(t)
 	ctx := t.Context()
 	lock, err := p.Begin(ctx)
@@ -117,26 +111,13 @@ func TestThreatUint32MigrationLocksBeforeSchemaAndGuardedDown(t *testing.T) {
 	}
 	blocked, cancel := context.WithTimeout(ctx, 80*time.Millisecond)
 	defer cancel()
-	if _, err = p.Exec(blocked, threatMigration(t, true)); err == nil {
+	if _, err = p.Exec(blocked, threatMigration(t)); err == nil {
 		t.Fatal("migration bypassed state lock")
 	}
 	if err = lock.Rollback(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = p.Exec(ctx, threatMigration(t, true)); err != nil {
-		t.Fatal(err)
-	}
-	// Even low known IDs cannot discard an uncertain historical maximum.
-	if _, err = p.Exec(ctx, `INSERT INTO network_flow_rollups VALUES('00000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000002','zero','dst','tcp','',443,'allow',now(),1,0,99,88,false)`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = p.Exec(ctx, threatMigration(t, false)); err == nil {
-		t.Fatal("unknown low maximum downgrade accepted")
-	}
-	if _, err = p.Exec(ctx, `DELETE FROM network_flow_rollups`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = p.Exec(ctx, threatMigration(t, false)); err != nil {
+	if _, err = p.Exec(ctx, threatMigration(t)); err != nil {
 		t.Fatal(err)
 	}
 }
