@@ -1,3 +1,5 @@
+//go:build integration
+
 package findings
 
 import (
@@ -50,6 +52,7 @@ func checkpointVersion(t *testing.T, pool *pgxpool.Pool, feed string) string {
 }
 
 func TestCVEFeedCheckpointRestartCorrectionAndRollback(t *testing.T) {
+	t.Parallel()
 	pool := checkpointPool(t)
 	var probability atomic.Value
 	probability.Store("0.10")
@@ -111,6 +114,7 @@ func TestCVEFeedCheckpointRestartCorrectionAndRollback(t *testing.T) {
 }
 
 func TestCVEFeedReplicaLockAndCancellation(t *testing.T) {
+	t.Parallel()
 	pool := checkpointPool(t)
 	other, err := pgxpool.NewWithConfig(t.Context(), pool.Config().Copy())
 	if err != nil {
@@ -144,6 +148,7 @@ func TestCVEFeedReplicaLockAndCancellation(t *testing.T) {
 }
 
 func TestNVDCheckpointResumeAndIncompleteWindow(t *testing.T) {
+	t.Parallel()
 	pool := checkpointPool(t)
 	var failSecond atomic.Bool
 	failSecond.Store(true)
@@ -208,6 +213,7 @@ func TestNVDCheckpointResumeAndIncompleteWindow(t *testing.T) {
 }
 
 func TestCVEFeedRejectsInvalidSnapshots(t *testing.T) {
+	t.Parallel()
 	for _, feed := range []string{"", "{}", `{"catalogVersion":"v","count":2,"vulnerabilities":[]}`} {
 		if _, err := parseKEV([]byte(feed)); err == nil {
 			t.Fatalf("invalid KEV accepted: %q", feed)
@@ -226,6 +232,7 @@ func TestCVEFeedRejectsInvalidSnapshots(t *testing.T) {
 }
 
 func TestNVDCheckpointCatchesUpOldWindowsAndResetsForMirror(t *testing.T) {
+	t.Parallel()
 	pool := checkpointPool(t)
 	var ranges [][2]time.Time
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

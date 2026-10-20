@@ -33,6 +33,7 @@ type flannelScenario struct {
 }
 
 func TestFlannelRuntimePolicyPacketAcceptance(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("CONSTELLATION_FLANNEL_POLICY_RUN") != "1" {
 		t.Skip("requires explicit root-reviewed disposable Flannel fixture; see scripts/test-flannel-policy.sh")
 	}

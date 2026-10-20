@@ -65,6 +65,7 @@ func (error404) Error() string     { return "NoSuchPublicAccessBlockConfiguratio
 func (error404) ErrorCode() string { return "NoSuchPublicAccessBlockConfiguration" }
 
 func TestScanIAM_FlagsOverPrivilegedAndWildcard(t *testing.T) {
+	t.Parallel()
 	roleA := iamtypes.Role{RoleName: awssdk.String("admin-role"), Arn: awssdk.String("arn:aws:iam::123:role/admin-role")}
 	roleB := iamtypes.Role{RoleName: awssdk.String("dev-role"), Arn: awssdk.String("arn:aws:iam::123:role/dev-role")}
 	roleC := iamtypes.Role{RoleName: awssdk.String("read-role"), Arn: awssdk.String("arn:aws:iam::123:role/read-role")}
@@ -110,6 +111,7 @@ func TestScanIAM_FlagsOverPrivilegedAndWildcard(t *testing.T) {
 }
 
 func TestScanS3_FlagsPublicAclAndWeakPAB(t *testing.T) {
+	t.Parallel()
 	bucketA := s3types.Bucket{Name: awssdk.String("public-bucket")}
 	bucketB := s3types.Bucket{Name: awssdk.String("missing-pab")}
 	bucketC := s3types.Bucket{Name: awssdk.String("locked-down")}
@@ -164,6 +166,7 @@ func TestScanS3_FlagsPublicAclAndWeakPAB(t *testing.T) {
 }
 
 func TestIsWildcardGrant(t *testing.T) {
+	t.Parallel()
 	if !isWildcardGrant(`{"Effect":"Allow","Action":"*","Resource":"*"}`) {
 		t.Fatal("should detect wildcard")
 	}
@@ -178,6 +181,7 @@ func TestIsWildcardGrant(t *testing.T) {
 // TestIsWildcardGrant_URLEncoded is the regression for H4: GetRolePolicy returns the
 // policy document URL-encoded, and the old substring matcher never fired on it.
 func TestIsWildcardGrant_URLEncoded(t *testing.T) {
+	t.Parallel()
 	plain := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"*","Resource":"*"}]}`
 	encoded := url.QueryEscape(plain)
 	if encoded == plain {
@@ -191,6 +195,7 @@ func TestIsWildcardGrant_URLEncoded(t *testing.T) {
 // TestIsWildcardGrant_Shapes covers array-valued Action/Resource and a multi-statement
 // document where only a non-leading statement is the wildcard grant.
 func TestIsWildcardGrant_Shapes(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		body string
@@ -219,6 +224,7 @@ func (*errIAM) ListRoles(_ context.Context, _ *iam.ListRolesInput, _ ...func(*ia
 // TestScan_PartialFailureSurfaces is the regression for the CSPM fail-open: a single
 // failed sub-scan must surface an error, not be reported as a clean scan.
 func TestScan_PartialFailureSurfaces(t *testing.T) {
+	t.Parallel()
 	c := &Connector{
 		IAM: &errIAM{},
 		S3: &fakeS3{
@@ -254,6 +260,7 @@ func (p *pagingIAM) ListRoles(_ context.Context, in *iam.ListRolesInput, _ ...fu
 // TestScanIAM_PaginatesRoles is the regression for the no-pagination fail-open: a
 // wildcard-grant role on the second page must still be flagged.
 func TestScanIAM_PaginatesRoles(t *testing.T) {
+	t.Parallel()
 	p := &pagingIAM{
 		page1: []iamtypes.Role{{RoleName: awssdk.String("page1-role"), Arn: awssdk.String("arn:p1")}},
 		page2: []iamtypes.Role{{RoleName: awssdk.String("page2-role"), Arn: awssdk.String("arn:p2")}},

@@ -3,6 +3,7 @@ package complianceevidence
 import "testing"
 
 func TestInventoryQueryValidation(t *testing.T) {
+	t.Parallel()
 	q, err := ValidateQuery(Query{Scope: "all", Framework: "all", Targets: []string{}})
 	if err != nil || q.Scope != "" || q.Framework != "" || q.Limit != 1000 || q.Sort != "observed" || q.Order != "desc" || q.Targets == nil {
 		t.Fatalf("defaults/empty scope changed: %+v %v", q, err)

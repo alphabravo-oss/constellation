@@ -1,3 +1,5 @@
+//go:build integration
+
 package findings
 
 import (
@@ -50,6 +52,7 @@ func TestCVECatalogParserAndAuthorization(t *testing.T) {
 }
 
 func TestCVECatalogMatchingExportFiltersOrderingAndCap(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	t.Cleanup(d.Close)
 	pool, ctx := d.Pool(), t.Context()

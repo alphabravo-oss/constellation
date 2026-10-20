@@ -1,3 +1,5 @@
+//go:build integration
+
 package network
 
 import (
@@ -17,6 +19,7 @@ import (
 )
 
 func TestConversationStreamInventoryCompleteScopePagesAndCSV(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	t.Cleanup(d.Close)
 	org, foreign, cluster, sibling := uuid.New(), uuid.New(), uuid.New(), uuid.New()
@@ -154,6 +157,7 @@ func TestConversationStreamInventoryCompleteScopePagesAndCSV(t *testing.T) {
 }
 
 func TestConversationStreamInventoryCSVFullCap(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	t.Cleanup(d.Close)
 	org, cluster := uuid.New(), uuid.New()
@@ -183,6 +187,7 @@ func TestConversationStreamInventoryCSVFullCap(t *testing.T) {
 }
 
 func TestConversationStreamInventoryStrictParser(t *testing.T) {
+	t.Parallel()
 	base := "cluster_id=" + uuid.NewString() + "&from=prod%2Fa&to=prod%2Fb"
 	for _, query := range []string{"&hours=0", "&hours=-1", "&hours=721", "&hours=bad", "&hours=", "&limit=0", "&offset=-1"} {
 		values, err := url.ParseQuery(base + query)

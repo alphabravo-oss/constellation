@@ -84,6 +84,7 @@ spec: {}`,
 }
 
 func TestReconcileStateAppliesOnlyProtectRows(t *testing.T) {
+	t.Parallel()
 	client := &fakeResourceClient{}
 	result := ReconcileState(context.Background(), client, LifecycleState{
 		CurrentMode:    "protect",
@@ -104,6 +105,7 @@ spec: {}`},
 }
 
 func TestReconcileStateDeletesDemotedRows(t *testing.T) {
+	t.Parallel()
 	client := &fakeResourceClient{}
 	result := ReconcileState(context.Background(), client, LifecycleState{
 		CurrentMode:    "monitor",
@@ -124,6 +126,7 @@ spec: {}`},
 }
 
 func TestReconcileStateSkipsUnappliedRows(t *testing.T) {
+	t.Parallel()
 	client := &fakeResourceClient{}
 	result := ReconcileState(context.Background(), client, LifecycleState{
 		CurrentMode:    "monitor",
@@ -139,6 +142,7 @@ func TestReconcileStateSkipsUnappliedRows(t *testing.T) {
 }
 
 func TestReconcileStateReportsClientErrors(t *testing.T) {
+	t.Parallel()
 	client := &fakeResourceClient{err: errors.New("forbidden")}
 	result := ReconcileState(context.Background(), client, LifecycleState{
 		CurrentMode:    "protect",

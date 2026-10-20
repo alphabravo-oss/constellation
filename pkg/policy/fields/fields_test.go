@@ -3,6 +3,7 @@ package fields
 import "testing"
 
 func TestAllSorted(t *testing.T) {
+	t.Parallel()
 	all := All()
 	if len(all) < 10 {
 		t.Fatalf("expected catalogue to be populated, got %d", len(all))
@@ -15,6 +16,7 @@ func TestAllSorted(t *testing.T) {
 }
 
 func TestByName(t *testing.T) {
+	t.Parallel()
 	if _, ok := ByName("container.securityContext.privileged"); !ok {
 		t.Fatalf("missing privileged field")
 	}

@@ -9,6 +9,7 @@ import (
 )
 
 func TestGroupEdgeValidateCopiedInputsDoNotShareNormalization(t *testing.T) {
+	t.Parallel()
 	original := GroupEdge{FromGroup: "frontend", ToGroup: "backend", Ports: []PortSpec{{Protocol: " tcp ", Port: 443}, {Protocol: "", Port: 80}}}
 	before := []PortSpec{{Protocol: " tcp ", Port: 443}, {Protocol: "", Port: 80}}
 	start := make(chan struct{})

@@ -10,6 +10,7 @@ import (
 )
 
 func TestParseNVDPage(t *testing.T) {
+	t.Parallel()
 	const fixture = `{
       "resultsPerPage": 2,
       "startIndex": 0,
@@ -59,6 +60,7 @@ func TestParseNVDPage(t *testing.T) {
 }
 
 func TestNVDCredentialedMirrorRemainsSupported(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, password, ok := r.BasicAuth()
 		if !ok || user != "fixture" || password != "fixture" {

@@ -106,6 +106,7 @@ func condTrue(conds []metav1.Condition, typ string) bool {
 // =================== ConstellationAdmissionRule ============================
 
 func TestAdmissionRule_AddsFinalizerThenUpserts(t *testing.T) {
+	t.Parallel()
 	scheme := policyScheme(t)
 	car := &cv1alpha1.ConstellationAdmissionRule{
 		ObjectMeta: metav1.ObjectMeta{Name: "no-privileged", Generation: 1},
@@ -168,6 +169,7 @@ func TestAdmissionRule_AddsFinalizerThenUpserts(t *testing.T) {
 }
 
 func TestAdmissionRule_DriftCorrected(t *testing.T) {
+	t.Parallel()
 	scheme := policyScheme(t)
 	car := &cv1alpha1.ConstellationAdmissionRule{
 		ObjectMeta: metav1.ObjectMeta{Name: "drifty", Generation: 1, Finalizers: []string{policyFinalizer}},
@@ -201,6 +203,7 @@ func TestAdmissionRule_DriftCorrected(t *testing.T) {
 }
 
 func TestAdmissionRule_DeleteRemovesRowAndFinalizer(t *testing.T) {
+	t.Parallel()
 	scheme := policyScheme(t)
 	now := metav1.NewTime(time.Now())
 	car := &cv1alpha1.ConstellationAdmissionRule{
@@ -240,6 +243,7 @@ func TestAdmissionRule_DeleteRemovesRowAndFinalizer(t *testing.T) {
 // mutated to a non-UUID after the row was written, deletion falls back to the last-applied org
 // so the backing row is still removed (not orphaned) before the finalizer is released.
 func TestAdmissionRule_DeleteMutatedOrgIDUsesLastApplied(t *testing.T) {
+	t.Parallel()
 	scheme := policyScheme(t)
 	now := metav1.NewTime(time.Now())
 	car := &cv1alpha1.ConstellationAdmissionRule{
@@ -271,6 +275,7 @@ func TestAdmissionRule_DeleteMutatedOrgIDUsesLastApplied(t *testing.T) {
 }
 
 func TestAdmissionRule_InvalidSpecNoUpsert(t *testing.T) {
+	t.Parallel()
 	scheme := policyScheme(t)
 	car := &cv1alpha1.ConstellationAdmissionRule{
 		ObjectMeta: metav1.ObjectMeta{Name: "bad-org", Generation: 1, Finalizers: []string{policyFinalizer}},
@@ -302,6 +307,7 @@ func TestAdmissionRule_InvalidSpecNoUpsert(t *testing.T) {
 }
 
 func TestAdmissionRule_StoreErrorRequeues(t *testing.T) {
+	t.Parallel()
 	scheme := policyScheme(t)
 	car := &cv1alpha1.ConstellationAdmissionRule{
 		ObjectMeta: metav1.ObjectMeta{Name: "transient", Generation: 1, Finalizers: []string{policyFinalizer}},
@@ -323,6 +329,7 @@ func TestAdmissionRule_StoreErrorRequeues(t *testing.T) {
 // imperative row is reported as a Conflict (not a transient error-requeue) and is retried slowly so
 // it self-heals if the imperative row is later removed.
 func TestAdmissionRule_ImperativeConflictSurfaced(t *testing.T) {
+	t.Parallel()
 	scheme := policyScheme(t)
 	car := &cv1alpha1.ConstellationAdmissionRule{
 		ObjectMeta: metav1.ObjectMeta{Name: "collide", Generation: 1, Finalizers: []string{policyFinalizer}},
@@ -366,6 +373,7 @@ func newResponseCR() *cv1alpha1.ConstellationResponseRule {
 }
 
 func TestResponseRule_UpsertMapsFields(t *testing.T) {
+	t.Parallel()
 	scheme := policyScheme(t)
 	crr := newResponseCR()
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(crr).
@@ -410,6 +418,7 @@ func TestResponseRule_UpsertMapsFields(t *testing.T) {
 // non-UUID .spec.orgID at delete time falls back to the last-applied org so no orphan row
 // survives to keep firing actions.
 func TestResponseRule_DeleteMutatedOrgIDUsesLastApplied(t *testing.T) {
+	t.Parallel()
 	scheme := policyScheme(t)
 	now := metav1.NewTime(time.Now())
 	crr := newResponseCR()
@@ -439,6 +448,7 @@ func TestResponseRule_DeleteMutatedOrgIDUsesLastApplied(t *testing.T) {
 // (requeued) StoreError must NOT advance ObservedGeneration, while a permanent failure does, so a
 // readiness gate keyed on observedGeneration==generation cannot mistake a retry for settled.
 func TestMarkError_TransientDoesNotAdvanceObservedGeneration(t *testing.T) {
+	t.Parallel()
 	transient := &cv1alpha1.PolicyStatus{ObservedGeneration: 3}
 	markError(transient, 7, "StoreError", "db down", false)
 	if transient.ObservedGeneration != 3 {
@@ -452,6 +462,7 @@ func TestMarkError_TransientDoesNotAdvanceObservedGeneration(t *testing.T) {
 }
 
 func TestResponseRule_InvalidSpecRejected(t *testing.T) {
+	t.Parallel()
 	scheme := policyScheme(t)
 	crr := newResponseCR()
 	crr.Spec.Conditions[0].Op = "startswith" // invalid op -> Validate fails
@@ -477,6 +488,7 @@ func TestResponseRule_InvalidSpecRejected(t *testing.T) {
 }
 
 func TestResponseRule_InvalidLegacyTagRemovesLastAppliedRow(t *testing.T) {
+	t.Parallel()
 	scheme := policyScheme(t)
 	crr := newResponseCR()
 	crr.Status.LastAppliedOrgID = testOrg
@@ -525,6 +537,7 @@ func TestResponseRule_InvalidLegacyTagRemovesLastAppliedRow(t *testing.T) {
 }
 
 func TestResponseRule_InvalidSpecDeleteFailureRequeues(t *testing.T) {
+	t.Parallel()
 	scheme := policyScheme(t)
 	crr := newResponseCR()
 	crr.Status.LastAppliedOrgID = testOrg
@@ -553,6 +566,7 @@ func TestResponseRule_InvalidSpecDeleteFailureRequeues(t *testing.T) {
 }
 
 func TestResponseRule_DeleteRemovesRow(t *testing.T) {
+	t.Parallel()
 	scheme := policyScheme(t)
 	now := metav1.NewTime(time.Now())
 	crr := newResponseCR()

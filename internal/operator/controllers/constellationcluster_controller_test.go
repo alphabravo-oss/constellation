@@ -28,6 +28,7 @@ func newTestScheme() *runtime.Scheme {
 }
 
 func TestReconcile_AllSubsystemsEnabled(t *testing.T) {
+	t.Parallel()
 	scheme := newTestScheme()
 	cc := &cv1alpha1.ConstellationCluster{
 		ObjectMeta: metav1.ObjectMeta{Name: "demo", Generation: 1},
@@ -129,6 +130,7 @@ func hasVolumeMount(mounts []corev1.VolumeMount, name, path string) bool {
 }
 
 func TestReconcile_RoleSpecificImagesAndHPA(t *testing.T) {
+	t.Parallel()
 	scheme := newTestScheme()
 	min := int32(3)
 	max := int32(20)
@@ -205,6 +207,7 @@ func TestReconcile_RoleSpecificImagesAndHPA(t *testing.T) {
 }
 
 func TestReconcile_TogglesDeleteResources(t *testing.T) {
+	t.Parallel()
 	scheme := newTestScheme()
 	cc := &cv1alpha1.ConstellationCluster{
 		ObjectMeta: metav1.ObjectMeta{Name: "demo"},

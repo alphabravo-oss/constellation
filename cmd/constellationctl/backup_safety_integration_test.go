@@ -12,38 +12,27 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/alphabravocompany/constellation/pkg/backup"
 )
 
 func TestBackupCLIExplicitVerificationFailurePreventsUpload(t *testing.T) {
-	dsn := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Fatal("owned disposable database required")
-	}
-	pool, err := pgxpool.New(t.Context(), dsn)
-	if err != nil {
-		t.Fatal("fixture pool failed")
-	}
-	defer pool.Close()
-	var database string
-	if err = pool.QueryRow(t.Context(), "SELECT current_database()").Scan(&database); err != nil || database != "constellation_test" {
-		t.Fatal("refusing non-disposable database")
-	}
+	pool := pgtest.Pool(t)
 	org := uuid.New()
-	if _, err = pool.Exec(t.Context(), "INSERT INTO orgs(id,name,display_name) VALUES($1,$2,'CLI verification fixture')", org, "cli-"+org.String()); err != nil {
+	if _, err := pool.Exec(t.Context(), "INSERT INTO orgs(id,name,display_name) VALUES($1,$2,'CLI verification fixture')", org, "cli-"+org.String()); err != nil {
 		t.Fatal(err)
 	}
 	keys := t.TempDir()
 	private, public := filepath.Join(keys, "private"), filepath.Join(keys, "public")
 	otherPrivate, otherPublic := filepath.Join(keys, "other-private"), filepath.Join(keys, "other-public")
-	if err = backup.GenerateEd25519Keypair(private, public); err != nil {
+	if err := backup.GenerateEd25519Keypair(private, public); err != nil {
 		t.Fatal(err)
 	}
-	if err = backup.GenerateEd25519Keypair(otherPrivate, otherPublic); err != nil {
+	if err := backup.GenerateEd25519Keypair(otherPrivate, otherPublic); err != nil {
 		t.Fatal(err)
 	}
 	temp := t.TempDir()
@@ -53,8 +42,8 @@ func TestBackupCLIExplicitVerificationFailurePreventsUpload(t *testing.T) {
 	var output bytes.Buffer
 	command.SetOut(&output)
 	command.SetErr(&output)
-	command.SetArgs([]string{"create", "--database-url", dsn, "--org-id", org.String(), "--s3", "s3://backups/prefix", "--sign-key", private, "--verify-key", otherPublic})
-	err = command.Execute()
+	command.SetArgs([]string{"create", "--database-url", pgtest.URL(t), "--org-id", org.String(), "--s3", "s3://backups/prefix", "--sign-key", private, "--verify-key", otherPublic})
+	err := command.Execute()
 	if err == nil || !strings.Contains(err.Error(), "verification") {
 		t.Fatal("failed verification did not stop upload")
 	}
@@ -69,30 +58,18 @@ func TestBackupCLIExplicitVerificationFailurePreventsUpload(t *testing.T) {
 }
 
 func TestBackupCLICatalogUncertaintyHasDiscoverableRecoveryReceipt(t *testing.T) {
-	dsn := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Fatal("owned disposable database required")
-	}
-	pool, err := pgxpool.New(t.Context(), dsn)
-	if err != nil {
-		t.Fatal("fixture connection unavailable")
-	}
-	t.Cleanup(pool.Close)
-	var database string
-	if err = pool.QueryRow(t.Context(), "SELECT current_database()").Scan(&database); err != nil || database != "constellation_test" {
-		t.Fatal("refusing non-disposable database")
-	}
+	pool := pgtest.Pool(t)
 	org := uuid.New()
-	if _, err = pool.Exec(t.Context(), "INSERT INTO orgs(id,name,display_name) VALUES($1,$2,'CLI catalog fixture')", org, "cli-"+org.String()); err != nil {
+	if _, err := pool.Exec(t.Context(), "INSERT INTO orgs(id,name,display_name) VALUES($1,$2,'CLI catalog fixture')", org, "cli-"+org.String()); err != nil {
 		t.Fatal(err)
 	}
 	name := "cli_catalog_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	function := pgx.Identifier{name}.Sanitize()
 	trigger := pgx.Identifier{name + "_trigger"}.Sanitize()
-	if _, err = pool.Exec(t.Context(), "CREATE FUNCTION "+function+"() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture-secret-must-not-escape'; END $$"); err != nil {
+	if _, err := pool.Exec(t.Context(), "CREATE FUNCTION "+function+"() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture-secret-must-not-escape'; END $$"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = pool.Exec(t.Context(), "CREATE TRIGGER "+trigger+" BEFORE INSERT ON backups FOR EACH ROW WHEN(NEW.org_id='"+org.String()+"'::uuid) EXECUTE FUNCTION "+function+"()"); err != nil {
+	if _, err := pool.Exec(t.Context(), "CREATE TRIGGER "+trigger+" BEFORE INSERT ON backups FOR EACH ROW WHEN(NEW.org_id='"+org.String()+"'::uuid) EXECUTE FUNCTION "+function+"()"); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
@@ -107,8 +84,8 @@ func TestBackupCLICatalogUncertaintyHasDiscoverableRecoveryReceipt(t *testing.T)
 	var output bytes.Buffer
 	command.SetOut(&output)
 	command.SetErr(&output)
-	command.SetArgs([]string{"create", "--database-url", dsn, "--org-id", org.String(), "--s3", "s3://backups/catalog-proof"})
-	err = command.Execute()
+	command.SetArgs([]string{"create", "--database-url", pgtest.URL(t), "--org-id", org.String(), "--s3", "s3://backups/catalog-proof"})
+	err := command.Execute()
 	if strings.Contains("\n"+output.String(), "\nuploaded ") {
 		t.Fatal("unconfirmed catalog reported success")
 	}
@@ -120,7 +97,7 @@ func TestMain(m *testing.M) {
 		catalogUploadFixture()
 		return
 	}
-	os.Exit(m.Run())
+	pgtest.Main(m)
 }
 
 func catalogUploadFixture() {

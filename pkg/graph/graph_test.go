@@ -6,6 +6,7 @@ import (
 )
 
 func TestGraph_AddAndAggregate(t *testing.T) {
+	t.Parallel()
 	g := New()
 	t1 := time.Date(2026, 5, 12, 12, 0, 0, 0, time.UTC)
 	g.AddEdge("api", "db", Attrs{Bytes: 100, Packets: 1, Protocol: "tcp", Port: 5432, LastSeen: t1})
@@ -34,6 +35,7 @@ func TestGraph_AddAndAggregate(t *testing.T) {
 }
 
 func TestGraph_ConversationSecurityFields(t *testing.T) {
+	t.Parallel()
 	g := New()
 	t1 := time.Now()
 	// two edges api→db: an allow http and a later deny ssl with higher severity.
@@ -56,6 +58,7 @@ func TestGraph_ConversationSecurityFields(t *testing.T) {
 }
 
 func TestGraph_Conversations(t *testing.T) {
+	t.Parallel()
 	g := New()
 	t1 := time.Now()
 	g.AddEdge("api", "db", Attrs{Bytes: 10, Protocol: "tcp", Port: 5432, LastSeen: t1})
@@ -75,6 +78,7 @@ func TestGraph_Conversations(t *testing.T) {
 }
 
 func TestGraph_NodesSorted(t *testing.T) {
+	t.Parallel()
 	g := New()
 	g.AddNode("b")
 	g.AddNode("a")

@@ -1,3 +1,5 @@
+//go:build integration
+
 package runtime
 
 import (
@@ -17,7 +19,6 @@ import (
 )
 
 func TestParseFileProfileFilter(t *testing.T) {
-	t.Parallel()
 
 	tests := []struct {
 		name       string

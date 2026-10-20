@@ -3,6 +3,7 @@ package federation
 import "testing"
 
 func TestStateMachine(t *testing.T) {
+	t.Parallel()
 	m := Membership{State: StateStandalone}
 	m2, err := Promote(m)
 	if err != nil || m2.State != StateMaster {
@@ -29,6 +30,7 @@ func TestStateMachine(t *testing.T) {
 }
 
 func TestFilterSinceAndNextRevision(t *testing.T) {
+	t.Parallel()
 	rev := []RuleRevision{
 		{Revision: 1}, {Revision: 5}, {Revision: 3}, {Revision: 2},
 	}
@@ -42,6 +44,7 @@ func TestFilterSinceAndNextRevision(t *testing.T) {
 }
 
 func TestMember_Validate(t *testing.T) {
+	t.Parallel()
 	if err := (&Member{}).Validate(); err == nil {
 		t.Fatal("expected error")
 	}

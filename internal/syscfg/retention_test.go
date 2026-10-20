@@ -1,10 +1,13 @@
+//go:build integration
+
 package syscfg
 
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"testing"
+
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/testutil/pgfixture"
@@ -37,15 +40,7 @@ func TestRetentionDefaultsPreserveStoredHolds(t *testing.T) {
 
 func TestEffectiveRetentionRespectsEveryOrgAndFailsClosed(t *testing.T) {
 	ctx := context.Background()
-	url := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-	if url == "" {
-		t.Skip("CONSTELLATION_TEST_DATABASE_URL not set; integration test")
-	}
-	database, err := db.Connect(ctx, url)
-	if err != nil {
-		t.Skipf("test database unavailable: %v", err)
-	}
-	t.Cleanup(database.Close)
+	database := db.NewFromPool(pgtest.Pool(t))
 	pool := pgfixture.Schema(t, database.Pool())
 	if _, err := pool.Exec(ctx, `CREATE TABLE orgs(id int PRIMARY KEY); CREATE TABLE system_config(org_id int PRIMARY KEY,config jsonb); INSERT INTO orgs VALUES(1),(2); INSERT INTO system_config VALUES (1,'{"events_retention_days":7}'),(2,'{"events_retention_days":90}');`); err != nil {
 		t.Fatal(err)

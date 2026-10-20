@@ -1,3 +1,5 @@
+//go:build integration
+
 package server
 
 import (
@@ -22,7 +24,7 @@ func newIdleTimeoutTestServer(t *testing.T, idle time.Duration) (*httptest.Serve
 	t.Helper()
 	t.Setenv("CONSTELLATION_ALLOW_HS256_JWT", "true") // tests sign with a symmetric JWTKeys secret
 	ctx := context.Background()
-	url := testDBURL()
+	url := testDBURL(t)
 
 	pool, err := pgxpool.New(ctx, url)
 	if err != nil {

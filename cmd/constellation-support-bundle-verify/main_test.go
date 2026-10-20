@@ -58,6 +58,7 @@ func writeBundle(t *testing.T, contents []byte) string {
 }
 
 func TestVerifySignedBundle(t *testing.T) {
+	t.Parallel()
 	fixture, pinnedKeyID := signedFixture(t)
 	if err := verify(fixture, pinnedKeyID); err != nil {
 		t.Fatal(err)

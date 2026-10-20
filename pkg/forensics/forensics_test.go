@@ -7,6 +7,7 @@ import (
 )
 
 func TestCapture_RoundTrip(t *testing.T) {
+	t.Parallel()
 	env := Envelope{
 		Trigger:    "quarantine",
 		CapturedAt: time.Now().UTC(),

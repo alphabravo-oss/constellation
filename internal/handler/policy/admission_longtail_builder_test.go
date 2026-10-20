@@ -21,6 +21,7 @@ func bodyWith(pairs ...[2]string) createAdmissionRuleBody {
 // The DTO builder translates the new ADM-26/ADM-29 criteria keys into YAML that
 // the engine parser accepts and maps onto the expected conditions.
 func TestBuildAdmissionSpecYAML_NewCriteriaRoundTrip(t *testing.T) {
+	t.Parallel()
 	body := bodyWith(
 		[2]string{"host_ipc", ""},
 		[2]string{"allow_privilege_escalation", ""},
@@ -58,12 +59,14 @@ func TestBuildAdmissionSpecYAML_NewCriteriaRoundTrip(t *testing.T) {
 }
 
 func TestBuildAdmissionSpecYAML_RejectsBadCVECount(t *testing.T) {
+	t.Parallel()
 	if _, err := buildAdmissionSpecYAML(bodyWith([2]string{"max_medium_cves", "-1"})); err == nil {
 		t.Fatal("negative max_medium_cves must be rejected")
 	}
 }
 
 func TestBuildAdmissionSpecYAML_GroupRoundTrip(t *testing.T) {
+	t.Parallel()
 	body := bodyWith([2]string{"run_as_privileged", ""})
 	body.Group = "payments"
 	specYAML, err := buildAdmissionSpecYAML(body)
@@ -89,6 +92,7 @@ func TestBuildAdmissionSpecYAML_GroupRoundTrip(t *testing.T) {
 // Every catalog key must have a builder case (the comment in admission_options.go
 // requires the two stay in lockstep).
 func TestAdmissionCatalogKeysHaveBuilderCases(t *testing.T) {
+	t.Parallel()
 	for _, opt := range admissionCriteriaCatalog() {
 		val := ""
 		switch opt.ValueType {

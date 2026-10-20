@@ -219,6 +219,7 @@ func TestCISModuleChangingEvidenceNeverPasses(t *testing.T) {
 }
 
 func TestCISModuleTraversalAndReadBounds(t *testing.T) {
+	t.Parallel()
 	host := cisHostFixture()
 	for _, limits := range [][2]int{{0, 64}, {100, 0}} {
 		if _, err := scanModuleTree(host, "lib/modules/"+cisTestRelease, "cramfs", limits[0], limits[1]); err == nil {
@@ -300,6 +301,7 @@ func TestCISSSHUnreadTailAndCloseFailureCannotPass(t *testing.T) {
 }
 
 func TestCISSSHPublicWrapperAndReportCounts(t *testing.T) {
+	t.Parallel()
 	directory := t.TempDir()
 	root, err := os.OpenRoot(directory)
 	if err != nil {
@@ -341,6 +343,7 @@ func TestCISSSHPublicWrapperAndReportCounts(t *testing.T) {
 }
 
 func TestCISModuleProcShapeSupportsKernelVariants(t *testing.T) {
+	t.Parallel()
 	for _, record := range []string{
 		"other 4096 - - Live 0x0\n",
 		"other 4096 -1 - Unloading 0x0000000000000000\n",
@@ -507,6 +510,7 @@ func TestCISModuleDirectoryTerminalEOF(t *testing.T) {
 }
 
 func TestCISBuiltinPositiveSurvivesUnrelatedSourceFailure(t *testing.T) {
+	t.Parallel()
 	proc, host := cisProcFixture(), cisHostFixture()
 	delete(proc, "modules")
 	builtinPath := "lib/modules/" + cisTestRelease + "/modules.builtin"
@@ -527,6 +531,7 @@ func TestCISBuiltinPositiveSurvivesUnrelatedSourceFailure(t *testing.T) {
 }
 
 func TestCISModuleMetadataBoundsCannotPass(t *testing.T) {
+	t.Parallel()
 	for _, record := range []string{strings.Repeat("\n", cisModuleEntries+1), strings.Repeat("x", 65537)} {
 		proc := cisProcFixture()
 		proc["modules"].Data = []byte(record)

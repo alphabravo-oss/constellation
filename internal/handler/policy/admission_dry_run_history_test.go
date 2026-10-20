@@ -1,3 +1,5 @@
+//go:build integration
+
 package policy
 
 import (
@@ -16,6 +18,7 @@ import (
 )
 
 func TestPolicies_AssessPersistsDryRunHistoryAndAudit(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 

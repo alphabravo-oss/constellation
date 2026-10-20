@@ -38,6 +38,7 @@ func manualRetryTimer() (chan time.Time, <-chan struct{}, func() bool) {
 }
 
 func TestRateLimitedRetryPreservesJobAndWatermark(t *testing.T) {
+	t.Parallel()
 	d := lifecycleDispatcher(t)
 	originalTime := time.Now().Add(-4 * time.Minute)
 	j := &job{deliveryID: uuid.New(), enqueuedAt: originalTime, attempt: 2, event: Event{Body: "original payload"}}
@@ -89,6 +90,7 @@ func TestRateLimitedRetryCancellationStopsTimerAndEnqueue(t *testing.T) {
 }
 
 func TestRateLimitedRetryReadyTimerCannotOverrideCanceledParent(t *testing.T) {
+	t.Parallel()
 	d := lifecycleDispatcher(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -111,6 +113,7 @@ func TestRateLimitedRetryReadyTimerCannotOverrideCanceledParent(t *testing.T) {
 }
 
 func TestDispatcherStopWaitsForRetryAndRejectsLateRegistration(t *testing.T) {
+	t.Parallel()
 	d := lifecycleDispatcher(t)
 	entered := make(chan struct{})
 	release := make(chan struct{})
@@ -148,6 +151,7 @@ func TestDispatcherStopWaitsForRetryAndRejectsLateRegistration(t *testing.T) {
 }
 
 func TestDispatcherConcurrentStartStopAndRetryRegistration(t *testing.T) {
+	t.Parallel()
 	for range 50 {
 		d := NewDispatcher(nil, DispatcherConfig{Workers: 1, Buffer: 1, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 		ctx, cancel := context.WithCancel(t.Context())
@@ -172,6 +176,7 @@ func TestDispatcherConcurrentStartStopAndRetryRegistration(t *testing.T) {
 }
 
 func TestRateLimitedRetryQueueFailurePreservesExistingJobAndReportsError(t *testing.T) {
+	t.Parallel()
 	pool, err := pgxpool.New(t.Context(), "postgres://fixture@127.0.0.1:1/unused?sslmode=disable")
 	if err != nil {
 		t.Fatal(err)

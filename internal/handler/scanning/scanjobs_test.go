@@ -1,3 +1,5 @@
+//go:build integration
+
 package scanning
 
 import (
@@ -7,7 +9,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -19,7 +20,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/scanner"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/responserule"
@@ -27,6 +27,7 @@ import (
 )
 
 func TestScannerFindingDetailIncludesVulnDBBundle(t *testing.T) {
+	t.Parallel()
 	exportedAt := time.Date(2026, 6, 12, 1, 2, 3, 0, time.UTC)
 	metadata := &scanner.BundleMetadata{
 		SchemaVersion: "v2",
@@ -154,6 +155,7 @@ func TestScannerFindingDetailIncludesVulnDBBundle(t *testing.T) {
 }
 
 func TestScannerFindingDetailIncludesVulnerabilityProfileDecision(t *testing.T) {
+	t.Parallel()
 	decision := map[string]any{
 		"profile_id":   "profile-1",
 		"profile_name": "Production criticals",
@@ -183,6 +185,7 @@ func TestScannerFindingDetailIncludesVulnerabilityProfileDecision(t *testing.T) 
 }
 
 func TestVulnerabilityProfileDecisionForFinding(t *testing.T) {
+	t.Parallel()
 	clusterID := uuid.New()
 	target := handler.ScanTarget{
 		ClusterID: &clusterID,
@@ -231,6 +234,7 @@ func TestVulnerabilityProfileDecisionForFinding(t *testing.T) {
 }
 
 func TestScanJobs_RejectsExecutableRepositoryTarget(t *testing.T) {
+	t.Parallel()
 	h := NewScanJobs(nil, nil)
 	body, _ := json.Marshal(EnqueueRequest{TargetType: "repository", TargetRef: "github.com/acme/app"})
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/scan-jobs", bytes.NewReader(body))
@@ -243,19 +247,6 @@ func TestScanJobs_RejectsExecutableRepositoryTarget(t *testing.T) {
 	if got := rec.Body.String(); !bytes.Contains([]byte(got), []byte("repository package evidence")) {
 		t.Fatalf("error body = %s", got)
 	}
-}
-
-func openTestDB(t *testing.T) *db.DB {
-	t.Helper()
-	url := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-	if url == "" {
-		t.Skip("CONSTELLATION_TEST_DATABASE_URL not set; integration test")
-	}
-	d, err := db.Connect(context.Background(), url)
-	if err != nil {
-		t.Skipf("skipping: cannot reach test DB (%v)", err)
-	}
-	return d
 }
 
 // clearScanQueue removes every claimable (pending/running/paused) scan job for
@@ -275,6 +266,7 @@ func clearScanQueue(t *testing.T, pool *pgxpool.Pool, orgID uuid.UUID) {
 }
 
 func TestScanJobs_QueueLifecycle(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -459,6 +451,7 @@ func TestScanJobs_QueueLifecycle(t *testing.T) {
 }
 
 func TestScanJobs_ClaimReclaimsExpiredLeaseAndFailureRequiresWorker(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -572,6 +565,7 @@ func TestScanJobs_ClaimReclaimsExpiredLeaseAndFailureRequiresWorker(t *testing.T
 }
 
 func TestScanJobs_RenewRequiresSameScannerInstance(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -667,6 +661,7 @@ func TestScanJobs_RenewRequiresSameScannerInstance(t *testing.T) {
 }
 
 func TestScanJobs_RetryBackoffAndMaxAttempts(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -850,6 +845,7 @@ SELECT status, COALESCE(error, ''), finished_at
 }
 
 func TestScanJobs_ClaimFiltersTargetTypes(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -920,6 +916,7 @@ func TestScanJobs_ClaimFiltersTargetTypes(t *testing.T) {
 // running cluster, while the canonical image_scan_findings row is still preserved. The
 // assertions below were flipped to match the unified per-asset model.
 func TestScanJobs_CompleteWritesCanonicalImageResultWithoutFindingProjection(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -1138,6 +1135,7 @@ SELECT COUNT(DISTINCT r.id)::int, COUNT(f.id)::int, MIN(r.id::text)
 }
 
 func TestScanJobs_CompleteWritesImageScanArtifacts(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -1719,6 +1717,7 @@ SELECT package_count, payload
 }
 
 func TestCompleteScanEnginesToResultsTracksSuccessfulEngines(t *testing.T) {
+	t.Parallel()
 	engines := completeScanEnginesToResults([]completeScanEngine{
 		{Engine: " Trivy "},
 		{Engine: "grype", Error: "grype failed"},
@@ -1739,6 +1738,7 @@ func TestCompleteScanEnginesToResultsTracksSuccessfulEngines(t *testing.T) {
 }
 
 func TestImageScanArtifacts_RecordsCleanSecretScanOnlyForSuccessfulTrivy(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -1858,6 +1858,7 @@ SELECT COUNT(*)::int
 }
 
 func TestScanFindingStableKeyIgnoresPackageLocations(t *testing.T) {
+	t.Parallel()
 	base := scanner.Finding{
 		VulnerabilityID: "CVE-2026-0001",
 		Package: scanner.Package{
@@ -1894,6 +1895,7 @@ func TestScanFindingStableKeyIgnoresPackageLocations(t *testing.T) {
 }
 
 func TestScanJobs_RepositorySourceImageScanPreservesProvenance(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -2086,6 +2088,7 @@ SELECT id, COALESCE(source_type, ''), COALESCE(source_ref, '')
 }
 
 func TestScanJobs_ImpactedWorkloadsMatchesDigestAndCluster(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -2182,6 +2185,7 @@ INSERT INTO image_workload_links (
 }
 
 func TestScanJobs_ListIncludesQueueMetricsByTargetType(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -2256,6 +2260,7 @@ VALUES ($1, $2, 'image', 'registry.example.test/app:latest', 'manual', 'registry
 // idempotency (re-promotion replaces, no dupes) and running-only scoping (an unlinked image
 // produces nothing).
 func TestScanJobs_ImageFindingsPromotedToDashboardAndFindingsList(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -2438,6 +2443,7 @@ VALUES ($1, $2, 'k', 'CVE-2099-unused', 'unused', 'critical', 90)`, orgID, other
 }
 
 func TestScanJobs_StatusReportsNeuVectorAggregate(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	pool := d.Pool()
@@ -2497,6 +2503,7 @@ VALUES ($1, $2, 'completed', NOW() - INTERVAL '7 minutes', NOW() - INTERVAL '6 m
 }
 
 func TestScanJobs_CanceledRunningWorkerReportsAreDropped(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	pool := d.Pool()
@@ -2573,6 +2580,7 @@ VALUES ($1, $2, $3, 'canceled', $4, NOW() - INTERVAL '5 minutes', NOW() - INTERV
 }
 
 func TestScannerTokenMiddleware_Rejects(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -2640,6 +2648,7 @@ func TestVulnProfileDecisionApplication(t *testing.T) {
 // rescan (re-promotion) preserves the user's manual triage — lifecycle, assignee, accepted_until,
 // priority, and the original first_seen_at — instead of resetting the CVE to a fresh open finding.
 func TestPromoteImageFindingsAppliesSuppressAndCarriesForwardTriage(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -2816,6 +2825,7 @@ SELECT lifecycle, assignee_id, priority, first_seen_at, accepted_until FROM find
 // via image_workload_links and writes a scope='image' quarantine_entries row per cluster, instead
 // of audit-logging enforced=skipped and blocking nothing.
 func TestScanResponseRuleQuarantineEnforcesForRegistryScan(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -2932,6 +2942,7 @@ var _ = pgxpool.New
 // human repo:tag filled in from the workload map (and that an unmapped digest is left
 // untouched rather than guessed).
 func TestResolveEvidenceImageName(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	ctx := context.Background()

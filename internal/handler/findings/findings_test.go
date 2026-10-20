@@ -1,3 +1,5 @@
+//go:build integration
+
 package findings
 
 import (
@@ -15,6 +17,7 @@ import (
 )
 
 func TestFindings_ListReturnsLifecycleCountsForKind(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -64,6 +67,7 @@ VALUES ($1, $2, 'vulnerability', $3, $4, $4, 'high', 70, $5)`,
 }
 
 func TestFindings_ExposesScannerProvenanceAndReconciliation(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -224,6 +228,7 @@ VALUES ($1, $2, $3, 'vulnerability', 'CVE-2099-0001', 'provenance finding',
 }
 
 func TestFindings_ByCVEExposesCVSSBaseAndVector(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 

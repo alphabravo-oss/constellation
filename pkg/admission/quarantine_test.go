@@ -32,6 +32,7 @@ func newSourceWith(t *testing.T, entries []quarantine.Entry) *quarantine.Source 
 }
 
 func TestEvaluate_Quarantine_DeniesNamespace(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	e.SetQuarantine(newSourceWith(t, []quarantine.Entry{{
 		ID: uuid.New(), Scope: quarantine.ScopeNamespace, MatchKey: "tainted",
@@ -54,6 +55,7 @@ func TestEvaluate_Quarantine_DeniesNamespace(t *testing.T) {
 }
 
 func TestEvaluate_Quarantine_DeniesImage(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	e.SetQuarantine(newSourceWith(t, []quarantine.Entry{{
 		ID: uuid.New(), Scope: quarantine.ScopeImage,
@@ -74,6 +76,7 @@ func TestEvaluate_Quarantine_DeniesImage(t *testing.T) {
 }
 
 func TestEvaluate_Quarantine_BypassesMonitorMode(t *testing.T) {
+	t.Parallel()
 	// Even if no enforce rules match the pod, quarantine still denies.
 	// Tests the architectural claim that quarantine is not subject to
 	// the policy state machine.
@@ -103,6 +106,7 @@ func TestEvaluate_Quarantine_BypassesMonitorMode(t *testing.T) {
 }
 
 func TestEvaluate_Quarantine_FiresOnDenyHook(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	got := make(chan DenyEvent, 1)
 	e.OnDeny = func(_ context.Context, ev DenyEvent) { got <- ev }
@@ -133,6 +137,7 @@ func TestEvaluate_Quarantine_FiresOnDenyHook(t *testing.T) {
 }
 
 func TestEvaluate_Quarantine_NilSourceIsNoop(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	// e.Quarantine is nil by default — engine should behave exactly as
 	// before E4 (this guards against accidentally requiring the source).

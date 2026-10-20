@@ -1,3 +1,5 @@
+//go:build integration
+
 package network
 
 import (
@@ -19,6 +21,7 @@ import (
 )
 
 func TestNetworkRulesPortableExportImportAuthoredOverrides(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -315,6 +318,7 @@ func TestNetworkRulesPortableImportCompletionFailureRollsBackWrites(t *testing.T
 }
 
 func TestNetworkRulesPortableImportAttemptFailurePreventsWrites(t *testing.T) {
+	t.Parallel()
 	database, importRules, orgID, clusterID := portableImportFixture(t)
 	ctx := context.Background()
 	const constraint = "test_portable_import_attempt_guard"
@@ -336,6 +340,7 @@ func TestNetworkRulesPortableImportAttemptFailurePreventsWrites(t *testing.T) {
 }
 
 func TestNetworkRulesPortableImportKeepsPerRowErrors(t *testing.T) {
+	t.Parallel()
 	database, importRules, orgID, clusterID := portableImportFixture(t)
 	response := importRules("apiVersion: constellation/v1\nkind: NetworkRuleBundle\nrules:\n  - from: prod/bad\n    to: prod/db\n    priority: 2147483648\n  - from: prod/good\n    to: prod/db\n    priority: 7\n")
 	if response.Code != http.StatusOK {
@@ -365,6 +370,7 @@ func TestNetworkRulesPortableImportKeepsPerRowErrors(t *testing.T) {
 }
 
 func TestNetworkRulesPortableImportSerializesConcurrentWrites(t *testing.T) {
+	t.Parallel()
 	database, importRules, orgID, clusterID := portableImportFixture(t)
 	const imports = 4
 	responses := make(chan *httptest.ResponseRecorder, imports)

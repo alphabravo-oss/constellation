@@ -4,6 +4,7 @@ import "testing"
 
 // ADM-26: long-tail pod criteria parse into the right RuleConditions.
 func TestRuleFromYAMLParsesLongTailPodCriteria(t *testing.T) {
+	t.Parallel()
 	rule, supported, err := RuleFromYAML("long-tail", "long-tail", "", "enforce", `apiVersion: constellation.alphabravo.io/v1alpha1
 kind: AdmissionRule
 metadata:
@@ -50,6 +51,7 @@ spec:
 
 // ADM-26: a malformed resourceLimit quantity is rejected at load time.
 func TestRuleFromYAMLRejectsBadResourceQuantity(t *testing.T) {
+	t.Parallel()
 	_, _, err := RuleFromYAML("bad-q", "bad-q", "", "enforce", `spec:
   pod:
     resourceLimit:
@@ -62,6 +64,7 @@ func TestRuleFromYAMLRejectsBadResourceQuantity(t *testing.T) {
 
 // ADM-29: CVE granularity fields parse into the vulnerability EvidenceGate.
 func TestRuleFromYAMLParsesCVEGranularityGate(t *testing.T) {
+	t.Parallel()
 	rule, supported, err := RuleFromYAML("cve-gran", "cve-gran", "", "enforce", `spec:
   vulnerability:
     maxMediumCount: 20

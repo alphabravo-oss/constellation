@@ -6,6 +6,7 @@ import (
 )
 
 func TestGroup_Matches(t *testing.T) {
+	t.Parallel()
 	g := &Group{Name: "g", Kind: KindGround, Criteria: []Criterion{
 		{Key: "namespace", Value: "prod", Op: OpEq},
 		{Key: "label.app", Value: "api", Op: OpEq},
@@ -21,6 +22,7 @@ func TestGroup_Matches(t *testing.T) {
 }
 
 func TestGroup_ComputeMembers(t *testing.T) {
+	t.Parallel()
 	g := &Group{Name: "g", Kind: KindGround, Criteria: []Criterion{
 		{Key: "namespace", Value: "prod", Op: OpEq},
 	}}
@@ -40,6 +42,7 @@ func TestGroup_ComputeMembers(t *testing.T) {
 }
 
 func TestGroup_Validate_Modes(t *testing.T) {
+	t.Parallel()
 	g := &Group{Name: "g", Kind: KindGround}
 	if err := g.Validate(); err != nil {
 		t.Fatalf("unexpected: %v", err)
@@ -54,6 +57,7 @@ func TestGroup_Validate_Modes(t *testing.T) {
 }
 
 func TestGroup_Matches_RegexAndContains(t *testing.T) {
+	t.Parallel()
 	g := &Group{Name: "g", Kind: KindGround, Criteria: []Criterion{
 		{Key: "label.tier", Value: "front.*", Op: OpRegex},
 		{Key: "label.env", Value: "prod", Op: OpContains},
@@ -65,6 +69,7 @@ func TestGroup_Matches_RegexAndContains(t *testing.T) {
 }
 
 func TestLearnFromObservations(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	obs := []Observation{
 		{At: now, Workload: Workload{ID: "a", Cluster: "c1", Namespace: "payments", Labels: map[string]string{"app": "api"}}},
@@ -90,6 +95,7 @@ func TestLearnFromObservations(t *testing.T) {
 // namespace into one namespace-wide group. Fails before the Service-bucketing change
 // (both services land in a single "payments" group).
 func TestLearnFromObservations_PerService(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	obs := []Observation{
 		{At: now, Workload: Workload{ID: "payments/api", Cluster: "c1", Namespace: "payments", Service: "api", Labels: map[string]string{"app": "api"}}},
@@ -118,6 +124,7 @@ func TestLearnFromObservations_PerService(t *testing.T) {
 }
 
 func TestGroup_Validate(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		g    Group
 		want bool
@@ -136,6 +143,7 @@ func TestGroup_Validate(t *testing.T) {
 }
 
 func TestGroup_MembersChanged(t *testing.T) {
+	t.Parallel()
 	// The stale-membership scenario the reconcile closes: a group authored when
 	// only prod/api existed; a new replica prod/web now matches the criteria.
 	g := &Group{Name: "g", Kind: KindGround, Members: []string{"prod/api"},

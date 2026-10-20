@@ -41,6 +41,7 @@ const cosignVerifyMultiSig = `[
 ]`
 
 func TestDecodeCosignSignaturesSingleSig(t *testing.T) {
+	t.Parallel()
 	sigs := decodeCosignSignatures([]byte(cosignVerifySingleSig))
 	if len(sigs) != 1 {
 		t.Fatalf("expected 1 signature, got %d", len(sigs))
@@ -54,6 +55,7 @@ func TestDecodeCosignSignaturesSingleSig(t *testing.T) {
 }
 
 func TestPickTrustedIdentitySingleSig(t *testing.T) {
+	t.Parallel()
 	policy := TrustPolicy{
 		Identities: []string{`https://github\.com/acme/app/.*`},
 		Issuers:    []string{`https://token\.actions\.githubusercontent\.com`},
@@ -68,6 +70,7 @@ func TestPickTrustedIdentitySingleSig(t *testing.T) {
 // image whose only policy-matching signature is the SECOND one must be trusted. The old
 // first-match regex would have evaluated the attacker's identity and failed closed.
 func TestPickTrustedIdentityMultiSigSecondMatches(t *testing.T) {
+	t.Parallel()
 	policy := TrustPolicy{
 		Identities: []string{`https://github\.com/acme/app/.*`},
 		Issuers:    []string{`https://token\.actions\.githubusercontent\.com`},
@@ -82,6 +85,7 @@ func TestPickTrustedIdentityMultiSigSecondMatches(t *testing.T) {
 }
 
 func TestPickTrustedIdentityNoMatch(t *testing.T) {
+	t.Parallel()
 	policy := TrustPolicy{
 		Identities: []string{`https://github\.com/someone-else/.*`},
 		Issuers:    []string{`https://token\.actions\.githubusercontent\.com`},
@@ -139,6 +143,7 @@ func TestSignatureTrustRejectsSuperstringIdentity(t *testing.T) {
 }
 
 func TestJoinAltAnchorsForCosign(t *testing.T) {
+	t.Parallel()
 	got := joinAlt([]string{`https://github\.com/acme/app/.*`, `ci@example\.test`})
 	want := `^(?:https://github\.com/acme/app/.*|ci@example\.test)$`
 	if got != want {

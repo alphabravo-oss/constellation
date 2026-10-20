@@ -4,10 +4,14 @@ package db
 
 import (
 	"context"
-	"os"
+	"io/fs"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/server/database"
+
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -18,7 +22,7 @@ import (
 // (ADR 0006), so there is no Down section to exercise.
 func threatMigration(t *testing.T) string {
 	t.Helper()
-	body, err := os.ReadFile("../../db/migrations/180_runtime_threat_uint32.sql")
+	body, err := fs.ReadFile(database.FS(), "180_runtime_threat_uint32.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,17 +34,9 @@ func threatMigration(t *testing.T) string {
 }
 func threatMigrationFixture(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	dsn := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("requires disposable PostgreSQL")
-	}
-	base, err := pgxpool.New(t.Context(), dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(base.Close)
+	base := pgtest.Pool(t)
 	p := pgfixture.Schema(t, base)
-	_, err = p.Exec(t.Context(), `CREATE TABLE runtime_threats(threat_id integer NOT NULL);
+	_, err := p.Exec(t.Context(), `CREATE TABLE runtime_threats(threat_id integer NOT NULL);
  CREATE TABLE network_flows(org_id uuid,cluster_id uuid,src_workload text,dst_workload text,protocol text,l7_protocol text,dst_port integer,verdict text,at timestamptz,threat_id integer) PARTITION BY RANGE(at);
  CREATE TABLE network_flows_default PARTITION OF network_flows DEFAULT;
  CREATE TABLE network_flow_rollup_state(id boolean PRIMARY KEY,watermark timestamptz,raw_pruned_before timestamptz);
@@ -53,6 +49,7 @@ func threatMigrationFixture(t *testing.T) *pgxpool.Pool {
 	return p
 }
 func TestThreatUint32MigrationRepairsOnlyProvenHistory(t *testing.T) {
+	t.Parallel()
 	p := threatMigrationFixture(t)
 	ctx := t.Context()
 	_, err := p.Exec(ctx, `INSERT INTO runtime_threats VALUES(-1),(-2147483648),(0),(2147483647);
@@ -99,6 +96,7 @@ func TestThreatUint32MigrationRepairsOnlyProvenHistory(t *testing.T) {
 	}
 }
 func TestThreatUint32MigrationLocksBeforeSchema(t *testing.T) {
+	t.Parallel()
 	p := threatMigrationFixture(t)
 	ctx := t.Context()
 	lock, err := p.Begin(ctx)

@@ -23,6 +23,7 @@ func (allowEngine) Evaluate(_ context.Context, req *admissionv1.AdmissionRequest
 // TestValidateHandlerRecordsAllow asserts validateHandler wires the real decision
 // path into the admission_decisions_total Prometheus counter (allow branch).
 func TestValidateHandlerRecordsAllow(t *testing.T) {
+	t.Parallel()
 	tel, err := telemetry.Init(context.Background(), telemetry.Config{ServiceName: "test-admission-metric"})
 	if err != nil {
 		t.Fatalf("observability init: %v", err)

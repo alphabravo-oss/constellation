@@ -8,6 +8,7 @@ import (
 )
 
 func TestExecuteSnapshot(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	q, err := New(Options{OutputDir: dir, DryRun: false}, CollectorSet{
 		Cordon: LocalCordonCollector(),
@@ -76,6 +77,7 @@ func TestExecuteSnapshot(t *testing.T) {
 }
 
 func TestDryRunSkipsCordon(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	q, err := New(Options{OutputDir: dir, DryRun: true}, CollectorSet{
 		Cordon: LocalCordonCollector(),
@@ -98,6 +100,7 @@ func TestDryRunSkipsCordon(t *testing.T) {
 }
 
 func TestRenderCordonYAML(t *testing.T) {
+	t.Parallel()
 	y := RenderCordonYAML(Target{Namespace: "ns", Pod: "web-1", WorkloadID: "ns/Deployment/web"})
 	if !strings.Contains(y, "podSelector") || !strings.Contains(y, "kube-dns") {
 		t.Fatalf("bad yaml: %s", y)

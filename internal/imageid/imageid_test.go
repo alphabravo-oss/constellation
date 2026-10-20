@@ -3,6 +3,7 @@ package imageid
 import "testing"
 
 func TestParse(t *testing.T) {
+	t.Parallel()
 	cases := map[string]Identity{
 		"ubuntu": {
 			Normalized: "docker.io/library/ubuntu:latest",

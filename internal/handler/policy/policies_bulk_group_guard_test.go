@@ -1,3 +1,5 @@
+//go:build integration
+
 package policy
 
 import (
@@ -32,6 +34,7 @@ func bulkUpdateGroupPolicy(id uuid.UUID, spec string) bulkPolicyOp {
 }
 
 func TestBulkAdmissionPolicyCreateScopesGroupsAndRollsBack(t *testing.T) {
+	t.Parallel()
 	database := openTestDB(t)
 	defer database.Close()
 	pool := database.Pool()
@@ -83,6 +86,7 @@ func TestBulkAdmissionPolicyCreateScopesGroupsAndRollsBack(t *testing.T) {
 }
 
 func TestBulkAdmissionPolicyUpdateValidatesResultingGroups(t *testing.T) {
+	t.Parallel()
 	database := openTestDB(t)
 	defer database.Close()
 	pool := database.Pool()

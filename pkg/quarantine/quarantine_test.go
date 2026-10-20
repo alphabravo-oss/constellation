@@ -35,6 +35,7 @@ func imgName(i int) string {
 }
 
 func TestSnapshotMatch_Namespace(t *testing.T) {
+	t.Parallel()
 	cluster := uuid.New()
 	now := time.Now()
 	entries := []Entry{{
@@ -55,6 +56,7 @@ func TestSnapshotMatch_Namespace(t *testing.T) {
 }
 
 func TestSnapshotMatch_Workload_ReplicaSet(t *testing.T) {
+	t.Parallel()
 	cluster := uuid.New()
 	now := time.Now()
 	entries := []Entry{{
@@ -74,6 +76,7 @@ func TestSnapshotMatch_Workload_ReplicaSet(t *testing.T) {
 }
 
 func TestSnapshotMatch_Workload_DaemonSet(t *testing.T) {
+	t.Parallel()
 	cluster := uuid.New()
 	now := time.Now()
 	entries := []Entry{{
@@ -89,6 +92,7 @@ func TestSnapshotMatch_Workload_DaemonSet(t *testing.T) {
 }
 
 func TestSnapshotMatch_Image_PrefixSemantics(t *testing.T) {
+	t.Parallel()
 	cluster := uuid.New()
 	now := time.Now()
 	entries := []Entry{{
@@ -113,6 +117,7 @@ func TestSnapshotMatch_Image_PrefixSemantics(t *testing.T) {
 }
 
 func TestSnapshotMatch_Image_AnyContainer(t *testing.T) {
+	t.Parallel()
 	cluster := uuid.New()
 	now := time.Now()
 	entries := []Entry{{
@@ -133,6 +138,7 @@ func TestSnapshotMatch_Image_AnyContainer(t *testing.T) {
 }
 
 func TestSnapshotMatch_ExpiredEntryDoesNotMatch(t *testing.T) {
+	t.Parallel()
 	cluster := uuid.New()
 	now := time.Now()
 	past := now.Add(-1 * time.Hour)
@@ -149,6 +155,7 @@ func TestSnapshotMatch_ExpiredEntryDoesNotMatch(t *testing.T) {
 }
 
 func TestSnapshotMatch_NonExpiringEntry(t *testing.T) {
+	t.Parallel()
 	cluster := uuid.New()
 	now := time.Now()
 	entries := []Entry{{
@@ -163,6 +170,7 @@ func TestSnapshotMatch_NonExpiringEntry(t *testing.T) {
 }
 
 func TestSnapshotMatch_MatchOrder_NamespaceWinsOverImage(t *testing.T) {
+	t.Parallel()
 	cluster := uuid.New()
 	now := time.Now()
 	entries := []Entry{
@@ -177,6 +185,7 @@ func TestSnapshotMatch_MatchOrder_NamespaceWinsOverImage(t *testing.T) {
 }
 
 func TestSnapshotMatch_NilSafety(t *testing.T) {
+	t.Parallel()
 	var s *Snapshot
 	if s.Match(mkPod("a", "b", "", "", "c")) != nil {
 		t.Error("nil snapshot Match must return nil")
@@ -188,6 +197,7 @@ func TestSnapshotMatch_NilSafety(t *testing.T) {
 }
 
 func TestStats_CountsByScope(t *testing.T) {
+	t.Parallel()
 	cluster := uuid.New()
 	now := time.Now()
 	entries := []Entry{
@@ -218,6 +228,7 @@ func (f *fakeLoader) Load(_ context.Context, _ uuid.UUID) ([]Entry, error) {
 }
 
 func TestSource_RefreshUpdatesSnapshot(t *testing.T) {
+	t.Parallel()
 	loader := &fakeLoader{out: []Entry{{
 		ClusterID: uuid.New(), Scope: ScopeNamespace, MatchKey: "x",
 		Reason: "test", Origin: "auto", CreatedAt: time.Now(),
@@ -243,6 +254,7 @@ func TestSource_RefreshUpdatesSnapshot(t *testing.T) {
 }
 
 func TestSource_RefreshErrorKeepsLastSnapshot(t *testing.T) {
+	t.Parallel()
 	loader := &fakeLoader{out: []Entry{{
 		ClusterID: uuid.New(), Scope: ScopeNamespace, MatchKey: "x",
 		Reason: "test", Origin: "auto", CreatedAt: time.Now(),
@@ -265,6 +277,7 @@ func TestSource_RefreshErrorKeepsLastSnapshot(t *testing.T) {
 }
 
 func TestSource_IntervalClampsToOneSecond(t *testing.T) {
+	t.Parallel()
 	loader := &fakeLoader{}
 	src := NewSource(loader, uuid.New(), 1*time.Millisecond)
 	if src.interval != time.Second {
@@ -273,6 +286,7 @@ func TestSource_IntervalClampsToOneSecond(t *testing.T) {
 }
 
 func TestEntry_ActiveAcrossExpiry(t *testing.T) {
+	t.Parallel()
 	t0 := time.Now()
 	future := t0.Add(time.Hour)
 	past := t0.Add(-time.Hour)

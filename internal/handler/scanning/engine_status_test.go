@@ -6,6 +6,7 @@ import (
 )
 
 func TestScanEngineStatusFailClosed(t *testing.T) {
+	t.Parallel()
 	for _, engines := range [][]completeScanEngine{
 		{{Engine: "Trivy"}, {Engine: "trivy", Error: "private upstream credential fixture"}, {Engine: "grype"}},
 		{{Engine: "trivy", Error: "private upstream credential fixture"}, {Engine: " Trivy "}, {Engine: "grype"}},

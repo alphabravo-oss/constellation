@@ -3,6 +3,7 @@ package admission
 import "testing"
 
 func TestBuiltInAdmissionProfiles(t *testing.T) {
+	t.Parallel()
 	profiles := BuiltInAdmissionProfiles()
 	if len(profiles) != 10 {
 		t.Fatalf("profile count=%d want 10", len(profiles))
@@ -60,6 +61,7 @@ func TestBuiltInAdmissionProfiles(t *testing.T) {
 }
 
 func TestAdmissionProfileBundleFor(t *testing.T) {
+	t.Parallel()
 	profile, ok := BuiltInAdmissionProfile("strict-hardening")
 	if !ok {
 		t.Fatal("strict-hardening profile missing")
@@ -74,6 +76,7 @@ func TestAdmissionProfileBundleFor(t *testing.T) {
 }
 
 func TestBuiltInAdmissionProfileDeprecatedAliases(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"baseline":   "basic-hardening",
 		"restricted": "strict-hardening",
@@ -90,6 +93,7 @@ func TestBuiltInAdmissionProfileDeprecatedAliases(t *testing.T) {
 }
 
 func TestBuiltInAdmissionProfileUnknown(t *testing.T) {
+	t.Parallel()
 	if _, ok := BuiltInAdmissionProfile("does-not-exist"); ok {
 		t.Fatal("unknown profile should not resolve")
 	}

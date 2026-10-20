@@ -1,3 +1,5 @@
+//go:build integration
+
 package findings
 
 import (
@@ -14,6 +16,7 @@ import (
 )
 
 func TestCVE_AffectedUsesCanonicalImageResults(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	t.Cleanup(d.Close)
 

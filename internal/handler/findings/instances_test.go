@@ -1,3 +1,5 @@
+//go:build integration
+
 package findings
 
 import (
@@ -51,6 +53,7 @@ func exactQuery(at time.Time) string {
 	return "first_seen_at=" + url.QueryEscape(at.Format(time.RFC3339Nano))
 }
 func TestFindingInstancesExactReadsMutationsAndComments(t *testing.T) {
+	t.Parallel()
 	f := newExceptionEvidenceFixture(t)
 	id := uuid.New()
 	first := time.Date(2026, 10, 12, 0, 0, 0, 123456000, time.UTC)
@@ -149,6 +152,7 @@ func TestFindingInstancesExactReadsMutationsAndComments(t *testing.T) {
 	}
 }
 func TestFindingInstancesConcurrentRevisionAndScope(t *testing.T) {
+	t.Parallel()
 	f := newExceptionEvidenceFixture(t)
 	id := uuid.New()
 	at := time.Date(2026, 10, 12, 0, 0, 0, 123456000, time.UTC)
@@ -192,6 +196,7 @@ func TestFindingInstancesConcurrentRevisionAndScope(t *testing.T) {
 	}
 }
 func TestFindingInstancesLegacyUniqueAndRevisionPartitionRetention(t *testing.T) {
+	t.Parallel()
 	f := newExceptionEvidenceFixture(t)
 	id := uuid.New()
 	at := time.Date(2026, 10, 12, 0, 0, 0, 0, time.UTC)
@@ -227,6 +232,7 @@ func TestFindingInstancesLegacyUniqueAndRevisionPartitionRetention(t *testing.T)
 }
 
 func TestFindingInstancesAcceptanceReachabilityAndExport(t *testing.T) {
+	t.Parallel()
 	f := newExceptionEvidenceFixture(t)
 	id := uuid.New()
 	a := time.Date(2026, 10, 12, 0, 0, 0, 123456000, time.UTC)
@@ -285,6 +291,7 @@ func TestFindingInstancesAcceptanceReachabilityAndExport(t *testing.T) {
 }
 
 func TestFindingInstanceSelectorAndRevisionParsing(t *testing.T) {
+	t.Parallel()
 	id := uuid.New()
 	for _, tc := range []struct {
 		value string
@@ -307,6 +314,7 @@ func TestFindingInstanceSelectorAndRevisionParsing(t *testing.T) {
 }
 
 func TestFindingInstancesTenantIsolationAndMissingRows(t *testing.T) {
+	t.Parallel()
 	f, foreign := newExceptionEvidenceFixture(t), newExceptionEvidenceFixture(t)
 	id := uuid.New()
 	at := time.Date(2026, 10, 12, 0, 0, 0, 123456000, time.UTC)
@@ -337,6 +345,7 @@ func TestFindingInstancesTenantIsolationAndMissingRows(t *testing.T) {
 }
 
 func TestFindingInstancesAuditFailureRollsBackMutation(t *testing.T) {
+	t.Parallel()
 	f := newExceptionEvidenceFixture(t)
 	id := uuid.New()
 	at := time.Date(2026, 10, 12, 0, 0, 0, 0, time.UTC)
@@ -360,6 +369,7 @@ func TestFindingInstancesAuditFailureRollsBackMutation(t *testing.T) {
 }
 
 func TestFindingInstanceChooserEnumeratesOwnedWorkloadOccurrences(t *testing.T) {
+	t.Parallel()
 	f, foreign := newExceptionEvidenceFixture(t), newExceptionEvidenceFixture(t)
 	id, otherID := uuid.New(), uuid.New()
 	first := time.Date(2026, 10, 12, 0, 0, 0, 123456000, time.UTC)
@@ -428,6 +438,7 @@ func TestFindingInstanceChooserEnumeratesOwnedWorkloadOccurrences(t *testing.T) 
 	}
 }
 func TestFindingExactIDChooserGrammar(t *testing.T) {
+	t.Parallel()
 	id := uuid.New()
 	for _, raw := range []string{"id:" + id.String(), "  ID:" + strings.ToUpper(id.String()) + "  "} {
 		got, ok := findingExactIDQuery(raw)

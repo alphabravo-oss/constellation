@@ -11,6 +11,7 @@ import (
 // TestAgentDegraded exercises the userspace channel + Inject path so the rest of the
 // runtime pipeline can be tested without root / a Linux kernel.
 func TestAgentDegraded(t *testing.T) {
+	t.Parallel()
 	a, err := New(Options{EventChannelBuffer: 4})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -58,6 +59,7 @@ func TestAgentDegraded(t *testing.T) {
 
 // TestAgentDropsOnBackpressure verifies the dropped counter when the channel is full.
 func TestAgentDropsOnBackpressure(t *testing.T) {
+	t.Parallel()
 	a, err := New(Options{EventChannelBuffer: 1})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -74,6 +76,7 @@ func TestAgentDropsOnBackpressure(t *testing.T) {
 
 // TestAgentAlreadyRunning ensures Run is single-shot.
 func TestAgentAlreadyRunning(t *testing.T) {
+	t.Parallel()
 	a, err := New(Options{})
 	if err != nil {
 		t.Fatalf("New: %v", err)

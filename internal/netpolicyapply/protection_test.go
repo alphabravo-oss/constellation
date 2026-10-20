@@ -59,6 +59,7 @@ func TestProtectionAtKubernetesWriteBoundary(t *testing.T) {
 }
 
 func TestGlobalPolicyProtectionPreservesApplicationSelector(t *testing.T) {
+	t.Parallel()
 	p, err := NewProtection("custom-install", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -100,6 +101,7 @@ func TestGlobalPolicyProtectionPreservesApplicationSelector(t *testing.T) {
 }
 
 func TestProtectionRejectsInvalidConfigurationAndIdentity(t *testing.T) {
+	t.Parallel()
 	for _, own := range []string{"", "bad'name", "name with spaces"} {
 		if _, err := NewProtection(own, nil); err == nil {
 			t.Fatalf("accepted %q", own)
@@ -117,6 +119,7 @@ func TestProtectionRejectsInvalidConfigurationAndIdentity(t *testing.T) {
 }
 
 func TestGlobalPolicySelectorCannotEscapeProtection(t *testing.T) {
+	t.Parallel()
 	p, _ := NewProtection("own", nil)
 	for _, selector := range []string{"all()) || all() || (all()", "name == 'unterminated", "name == 'a\\'"} {
 		obj := map[string]any{"apiVersion": "projectcalico.org/v3", "kind": "GlobalNetworkPolicy", "metadata": map[string]any{"name": "global"}, "spec": map[string]any{"namespaceSelector": selector}}

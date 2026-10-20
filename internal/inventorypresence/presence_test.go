@@ -1,29 +1,21 @@
+//go:build integration
+
 package inventorypresence
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
+
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestPresenceScopeFreshnessAndHistory(t *testing.T) {
-	url := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-	if url == "" {
-		url = "postgres://test:test@127.0.0.1:15433/constellation_test?sslmode=disable"
-	}
+	t.Parallel()
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, url)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer pool.Close()
-	if err := pool.Ping(ctx); err != nil {
-		t.Skipf("test DB unavailable: %v", err)
-	}
+	pool := pgtest.Pool(t)
 	org, other, cluster := uuid.New(), uuid.New(), uuid.New()
 	exec := func(sql string, args ...any) {
 		t.Helper()

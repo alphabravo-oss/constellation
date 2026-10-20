@@ -9,6 +9,7 @@ import (
 )
 
 func TestLeaseHeaderRoundTripAndValidation(t *testing.T) {
+	t.Parallel()
 	id := uuid.NewString()
 	req := httptest.NewRequest("POST", "/", nil).WithContext(WithContext(context.Background(), id))
 	Attach(req)

@@ -1,3 +1,5 @@
+//go:build integration
+
 package findings
 
 import (
@@ -17,6 +19,7 @@ import (
 )
 
 func TestCVEAffectedInventoryBeyondCapsDedupScopeAndExports(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	t.Cleanup(d.Close)
 	ctx, pool := t.Context(), d.Pool()

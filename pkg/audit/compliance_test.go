@@ -6,6 +6,7 @@ import (
 )
 
 func TestControlIDsFor_EmptyAction(t *testing.T) {
+	t.Parallel()
 	got := ControlIDsFor("")
 	if got == nil {
 		t.Fatal("ControlIDsFor must return non-nil even for empty input")
@@ -16,6 +17,7 @@ func TestControlIDsFor_EmptyAction(t *testing.T) {
 }
 
 func TestControlIDsFor_UnmappedAction(t *testing.T) {
+	t.Parallel()
 	got := ControlIDsFor("totally.fictional.event")
 	if len(got) != 0 {
 		t.Errorf("unmapped action should return 0 mappings, got %d", len(got))
@@ -25,6 +27,7 @@ func TestControlIDsFor_UnmappedAction(t *testing.T) {
 // Login events are the single most heavily-audited control. If this
 // regresses we've broken the federal baseline.
 func TestControlIDsFor_AuthLoginCoversBaselines(t *testing.T) {
+	t.Parallel()
 	got := ControlIDsFor("auth.login.local")
 	want := []struct {
 		fw Framework
@@ -56,6 +59,7 @@ func TestControlIDsFor_AuthLoginCoversBaselines(t *testing.T) {
 }
 
 func TestControlIDsFor_StableOrder(t *testing.T) {
+	t.Parallel()
 	got := ControlIDsFor("policy.update")
 	for i := 1; i < len(got); i++ {
 		a, b := got[i-1], got[i]
@@ -69,6 +73,7 @@ func TestControlIDsFor_StableOrder(t *testing.T) {
 }
 
 func TestControlIDsFor_NoDuplicates(t *testing.T) {
+	t.Parallel()
 	for _, action := range []string{
 		"auth.login.oidc", "policy.create", "finding.suppress",
 		"runtime.alert.exec", "backup.start", "scan-job.complete",
@@ -88,6 +93,7 @@ func TestControlIDsFor_NoDuplicates(t *testing.T) {
 // Cross-cutting controls (AU-2 event logging, CM-3 change control) need
 // to apply to multiple action families. Verify that.
 func TestControlIDsFor_AU2AppearsAcrossFamilies(t *testing.T) {
+	t.Parallel()
 	families := []string{
 		"auth.login.local", "auth.logout",
 		"policy.update", "finding.suppress",
@@ -110,6 +116,7 @@ func TestControlIDsFor_AU2AppearsAcrossFamilies(t *testing.T) {
 }
 
 func TestActionsFor_RoundTrips(t *testing.T) {
+	t.Parallel()
 	// AC-2 (Account Management) — should pull at least the auth.login and
 	// the account-management rule (group./role_binding./service_account).
 	got := ActionsFor(FrameworkNIST80053, "AC-2")
@@ -129,6 +136,7 @@ func TestActionsFor_RoundTrips(t *testing.T) {
 }
 
 func TestActionsFor_UnknownControl(t *testing.T) {
+	t.Parallel()
 	got := ActionsFor(FrameworkNIST80053, "ZZ-99")
 	if len(got) != 0 {
 		t.Errorf("unknown control should return 0 prefixes, got %v", got)
@@ -136,6 +144,7 @@ func TestActionsFor_UnknownControl(t *testing.T) {
 }
 
 func TestAllControls_NonEmpty(t *testing.T) {
+	t.Parallel()
 	all := AllControls()
 	if len(all) < 20 {
 		t.Fatalf("AllControls returned %d entries; mapping table looks suspiciously small", len(all))
@@ -149,6 +158,7 @@ func TestAllControls_NonEmpty(t *testing.T) {
 }
 
 func TestAllFrameworks_HasFour(t *testing.T) {
+	t.Parallel()
 	fws := AllFrameworks()
 	want := map[Framework]bool{
 		FrameworkNIST80053: false,
@@ -172,6 +182,7 @@ func TestAllFrameworks_HasFour(t *testing.T) {
 // constants are written. If anyone edits a Framework constant value, this
 // test fails loudly — the strings appear in customer-facing audit exports.
 func TestFrameworkConstants_HaveStablePublicNames(t *testing.T) {
+	t.Parallel()
 	cases := map[Framework]string{
 		FrameworkNIST80053: "nist-sp-800-53-r5",
 		FrameworkSOC2:      "soc2-tsc-2017",
@@ -186,6 +197,7 @@ func TestFrameworkConstants_HaveStablePublicNames(t *testing.T) {
 }
 
 func TestRulesCoverEveryDocumentedActionFamily(t *testing.T) {
+	t.Parallel()
 	// A sanity check that every audit Action observed in the codebase
 	// gets at least one mapping. If you add a new audit action and forget
 	// to update compliance.go, this test catches it.

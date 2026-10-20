@@ -1,3 +1,5 @@
+//go:build integration
+
 package network
 
 import (
@@ -19,6 +21,7 @@ import (
 // The generated manifests are only useful if the applier can parse them. Round-trip
 // each through ParseManifest and assert the flavor/GVR/name the applier will act on.
 func TestEnforcementManifestsParse(t *testing.T) {
+	t.Parallel()
 	isoManifest, isoRef := isolateManifest("prod", "api", map[string]string{"app": "api"})
 	res, _, err := netpolicyapply.ParseManifest(netpolicyapply.FlavorNative, isoManifest)
 	if err != nil {
@@ -56,6 +59,7 @@ func TestEnforcementManifestsParse(t *testing.T) {
 }
 
 func TestK8sNameSanitize(t *testing.T) {
+	t.Parallel()
 	if got := k8sName("Constellation-Isolate-My_App.v2"); got != "constellation-isolate-my-app-v2" {
 		t.Fatalf("k8sName sanitize: got %q", got)
 	}
@@ -68,6 +72,7 @@ func TestK8sNameSanitize(t *testing.T) {
 }
 
 func TestEnforcementRejectsMissingWorkloadAndUnsupportedCNI(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	t.Cleanup(d.Close)
 	ctx := t.Context()
@@ -129,6 +134,7 @@ func TestEnforcementRejectsMissingWorkloadAndUnsupportedCNI(t *testing.T) {
 }
 
 func TestEnforcementLiftClearsPreviousApplyOutcome(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 	ctx := t.Context()

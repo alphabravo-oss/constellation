@@ -18,6 +18,7 @@ func mkHTTP(body string) dpi.L7Event {
 }
 
 func TestCreditCardLuhn(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	if err := e.AddSensor(BuiltinSensor()); err != nil {
 		t.Fatalf("AddSensor: %v", err)
@@ -39,6 +40,7 @@ func TestCreditCardLuhn(t *testing.T) {
 }
 
 func TestSSN(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	_ = e.AddSensor(BuiltinSensor())
 	e.SetMode("w", baseline.ModeEnforce)
@@ -49,6 +51,7 @@ func TestSSN(t *testing.T) {
 }
 
 func TestAWSAccessKey(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	_ = e.AddSensor(BuiltinSensor())
 	e.SetMode("w", baseline.ModeEnforce)
@@ -59,6 +62,7 @@ func TestAWSAccessKey(t *testing.T) {
 }
 
 func TestGitHubPAT(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	_ = e.AddSensor(BuiltinSensor())
 	e.SetMode("w", baseline.ModeEnforce)
@@ -69,6 +73,7 @@ func TestGitHubPAT(t *testing.T) {
 }
 
 func TestSlackToken(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	_ = e.AddSensor(BuiltinSensor())
 	e.SetMode("w", baseline.ModeEnforce)
@@ -79,6 +84,7 @@ func TestSlackToken(t *testing.T) {
 }
 
 func TestBearerHeader(t *testing.T) {
+	t.Parallel()
 	evt := dpi.L7Event{
 		Protocol: "http", Dir: dpi.DirRequest,
 		HTTP: &dpi.HTTPEvent{
@@ -97,6 +103,7 @@ func TestBearerHeader(t *testing.T) {
 }
 
 func TestLearnModeSilent(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	_ = e.AddSensor(BuiltinSensor())
 	e.SetMode("w", baseline.ModeLearn)
@@ -107,6 +114,7 @@ func TestLearnModeSilent(t *testing.T) {
 }
 
 func TestSQLQueryLeak(t *testing.T) {
+	t.Parallel()
 	evt := dpi.L7Event{
 		Protocol: "postgres", Dir: dpi.DirRequest,
 		Postgres: &dpi.PostgresEvent{
@@ -124,6 +132,7 @@ func TestSQLQueryLeak(t *testing.T) {
 }
 
 func TestRedact(t *testing.T) {
+	t.Parallel()
 	if got := redact("4111111111111111"); got != "4111…1111" {
 		t.Fatalf("redact = %q", got)
 	}
@@ -133,6 +142,7 @@ func TestRedact(t *testing.T) {
 }
 
 func TestLuhnValid(t *testing.T) {
+	t.Parallel()
 	cases := map[string]bool{
 		"4111111111111111": true,
 		"5500000000000004": true,
@@ -147,6 +157,7 @@ func TestLuhnValid(t *testing.T) {
 }
 
 func TestIBAN(t *testing.T) {
+	t.Parallel()
 	// GB82 WEST 1234 5698 7654 32 is a documented sample.
 	if !looksLikeIBAN("GB82WEST12345698765432") {
 		t.Errorf("valid IBAN rejected")

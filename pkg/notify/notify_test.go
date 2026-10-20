@@ -31,6 +31,7 @@ func testAlert(sev, cluster, workload string) Alert {
 }
 
 func TestSlack_PostsToWebhook(t *testing.T) {
+	t.Parallel()
 	var got []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got, _ = io.ReadAll(r.Body)
@@ -47,6 +48,7 @@ func TestSlack_PostsToWebhook(t *testing.T) {
 }
 
 func TestPagerDuty_SendsTriggerEvent(t *testing.T) {
+	t.Parallel()
 	var got []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got, _ = io.ReadAll(r.Body)
@@ -79,6 +81,7 @@ func TestPagerDuty_SendsTriggerEvent(t *testing.T) {
 }
 
 func TestWebhook_GenericPost(t *testing.T) {
+	t.Parallel()
 	var got []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got, _ = io.ReadAll(r.Body)
@@ -98,6 +101,7 @@ func TestWebhook_GenericPost(t *testing.T) {
 }
 
 func TestTeams_MessageCardShape(t *testing.T) {
+	t.Parallel()
 	body, err := teamsMessageCard([]Alert{testAlert("critical", "prod", "api")})
 	if err != nil {
 		t.Fatal(err)
@@ -126,6 +130,7 @@ func TestTeams_MessageCardShape(t *testing.T) {
 }
 
 func TestTeams_PostsToWebhook(t *testing.T) {
+	t.Parallel()
 	var got []byte
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got, _ = io.ReadAll(r.Body)
@@ -142,6 +147,7 @@ func TestTeams_PostsToWebhook(t *testing.T) {
 }
 
 func TestSyslog_RFC5424Format(t *testing.T) {
+	t.Parallel()
 	fixed := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
 	s := &Syslog{
 		Network: "udp", Addr: "siem:514", Facility: 16, AppName: "constellation",
@@ -165,6 +171,7 @@ func TestSyslog_RFC5424Format(t *testing.T) {
 }
 
 func TestSyslog_SDEscaping(t *testing.T) {
+	t.Parallel()
 	s := &Syslog{Hostname: "h", AppName: "app"}
 	a := Alert{ID: `a"]b\c`, Severity: "info", FiredAt: time.Unix(0, 0).UTC(), Title: "t"}
 	line := s.formatRFC5424(a)
@@ -174,6 +181,7 @@ func TestSyslog_SDEscaping(t *testing.T) {
 }
 
 func TestSyslog_SendOverUDP(t *testing.T) {
+	t.Parallel()
 	pc, err := (&net.ListenConfig{}).ListenPacket(t.Context(), "udp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -196,6 +204,7 @@ func TestSyslog_SendOverUDP(t *testing.T) {
 }
 
 func TestSyslog_SendOverVerifiedTLS(t *testing.T) {
+	t.Parallel()
 	certServer := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	cert := certServer.TLS.Certificates[0]
 	ca := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certServer.Certificate().Raw})
@@ -385,6 +394,7 @@ func TestSyslog_RejectsPlaintextWithTLSSettings(t *testing.T) {
 }
 
 func TestSyslog_JSONFormat(t *testing.T) {
+	t.Parallel()
 	fixed := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
 	s := &Syslog{Format: "json", Hostname: "node-1", AppName: "constellation"}
 	a := Alert{
@@ -416,6 +426,7 @@ func TestSyslog_JSONFormat(t *testing.T) {
 }
 
 func TestSyslog_CEFFormat(t *testing.T) {
+	t.Parallel()
 	fixed := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
 	s := &Syslog{Format: "cef", Product: "constellation", Version: "1.0", Now: func() time.Time { return fixed }}
 	a := Alert{
@@ -442,6 +453,7 @@ func TestSyslog_CEFFormat(t *testing.T) {
 }
 
 func TestSyslog_CEFEscaping(t *testing.T) {
+	t.Parallel()
 	s := &Syslog{Format: "cef"}
 	a := Alert{Kind: "a|b", Title: "pipe|and\\slash", Severity: "low",
 		Labels: map[string]string{"src": "k=v"}}
@@ -493,6 +505,7 @@ func TestSyslog_LevelAndCategoryFilter(t *testing.T) {
 }
 
 func TestSyslog_FilterSkipsSendWhenEmpty(t *testing.T) {
+	t.Parallel()
 	pc, err := (&net.ListenConfig{}).ListenPacket(t.Context(), "udp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -512,6 +525,7 @@ func TestSyslog_FilterSkipsSendWhenEmpty(t *testing.T) {
 }
 
 func TestSyslog_UnknownMinLevelSkipsDial(t *testing.T) {
+	t.Parallel()
 	s := NewSyslog("tcp", "127.0.0.1:1")
 	s.MinLevel = "urgent"
 	if err := s.Send(context.Background(), []Alert{testAlert("critical", "prod", "api")}); err != nil {
@@ -534,6 +548,7 @@ func (r *recordingReceiver) Send(_ context.Context, alerts []Alert) error {
 }
 
 func TestRouter_DispatchesMatchingReceivers(t *testing.T) {
+	t.Parallel()
 	rec := &recordingReceiver{}
 	r := &Router{
 		Receivers: map[string]Receiver{"recorder": rec},
@@ -611,6 +626,7 @@ func TestRouter_WalkSiblingRouting(t *testing.T) {
 }
 
 func TestRouter_InhibitsLowerSeverityWhenSourceFiring(t *testing.T) {
+	t.Parallel()
 	rec := &recordingReceiver{}
 	r := &Router{
 		Receivers: map[string]Receiver{"recorder": rec},
@@ -632,6 +648,7 @@ func TestRouter_InhibitsLowerSeverityWhenSourceFiring(t *testing.T) {
 }
 
 func TestGroupKey_StableAcrossLabelOrder(t *testing.T) {
+	t.Parallel()
 	a := Alert{Labels: map[string]string{"cluster": "prod", "kind": "vuln", "severity": "high"}}
 	got := GroupKey(a, []string{"severity", "cluster"})
 	want := "cluster=prod,severity=high"

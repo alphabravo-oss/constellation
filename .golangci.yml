@@ -5,6 +5,8 @@ run:
   timeout: 15m
   modules-download-mode: readonly
   tests: true
+  # Integration tests (testcontainers + pgtestdb, internal/testutil/pgtest) are linted too.
+  build-tags: [integration]
 linters:
   default: standard
   enable:
@@ -21,8 +23,10 @@ linters:
     - nestif
     - noctx
     - nolintlint
+    - paralleltest
     - rowserrcheck
     - sqlclosecheck
+    - tparallel
     - unconvert
     - wastedassign
   settings:
@@ -70,6 +74,11 @@ linters:
       # See docs/decisions/0002-adopt-guide-stack.md.
       - path: ^(deploy/e2e/runtime-smoke|internal/admissionevidence|internal/auth|internal/cspm/aws|internal/cspm/gcp|internal/migration/neuvector|internal/netpolicyapply|internal/operator/controllers|internal/operator/policydb|internal/runtime/dlp|internal/runtime/dp|internal/runtime/dpi|internal/runtime/hostscan|internal/scanner|internal/serverless/awslambda|internal/syscfg|internal/telemetry|pkg/admission|pkg/backup|pkg/group|pkg/netpolicy|pkg/notify|pkg/policy/eval|pkg/reachability|pkg/response|pkg/responserule|pkg/runtime/falco|pkg/search/dsl)/
         linters: [cyclop, funlen, gocognit, nestif]
+      # paralleltest: every //go:build integration test owns a pgtestdb clone and runs in
+      # parallel, as does every package written in Phase 1. Legacy unit-test files in the
+      # packages below predate the fixture and are swept as their domains migrate (Phase 2).
+      - path: ^(internal/handler|internal/server|internal/auth|internal/syscfg|internal/runtime|internal/registry|internal/scanner|internal/obslog|pkg/backup|pkg/version|cmd/|deploy/docker/scanner-tools)
+        linters: [paralleltest]
       # cmd/ mains may call os.Exit after defers and carry long wiring functions.
       - path: ^cmd/
         linters: [funlen, gocognit, cyclop, nestif, gocritic, errorlint, contextcheck, exhaustive, noctx, wastedassign, errcheck, staticcheck, unparam, unused, ineffassign, bodyclose, rowserrcheck, sqlclosecheck, unconvert, misspell, gosec]

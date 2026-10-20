@@ -43,6 +43,7 @@ func scopedPrivilegedPod(name, namespace string) *corev1.Pod {
 // namespace targeting: a rule scoped to match.namespaces only fires for pods in
 // those namespaces.
 func TestEvaluate_PerRuleNamespaceTargetingByName(t *testing.T) {
+	t.Parallel()
 	tr := true
 	rule := Rule{
 		ID: "block-privileged-prod", Mode: "enforce", Kinds: []string{"Pod"},
@@ -68,6 +69,7 @@ func TestEvaluate_PerRuleNamespaceTargetingByName(t *testing.T) {
 // namespace scoping via a namespaceSelector resolved through a NamespaceLabeler,
 // and the safe-by-default behaviour when no labeler is wired.
 func TestEvaluate_PerRuleNamespaceSelector(t *testing.T) {
+	t.Parallel()
 	tr := true
 	rule := Rule{
 		ID: "block-privileged-restricted", Mode: "enforce", Kinds: []string{"Pod"},
@@ -96,6 +98,7 @@ func TestEvaluate_PerRuleNamespaceSelector(t *testing.T) {
 }
 
 func TestEvaluate_PerRuleGroupScoping(t *testing.T) {
+	t.Parallel()
 	tr := true
 	rule := Rule{
 		ID: "block-privileged-payments", Mode: "enforce", Kinds: []string{"Pod"},
@@ -126,6 +129,7 @@ func TestEvaluate_PerRuleGroupScoping(t *testing.T) {
 // spec surface: deniedCVEs, cveGraceDays, match.namespaces and
 // match.namespaceSelector.
 func TestRuleFromYAMLParsesNamedCVEGraceAndNamespaceScoping(t *testing.T) {
+	t.Parallel()
 	rule, supported, err := RuleFromYAML("block-named-cves", "block-named-cves", "", "enforce", `apiVersion: constellation.alphabravo.io/v1alpha1
 kind: AdmissionRule
 metadata:
@@ -167,6 +171,7 @@ spec:
 }
 
 func TestRuleFromYAMLParsesGroupScoping(t *testing.T) {
+	t.Parallel()
 	rule, supported, err := RuleFromYAML("group-scope", "group-scope", "", "enforce", `apiVersion: constellation.alphabravo.io/v1alpha1
 kind: AdmissionRule
 metadata:

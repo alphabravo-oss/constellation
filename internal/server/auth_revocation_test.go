@@ -1,3 +1,5 @@
+//go:build integration
+
 package server
 
 import (
@@ -8,9 +10,10 @@ import (
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -39,11 +42,9 @@ func mintTestPAT(t *testing.T) (string, string) {
 // though the JWT itself is still cryptographically valid and unexpired. These exercise the
 // DB-backed revocation primitive (users.disabled + users.session_epoch) wired into
 // authMiddleware. They run against the shared test DB and skip when it is unreachable.
-func testDBURL() string {
-	if u := os.Getenv("CONSTELLATION_TEST_DATABASE_URL"); u != "" {
-		return u
-	}
-	return "" // unset: the DB-backed tests below skip (unit runs never need Docker)
+func testDBURL(t *testing.T) string {
+	t.Helper()
+	return pgtest.URL(t)
 }
 
 // newAuthTestServer boots a Server against the test DB and returns it plus a seeded,
@@ -52,7 +53,7 @@ func newAuthTestServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, *auth.Sig
 	t.Helper()
 	t.Setenv("CONSTELLATION_ALLOW_HS256_JWT", "true") // tests sign with a symmetric JWTKeys secret
 	ctx := context.Background()
-	url := testDBURL()
+	url := testDBURL(t)
 
 	pool, err := pgxpool.New(ctx, url)
 	if err != nil {

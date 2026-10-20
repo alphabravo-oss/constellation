@@ -37,6 +37,7 @@ func privilegedPodSpec() corev1.PodSpec {
 }
 
 func TestEvaluate_DeniesBadDeploymentTemplate(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 
 	dep := map[string]any{
@@ -62,6 +63,7 @@ func TestEvaluate_DeniesBadDeploymentTemplate(t *testing.T) {
 }
 
 func TestEvaluate_AllowsCleanDeploymentTemplate(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	t1 := true
 	dep := map[string]any{
@@ -92,6 +94,7 @@ func TestEvaluate_AllowsCleanDeploymentTemplate(t *testing.T) {
 }
 
 func TestEvaluate_DeniesBadCronJobTemplate(t *testing.T) {
+	t.Parallel()
 	e := NewEngine()
 	cj := map[string]any{
 		"apiVersion": "batch/v1",
@@ -114,6 +117,7 @@ func TestEvaluate_DeniesBadCronJobTemplate(t *testing.T) {
 }
 
 func TestExtractPodFromObject_ControllerIdentityFallback(t *testing.T) {
+	t.Parallel()
 	ss := map[string]any{
 		"kind":     "StatefulSet",
 		"metadata": map[string]any{"name": "db", "namespace": "data"},
@@ -161,6 +165,7 @@ func pvcRaw(name, sc string, scSet bool) []byte {
 }
 
 func TestEvaluate_PVCStorageClassGate(t *testing.T) {
+	t.Parallel()
 	e := pvcEngine("enforce", "fast-ssd", "standard")
 
 	// Disallowed class is denied.
@@ -180,6 +185,7 @@ func TestEvaluate_PVCStorageClassGate(t *testing.T) {
 }
 
 func TestEvaluate_PVCDefaultStorageClass(t *testing.T) {
+	t.Parallel()
 	// An allowlist that does not include "" denies a PVC that omits the class.
 	e := pvcEngine("enforce", "fast-ssd")
 	resp := e.Evaluate(context.Background(), reviewForKind("PersistentVolumeClaim", pvcRaw("c1", "", false)))
@@ -196,6 +202,7 @@ func TestEvaluate_PVCDefaultStorageClass(t *testing.T) {
 }
 
 func TestEvaluate_PVCMonitorModeWarns(t *testing.T) {
+	t.Parallel()
 	e := pvcEngine("monitor", "fast-ssd")
 	resp := e.Evaluate(context.Background(), reviewForKind("PersistentVolumeClaim", pvcRaw("c1", "slow-hdd", true)))
 	if !resp.Allowed {
@@ -207,6 +214,7 @@ func TestEvaluate_PVCMonitorModeWarns(t *testing.T) {
 }
 
 func TestRuleFromYAML_PVCStorageClass(t *testing.T) {
+	t.Parallel()
 	spec := `
 spec:
   match:

@@ -1,3 +1,5 @@
+//go:build integration
+
 package notify
 
 import (
@@ -7,11 +9,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -21,18 +24,7 @@ import (
 // the handler tests (CONSTELLATION_TEST_DATABASE_URL with a local default).
 func openNotifyTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	url := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-	if url == "" {
-		t.Skip("CONSTELLATION_TEST_DATABASE_URL not set; integration test")
-	}
-	pool, err := pgxpool.New(context.Background(), url)
-	if err != nil {
-		t.Skipf("skipping: cannot reach test DB (%v)", err)
-	}
-	if err := pool.Ping(context.Background()); err != nil {
-		pool.Close()
-		t.Skipf("skipping: cannot ping test DB (%v)", err)
-	}
+	pool := pgtest.Pool(t)
 	return pool
 }
 
@@ -59,6 +51,7 @@ VALUES ($1, $2, $3, 'webhook', 'https://example.com/hook', 'pending')`,
 // the entire alert payload": persistPending must store the full event so a retry can replay
 // the identical body. (Migration 113 adds the payload column.)
 func TestPersistPending_RoundTripsFullPayload(t *testing.T) {
+	t.Parallel()
 	pool := openNotifyTestPool(t)
 	defer pool.Close()
 	ctx := context.Background()
@@ -98,6 +91,7 @@ func TestPersistPending_RoundTripsFullPayload(t *testing.T) {
 // queue": a queue-full delivery must keep final_state NULL and set next_retry_at so the
 // sweeper re-enqueues it.
 func TestMarkQueueFull_StaysRetryable(t *testing.T) {
+	t.Parallel()
 	pool := openNotifyTestPool(t)
 	defer pool.Close()
 	ctx := context.Background()
@@ -159,6 +153,7 @@ func processNamedJob(t *testing.T, d *Dispatcher) {
 }
 
 func TestDispatchTo_PausedAfterQueueDoesNotSend(t *testing.T) {
+	t.Parallel()
 	for _, testCase := range []struct {
 		name          string
 		priorAttempts int
@@ -312,6 +307,7 @@ SELECT d.status, d.final_state, d.attempts, d.next_retry_at, r.paused
 }
 
 func TestDispatchTo_NamedReceiverReceipt(t *testing.T) {
+	t.Parallel()
 	pool := openNotifyTestPool(t)
 	defer pool.Close()
 	ctx := context.Background()

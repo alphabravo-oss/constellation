@@ -6,6 +6,7 @@ import (
 )
 
 func TestBenchExecutionReportRequiresActualEvaluations(t *testing.T) {
+	t.Parallel()
 	for _, raw := range []string{`null`, `{}`, `{"Controls":[]}`, `{"Controls":[{"tests":[{"results":[{"status":"PASS"}]}]}]}`, `{"Controls":[{"tests":[{"results":[{"test_number":"1","test_desc":"test","status":"surprise"}]}]}]}`} {
 		if _, err := ValidateBenchExecutionReport([]byte(raw)); err == nil {
 			t.Fatalf("non-evaluation qualified as successful execution: %s", raw)
@@ -19,6 +20,7 @@ func TestBenchExecutionReportRequiresActualEvaluations(t *testing.T) {
 }
 
 func TestBenchExecutionCanonicalDigestAndBounds(t *testing.T) {
+	t.Parallel()
 	a, hashA, err := CanonicalBenchReport([]byte(" { \"x\" : 1 } \n"))
 	if err != nil {
 		t.Fatal(err)

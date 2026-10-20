@@ -1,10 +1,13 @@
+//go:build integration
+
 package flowrollup
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
 
 	"github.com/google/uuid"
 
@@ -12,15 +15,8 @@ import (
 )
 
 func TestThreatUint32LateFoldPreservesUnknownAndRebuildRepairs(t *testing.T) {
-	dsn := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("requires disposable PostgreSQL")
-	}
-	d, err := db.Connect(t.Context(), dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(d.Close)
+	t.Parallel()
+	d := db.NewFromPool(pgtest.Pool(t))
 	p := d.Pool()
 	ctx := t.Context()
 	org, cluster := uuid.New(), uuid.New()
@@ -30,10 +26,10 @@ func TestThreatUint32LateFoldPreservesUnknownAndRebuildRepairs(t *testing.T) {
 		_, _ = p.Exec(cleanup, `DELETE FROM network_flow_rollups WHERE org_id=$1`, org)
 		_, _ = p.Exec(cleanup, `DELETE FROM orgs WHERE id=$1`, org)
 	})
-	if _, err = p.Exec(ctx, `INSERT INTO orgs(id,name,display_name)VALUES($1::uuid,$1::text,'fold unsigned')`, org); err != nil {
+	if _, err := p.Exec(ctx, `INSERT INTO orgs(id,name,display_name)VALUES($1::uuid,$1::text,'fold unsigned')`, org); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = p.Exec(ctx, `INSERT INTO clusters(id,org_id,name)VALUES($1,$2,'fold unsigned')`, cluster, org); err != nil {
+	if _, err := p.Exec(ctx, `INSERT INTO clusters(id,org_id,name)VALUES($1,$2,'fold unsigned')`, cluster, org); err != nil {
 		t.Fatal(err)
 	}
 	tx, err := p.Begin(ctx)

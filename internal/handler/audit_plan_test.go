@@ -1,10 +1,11 @@
+//go:build integration
+
 package handler
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 
@@ -15,9 +16,6 @@ import (
 // Its synthetic audit rows remain inside a rolled-back transaction, so it never
 // changes the shared audit chain or reaches the live database.
 func TestAuditClusterLookupPlan(t *testing.T) {
-	if os.Getenv("CONSTELLATION_TEST_DATABASE_URL") == "" {
-		t.Skip("requires explicitly configured disposable test database")
-	}
 	f := newAuditListFixture(t)
 	ctx := t.Context()
 	tx, err := f.database.Pool().Begin(ctx)

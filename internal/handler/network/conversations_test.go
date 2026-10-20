@@ -1,3 +1,5 @@
+//go:build integration
+
 package network
 
 import (
@@ -15,6 +17,7 @@ import (
 )
 
 func TestEndpointKind(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"default/api":             "workload",
 		"cert-manager/webhook":    "workload",

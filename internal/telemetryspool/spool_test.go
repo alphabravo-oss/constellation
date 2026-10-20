@@ -8,6 +8,7 @@ import (
 )
 
 func TestRestartAndReplay(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	q, err := Open(dir, "cluster-a/events", 1<<20, 10)
 	if err != nil {
@@ -52,6 +53,7 @@ func TestRestartAndReplay(t *testing.T) {
 }
 
 func TestBoundedQueueRetainsOldest(t *testing.T) {
+	t.Parallel()
 	for _, limits := range []struct {
 		bytes int64
 		files int
@@ -75,6 +77,7 @@ func TestBoundedQueueRetainsOldest(t *testing.T) {
 }
 
 func TestExclusiveOwnerAndDestination(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	q, err := Open(dir, "a", 1000, 10)
 	if err != nil {
@@ -92,6 +95,7 @@ func TestExclusiveOwnerAndDestination(t *testing.T) {
 }
 
 func TestCrashBetweenBatchAndState(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	q, err := Open(dir, "a", 1000, 10)
 	if err != nil {
@@ -127,6 +131,7 @@ func TestCrashBetweenBatchAndState(t *testing.T) {
 }
 
 func TestMissingIdentityNeverResetsPendingData(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	q, err := Open(dir, "a", 1000, 10)
 	if err != nil {

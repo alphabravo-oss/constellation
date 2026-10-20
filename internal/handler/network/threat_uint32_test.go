@@ -1,3 +1,5 @@
+//go:build integration
+
 package network
 
 import (
@@ -15,6 +17,7 @@ import (
 )
 
 func TestThreatUint32StreamsMapAndLegacyPreserveUncertainty(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	t.Cleanup(d.Close)
 	ctx := t.Context()

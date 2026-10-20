@@ -57,6 +57,7 @@ func TestRuleFromYAMLParsesFindingBackedProfileRules(t *testing.T) {
 }
 
 func TestRuleFromYAMLParsesImageArtifactGates(t *testing.T) {
+	t.Parallel()
 	rule, supported, err := RuleFromYAML("artifact-gates", "artifact-gates", "", "enforce", `apiVersion: constellation.alphabravo.io/v1alpha1
 kind: AdmissionRule
 metadata:
@@ -118,6 +119,7 @@ spec:
 }
 
 func TestRuleFromYAMLParsesVulnerabilityEvidenceQualityGates(t *testing.T) {
+	t.Parallel()
 	rule, supported, err := RuleFromYAML("vuln-evidence", "vuln-evidence", "", "enforce", `apiVersion: constellation.alphabravo.io/v1alpha1
 kind: AdmissionRule
 metadata:
@@ -172,6 +174,7 @@ spec:
 }
 
 func TestRuleFromYAMLRejectsInvalidScanEvidenceDuration(t *testing.T) {
+	t.Parallel()
 	_, supported, err := RuleFromYAML("bad-duration", "bad-duration", "", "enforce", `apiVersion: constellation.alphabravo.io/v1alpha1
 kind: AdmissionRule
 metadata:
@@ -191,6 +194,7 @@ spec:
 }
 
 func TestEvaluate_ProfileRuleRequiresNonRoot(t *testing.T) {
+	t.Parallel()
 	rule := mustProfileRule(t, "strict-hardening", "require-non-root")
 	zero := int64(0)
 	pod := &corev1.Pod{
@@ -226,6 +230,7 @@ func TestEvaluate_ProfileRuleDisallowsLatestAndImplicitTags(t *testing.T) {
 }
 
 func TestEvaluate_ProfileRuleRequiresDigest(t *testing.T) {
+	t.Parallel()
 	rule := mustProfileRule(t, "image-provenance-required", "require-digest-pinned-images")
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "tagged-image"},
@@ -240,6 +245,7 @@ func TestEvaluate_ProfileRuleRequiresDigest(t *testing.T) {
 }
 
 func TestEvaluate_ProfileRuleAllowsOnlyConfiguredRegistries(t *testing.T) {
+	t.Parallel()
 	rule, supported, err := RuleFromYAML("allow-registry", "allow-registry", "", "enforce", `apiVersion: constellation.alphabravo.io/v1alpha1
 kind: AdmissionRule
 metadata:
@@ -274,6 +280,7 @@ spec:
 }
 
 func TestEvaluate_ProfileRuleRequiresPrivilegedApproval(t *testing.T) {
+	t.Parallel()
 	rule := mustProfileRule(t, "privileged-workload-approval-required", "require-approval-for-privileged-workloads")
 	t1 := true
 	pod := &corev1.Pod{
@@ -294,6 +301,7 @@ func TestEvaluate_ProfileRuleRequiresPrivilegedApproval(t *testing.T) {
 }
 
 func TestEvaluate_EvidenceGateUsesEvidenceSource(t *testing.T) {
+	t.Parallel()
 	rule := mustProfileRule(t, "critical-vulnerabilities-blocked", "block-critical-vulnerabilities")
 	engine := &PolicyEngine{
 		Rules:    []Rule{rule},
@@ -315,6 +323,7 @@ func TestEvaluate_EvidenceGateUsesEvidenceSource(t *testing.T) {
 }
 
 func TestEvaluate_EvidenceGateEmitsDenyEventEvidenceDetails(t *testing.T) {
+	t.Parallel()
 	rule := mustProfileRule(t, "critical-vulnerabilities-blocked", "block-critical-vulnerabilities")
 	got := make(chan DenyEvent, 1)
 	engine := &PolicyEngine{
@@ -372,6 +381,7 @@ func TestEvaluate_EvidenceGateEmitsDenyEventEvidenceDetails(t *testing.T) {
 }
 
 func TestEvaluate_EvidenceGateFailsClosedWhenSourceUnavailableOrErrors(t *testing.T) {
+	t.Parallel()
 	rule := mustProfileRule(t, "critical-vulnerabilities-blocked", "block-critical-vulnerabilities")
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "vulnerable"},

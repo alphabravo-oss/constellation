@@ -1,28 +1,23 @@
+//go:build integration
+
 package quarantine
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
+
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 	corev1 "k8s.io/api/core/v1"
 
 	pkgquar "github.com/alphabravocompany/constellation/pkg/quarantine"
 )
 
 func TestPgLoaderPreservesAutomaticScanMatching(t *testing.T) {
-	url := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-	if url == "" {
-		t.Skip("test database not configured")
-	}
-	pool, err := pgxpool.New(t.Context(), url)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(pool.Close)
+	t.Parallel()
+	pool := pgtest.Pool(t)
 	org, cluster := uuid.New(), uuid.New()
 	if _, err := pool.Exec(t.Context(), `INSERT INTO orgs(id,name,display_name) VALUES($1,$2,$2)`, org, "scan-matching-"+org.String()); err != nil {
 		t.Fatal(err)

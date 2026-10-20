@@ -1,3 +1,5 @@
+//go:build integration
+
 package network
 
 import (
@@ -143,6 +145,7 @@ func assertSessionSettingsResponse(t *testing.T, response *httptest.ResponseReco
 }
 
 func TestIngestSessionsSettingsReadFailurePreservesCommittedSnapshotAndKills(t *testing.T) {
+	t.Parallel()
 	f := newSessionSettingsFixture(t)
 	pool := f.database.Pool()
 	if _, err := pool.Exec(t.Context(), `INSERT INTO dpi_threat_settings(org_id,cluster_id,weak_tls_enabled) VALUES($1,$2,true)`, f.org, f.cluster); err != nil {

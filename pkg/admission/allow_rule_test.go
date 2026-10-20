@@ -40,6 +40,7 @@ func privilegedPod() *corev1.Pod {
 // enforce-mode allow/except rule whose conditions match short-circuits to ADMIT
 // before the matching deny rule is ever evaluated.
 func TestEvaluate_AllowCarveOutBeatsDeny(t *testing.T) {
+	t.Parallel()
 	e := &PolicyEngine{Rules: []Rule{
 		// A broad deny that WOULD block this privileged pod.
 		{ID: "block-privileged", Mode: "enforce", Kinds: []string{"Pod"},
@@ -59,6 +60,7 @@ func TestEvaluate_AllowCarveOutBeatsDeny(t *testing.T) {
 // TestEvaluate_AllowCarveOutDoesNotMatchOtherUser confirms the carve-out is
 // scoped: a non-matching user still hits the deny rule.
 func TestEvaluate_AllowCarveOutDoesNotMatchOtherUser(t *testing.T) {
+	t.Parallel()
 	e := &PolicyEngine{Rules: []Rule{
 		{ID: "block-privileged", Mode: "enforce", Kinds: []string{"Pod"},
 			Conditions: RuleConditions{Privileged: boolPtr(true)}},
@@ -77,6 +79,7 @@ func TestEvaluate_AllowCarveOutDoesNotMatchOtherUser(t *testing.T) {
 // monitor-mode allow rule does NOT short-circuit; it only warns, so the deny
 // rule still blocks until an operator flips the carve-out to enforce.
 func TestEvaluate_MonitorAllowOnlyObserves(t *testing.T) {
+	t.Parallel()
 	e := &PolicyEngine{Rules: []Rule{
 		{ID: "block-privileged", Mode: "enforce", Kinds: []string{"Pod"},
 			Conditions: RuleConditions{Privileged: boolPtr(true)}},
@@ -101,6 +104,7 @@ func TestEvaluate_MonitorAllowOnlyObserves(t *testing.T) {
 }
 
 func TestRuleFromYAML_AllowAndExceptSetEffect(t *testing.T) {
+	t.Parallel()
 	for _, action := range []string{"allow", "except", "exception"} {
 		spec := `apiVersion: constellation.alphabravo.io/v1alpha1
 kind: AdmissionRule
@@ -126,6 +130,7 @@ spec:
 }
 
 func TestRuleFromYAML_DefaultEffectIsDeny(t *testing.T) {
+	t.Parallel()
 	spec := `apiVersion: constellation.alphabravo.io/v1alpha1
 kind: AdmissionRule
 metadata:
@@ -146,6 +151,7 @@ spec:
 }
 
 func TestRuleFromYAML_UnknownActionRejected(t *testing.T) {
+	t.Parallel()
 	spec := `apiVersion: constellation.alphabravo.io/v1alpha1
 kind: AdmissionRule
 metadata:

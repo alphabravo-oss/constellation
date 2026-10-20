@@ -14,6 +14,7 @@ import (
 )
 
 func TestAuditLogInTxSharesCallerTransaction(t *testing.T) {
+	t.Parallel()
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
 		t.Skip("DATABASE_URL not set")
@@ -65,6 +66,7 @@ func TestAuditLogInTxSharesCallerTransaction(t *testing.T) {
 //
 // Requires the migrations to be applied.
 func TestAuditChainIntegration(t *testing.T) {
+	t.Parallel()
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
 		t.Skip("DATABASE_URL not set")
@@ -122,6 +124,7 @@ func TestAuditChainIntegration(t *testing.T) {
 // producing a false `prev_hash mismatch` in VerifyChain. With the fixed-key pg_advisory_xact_lock
 // taken before the head read, every writer queues and reads the genuine committed head.
 func TestAuditChainConcurrentWritersIntact(t *testing.T) {
+	t.Parallel()
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
 		t.Skip("DATABASE_URL not set")

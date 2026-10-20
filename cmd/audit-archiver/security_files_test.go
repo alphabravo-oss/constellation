@@ -7,6 +7,7 @@ import (
 )
 
 func TestLocalAuditArtifactsPrivateAndSymlinkSafe(t *testing.T) {
+	t.Parallel()
 	source := filepath.Join(t.TempDir(), "archive")
 	if err := os.WriteFile(source, []byte("retained audit evidence"), 0o600); err != nil {
 		t.Fatal(err)

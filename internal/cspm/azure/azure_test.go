@@ -21,6 +21,7 @@ func (f *fakeHTTP) Do(req *http.Request) (*http.Response, error) {
 }
 
 func TestScanRoleAssignments_FlagsOwnerToUser(t *testing.T) {
+	t.Parallel()
 	c := &Connector{Token: "t", SubscriptionID: "sub-1", HTTP: &fakeHTTP{responses: map[string]string{
 		"roleAssignments": `{"value":[
 			{"name":"a1","properties":{"roleDefinitionId":"/subscriptions/sub-1/providers/Microsoft.Authorization/roleDefinitions/8e3af657-a8ff-443c-a75c-2fe8c4bcb635","principalId":"u1","principalType":"User","scope":"/subscriptions/sub-1"}},
@@ -42,6 +43,7 @@ func TestScanRoleAssignments_FlagsOwnerToUser(t *testing.T) {
 }
 
 func TestScanStorage_FlagsAllowBlobPublicAccess(t *testing.T) {
+	t.Parallel()
 	c := &Connector{Token: "t", SubscriptionID: "sub-1", HTTP: &fakeHTTP{responses: map[string]string{
 		"storageAccounts": `{"value":[
 			{"id":"/sub/x/sa1","name":"sa1","properties":{"allowBlobPublicAccess":true}},

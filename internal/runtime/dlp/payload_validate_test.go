@@ -6,6 +6,7 @@ import "testing"
 // credit-card regex matches BOTH numbers below (16 digits), but only the
 // Luhn-valid one must survive validation — the false positive is rejected.
 func TestPayloadHasValidCreditCard(t *testing.T) {
+	t.Parallel()
 	// Both are matched by the structural regex.
 	valid := "4111111111111111"   // Luhn-valid Visa test PAN
 	invalid := "4111111111111112" // one digit off → fails Luhn
@@ -28,6 +29,7 @@ func TestPayloadHasValidCreditCard(t *testing.T) {
 // TestPayloadHasValidSSN checks the sentinel exclusion: a structurally valid but
 // non-issuable SSN (000 area) is rejected while a real one is accepted.
 func TestPayloadHasValidSSN(t *testing.T) {
+	t.Parallel()
 	if !PayloadHasValidSSN([]byte("ssn 123-45-6789 end")) {
 		t.Errorf("issuable SSN rejected")
 	}
@@ -39,6 +41,7 @@ func TestPayloadHasValidSSN(t *testing.T) {
 // TestPayloadHasValidPII_FailOpen: an empty payload must not be treated as "no
 // PII" — the agent keeps the alert when dp captured no packet bytes.
 func TestPayloadHasValidPII_FailOpen(t *testing.T) {
+	t.Parallel()
 	if PayloadHasValidPII(nil) {
 		t.Errorf("nil payload must return false (agent then fails open, keeps alert)")
 	}
@@ -48,6 +51,7 @@ func TestPayloadHasValidPII_FailOpen(t *testing.T) {
 }
 
 func TestLuhnValidExported(t *testing.T) {
+	t.Parallel()
 	if !LuhnValid("4111111111111111") {
 		t.Errorf("LuhnValid rejected a valid PAN")
 	}

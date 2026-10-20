@@ -7,6 +7,7 @@ import "testing"
 // verifier accepts it), and is rejected when no root does. selectTrustedRoot is the cosign-free
 // core of VerifyWithRoots; the fake verify stands in for the per-root cosign shell-out.
 func TestSelectTrustedRootAnyRootVerifies(t *testing.T) {
+	t.Parallel()
 	roots := []RootOfTrust{
 		{Name: "first"},
 		{Name: "second"},

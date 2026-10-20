@@ -1,13 +1,16 @@
+//go:build integration
+
 package main
 
 import (
 	"context"
 	"io"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -44,16 +47,8 @@ func TestEmailDeliveryFailurePersistsFailedRunAndRetainsArtifact(t *testing.T) {
 
 func newEmailDeliveryFixture(t *testing.T) (*pgxpool.Pool, uuid.UUID, uuid.UUID) {
 	t.Helper()
-	raw := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-	if raw == "" {
-		t.Skip("fresh test database required")
-	}
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(pool.Close)
+	pool := pgtest.Pool(t)
 	org, cluster := uuid.New(), uuid.New()
 	if _, err := pool.Exec(ctx, `INSERT INTO orgs(id,name,display_name) VALUES($1,$2,'Email delivery fixture')`, org, "email-delivery-"+org.String()); err != nil {
 		t.Fatal(err)

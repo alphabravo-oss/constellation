@@ -3,6 +3,7 @@ package dlp
 import "testing"
 
 func TestDlpSensor_Validate(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		s    DlpSensor
 		want bool
@@ -24,6 +25,7 @@ func TestDlpSensor_Validate(t *testing.T) {
 }
 
 func TestDefaultCatalog_AllValid(t *testing.T) {
+	t.Parallel()
 	for _, s := range DefaultCatalog() {
 		if err := s.Validate(); err != nil {
 			t.Errorf("seed sensor %s invalid: %v", s.Name, err)

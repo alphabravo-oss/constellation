@@ -32,6 +32,7 @@ func TestRuleMatchStat_IsDead(t *testing.T) {
 }
 
 func TestRuleMatchStat_IsDead_DefaultWindow(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC()
 	// A non-positive window falls back to DefaultDeadRuleWindow.
 	fresh := RuleMatchStat{RuleID: 1, LastMatchedAt: ptime(now.Add(-1 * time.Hour))}
@@ -45,6 +46,7 @@ func TestRuleMatchStat_IsDead_DefaultWindow(t *testing.T) {
 }
 
 func TestDeadRules(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC()
 	stats := []RuleMatchStat{
 		{RuleID: 1, LastMatchedAt: ptime(now.Add(-1 * time.Hour))},        // alive

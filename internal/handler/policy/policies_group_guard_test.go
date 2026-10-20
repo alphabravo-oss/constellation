@@ -1,3 +1,5 @@
+//go:build integration
+
 package policy
 
 import (
@@ -87,6 +89,7 @@ func rawPolicyID(t *testing.T, response *httptest.ResponseRecorder) uuid.UUID {
 }
 
 func TestPolicyCreateRejectsForeignClusterWithAndWithoutSelectors(t *testing.T) {
+	t.Parallel()
 	database := openTestDB(t)
 	defer database.Close()
 	pool := database.Pool()
@@ -121,6 +124,7 @@ func TestPolicyCreateRejectsForeignClusterWithAndWithoutSelectors(t *testing.T) 
 }
 
 func TestRawAdmissionPolicyCreateScopesAllGroupSelectors(t *testing.T) {
+	t.Parallel()
 	database := openTestDB(t)
 	defer database.Close()
 	pool := database.Pool()
@@ -166,6 +170,7 @@ func TestRawAdmissionPolicyCreateScopesAllGroupSelectors(t *testing.T) {
 }
 
 func TestRawAdmissionPolicyUpdateValidatesResultingGroups(t *testing.T) {
+	t.Parallel()
 	database := openTestDB(t)
 	defer database.Close()
 	pool := database.Pool()

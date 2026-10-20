@@ -282,6 +282,7 @@ func TestFlannelFixtureRejectsScopeEscapeAndReusedIdentity(t *testing.T) {
 }
 
 func TestFlannelFixtureRejectsUnexpectedSecurityLabels(t *testing.T) {
+	t.Parallel()
 	labels := map[string]string{"driver": "unconfined", "client": "unconfined", "server-a": "unconfined", "server-b": "unconfined"}
 	if err := validateFlannelSecurityLabels(labels); err != nil {
 		t.Fatal(err)
@@ -300,6 +301,7 @@ func TestFlannelFixtureRejectsUnexpectedSecurityLabels(t *testing.T) {
 }
 
 func TestFlannelFixtureReadlinkSearchOnly(t *testing.T) {
+	t.Parallel()
 	if path := os.Getenv("CONSTELLATION_FLANNEL_SEARCH_ONLY_TEST"); path != "" {
 		assertFlannelSearchOnlyLink(t, path)
 		return
@@ -354,6 +356,7 @@ func TestFlannelFixtureReadlinkSearchOnly(t *testing.T) {
 }
 
 func TestFlannelFixturePoliciesRequireRealBindingsAndStampAppIDs(t *testing.T) {
+	t.Parallel()
 	identity := fixtureFlannelIdentity()
 	policies := flannelPolicies(identity)
 	if err := validateRuntimePolicyBundle(&runtimePolicyBundle{ProtocolVersion: 2, ClusterID: "fixture", SourceComplete: true, Policies: policies}, "fixture"); err != nil {

@@ -1,12 +1,15 @@
+//go:build integration
+
 package k8saudit
 
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
 
 	"github.com/google/uuid"
 
@@ -17,15 +20,7 @@ import (
 )
 
 func TestLegacyTagOutcomePreservesSuppressLog(t *testing.T) {
-	databaseURL := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("CONSTELLATION_TEST_DATABASE_URL not set; integration test")
-	}
-	database, err := db.Connect(context.Background(), databaseURL)
-	if err != nil {
-		t.Skipf("skipping: cannot reach test DB (%v)", err)
-	}
-	t.Cleanup(database.Close)
+	database := db.NewFromPool(pgtest.Pool(t))
 	ctx := context.Background()
 	pool := database.Pool()
 	orgID := uuid.New()
@@ -127,6 +122,7 @@ func TestClassify(t *testing.T) {
 }
 
 func TestClassifyPrivilegedCreate(t *testing.T) {
+	t.Parallel()
 	priv := true
 	spec := map[string]any{
 		"spec": map[string]any{
@@ -161,6 +157,7 @@ func TestClassifyPrivilegedCreate(t *testing.T) {
 }
 
 func TestDecisionAndSourceIP(t *testing.T) {
+	t.Parallel()
 	ev := &AuditEvent{
 		Annotations: map[string]string{"authorization.k8s.io/decision": "Forbid"},
 		SourceIPs:   []string{"10.1.2.3", "10.9.9.9"},
@@ -178,6 +175,7 @@ func TestDecisionAndSourceIP(t *testing.T) {
 }
 
 func TestDedupCollapsesRepeats(t *testing.T) {
+	t.Parallel()
 	base := time.Unix(1_700_000_000, 0)
 	d := newAuditDedup(60 * time.Second)
 	d.now = func() time.Time { return base }
@@ -203,6 +201,7 @@ func TestDedupCollapsesRepeats(t *testing.T) {
 }
 
 func TestDecodeAuditItemsEventListAndArray(t *testing.T) {
+	t.Parallel()
 	list := `{"kind":"EventList","apiVersion":"audit.k8s.io/v1","items":[{"verb":"get"},{"verb":"list"}]}`
 	items, err := decodeAuditItems(strings.NewReader(list))
 	if err != nil || len(items) != 2 {

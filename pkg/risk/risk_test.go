@@ -3,6 +3,7 @@ package risk
 import "testing"
 
 func TestComputeBoundary(t *testing.T) {
+	t.Parallel()
 	if got := Compute(Inputs{}); got != 0 {
 		t.Fatalf("empty inputs should be 0, got %d", got)
 	}
@@ -17,6 +18,7 @@ func TestComputeBoundary(t *testing.T) {
 }
 
 func TestKEVKicker(t *testing.T) {
+	t.Parallel()
 	// Two identical findings, one KEV, one not. KEV should score higher.
 	noKEV := Compute(Inputs{CVSSBase: 7.5, EPSSProbability: 0.5, AssetCriticality: "high"})
 	withKEV := Compute(Inputs{CVSSBase: 7.5, EPSSProbability: 0.5, AssetCriticality: "high", KEVListed: true})
@@ -26,6 +28,7 @@ func TestKEVKicker(t *testing.T) {
 }
 
 func TestOverride(t *testing.T) {
+	t.Parallel()
 	got := Compute(Inputs{CVSSBase: 10, Override: true, OverrideScore: 5})
 	if got != 5 {
 		t.Fatalf("override should win, got %d", got)
@@ -33,6 +36,7 @@ func TestOverride(t *testing.T) {
 }
 
 func TestReachabilityShift(t *testing.T) {
+	t.Parallel()
 	cold := Compute(Inputs{CVSSBase: 8, EPSSProbability: 0.2})
 	hot := Compute(Inputs{CVSSBase: 8, EPSSProbability: 0.2, ReachableRuntime: true})
 	if hot <= cold {

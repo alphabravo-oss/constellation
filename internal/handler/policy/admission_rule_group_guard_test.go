@@ -1,3 +1,5 @@
+//go:build integration
+
 package policy
 
 import (
@@ -15,6 +17,7 @@ import (
 )
 
 func TestCreateAdmissionRuleRejectsClusterGroupWithoutClusterScope(t *testing.T) {
+	t.Parallel()
 	database := openTestDB(t)
 	t.Cleanup(database.Close)
 	pool := database.Pool()
@@ -61,6 +64,7 @@ func TestCreateAdmissionRuleRejectsClusterGroupWithoutClusterScope(t *testing.T)
 }
 
 func TestCreateAdmissionRuleRejectsGroupRenamedDuringWrite(t *testing.T) {
+	t.Parallel()
 	database := openTestDB(t)
 	t.Cleanup(database.Close)
 	ctx := context.Background()

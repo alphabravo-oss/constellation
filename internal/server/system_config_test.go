@@ -1,3 +1,5 @@
+//go:build integration
+
 package server
 
 import (
@@ -31,7 +33,7 @@ func newSysConfigTestServer(t *testing.T) (*Server, *httptest.Server, *pgxpool.P
 	t.Helper()
 	t.Setenv("CONSTELLATION_ALLOW_HS256_JWT", "true")
 	ctx := context.Background()
-	url := testDBURL()
+	url := testDBURL(t)
 
 	pool, err := pgxpool.New(ctx, url)
 	if err != nil {

@@ -1,3 +1,5 @@
+//go:build integration
+
 package telemetryingest
 
 import (
@@ -5,35 +7,28 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
+
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestReceiptConcurrentReplayRollbackAndScope(t *testing.T) {
-	url := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-	if url == "" {
-		t.Skip("requires integration database")
-	}
+	t.Parallel()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	pool, err := pgxpool.New(ctx, url)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer pool.Close()
+	pool := pgtest.Pool(t)
 	org, cluster := uuid.New(), uuid.New()
-	if _, err = pool.Exec(ctx, `INSERT INTO orgs(id,name,display_name) VALUES ($1,$2,$2)`, org, "receipt-"+org.String()); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO orgs(id,name,display_name) VALUES ($1,$2,$2)`, org, "receipt-"+org.String()); err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id=$1`, org) }()
-	if _, err = pool.Exec(ctx, `INSERT INTO clusters(id,org_id,name) VALUES ($1,$2,'receipt')`, cluster, org); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO clusters(id,org_id,name) VALUES ($1,$2,'receipt')`, cluster, org); err != nil {
 		t.Fatal(err)
 	}
 	producer := uuid.New()
@@ -142,6 +137,7 @@ func TestReceiptConcurrentReplayRollbackAndScope(t *testing.T) {
 }
 
 func TestAdmissionIsolatesBusyCluster(t *testing.T) {
+	t.Parallel()
 	org, a, b := uuid.New(), uuid.New(), uuid.New()
 	one, ok := Admit(httptest.NewRecorder(), org, a)
 	if !ok {

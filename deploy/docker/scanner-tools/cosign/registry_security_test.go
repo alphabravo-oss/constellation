@@ -17,6 +17,7 @@ func (r rejectCredentialTransport) RoundTrip(*http.Request) (*http.Response, err
 }
 
 func TestConstellationAzureLookalikesRejectedBeforeCredentialRequest(t *testing.T) {
+	t.Parallel()
 	calls := 0
 	old := http.DefaultTransport
 	http.DefaultTransport = rejectCredentialTransport{calls: &calls}

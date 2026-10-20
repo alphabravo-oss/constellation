@@ -9,6 +9,7 @@ import (
 // unparseable pattern must be rejected at authoring time, not stored and shown
 // "enforce" while dp silently drops it.
 func TestCompilePatternRejectsInvalid(t *testing.T) {
+	t.Parallel()
 	for _, bad := range []string{
 		`(unclosed`, // unbalanced paren — the classic typo
 		`[a-`,       // unterminated class
@@ -26,6 +27,7 @@ func TestCompilePatternRejectsInvalid(t *testing.T) {
 // This is exactly what plain stdlib regexp.Compile (RE2) would fail-closed on,
 // so it fails if someone swaps CompilePattern back to RE2.
 func TestCompilePatternAcceptsLookaround(t *testing.T) {
+	t.Parallel()
 	for _, ok := range []string{
 		`foo(?=bar)`,  // positive lookahead
 		`foo(?!bar)`,  // negative lookahead
@@ -42,6 +44,7 @@ func TestCompilePatternAcceptsLookaround(t *testing.T) {
 }
 
 func TestValidatePatterns(t *testing.T) {
+	t.Parallel()
 	// Empty set: NeuVector requires >=1 pattern.
 	if err := ValidatePatterns(nil); err == nil {
 		t.Error("ValidatePatterns(nil) = nil, want error (>=1 pattern required)")

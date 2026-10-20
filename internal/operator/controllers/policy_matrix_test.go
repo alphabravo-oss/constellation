@@ -21,6 +21,7 @@ const testCluster = "22222222-2222-2222-2222-222222222222"
 // -------------------------------- signature rule --------------------------------
 
 func TestMapSignatureRule_Defaults(t *testing.T) {
+	t.Parallel()
 	cr := &cv1alpha1.ConstellationSignatureRule{
 		ObjectMeta: metav1.ObjectMeta{Name: "log4shell"},
 		Spec: cv1alpha1.ConstellationSignatureRuleSpec{
@@ -45,6 +46,7 @@ func TestMapSignatureRule_Defaults(t *testing.T) {
 }
 
 func TestMapSignatureRule_Rejects(t *testing.T) {
+	t.Parallel()
 	cases := map[string]cv1alpha1.ConstellationSignatureRuleSpec{
 		"bad org":      {OrgID: "x", ClusterID: testCluster, Patterns: []string{"a"}},
 		"bad cluster":  {OrgID: testOrg, ClusterID: "x", Patterns: []string{"a"}},
@@ -65,6 +67,7 @@ func TestMapSignatureRule_Rejects(t *testing.T) {
 // --------------------------------- vuln profile ---------------------------------
 
 func TestMapVulnProfile_Mapping(t *testing.T) {
+	t.Parallel()
 	cr := &cv1alpha1.ConstellationVulnProfile{
 		ObjectMeta: metav1.ObjectMeta{Name: "grace"},
 		Spec: cv1alpha1.ConstellationVulnProfileSpec{
@@ -93,6 +96,7 @@ func TestMapVulnProfile_Mapping(t *testing.T) {
 }
 
 func TestMapVulnProfile_Rejects(t *testing.T) {
+	t.Parallel()
 	cases := map[string]cv1alpha1.ConstellationVulnProfileSpec{
 		"bad org":      {OrgID: "x"},
 		"bad action":   {OrgID: testOrg, Entries: []cv1alpha1.VulnProfileEntry{{Name: "e", Action: "ignore"}}},

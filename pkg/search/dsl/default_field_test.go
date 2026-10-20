@@ -7,6 +7,7 @@ import (
 )
 
 func TestDefaultFieldAndLeadingNegation(t *testing.T) {
+	t.Parallel()
 	schema := Schema{DefaultField: "text", Fields: map[string]Field{"text": {Column: "document", Type: FieldString}, "status": {Column: "lifecycle", Type: FieldString}}}
 	for _, tc := range []struct {
 		query     string
@@ -35,6 +36,7 @@ func TestDefaultFieldAndLeadingNegation(t *testing.T) {
 }
 
 func TestColonValuesAndStrictBooleans(t *testing.T) {
+	t.Parallel()
 	s := Schema{Fields: map[string]Field{"purl": {Column: "purl", Type: FieldString}, "seen": {Column: "seen_at", Type: FieldTime}, "kev": {Column: "kev", Type: FieldBool}}}
 	got, err := Compile("purl:pkg:npm/example kev:true seen:2026-01-01T12:34:56Z", s)
 	if err != nil || len(got.Args) != 3 || got.Args[0] != "%pkg:npm/example%" || got.Args[1] != true {
@@ -53,6 +55,7 @@ func TestColonValuesAndStrictBooleans(t *testing.T) {
 }
 
 func TestLiteralSubstrings(t *testing.T) {
+	t.Parallel()
 	s := Schema{DefaultField: "text", LiteralSubstrings: true, Fields: map[string]Field{"text": {Column: "document", Type: FieldString}}}
 	got, err := Compile(`foo_bar% text:g/foo*`, s)
 	if err != nil || !reflect.DeepEqual(got.Args, []any{`%foo\_bar\%%`, "foo%"}) {

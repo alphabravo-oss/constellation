@@ -3,6 +3,7 @@ package netpolicy
 import "testing"
 
 func TestExpandEdgeFansOutMembersAndPorts(t *testing.T) {
+	t.Parallel()
 	e := GroupEdge{
 		FromGroup: "frontend", ToGroup: "backend",
 		Ports: []PortSpec{{Protocol: "tcp", Port: 5432}, {Protocol: "tcp", Port: 6379}},
@@ -31,6 +32,7 @@ func TestExpandEdgeFansOutMembersAndPorts(t *testing.T) {
 }
 
 func TestExpandEdgeSkipsSelfPairs(t *testing.T) {
+	t.Parallel()
 	e := GroupEdge{FromGroup: "g", ToGroup: "g", Ports: []PortSpec{{Protocol: "TCP", Port: 8080}}}
 	_ = e.Validate()
 	members := []string{"ns/a", "ns/b"}
@@ -47,6 +49,7 @@ func TestExpandEdgeSkipsSelfPairs(t *testing.T) {
 }
 
 func TestGroupEdgeValidateDefaultsMonitor(t *testing.T) {
+	t.Parallel()
 	e := GroupEdge{FromGroup: "a", ToGroup: "b"}
 	if err := e.Validate(); err != nil {
 		t.Fatal(err)

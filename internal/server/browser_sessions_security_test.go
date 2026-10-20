@@ -1,3 +1,5 @@
+//go:build integration
+
 package server
 
 import (
@@ -275,7 +277,7 @@ func TestBrowserSessionsSecurityRefreshCannotMoveActivityBackwards(t *testing.T)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	config, err := pgxpool.ParseConfig(testDBURL())
+	config, err := pgxpool.ParseConfig(testDBURL(t))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -6,6 +6,7 @@ import (
 )
 
 func TestRuntimeArtifactsRoundTrip(t *testing.T) {
+	t.Parallel()
 	env := Envelope{
 		Trigger:    "quarantine",
 		CapturedAt: time.Now().UTC(),
@@ -36,6 +37,7 @@ func TestRuntimeArtifactsRoundTrip(t *testing.T) {
 }
 
 func TestDecodeRuntimeArtifactsAbsent(t *testing.T) {
+	t.Parallel()
 	env := &Envelope{}
 	if _, ok := DecodeRuntimeArtifacts(env); ok {
 		t.Fatal("expected absent")

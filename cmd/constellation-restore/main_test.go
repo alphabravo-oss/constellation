@@ -59,6 +59,7 @@ func TestServerRestoreRejectsRedirectAndFailure(t *testing.T) {
 }
 
 func TestServerRestoreRespectsCancellation(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		t.Error("canceled restore reached server")
 		w.WriteHeader(http.StatusInternalServerError)

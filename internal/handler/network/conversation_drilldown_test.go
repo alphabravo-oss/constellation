@@ -1,3 +1,5 @@
+//go:build integration
+
 package network
 
 import (
@@ -17,6 +19,7 @@ import (
 )
 
 func TestConversationExactDrilldownsBeforePagination(t *testing.T) {
+	t.Parallel()
 	database := openTestDB(t)
 	t.Cleanup(database.Close)
 	pool := database.Pool()

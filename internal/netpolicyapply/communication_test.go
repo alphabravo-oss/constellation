@@ -118,6 +118,7 @@ func TestNativeProtectionPreservesDirectionAndOriginalRules(t *testing.T) {
 	}
 }
 func TestCalicoProtectionPrecedesDenyAndKeepsIPFamiliesSeparate(t *testing.T) {
+	t.Parallel()
 	got := effectivePolicy(t, "GlobalNetworkPolicy", map[string]any{"types": []any{"Egress"}, "egress": []any{map[string]any{"action": "Deny"}}})
 	if _, exists := got["ingress"]; exists {
 		t.Fatal("egress-only became ingress policy")
@@ -139,6 +140,7 @@ func TestCalicoProtectionPrecedesDenyAndKeepsIPFamiliesSeparate(t *testing.T) {
 	}
 }
 func TestCiliumDenyProtectionAndDefaultSemantics(t *testing.T) {
+	t.Parallel()
 	p, _ := NewProtection("own", nil)
 	ips, _ := fixtureDependencies(context.Background(), p)
 	for _, tc := range []struct {
@@ -170,6 +172,7 @@ func TestCiliumDenyProtectionAndDefaultSemantics(t *testing.T) {
 	}
 }
 func TestDependencyFailureNeverWritesButAllowsRecoveryDelete(t *testing.T) {
+	t.Parallel()
 	p, _ := NewProtection("own", nil)
 	dyn := fake.NewSimpleDynamicClient(runtime.NewScheme())
 	writes := 0
@@ -189,6 +192,7 @@ func TestDependencyFailureNeverWritesButAllowsRecoveryDelete(t *testing.T) {
 	}
 }
 func TestDependencyInventoryReadsAllPagesAndFailsOnIncompleteData(t *testing.T) {
+	t.Parallel()
 	p, _ := NewProtection("own", nil)
 	for _, fail := range []bool{false, true} {
 		lists := map[schema.GroupVersionResource]string{}
@@ -240,6 +244,7 @@ func TestDependencyInventoryReadsAllPagesAndFailsOnIncompleteData(t *testing.T) 
 }
 
 func TestEmptyCiliumDirectionsDoNotStartIsolatingTraffic(t *testing.T) {
+	t.Parallel()
 	for _, empty := range []any{nil, []any{}} {
 		got := effectivePolicy(t, "CiliumNetworkPolicy", map[string]any{"egress": empty})
 		if rules, ok := got["egress"].([]any); ok && len(rules) > 0 {
@@ -249,6 +254,7 @@ func TestEmptyCiliumDirectionsDoNotStartIsolatingTraffic(t *testing.T) {
 }
 
 func TestServiceExceptionsNeverPermitUnrelatedNodePorts(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"NetworkPolicy", "CiliumNetworkPolicy", "GlobalNetworkPolicy"} {
 		spec := map[string]any{"policyTypes": []any{"Egress"}, "types": []any{"Egress"}, "egress": []any{map[string]any{"toEndpoints": []any{map[string]any{"matchLabels": map[string]any{"app": "application"}}}}}}
 		// Use a genuinely isolated direction for native and Calico; Cilium needs a
@@ -290,6 +296,7 @@ func TestServiceExceptionsNeverPermitUnrelatedNodePorts(t *testing.T) {
 }
 
 func TestUnownedServiceSliceCannotGrantAnException(t *testing.T) {
+	t.Parallel()
 	p, _ := NewProtection("own", nil)
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
@@ -337,6 +344,7 @@ func TestUnownedServiceSliceCannotGrantAnException(t *testing.T) {
 }
 
 func TestCoreServicesExposeDNSWithoutProxyOrMetricsPorts(t *testing.T) {
+	t.Parallel()
 	p, _ := NewProtection("own", nil)
 	svc := corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "kube-dns", Namespace: "kube-system"}, Spec: corev1.ServiceSpec{Ports: []corev1.ServicePort{{Name: "dns", Port: 53, Protocol: corev1.ProtocolUDP}, {Name: "metrics", Port: 9153, Protocol: corev1.ProtocolTCP}}}}
 	dns, metrics := svc.Spec.Ports[0], svc.Spec.Ports[1]

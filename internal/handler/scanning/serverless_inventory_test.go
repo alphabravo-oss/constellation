@@ -1,3 +1,5 @@
+//go:build integration
+
 package scanning
 
 import (
@@ -17,6 +19,7 @@ import (
 )
 
 func TestServerlessInventoryListAndGet(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 

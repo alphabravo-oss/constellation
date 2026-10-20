@@ -27,6 +27,7 @@ func reductionReview(t *testing.T, kind string, before, after any) *admissionv1.
 }
 
 func TestReplicaReductionAllowsStaleTemplateRetirement(t *testing.T) {
+	t.Parallel()
 	e := &PolicyEngine{Rules: []Rule{mustProfileRule(t, "critical-vulnerabilities-blocked", "block-critical-vulnerabilities")}, Evidence: fakeEvidenceSource{reason: "scan result is stale"}}
 	for _, kind := range []string{"ReplicaSet", "Deployment", "StatefulSet"} {
 		for _, counts := range [][2]any{{2, 1}, {1, 0}, {nil, 0}, {2, nil}} {
@@ -92,6 +93,7 @@ func TestReplicaReductionRejectsOtherChanges(t *testing.T) {
 }
 
 func TestReplicaReductionStillEvaluatesCustomRego(t *testing.T) {
+	t.Parallel()
 	rego, errs, err := NewRegoEngine(t.Context(), map[string]string{"block-reduction": `package constellation.admission
  deny[msg] {
  input.request.operation == "UPDATE"
@@ -111,6 +113,7 @@ func TestReplicaReductionStillEvaluatesCustomRego(t *testing.T) {
 }
 
 func TestReplicaReductionStillEvaluatesCustomCEL(t *testing.T) {
+	t.Parallel()
 	cel, errs, err := NewCELEngine([]*CELRule{{ID: "block-update", Expression: `request.operation != "UPDATE"`, MessageExpression: `"custom update gate"`, Mode: "enforce"}})
 	if err != nil || len(errs) > 0 {
 		t.Fatalf("compile: %v %v", err, errs)
@@ -123,6 +126,7 @@ func TestReplicaReductionStillEvaluatesCustomCEL(t *testing.T) {
 }
 
 func TestReplicaReductionPreservesLargeUnknownNumbers(t *testing.T) {
+	t.Parallel()
 	req := reductionReview(t, "ReplicaSet", 2, 1)
 	for i, raw := range []*runtime.RawExtension{&req.OldObject, &req.Object} {
 		var obj map[string]any

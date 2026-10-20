@@ -33,6 +33,7 @@ func TestHTTPBodyFramingForInspection(t *testing.T) {
 }
 
 func TestHTTPDecodedBodyRemainsBounded(t *testing.T) {
+	t.Parallel()
 	const limit = 64 << 10
 	body := strings.Repeat("x", limit+1)
 	payload := fmt.Sprintf("POST / HTTP/1.1\r\nHost: app\r\nTransfer-Encoding: chunked\r\n\r\n%x\r\n%s\r\n0\r\n\r\n", len(body), body)

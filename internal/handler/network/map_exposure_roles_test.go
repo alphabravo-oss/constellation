@@ -1,3 +1,5 @@
+//go:build integration
+
 package network
 
 import (
@@ -16,6 +18,7 @@ import (
 )
 
 func TestNetworkMapAndExposureExactEndpointRoles(t *testing.T) {
+	t.Parallel()
 	database := openTestDB(t)
 	t.Cleanup(database.Close)
 	ctx, pool := context.Background(), database.Pool()
@@ -196,6 +199,7 @@ func TestNetworkMapAndExposureExactEndpointRoles(t *testing.T) {
 }
 
 func TestNetworkMapAndExposureRoleLookupFailure(t *testing.T) {
+	t.Parallel()
 	database := openTestDB(t)
 	t.Cleanup(database.Close)
 	ctx, pool := context.Background(), database.Pool()
@@ -253,6 +257,7 @@ func TestNetworkMapAndExposureRoleLookupFailure(t *testing.T) {
 }
 
 func TestNetworkMapLegacyMultiClusterGraphRolesAreAmbiguous(t *testing.T) {
+	t.Parallel()
 	database := openTestDB(t)
 	t.Cleanup(database.Close)
 	ctx, pool := context.Background(), database.Pool()

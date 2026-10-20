@@ -1,3 +1,5 @@
+//go:build integration
+
 package scanning
 
 import (
@@ -23,6 +25,7 @@ import (
 )
 
 func TestScanAttestationsReportLinksRepositoryScan(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -409,6 +412,7 @@ SELECT COUNT(*) FROM audit_events
 }
 
 func TestScanAttestationTrustPolicyPublicKeyMode(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 

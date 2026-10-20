@@ -1,10 +1,13 @@
+//go:build integration
+
 package main
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
+
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/flowrollup"
@@ -13,17 +16,9 @@ import (
 
 func TestCLIBackfillCommitsLabelsAndTotalsTogether(t *testing.T) {
 	ctx := context.Background()
-	url := os.Getenv("CONSTELLATION_TEST_DATABASE_URL")
-	if url == "" {
-		t.Skip("requires isolated test database")
-	}
-	database, err := db.Connect(ctx, url)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(database.Close)
+	database := db.NewFromPool(pgtest.Pool(t))
 	pool := pgfixture.Schema(t, database.Pool())
-	_, err = pool.Exec(ctx, `CREATE TABLE network_flows (LIKE public.network_flows INCLUDING ALL);
+	_, err := pool.Exec(ctx, `CREATE TABLE network_flows (LIKE public.network_flows INCLUDING ALL);
  CREATE TABLE network_flow_rollups (LIKE public.network_flow_rollups INCLUDING ALL);
  CREATE TABLE network_flow_rollup_state (id boolean PRIMARY KEY, watermark timestamptz, raw_pruned_before timestamptz);
  INSERT INTO network_flow_rollup_state VALUES (true, now(), '1970-01-01');`)

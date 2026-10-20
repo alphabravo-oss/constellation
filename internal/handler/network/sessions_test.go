@@ -1,3 +1,5 @@
+//go:build integration
+
 package network
 
 import (
@@ -17,6 +19,7 @@ import (
 )
 
 func TestNetwork_KillSessionQueuesRequestAndAuditsTarget(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -136,6 +139,7 @@ SELECT count(*)::int
 }
 
 func TestNetwork_SessionsReturnsTruncationMetadata(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 
@@ -195,6 +199,7 @@ VALUES
 }
 
 func TestNetwork_SessionsPlatformRoleScopedToOwnedDeployment(t *testing.T) {
+	t.Parallel()
 	database := openTestDB(t)
 	t.Cleanup(database.Close)
 	ctx := context.Background()
@@ -263,6 +268,7 @@ func TestNetwork_SessionsPlatformRoleScopedToOwnedDeployment(t *testing.T) {
 }
 
 func TestNetwork_SessionsAppliesServerSideFilters(t *testing.T) {
+	t.Parallel()
 	d := openTestDB(t)
 	defer d.Close()
 

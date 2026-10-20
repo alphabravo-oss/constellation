@@ -23,6 +23,7 @@ func streamFixtureRoot(t *testing.T) *os.Root {
 }
 
 func TestWriteStreamPublishesFinalSizeAndPrivatePermissions(t *testing.T) {
+	t.Parallel()
 	root := streamFixtureRoot(t)
 	size, err := WriteStream(root, "evidence", 0o600, func(w io.Writer) error {
 		_, err := io.WriteString(w, "complete confidential evidence")
@@ -75,6 +76,7 @@ func TestWriteStreamFailurePreservesPriorArtifactAndAllErrors(t *testing.T) {
 }
 
 func TestWriteStreamFinalizationFailureNeverPublishes(t *testing.T) {
+	t.Parallel()
 	root := streamFixtureRoot(t)
 	size, err := WriteStream(root, "closed", 0o600, func(w io.Writer) error { return w.(*os.File).Close() })
 	if size != 0 || !errors.Is(err, os.ErrClosed) {
@@ -86,6 +88,7 @@ func TestWriteStreamFinalizationFailureNeverPublishes(t *testing.T) {
 }
 
 func TestWriteStreamRejectsNilProducerBeforePublication(t *testing.T) {
+	t.Parallel()
 	root := streamFixtureRoot(t)
 	if _, err := WriteStream(root, "missing", 0o600, nil); err == nil {
 		t.Fatal("nil producer accepted")

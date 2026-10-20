@@ -88,6 +88,7 @@ func TestScanStorageNestedFailuresNeverReportComplete(t *testing.T) {
 }
 
 func TestScanStorageRejectsPaginationCycle(t *testing.T) {
+	t.Parallel()
 	requests := 0
 	connector := New("token", "project")
 	connector.HTTP = httpFunc(func(request *http.Request) (*http.Response, error) {

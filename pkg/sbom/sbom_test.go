@@ -9,6 +9,7 @@ import (
 )
 
 func TestSPDX2_3(t *testing.T) {
+	t.Parallel()
 	res := &scanner.ScanResult{
 		ImageRef: "ghcr.io/test/img:1",
 		Packages: []scanner.Package{
@@ -61,6 +62,7 @@ func TestSPDX2_3(t *testing.T) {
 }
 
 func TestCycloneDX1_6(t *testing.T) {
+	t.Parallel()
 	res := &scanner.ScanResult{
 		ImageRef: "ghcr.io/test/img:1",
 		Packages: []scanner.Package{

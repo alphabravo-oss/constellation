@@ -8,6 +8,7 @@ import (
 func staticClock(t time.Time) func() time.Time { return func() time.Time { return t } }
 
 func TestEvaluate_DiscoverNotReadyDuringLearnWindow(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 5, 12, 12, 0, 0, 0, time.UTC)
 	m := NewManager()
 	m.Now = staticClock(now)
@@ -21,6 +22,7 @@ func TestEvaluate_DiscoverNotReadyDuringLearnWindow(t *testing.T) {
 }
 
 func TestEvaluate_DiscoverElevatesAfterWindowAndStable(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	m := NewManager()
 	m.Now = staticClock(now)
@@ -41,6 +43,7 @@ func TestEvaluate_DiscoverElevatesAfterWindowAndStable(t *testing.T) {
 }
 
 func TestEvaluate_DiscoverHoldsBeforeD2MWindow(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	m := NewManager() // D2M = 6h
 	m.Now = staticClock(now)
@@ -54,6 +57,7 @@ func TestEvaluate_DiscoverHoldsBeforeD2MWindow(t *testing.T) {
 }
 
 func TestEvaluate_DiscoverElevatesAfterD2MWindow(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	m := NewManager()
 	m.Now = staticClock(now)
@@ -68,6 +72,7 @@ func TestEvaluate_DiscoverElevatesAfterD2MWindow(t *testing.T) {
 }
 
 func TestEvaluate_D2MDisabledWhenWindowZero(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	m := NewManager()
 	m.D2MWindow = 0 // disabled, like NeuVector ConfigureCompleteDuration(mover, 0)
@@ -82,6 +87,7 @@ func TestEvaluate_D2MDisabledWhenWindowZero(t *testing.T) {
 }
 
 func TestEvaluate_MonitorHoldsWhenThreatInWindow(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	m := NewManager() // M2P = 12h continuous-clean
 	m.Now = staticClock(now)
@@ -95,6 +101,7 @@ func TestEvaluate_MonitorHoldsWhenThreatInWindow(t *testing.T) {
 }
 
 func TestEvaluate_M2PDisabledWhenWindowZero(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	m := NewManager()
 	m.M2PWindow = 0
@@ -109,6 +116,7 @@ func TestEvaluate_M2PDisabledWhenWindowZero(t *testing.T) {
 }
 
 func TestEvaluate_MonitorHoldsWhenAlertsExist(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	m := NewManager()
 	m.Now = staticClock(now)
@@ -122,6 +130,7 @@ func TestEvaluate_MonitorHoldsWhenAlertsExist(t *testing.T) {
 }
 
 func TestEvaluate_MonitorElevatesToProtect(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	m := NewManager()
 	m.Now = staticClock(now)
@@ -135,6 +144,7 @@ func TestEvaluate_MonitorElevatesToProtect(t *testing.T) {
 }
 
 func TestElevate_RejectsInvalidTransitions(t *testing.T) {
+	t.Parallel()
 	_, err := Elevate(WorkloadState{Mode: ModeDiscover}, Decision{TargetMode: ModeProtect})
 	if err == nil {
 		t.Fatal("Discover→Protect should be rejected (must go through Monitor)")
@@ -142,6 +152,7 @@ func TestElevate_RejectsInvalidTransitions(t *testing.T) {
 }
 
 func TestDemote_StepsBackOne(t *testing.T) {
+	t.Parallel()
 	s, err := Demote(WorkloadState{Mode: ModeProtect}, "ops rollback")
 	if err != nil {
 		t.Fatal(err)

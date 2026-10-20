@@ -6,6 +6,7 @@ import (
 )
 
 func TestParseEmailRecipients(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		cfg  string
@@ -32,6 +33,7 @@ func TestParseEmailRecipients(t *testing.T) {
 
 // A crafted subject must not be able to inject extra SMTP headers (CRLF injection).
 func TestBuildMessageHeaderInjection(t *testing.T) {
+	t.Parallel()
 	msg := string(buildMessage("from@x.com", []string{"to@y.com"},
 		"Hi\r\nBcc: evil@z.com", "body"))
 	// The injected header line must be neutralized, not present as its own header.

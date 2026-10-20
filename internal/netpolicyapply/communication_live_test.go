@@ -21,6 +21,7 @@ import (
 // labeled disposable namespaces and owns cleanup. Never accepts an installation
 // namespace or a namespace without the test nonce.
 func TestApplyNativeCommunicationLive(t *testing.T) {
+	t.Parallel()
 	ns, own, nonce := os.Getenv("CONSTELLATION_POLICY_PROOF_NAMESPACE"), os.Getenv("CONSTELLATION_POLICY_PROOF_PROTECTED_NAMESPACE"), os.Getenv("CONSTELLATION_POLICY_PROOF_NONCE")
 	if ns == "" {
 		t.Skip("disposable live policy fixture not requested")

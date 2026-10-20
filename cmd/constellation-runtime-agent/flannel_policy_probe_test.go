@@ -398,6 +398,7 @@ func flannelQueueListener(pod flannelPod) (bool, error) {
 }
 
 func TestFlannelCounterRequiresRealQueueBypassAndRejectsOverflow(t *testing.T) {
+	t.Parallel()
 	text := "[12:120] -A PREROUTING -i eth0 -j NFQUEUE --queue-num 4000 --queue-bypass\n[3:30] -A POSTROUTING -o eth0 -j NFQUEUE --queue-num 4000 --queue-bypass"
 	if value, err := parseFlannelCounter(text); err != nil || value != 15 {
 		t.Fatalf("counter=%d error=%v", value, err)
@@ -409,12 +410,14 @@ func TestFlannelCounterRequiresRealQueueBypassAndRejectsOverflow(t *testing.T) {
 	}
 }
 func TestFlannelOwnedChildRejectsUnrelatedParent(t *testing.T) {
+	t.Parallel()
 	if !flannelOwnChildStatus("Name:\tdp\nPPid:\t123\n", 123) || flannelOwnChildStatus("Name:\tdp\nPPid:\t123\n", 456) || flannelOwnChildStatus("Name:\tdp\n", 123) {
 		t.Fatal("owned child guard lost parent identity")
 	}
 }
 
 func TestFlannelNativeEvidenceRejectsDelayedEarlierAggregate(t *testing.T) {
+	t.Parallel()
 	mac, err := net.ParseMAC("02:00:00:00:00:01")
 	if err != nil {
 		t.Fatal(err)
@@ -444,6 +447,7 @@ func TestFlannelNativeEvidenceRejectsDelayedEarlierAggregate(t *testing.T) {
 }
 
 func TestFlannelNativeEvidenceDiagnosticsStayScopedAndBounded(t *testing.T) {
+	t.Parallel()
 	probe := flannelProbe{EventCursor: 1, StartedAt: 100, Port: 18081}
 	row := dp.Connection{ClientIP: net.ParseIP("10.233.0.12"), ServerIP: net.ParseIP("10.233.0.10"), ServerPort: 18081, IPProto: dp.IPProtoTCP, PolicyAction: dp.PolicyActionOpen, FirstSeenAt: 100}
 	events := &flannelEvents{rows: []dp.Connection{row}}

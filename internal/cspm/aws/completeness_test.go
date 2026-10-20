@@ -106,6 +106,7 @@ func TestScanS3DistinguishesInaccessibleFromAbsent(t *testing.T) {
 }
 
 func TestCheckNextPageRejectsMissingAndCyclicTokens(t *testing.T) {
+	t.Parallel()
 	seen := map[string]bool{}
 	for _, marker := range []*string{nil, awssdk.String("")} {
 		if err := checkNextPage(marker, seen); err == nil {
@@ -123,6 +124,7 @@ func TestCheckNextPageRejectsMissingAndCyclicTokens(t *testing.T) {
 }
 
 func TestWildcardGrantRejectsUnverifiableDocuments(t *testing.T) {
+	t.Parallel()
 	for _, document := range []string{"", "null", "{}", `{"Statement":42}`, `{"Statement":[null]}`, `{"Statement":[{"Effect":"unknown"}]}`} {
 		if _, err := wildcardGrant(document); err == nil {
 			t.Errorf("unverifiable document accepted: %s", document)

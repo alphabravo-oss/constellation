@@ -3,6 +3,7 @@ package gitops
 import "testing"
 
 func TestDetectDrift_FindsModifiedAndOrphanedResources(t *testing.T) {
+	t.Parallel()
 	declared := []Resource{
 		{Kind: "RoleBinding", Name: "rb-1", Namespace: "default", Spec: map[string]any{"subjects": []any{"alice"}}},
 		{Kind: "NetworkPolicy", Name: "np-1", Namespace: "default", Spec: map[string]any{"podSelector": map[string]any{"matchLabels": map[string]any{"app": "x"}}}},
@@ -32,6 +33,7 @@ func TestDetectDrift_FindsModifiedAndOrphanedResources(t *testing.T) {
 }
 
 func TestIsSensitive(t *testing.T) {
+	t.Parallel()
 	for _, k := range []string{"RoleBinding", "NetworkPolicy", "Secret"} {
 		if !IsSensitive(k) {
 			t.Fatalf("%s should be sensitive", k)
