@@ -23,7 +23,7 @@ GO_LDFLAGS := -s -w \
 
 # Every production binary under cmd/. Adding a binary is a one-line edit here.
 BINARIES := constellation-api constellation-scanner constellation-operator constellation-discoverer \
-  constellation-runtime-agent constellation-admission constellation-bootstrap constellation-backup \
+  constellation-runtime-agent constellation-admission constellation-backup \
   constellation-restore constellation-seed constellation-compliance-scheduler constellation-github-app \
   constellation-k8s-compliance-collector constellation-kube-bench-runner constellation-netpolicy-applier \
   constellation-registry-walker constellation-support-bundle-verify constellationctl audit-archiver \
@@ -39,7 +39,7 @@ DOCKER_BUILD ?= docker buildx build --platform $(PLATFORMS) \
   --build-arg COMMIT=$(COMMIT) --build-arg BUILD_TIME=$(DATE) --build-arg FIPS=$(FIPS)
 
 IMAGES := api scanner operator discoverer audit-archiver frontend runtime-agent admission \
-  bootstrap postgres compliance-scheduler kube-bench-runner toolbox
+  postgres compliance-scheduler kube-bench-runner toolbox
 # Dockerfile name differs from the image name for these roles.
 dockerfile_audit-archiver := archiver
 

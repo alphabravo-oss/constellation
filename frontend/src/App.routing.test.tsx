@@ -33,7 +33,7 @@ describe("route contract", () => {
   it.each([
     ["/clusters/cluster-1/findings/finding-1", "/_authenticated/clusters/$id/findings/$fid", { id: "cluster-1", fid: "finding-1" }],
     ["/clusters/cluster-1/runtime-dlp/new", "/_authenticated/clusters/$id/runtime-dlp/new", { id: "cluster-1" }],
-    ["/settings/access/sso/provider-1", "/_authenticated/settings/access/sso/$id", { id: "provider-1" }],
+    ["/settings/identity", "/_authenticated/settings/identity", {}],
     ["/hosts", "/_authenticated/hosts/$", {}],
     ["/hosts/node-a", "/_authenticated/hosts/$", { _splat: "node-a" }],
   ])("matches saved deep link %s", (url, id, params) => {
