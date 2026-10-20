@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Installs the pinned CI tool set into ${CI_TOOLS_BIN:-~/.local/bin}. Pins are the latest
+# stable as of 2026-10-20; bump here and in docs when upgrading.
 set -euo pipefail
 
 bin_dir="${CI_TOOLS_BIN:-${HOME}/.local/bin}"
@@ -38,10 +40,10 @@ for tool in "$@"; do
   esac
   case "$tool" in
     golangci-lint)
-      install_archive golangci/golangci-lint v2.11.4 golangci-lint-2.11.4-linux-amd64.tar.gz golangci-lint-2.11.4-checksums.txt golangci-lint
+      install_archive golangci/golangci-lint v2.15.0 golangci-lint-2.15.0-linux-amd64.tar.gz golangci-lint-2.15.0-checksums.txt golangci-lint
       ;;
     gitleaks)
-      install_archive gitleaks/gitleaks v8.30.0 gitleaks_8.30.0_linux_x64.tar.gz gitleaks_8.30.0_checksums.txt gitleaks
+      install_archive gitleaks/gitleaks v8.30.1 gitleaks_8.30.1_linux_x64.tar.gz gitleaks_8.30.1_checksums.txt gitleaks
       ;;
     shellcheck)
       curl --fail --silent --show-error --location --retry 3 \
@@ -52,7 +54,7 @@ for tool in "$@"; do
       install -m 0755 "$temporary/shellcheck-v0.11.0/shellcheck" "$bin_dir/shellcheck"
       ;;
     grype)
-      # Pinned upstream CLI for release checks; runtime tools use separate source locks.
+      # Pinned upstream CLI for the release image gate; runtime tools use separate source locks.
       curl --fail --silent --show-error --location --retry 3 \
         https://github.com/anchore/grype/releases/download/v0.120.1/grype_0.120.1_linux_amd64.tar.gz \
         -o "$temporary/grype.tar.gz"
@@ -61,10 +63,11 @@ for tool in "$@"; do
       install -m 0755 "$temporary/grype" "$bin_dir/grype"
       ;;
     gosec) go install github.com/securego/gosec/v2/cmd/gosec@v2.29.0 ;;
-    govulncheck) go install golang.org/x/vuln/cmd/govulncheck@v1.8.0 ;;
+    govulncheck) go install golang.org/x/vuln/cmd/govulncheck@latest ;;
     gotestsum) go install gotest.tools/gotestsum@v1.13.0 ;;
-    goose) go install github.com/pressly/goose/v3/cmd/goose@v3.27.1 ;;
-    actionlint) go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.11 ;;
+    goose) go install github.com/pressly/goose/v3/cmd/goose@v3.29.0 ;;
+    air) go install github.com/air-verse/air@v1.67.4 ;;
+    actionlint) go install github.com/rhysd/actionlint/cmd/actionlint@latest ;;
     *) echo "Unknown CI tool: $tool" >&2; exit 2 ;;
   esac
 done
