@@ -8,11 +8,9 @@
 # (make check-go-version enforces this). The builder is additionally pinned by
 # multi-arch index digest so a Go bump is one value change per file.
 # Refresh with: docker buildx imagetools inspect golang:<ver>-bookworm
-# NOTE: Docker Hub had not published the Go 1.27.3 bookworm tag at pin time; this
-# is the Go 1.27.2 bookworm index. With name:tag@digest the digest wins, and
-# GOTOOLCHAIN=auto fetches go.mod's toolchain during the build.
+# Pinned to the 1.27.3-bookworm multi-arch index digest of the Go builder (matches go.mod).
 ARG GO_VERSION
-ARG GO_IMAGE_DIGEST=sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61
+ARG GO_IMAGE_DIGEST=sha256:5c3e9b43cfd3bb95c7937462e29d87ada57b481a96fa23ad0eb61778d7a00110
 ARG COSIGN_VERSION=2.6.1
 ARG COSIGN_SHA256_AMD64=064954c5d8c7e3b28188eee5b1727b31c411550bc5fefd41aa672d3c761d103a
 ARG COSIGN_SHA256_ARM64=56a16480bdd56ec789abaa65924402f6b92c0041f06885995853c05567b76f34

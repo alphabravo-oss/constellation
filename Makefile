@@ -197,7 +197,9 @@ e2e: ## Playwright suite (PLAYWRIGHT_BASE_URL / VITE_API_URL select the target)
 # ---------------------------------------------------------------------------
 images: $(addprefix image-,$(IMAGES)) ## Build every role image locally (--load)
 
-image-%: check-go-version
+# Static pattern rule: image-<role> targets are .PHONY, and GNU make skips implicit
+# pattern rules for phony targets, so the pattern must be declared statically.
+$(addprefix image-,$(IMAGES)): image-%: check-go-version
 	$(DOCKER_BUILD) $(if $(filter frontend,$*),--build-arg NODE_VERSION=$(NODE_VERSION)) \
 	  -f deploy/docker/Dockerfile.$(or $(dockerfile_$*),$*) -t $(REGISTRY)/$*:$(VERSION)$(if $(filter 1 true,$(FIPS)),-fips) --load .
 
