@@ -65,7 +65,16 @@ spec:
       - name: AWS_DEFAULT_REGION
         value: {{ $off.region | quote }}
 {{- end }}
-{{- if and $off.sync.enabled $local.enabled }}
+{{- /* Sync source: the chart-rendered store (backup.objectStore), or an object store
+       managed outside this release (backup.offhost.sync.source.*, e.g. an adopted
+       CNPG cluster in postgres.mode=external archiving to a hand-deployed RustFS). */ -}}
+{{- $src := $off.sync.source | default dict -}}
+{{- $srcEndpoint := $src.endpointURL | default $localEndpoint -}}
+{{- $srcSecret := $src.credentialsSecret | default $localSecret -}}
+{{- $srcBucket := $src.bucket | default $local.bucket -}}
+{{- $srcRegion := $src.region | default $local.region -}}
+{{- $serverName := $src.serverName | default (printf "%s-postgres" (include "constellation.fullname" .)) -}}
+{{- if and $off.sync.enabled (or $local.enabled $src.endpointURL) }}
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -103,8 +112,8 @@ spec:
               command: ["rclone"]
               args:
                 - sync
-                - local:{{ $local.bucket }}/{{ include "constellation.fullname" . }}-postgres
-                - offhost:{{ $off.bucket }}/{{ include "constellation.fullname" . }}-postgres
+                - local:{{ $srcBucket }}/{{ $serverName }}
+                - offhost:{{ $off.bucket }}/{{ $serverName }}
                 - --transfers={{ $off.sync.transfers }}
                 - --checkers={{ $off.sync.checkers }}
                 - --fast-list
@@ -116,13 +125,13 @@ spec:
                 - { name: RCLONE_CONFIG, value: /tmp/rclone.conf }
                 - { name: RCLONE_CONFIG_LOCAL_TYPE, value: s3 }
                 - { name: RCLONE_CONFIG_LOCAL_PROVIDER, value: Other }
-                - { name: RCLONE_CONFIG_LOCAL_ENDPOINT, value: {{ $localEndpoint | quote }} }
-                - { name: RCLONE_CONFIG_LOCAL_REGION, value: {{ $local.region | quote }} }
+                - { name: RCLONE_CONFIG_LOCAL_ENDPOINT, value: {{ $srcEndpoint | quote }} }
+                - { name: RCLONE_CONFIG_LOCAL_REGION, value: {{ $srcRegion | quote }} }
                 - { name: RCLONE_CONFIG_LOCAL_FORCE_PATH_STYLE, value: "true" }
                 - name: RCLONE_CONFIG_LOCAL_ACCESS_KEY_ID
-                  valueFrom: { secretKeyRef: { name: {{ $localSecret }}, key: ACCESS_KEY_ID } }
+                  valueFrom: { secretKeyRef: { name: {{ $srcSecret }}, key: ACCESS_KEY_ID } }
                 - name: RCLONE_CONFIG_LOCAL_SECRET_ACCESS_KEY
-                  valueFrom: { secretKeyRef: { name: {{ $localSecret }}, key: SECRET_ACCESS_KEY } }
+                  valueFrom: { secretKeyRef: { name: {{ $srcSecret }}, key: SECRET_ACCESS_KEY } }
                 - { name: RCLONE_CONFIG_OFFHOST_TYPE, value: s3 }
                 - { name: RCLONE_CONFIG_OFFHOST_PROVIDER, value: Other }
                 - { name: RCLONE_CONFIG_OFFHOST_ENDPOINT, value: {{ $off.endpointURL | quote }} }

@@ -1018,6 +1018,15 @@ backup:
       schedule: "*/15 * * * *"
       transfers: 4
       checkers: 8
+      # Source store to mirror. Empty = the chart-rendered backup.objectStore and
+      # server <fullname>-postgres. Set for a store/cluster managed outside this
+      # release (postgres.mode=external with an adopted CNPG cluster).
+      source:
+        endpointURL: ""         # e.g. http://rustfs:9000
+        credentialsSecret: ""   # keys ACCESS_KEY_ID, SECRET_ACCESS_KEY
+        bucket: ""              # empty = backup.objectStore.bucket
+        region: ""
+        serverName: ""          # CNPG serverName prefix in the bucket
       resources:
         limits:   { cpu: 1,    memory: 512Mi }
         requests: { cpu: 100m, memory: 128Mi }

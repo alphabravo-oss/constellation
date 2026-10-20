@@ -803,4 +803,36 @@ spec:
           port: 8080
 {{ end }}
 {{ end }}
+{{ if .Values.complianceScheduler.enabled }}
+---
+# compliance-scheduler: DB (report schedules), API heartbeat, and HTTPS for
+# signature transparency (Rekor) when externalHTTP is enabled.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "constellation.fullname" . }}-compliance-scheduler-egress
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    app.kubernetes.io/component: compliance-scheduler
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "constellation.name" . }}
+      app.kubernetes.io/component: compliance-scheduler
+  policyTypes:
+    - Egress
+  egress:
+{{ include "constellation.networkPolicyDNSEgress" . | nindent 4 }}
+{{ include "constellation.networkPolicyPostgresEgress" . | nindent 4 }}
+{{ include "constellation.networkPolicyExternalHTTPEgress" . | nindent 4 }}
+{{ if .Values.api.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ include "constellation.name" . }}
+              app.kubernetes.io/component: api
+      ports:
+        - protocol: TCP
+          port: 8080
+{{ end }}
+{{ end }}
 {{- end }}
