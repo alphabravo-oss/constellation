@@ -19,7 +19,7 @@ it("keeps status and actions visible while disclosing supporting context on dema
   expect(host.textContent).toContain("Host findings need review");
   expect(toggle.getAttribute("aria-expanded")).toBe("false"); expect(detail.hidden).toBe(true);
   // The action remains independently operable when supporting detail is closed.
-  act(() => [...host.querySelectorAll("button")].find(button => button.textContent === "Retry")?.click());
+  act(() => [...host.querySelectorAll("button")].find((button) => button.textContent === "Retry" || button.getAttribute("aria-label") === "Retry")?.click());
   expect(retry).toHaveBeenCalled();
   act(() => toggle.click()); expect(detail.hidden).toBe(false); expect(toggle.getAttribute("aria-expanded")).toBe("true");
   act(() => toggle.click()); expect(detail.hidden).toBe(true);

@@ -12,7 +12,7 @@ export function Kbd({ combo, className }: { combo: string; className?: string })
       {tokens.map((t, i) => (
         <kbd
           key={i}
-          className="inline-flex h-5 min-w-[20px] items-center justify-center rounded border border-border bg-muted px-1.5 text-[10px] font-medium text-muted-foreground text-mono"
+          className="inline-flex h-5 min-w-5 items-center justify-center rounded border border-border bg-muted px-1 font-mono text-micro text-muted-foreground"
         >
           {t}
         </kbd>

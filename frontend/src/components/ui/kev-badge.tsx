@@ -9,7 +9,7 @@ export function KevBadge({ className }: { className?: string }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-0.5 rounded px-1.5 h-4 text-[9px] font-semibold uppercase tracking-wider",
+        "inline-flex items-center gap-0.5 rounded px-1.5 h-4 text-micro font-semibold ",
         "bg-[color-mix(in_oklab,var(--color-severity-critical)_22%,transparent)] text-[color:var(--color-severity-critical)] ring-1 ring-inset ring-[color-mix(in_oklab,var(--color-severity-critical)_48%,transparent)]",
         className,
       )}
@@ -28,7 +28,7 @@ export function EpssBadge({ probability, className }: { probability?: number; cl
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded px-1.5 h-4 text-[10px] text-mono",
+        "inline-flex items-center gap-1 rounded px-1.5 h-4 text-micro text-mono",
         hot
           ? "bg-[color-mix(in_oklab,var(--color-severity-high)_18%,transparent)] text-[color:var(--color-severity-high)] ring-1 ring-inset ring-[color-mix(in_oklab,var(--color-severity-high)_36%,transparent)]"
           : "bg-muted text-muted-foreground ring-1 ring-inset ring-border",
@@ -46,7 +46,7 @@ export function ReachableBadge({ reachable, className }: { reachable?: boolean; 
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded px-1.5 h-4 text-[10px] font-medium",
+        "inline-flex items-center gap-1 rounded px-1.5 h-4 text-micro font-medium",
         reachable
           ? "bg-[color-mix(in_oklab,var(--color-accent-teal)_18%,transparent)] text-[color:var(--color-accent-teal)] ring-1 ring-inset ring-[color-mix(in_oklab,var(--color-accent-teal)_36%,transparent)]"
           : "bg-muted text-muted-foreground ring-1 ring-inset ring-border",

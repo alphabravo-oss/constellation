@@ -25,7 +25,7 @@ async function openMenu(label = "Column layout") {
   await act(async () => { host.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 })); });
 }
 async function clickItem(label: string) {
-  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === label);
+  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) => item.textContent === label || item.getAttribute("aria-label") === label);
   expect(item).toBeDefined();
   await act(async () => { item!.click(); });
 }

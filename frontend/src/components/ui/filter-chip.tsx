@@ -24,10 +24,10 @@ export function FilterChip({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 h-6 px-2 rounded text-[11px] text-mono whitespace-nowrap border transition-colors duration-100",
+        "inline-flex h-7 items-center gap-1 whitespace-nowrap rounded-full border pl-2.5 pr-2 text-meta transition-colors duration-100",
         active
-          ? "bg-[color-mix(in_oklab,var(--color-primary)_18%,transparent)] border-[color-mix(in_oklab,var(--color-primary)_36%,transparent)] text-[color:var(--color-primary)]"
-          : "bg-card border-border text-foreground hover:bg-accent",
+          ? "border-foreground/40 bg-accent text-foreground"
+          : "border-border bg-muted/40 text-foreground hover:bg-accent",
         interactive && "cursor-pointer",
         className,
       )}
@@ -46,7 +46,7 @@ export function FilterChip({
           className="-mr-0.5 ml-0.5 rounded hover:bg-muted p-0.5"
           aria-label={`Remove ${label} filter`}
         >
-          <X className="h-2.5 w-2.5" />
+          <X className="h-3 w-3" />
         </button>
       )}
     </span>

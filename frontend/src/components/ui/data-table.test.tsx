@@ -68,7 +68,7 @@ describe("DataTable acceptance", () => {
     render(<DataTable rows={list} columns={[columns[0], { ...columns[1], sort: (a,b) => a.risk-b.risk }]} rowKey={row => row.id} hiddenColumnIds={["risk"]} defaultSort={{ id: "risk", dir: "desc" }} onSortChange={onSortChange} />);
     expect(host?.textContent).toContain("Sorted by Risk (descending) · hidden column");
     expect(host?.querySelector("tbody tr")?.textContent).toBe("worker");
-    act(() => [...host!.querySelectorAll("button")].find(button => button.textContent === "Clear sort")?.click());
+    act(() => [...host!.querySelectorAll("button")].find((button) => button.textContent === "Clear sort" || button.getAttribute("aria-label") === "Clear sort")?.click());
     expect(onSortChange).toHaveBeenCalledWith(null);
     expect(host?.textContent).not.toContain("hidden column");
     expect(host?.querySelector("tbody tr")?.textContent).toBe("api");
@@ -99,7 +99,7 @@ describe("DataTable acceptance", () => {
     expect(host?.querySelector("tbody tr")?.className).toContain("h-6");
     expect(host?.querySelector('[aria-label="compact density"]')?.getAttribute("aria-pressed")).toBe("true");
     unavailable = false;
-    act(() => [...host!.querySelectorAll("button")].find(button => button.textContent === "Retry saving preferences")?.click());
+    act(() => [...host!.querySelectorAll("button")].find((button) => button.textContent === "Retry saving preferences" || button.getAttribute("aria-label") === "Retry saving preferences")?.click());
     expect(host?.querySelector('[role="status"]')).toBeNull();
     expect(JSON.parse(storage.getItem(storageKey("blocked"))!).density).toBe("compact");
   });
@@ -142,7 +142,7 @@ describe("DataTable acceptance", () => {
   it("allows hiding the last optional column when a required column remains", async () => {
     render(<DataTable rows={rows} columns={[{...columns[0],hideable:false},columns[1]]} rowKey={row => row.id} preferencesKey="required" />);
     await act(async () => { host?.querySelector<HTMLButtonElement>('[aria-label="Columns"]')?.dispatchEvent(new MouseEvent("pointerdown",{bubbles:true,button:0})); });
-    const risk = [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find(item => item.textContent === "Risk");
+    const risk = [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((item) => item.textContent === "Risk" || item.getAttribute("aria-label") === "Risk");
     await act(async () => { risk?.click(); });
     expect([...host!.querySelectorAll("th")].map(cell => cell.textContent)).toEqual(["Name"]);
   });

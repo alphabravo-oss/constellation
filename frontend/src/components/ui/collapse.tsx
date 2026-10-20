@@ -20,7 +20,7 @@ export function Collapse({
 }) {
   return (
     <details open={defaultOpen} className={cn("group/collapse", className)}>
-      <summary className="flex cursor-pointer list-none items-center gap-1.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-sm py-1.5 text-meta font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
         <ChevronRight className="h-3.5 w-3.5 transition-transform group-open/collapse:rotate-90" />
         {label}
       </summary>

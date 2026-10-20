@@ -25,7 +25,7 @@ export function PlatformVisibilityToggle({
       aria-pressed={hidden}
       title="Hide Kubernetes, Constellation, and Astronomer platform components. Telemetry collection and protection stay active."
       data-testid="platform-visibility-toggle"
-      className={compact ? "h-6 px-2 text-[11px] text-mono" : undefined}
+      className={compact ? "h-6 px-2 text-micro text-mono" : undefined}
     >
       <Icon className="h-3.5 w-3.5" aria-hidden />
       {hidden ? `Platform hidden${count}` : "Platform visible"}
