@@ -44,7 +44,7 @@ it("shows and starts configured OIDC", async () => {
   vi.mocked(auth.providers).mockResolvedValue({ oidc: true, saml: false });
   vi.mocked(auth.oidcStart).mockReturnValue(new Promise(() => {}));
   await renderLogin();
-  const button = [...host.querySelectorAll("button")].find((item) => item.textContent === "Continue with SSO");
+  const button = [...host.querySelectorAll("button")].find((item) => item.textContent === "Continue with SSO" || item.getAttribute("aria-label") === "Continue with SSO" || item.getAttribute("data-export-label") === "Continue with SSO");
   expect(button).toBeDefined();
   expect(host.textContent).toContain("continue with password");
   await act(async () => button!.click());

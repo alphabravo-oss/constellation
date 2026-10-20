@@ -29,6 +29,7 @@ import {
   affectedSorts,
 } from "@/lib/cve-affected-inventory";
 import { ScanInventoryExport } from "./inventory-workspace";
+import { Select } from "@/components/ui/form";
 
 interface CVEDetail {
   cve_id: string;
@@ -151,16 +152,10 @@ export function CVEDetailPage() {
       !invalid &&
       search === debounced,
   });
-  const backPath = clusterId
-    ? `/clusters/${encodeURIComponent(clusterId)}/findings`
-    : "/cve";
   const header = (
     <PageHeader
-      title="CVE evidence"
-      description="Review exact vulnerability intelligence and matching affected evidence."
-      backLink={
-        <a href={backPath}>{clusterId ? "Findings" : "CVE database"}</a>
-      }
+      title={cveKey || "CVE"}
+      mono
     />
   );
   if (!scope.ready)
@@ -299,7 +294,7 @@ export function CVEDetailPage() {
         </label>
         <label className="text-xs">
           Finding severity
-          <select
+          <Select
             aria-label="Affected severity"
             className="block rounded-md border border-border bg-background p-2 text-sm"
             value={severity}
@@ -316,7 +311,7 @@ export function CVEDetailPage() {
                 {level}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <Button
           variant="outline"
@@ -406,10 +401,7 @@ export function CVEDetailPage() {
       <PageHeader
         title={cve.cve_id}
         mono
-        description={`${cve.title?.trim() || "Title not reported"} · ${scopeLabel} Intelligence metadata is global.`}
-        backLink={
-          <a href={backPath}>{clusterId ? "Findings" : "CVE database"}</a>
-        }
+        description={cve.title?.trim() || undefined}
         badges={
           <>
             {cve.kev_listed && <KevBadge />}
@@ -429,9 +421,9 @@ export function CVEDetailPage() {
             >
               {cveQ.isFetching || relatedQ.isFetching
                 ? "Refreshing…"
-                : "Refresh evidence"}
+                : "Refresh"}
             </Button>
-            <Button asChild variant="outline">
+            <Button asChild>
               <a
                 href={`https://nvd.nist.gov/vuln/detail/${encodeURIComponent(cve.cve_id)}`}
                 target="_blank"
@@ -444,6 +436,7 @@ export function CVEDetailPage() {
           </div>
         }
       />
+      <div data-testid={isInventory ? "cve-detail-stats" : undefined}>
       <VerdictBanner
         status={
           affectedError
@@ -465,39 +458,19 @@ export function CVEDetailPage() {
                   ? `${summary.total.toLocaleString()} matching ${cohortLabels[view]}`
                   : "Vulnerability intelligence is available"
         }
-        detail="Metrics cover every match in the selected view. Image associations use digest, reference or repository/tag matches; workload and cluster finding totals repeat findings across distinct associations. Absence does not establish scan coverage."
+        numbers={isInventory ? [
+          { label: `matching ${cohortLabels[view]}`, value: summary?.total ?? "—" },
+          { label: "finding instances", value: summary?.finding_count ?? "—" },
+          { label: "max risk", value: summary?.max_risk_score ?? "—" },
+          {
+            label: view === "workloads" ? "clusters" : view === "clusters" ? "workload associations" : "image scans",
+            value: summary?.[view === "workloads" ? "cluster_count" : view === "clusters" ? "workload_count" : "image_count"] ?? "—",
+          },
+        ] : undefined}
+        detail={`${scopeLabel} Intelligence metadata is global. Metrics cover every match in the selected view. Image associations use digest, reference or repository/tag matches; workload and cluster finding totals repeat findings across distinct associations. Absence does not establish scan coverage.`}
       />
-      {isInventory ? (
-        <StatGrid data-testid="cve-detail-stats">
-          <StatCard
-            label={`Matching ${cohortLabels[view]}`}
-            value={summary?.total ?? "—"}
-          />
-          <StatCard
-            label="Finding instances"
-            value={summary?.finding_count ?? "—"}
-          />
-          <StatCard label="Max risk" value={summary?.max_risk_score ?? "—"} />
-          <StatCard
-            label={
-              view === "workloads"
-                ? "Clusters"
-                : view === "clusters"
-                  ? "Workload associations"
-                  : "Image scans"
-            }
-            value={
-              summary?.[
-                view === "workloads"
-                  ? "cluster_count"
-                  : view === "clusters"
-                    ? "workload_count"
-                    : "image_count"
-              ] ?? "—"
-            }
-          />
-        </StatGrid>
-      ) : (
+      </div>
+      {isInventory ? null : (
         <StatGrid>
           <StatCard label="CVSS base" value={cve.cvss_base ?? "Not reported"} />
           <StatCard

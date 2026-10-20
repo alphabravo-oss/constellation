@@ -511,7 +511,7 @@ it("retains the current YAML preview when the manifest dictionary is empty", asy
 
 it("includes policy installation roles in returned lifecycle evidence exports", async () => {
  await render(<NetworkRulesWorkspaceTab items={[{ ...candidate(), platform_role: "core" }]} selectedWorkload={null} onSelect={vi.fn()} available loading={false} refreshing={false} onRetry={vi.fn()} />);
- await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Export returned policy evidence")!.click());
+ await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Export returned policy evidence" || button.getAttribute("aria-label") === "Export returned policy evidence" || button.getAttribute("data-export-label") === "Export returned policy evidence")!.click());
  const [,headers,rows]=vi.mocked(downloadCsv).mock.calls.at(-1)!;
  expect(rows[0][headers.indexOf("platform_role")]).toBe("core");
 });
@@ -519,7 +519,7 @@ it("exports the loaded threat page and real workload role without action control
  const threat = { id: "threat", workload_id: "operations/houston", platform_role: "core", threat_id: 2022, severity: 8, action: 2, at: "2026-10-12T00:00:00Z" } as RuntimeThreat;
  await render(<NetworkThreatsWorkspaceTab threats={[threat]} total={301} page={2} onPage={vi.fn()} weakTLS={true} settingsUnavailable={false} settingsLoading={false} settingsHref={undefined} onPivot={vi.fn()} />);
  expect(host.textContent).toContain("Metrics cover all matching threats.");
- await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Export this page CSV")!.click());
+ await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Export this page CSV" || button.getAttribute("aria-label") === "Export this page CSV" || button.getAttribute("data-export-label") === "Export this page CSV")!.click());
  const [,headers,rows]=vi.mocked(downloadCsv).mock.calls.at(-1)!;
  expect(rows).toHaveLength(1); expect(rows[0][headers.indexOf("platform_role")]).toBe("core"); expect(rows[0][headers.indexOf("Workload")]).toBe("operations/houston"); expect(headers).not.toContain("Actions"); expect(headers).not.toContain(""); expect(rows.flat()).not.toContain("Pivot");
 });
@@ -532,7 +532,7 @@ it("keeps exact observed tuple role evidence in the read-only preview and CSV", 
   const table = host.querySelector('[data-testid="network-policy-tuple-preview"]')!;
   expect(table.querySelectorAll("tbody tr")).toHaveLength(3);
   expect(table.textContent).toContain("Core"); expect(table.textContent).toContain("Unclassified"); expect(table.textContent).toContain("Not reported");
-  await act(async () => [...table.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Export returned tuple preview")!.click());
+  await act(async () => [...table.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Export returned tuple preview" || button.getAttribute("aria-label") === "Export returned tuple preview" || button.getAttribute("data-export-label") === "Export returned tuple preview")!.click());
   const [, headers, rows] = vi.mocked(downloadCsv).mock.calls.at(-1)!;
   expect(rows.map(row => row[headers.indexOf("Platform role")])).toEqual(["core", "", ""]);
   expect(policy.candidate_hash).toBe("hash");

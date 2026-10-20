@@ -8,29 +8,17 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
-import {
-  ArrowLeft,
-  ClipboardCopy,
-  KeyRound,
-  Plus,
-  RefreshCw,
-  ShieldAlert,
-  Trash2,
-} from "lucide-react";
+import { ClipboardCopy, KeyRound, Plus, RefreshCw, ShieldAlert, Trash2 } from "lucide-react";
 
-import {
-  apiTokens,
-  type ApiTokenCreateResponse,
-  type ApiTokenDTO,
-} from "@/api/client";
+import { apiTokens, type ApiTokenCreateResponse, type ApiTokenDTO } from "@/api/client";
 import { PageHeader } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { Checkbox } from "@/components/ui/form";
 
 export function ApiTokensPage() {
   const qc = useQueryClient();
@@ -73,7 +61,7 @@ export function ApiTokensPage() {
       cell: (t) => (
         <div className="flex flex-wrap gap-1">
           {t.scopes.map((s) => (
-            <span key={s} className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[10px]">{s}</span>
+            <span key={s} className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-micro">{s}</span>
           ))}
         </div>
       ),
@@ -84,7 +72,7 @@ export function ApiTokensPage() {
       cell: (t) => (
         <>
           <div>{t.attached_to_kind}</div>
-          {t.attached_to_label && <div className="font-mono text-[10px]">{t.attached_to_label}</div>}
+          {t.attached_to_label && <div className="font-mono text-micro">{t.attached_to_label}</div>}
         </>
       ),
       className: "text-xs text-muted-foreground",
@@ -94,7 +82,7 @@ export function ApiTokensPage() {
     {
       id: "status",
       header: "Status", exportValue: (t) => t.status, kind: "status",
-      cell: (t) => <span className={`rounded-md px-2 py-0.5 text-[10px] ${statusClasses(t.status)}`}>{t.status}</span>,
+      cell: (t) => <span className={`rounded-md px-2 py-0.5 text-micro ${statusClasses(t.status)}`}>{t.status}</span>,
     },
     {
       id: "actions",
@@ -132,11 +120,6 @@ export function ApiTokensPage() {
   return (
     <div className="space-y-6" data-testid="api-tokens-page">
       <PageHeader
-        eyebrow={
-          <Link to="/settings" className="inline-flex items-center gap-1 hover:text-foreground">
-            <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Back to Settings
-          </Link>
-        }
         title={
           <span className="flex items-center gap-2">
             <KeyRound className="h-5 w-5" aria-hidden />
@@ -157,13 +140,8 @@ export function ApiTokensPage() {
       />
 
       <VerdictBanner status={tokensQ.isError ? "degraded" : "info"} title={tokensQ.isError ? "Token inventory unavailable" : tokensQ.isPending ? "Loading API tokens" : `${activeCount} active tokens reported`}
-        detail="Manage token access and expiration. Export includes token metadata only." actions={<Button variant="outline" disabled={tokensQ.isFetching} onClick={() => void tokensQ.refetch()}>Refresh</Button>} />
-      <StatGrid>
-        <StatCard label="Tokens" value={tokensQ.isSuccess ? tokens.length : "—"} icon={<KeyRound className="h-3.5 w-3.5" aria-hidden />} />
-        <StatCard label="Active" value={tokensQ.isSuccess ? activeCount : "—"} tone="accent" />
-        <StatCard label="Expired" value={tokensQ.isSuccess ? expiredCount : "—"} tone={expiredCount ? "medium" : "neutral"} />
-        <StatCard label="Revoked" value={tokensQ.isSuccess ? revokedCount : "—"} tone={revokedCount ? "high" : "neutral"} />
-      </StatGrid>
+        detail="Manage token access and expiration. Export includes token metadata only." actions={<Button variant="outline" disabled={tokensQ.isFetching} onClick={() => void tokensQ.refetch()}>Refresh</Button>} numbers={[{ label: "Tokens", value: tokensQ.isSuccess ? tokens.length : "—" }, { label: "Active", value: tokensQ.isSuccess ? activeCount : "—" }, { label: "Expired", value: tokensQ.isSuccess ? expiredCount : "—", tone: (expiredCount ? "warning" : "default") }, { label: "Revoked", value: tokensQ.isSuccess ? revokedCount : "—", tone: (revokedCount ? "warning" : "default") }]} />
+      
 
       <Card padded={false}>
         <div data-testid="api-tokens-table">
@@ -263,8 +241,7 @@ function RevealDialog({
         {response.hint && <p className="text-xs text-muted-foreground">{response.hint}</p>}
 
         <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={acknowledged}
             onChange={(e) => setAcknowledged(e.target.checked)}
             data-testid="reveal-ack"

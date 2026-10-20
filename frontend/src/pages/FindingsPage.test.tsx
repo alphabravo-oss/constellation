@@ -7,6 +7,7 @@ import { findings, type Finding, type CVERollup } from "@/api/client";
 import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
 import { operatorStorageKey } from "@/lib/operator-preferences";
 import { FindingsPage } from "./FindingsPage";
+import { setIncludeSystemPreference } from "@/lib/system-scope";
 
 const route = vi.hoisted(() => ({ initial: "view=instances", latest: "", clusterId: "cluster", clusterError: null as Error | null, navigate: vi.fn() }));
 vi.mock("@/lib/route-search", async () => {
@@ -45,14 +46,36 @@ async function renderPage() {
   await rerenderPage();
 }
 async function rerenderPage() { await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={identity}><FindingsPage /></TablePreferencesProvider></QueryClientProvider>)); }
-async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }, { timeout: 3000 }); }
-function button(label: string) { return [...document.querySelectorAll<HTMLButtonElement>("button")].find((element) => element.textContent?.trim() === label)!; }
-async function click(label: string) { await act(async () => { if (label.startsWith("Views (")) button(label).dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })); else button(label).click(); }); }
+async function settled(check: () => void | Promise<void>) { await vi.waitFor(async () => { await act(async () => {}); await check(); }, { timeout: 3000 }); }
+// Export scopes live in the one Export menu (C1); map the former button labels onto its items.
+const EXPORT_ITEMS: Record<string, string> = { "Export filtered instances CSV": "Matching instances", "Export this page CSV": "This table", "Export this CVE page CSV": "This table" };
+async function exportItem(label: string): Promise<HTMLButtonElement> {
+  const find = () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) => item.firstElementChild?.textContent === label);
+  let item = find();
+  if (!item) {
+    const trigger = document.querySelector<HTMLButtonElement>('[data-testid$="-export-menu"] button');
+    // A single available scope renders as a plain Export button (no menu).
+    if (trigger && !trigger.hasAttribute("aria-haspopup")) return trigger;
+    if (trigger) await act(async () => { trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
+    item = find();
+  }
+  if (item && !Object.getOwnPropertyDescriptor(item, "disabled")) Object.defineProperty(item, "disabled", { configurable: true, get: () => item!.hasAttribute("data-disabled") });
+  return item as HTMLButtonElement;
+}
+async function exportButton(label: string) { return exportItem(EXPORT_ITEMS[label]); }
+function button(label: string) {
+  return [...document.querySelectorAll<HTMLButtonElement>("button")].find((element) => element.textContent?.trim() === label || element.getAttribute("aria-label") === label || element.getAttribute("data-export-label") === label)!;
+}
+async function click(label: string) { if (EXPORT_ITEMS[label]) { const item = await exportItem(EXPORT_ITEMS[label]); await act(async () => item.click()); return; } await act(async () => { if (label.startsWith("Views (")) button(label).dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })); else button(label).click(); }); }
 async function search(value: string) {
   await act(async () => { const input = host.querySelector<HTMLInputElement>('[aria-label="Search findings"]')!; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); });
 }
-async function selectFilter(label: string, value: string) { await act(async () => { const select = host.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`)!; select.value = value; select.dispatchEvent(new Event("change", { bubbles: true })); }); }
-async function selectFirst() { await act(async () => host.querySelector<HTMLInputElement>('[data-testid="findings-table"] tbody input[type="checkbox"]')!.click()); }
+async function selectFilter(label: string, value: string) {
+  // Secondary filters live in the "More filters" popover (C1 toolbar).
+  if (!host.querySelector(`select[aria-label="${label}"]`)) { const more = [...document.querySelectorAll<HTMLButtonElement>("button")].find((element) => element.textContent?.trim().startsWith("More filters")); if (more) await act(async () => more.click()); }
+  await act(async () => { const select = document.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`)!; select.value = value; select.dispatchEvent(new Event("change", { bubbles: true })); });
+}
+async function selectFirst() { await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="findings-table"] tbody button[role="checkbox"]')!.click()); }
 const params = () => new URLSearchParams(route.latest);
 
 it("loads and paginates matching records beyond the former 500-row cap without local sorting", async () => {
@@ -82,7 +105,7 @@ it("debounces server search, resets page immediately, preserves unknown URL keys
   const calls = vi.mocked(findings.list).mock.calls.length;
   await search("package:openssl");
   expect(params().has("page")).toBe(false); expect(params().get("custom")).toBe("retain");
-  expect(button("Export filtered instances CSV").disabled).toBe(true); expect(host.querySelector('[aria-label="Bulk actions, 1 selected"]')).toBeNull();
+  expect((await exportButton("Export filtered instances CSV")).disabled).toBe(true); expect(host.querySelector('[aria-label="Bulk actions, 1 selected"]')).toBeNull();
   expect(findings.list).toHaveBeenCalledTimes(calls);
   await search("package:openssl !kev:true");
   await settled(() => expect(findings.list).toHaveBeenLastCalledWith(expect.objectContaining({ q: "package:openssl !kev:true", offset: 0 })));
@@ -106,8 +129,8 @@ it("changes global server sort and keeps a chosen Instances view when lifecycle 
   await act(async () => severityHeader.click());
   await settled(() => expect(findings.list).toHaveBeenLastCalledWith(expect.objectContaining({ sort: "severity", order: "desc", offset: 0 })));
   expect(params().get("sort")).toBe("severity");
-  const accepted = [...host.querySelectorAll<HTMLButtonElement>('[data-testid="finding-state-tabs"] button')].find((item) => item.textContent?.startsWith("Accepted"))!;
-  await act(async () => accepted.click());
+  await settled(() => expect(host.querySelector('[data-testid="findings-table"]')).not.toBeNull());
+  await selectFilter("Lifecycle", "accepted");
   await settled(() => expect(findings.list).toHaveBeenLastCalledWith(expect.objectContaining({ lifecycle: "accepted" })));
   expect(params().get("view")).toBe("instances");
 });
@@ -116,7 +139,7 @@ it.each(["instances", "cve"])("shows explicit %s failure with retry and no false
   if (view === "instances") vi.mocked(findings.list).mockRejectedValueOnce(new Error("private server detail"));
   else vi.mocked(findings.byCVE).mockRejectedValueOnce(new Error("private server detail"));
   await renderPage(); await settled(() => expect(host.textContent).toContain("Could not load findings"));
-  expect(host.textContent).not.toContain("No findings match"); expect(host.textContent).not.toContain("private server detail"); expect(button("Export filtered instances CSV").disabled).toBe(true);
+  expect(host.textContent).not.toContain("No findings match"); expect(host.textContent).not.toContain("private server detail"); expect((await exportButton("Export filtered instances CSV")).disabled).toBe(true);
   await click("Retry"); await settled(() => expect(host.querySelector(`[data-testid="${view === "instances" ? "findings-table" : "findings-cve-table"}"]`)).not.toBeNull());
 });
 it.each(["instances", "cve"])("recovers truthfully from an out-of-range %s URL page", async (view) => {
@@ -129,11 +152,11 @@ it.each(["instances", "cve"])("recovers truthfully from an out-of-range %s URL p
 });
 it("exports all matching instances with the same predicates and global sort, independent of the page", async () => {
   route.initial = "view=instances&page=6&kind=runtime&lifecycle=suppressed&severity=high&fixable=true&q=asset:api%20!kev:true&sort=title&order=asc";
-  await renderPage(); await settled(() => expect(button("Export filtered instances CSV").disabled).toBe(false));
+  await renderPage(); await settled(async () => expect((await exportButton("Export filtered instances CSV")).disabled).toBe(false));
   await click("Export filtered instances CSV");
   await settled(() => expect(findings.exportCSV).toHaveBeenCalledWith({ workload_scope: "application", kind: "runtime", lifecycle: "suppressed", cluster_id: "cluster", q: "asset:api !kev:true severity:high", fixable: true, sort: "title", order: "asc", limit: 100000, offset: 0 }, expect.any(Function)));
-  expect(host.textContent).toContain("Up to 100,000 matching instances");
-  expect(button("Export this page CSV")).toBeDefined();
+  expect((await exportButton("Export filtered instances CSV")).textContent).toContain("Up to 100,000 matching instances");
+  expect((await exportButton("Export this page CSV"))).toBeDefined();
 });
 it("keeps CVE global risk order, uses full DSL and discloses instance and page exports", async () => {
   route.initial = "view=cve&page=6&severity=high&fixable=true&q=package:openssl%20!kev:true";
@@ -142,7 +165,7 @@ it("keeps CVE global risk order, uses full DSL and discloses instance and page e
   expect(host.querySelector('[data-testid="findings-cve-table"] thead [aria-sort]')).toBeNull();
   await click("Export filtered instances CSV");
   await settled(() => expect(findings.exportCSV).toHaveBeenCalledWith(expect.objectContaining({ kind: "vulnerability", q: "package:openssl !kev:true severity:high cve:CVE-", sort: "risk", order: "desc", offset: 0, limit: 100000 }), expect.any(Function)));
-  expect(button("Export this CVE page CSV")).toBeDefined();
+  expect((await exportButton("Export this CVE page CSV"))).toBeDefined();
 });
 it("shows export failure without discarding filters or results", async () => {
   vi.mocked(findings.exportCSV).mockRejectedValue(new Error("private export detail"));
@@ -161,7 +184,7 @@ it("navigates to a dedicated saved-view form with exact filters and context with
 it("merges selections across page-scoped groups and only mutates those selected IDs", async () => {
   route.initial = "view=instances&group=asset"; vi.mocked(findings.list).mockResolvedValue({ ...listed(), findings: [fixture(0), fixture(1)] });
   await renderPage(); await settled(() => expect(host.querySelector('[data-testid="findings-group-scope"]')).not.toBeNull());
-  const selectors = [...host.querySelectorAll<HTMLInputElement>('tbody input[type="checkbox"]')];
+  const selectors = [...host.querySelectorAll<HTMLButtonElement>('tbody button[role="checkbox"]')];
   await act(async () => selectors[0].click()); await act(async () => selectors[1].click());
   expect(host.querySelector('[aria-label="Bulk actions, 2 selected"]')).not.toBeNull();
   await click("Triage"); await settled(() => expect(findings.instanceTriage).toHaveBeenCalledTimes(2));
@@ -186,7 +209,7 @@ it("retains truthful refresh errors and drops stale selections during fetching",
   vi.mocked(findings.list).mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
   await act(async () => { void client.invalidateQueries({ queryKey: ["findings"] }); });
   await settled(() => expect(host.textContent).toContain("Updating findings"));
-  expect(host.querySelector('[aria-label="Bulk actions, 1 selected"]')).toBeNull(); expect(button("Export filtered instances CSV").disabled).toBe(true);
+  expect(host.querySelector('[aria-label="Bulk actions, 1 selected"]')).toBeNull(); expect((await exportButton("Export filtered instances CSV")).disabled).toBe(true);
   await act(async () => reject(new Error("private refresh detail")));
   await settled(() => expect(host.textContent).toContain("Could not load findings")); expect(host.textContent).not.toContain("No findings match"); expect(findings.instanceTriage).not.toHaveBeenCalled();
 });
@@ -198,7 +221,7 @@ it("reports partial bulk failure and refetches current state", async () => {
 });
 it("blocks requests when active cluster resolution fails", async () => {
   route.clusterError = new Error("private scope detail"); await renderPage();
-  expect(host.textContent).toContain("The active cluster could not be resolved"); expect(findings.list).not.toHaveBeenCalled(); expect(findings.byCVE).not.toHaveBeenCalled(); expect(button("Export filtered instances CSV").disabled).toBe(true);
+  expect(host.textContent).toContain("The active cluster could not be resolved"); expect(findings.list).not.toHaveBeenCalled(); expect(findings.byCVE).not.toHaveBeenCalled(); expect((await exportButton("Export filtered instances CSV")).disabled).toBe(true);
 });
 it("renders the full one-hundred-row server page without a second fifty-row pagination layer", async () => {
   vi.mocked(findings.list).mockResolvedValue({ ...listed(), findings: Array.from({ length: 100 }, (_, index) => fixture(index)) });
@@ -236,7 +259,7 @@ it("keeps the exact target cohort across paging, CVE rollup, export and selectio
  expect(host.textContent).toContain("image-workload"); await selectFirst();
  await selectFilter("Target type", "host");
  await settled(() => { expect(params().get("page")).toBeNull(); expect(findings.list).toHaveBeenLastCalledWith(expect.objectContaining({ target_type: "host", offset: 0 })); expect(host.textContent).toContain("Finding 0"); });
- expect(host.querySelector<HTMLInputElement>('[data-testid="findings-table"] tbody input[type="checkbox"]')?.checked).toBe(false);
+ expect(host.querySelector<HTMLButtonElement>('[data-testid="findings-table"] tbody button[role="checkbox"]')?.getAttribute("aria-checked")).toBe("false");
  await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="findings-view-cve"]')!.click());
  await settled(() => expect(host.textContent).toContain("CVE-last"));
  expect(findings.byCVE).toHaveBeenLastCalledWith(expect.objectContaining({ target_type: "host", cluster_id: "cluster" }));
@@ -273,7 +296,7 @@ it("clears selected instances after a mode change and restores a saved exact mod
  route.initial = "view=instances&group_mode=protect&id_scope=all&page=6";
  await renderPage(); await settled(() => expect(host.textContent).toContain("Finding 500")); await selectFirst();
  await selectFilter("Strongest group mode", "monitor"); await settled(() => expect(host.textContent).toContain("Finding 0"));
- expect(host.querySelector<HTMLInputElement>('[data-testid="findings-table"] tbody input[type="checkbox"]')?.checked).toBe(false);
+ expect(host.querySelector<HTMLButtonElement>('[data-testid="findings-table"] tbody button[role="checkbox"]')?.getAttribute("aria-checked")).toBe("false");
  await click("Views (2)"); await act(async () => [...document.querySelectorAll<HTMLButtonElement>("button")].find(b=>b.textContent?.startsWith("Discover ID cohort"))!.click());
  await settled(() => expect(findings.list).toHaveBeenLastCalledWith(expect.objectContaining({ group_mode: "discover", id_scope: "all", offset: 0 })));
  await click("Views (2)"); await act(async () => [...document.querySelectorAll<HTMLButtonElement>("button")].find(b=>b.textContent?.startsWith("Legacy cohort"))!.click());
@@ -286,7 +309,7 @@ it("retains reported and explicitly unknown roles in the visible-column page exp
   expect(host.querySelector('[data-testid="findings-table"] thead')?.textContent).not.toContain("Platform role");
   await act(async () => host.querySelector<HTMLButtonElement>('[data-testid="findings-table-columns-trigger"]')!.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0 })));
   await settled(() => expect(document.querySelector('[role="menuitemcheckbox"]')).not.toBeNull());
-  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find(item => item.textContent === "Platform role")!.click());
+  await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((item) => item.textContent === "Platform role" || item.getAttribute("aria-label") === "Platform role" || item.getAttribute("data-export-label") === "Platform role")!.click());
   expect(host.textContent).toContain("Core"); expect(host.textContent).toContain("Unclassified"); expect(host.textContent).toContain("Not reported");
   await click("Export this page CSV");
   const [, headers, rows] = vi.mocked(downloadCsv).mock.calls.at(-1)!;
@@ -300,7 +323,7 @@ it("rejects pending finding CSV after an operator round trip and retains the cli
   vi.mocked(findings.exportCSV).mockImplementation((_request, shouldDownload) => new Promise(resolve => { guard = shouldDownload!; complete = resolve; }));
   route.initial = "view=instances&severity=high&page=3&sort=title&order=asc";
   await renderPage();
-  await settled(() => expect(button("Export filtered instances CSV").disabled).toBe(false));
+  await settled(async () => expect((await exportButton("Export filtered instances CSV")).disabled).toBe(false));
   await click("Export filtered instances CSV");
   await settled(() => expect(guard).toBeTypeOf("function"));
   expect(guard()).toBe(true);
@@ -312,7 +335,7 @@ it("rejects pending finding CSV after an operator round trip and retains the cli
   expect(findings.exportCSV).toHaveBeenCalledOnce();
   expect(findings.exportCSV).toHaveBeenCalledWith(expect.objectContaining({ q: "severity:high", sort: "title", order: "asc", limit: 100000, offset: 0 }), expect.any(Function));
   await act(async () => complete());
-  await settled(() => expect(button("Export filtered instances CSV").disabled).toBe(false));
+  await settled(async () => expect((await exportButton("Export filtered instances CSV")).disabled).toBe(false));
   expect(host.textContent).not.toContain("Could not export matching instances");
 });
 it('selects two microsecond-separated recurrences independently and mutates exactly those revisions', async () => {
@@ -321,7 +344,7 @@ it('selects two microsecond-separated recurrences independently and mutates exac
   vi.mocked(findings.list).mockResolvedValue({ ...listed(), findings: [older, newer], total: 2, has_more: false });
   vi.mocked(findings.instanceTriage).mockImplementation(async (id, selector, body) => ({ ...newer, id, first_seen_at: selector.first_seen_at, row_id: selector.first_seen_at === older.first_seen_at ? older.row_id : newer.row_id, revision: String(BigInt(body.reviewed_revision) + 1n), status: 'ok', source_cluster_id: 'cluster', target_cluster_id: null }));
   await renderPage(); await settled(() => expect(host.querySelectorAll('[data-testid="findings-table"] tbody tr')).toHaveLength(2));
-  const selectors = [...host.querySelectorAll<HTMLInputElement>('tbody input[type="checkbox"]')]; await act(async () => selectors[1].click());
+  const selectors = [...host.querySelectorAll<HTMLButtonElement>('tbody button[role="checkbox"]')]; await act(async () => selectors[1].click());
   expect(host.querySelector('[aria-label="Bulk actions, 1 selected"]')).not.toBeNull(); await click('Triage');
   await settled(() => expect(findings.instanceTriage).toHaveBeenCalledOnce()); expect(findings.instanceTriage).toHaveBeenCalledWith('finding-0', { first_seen_at: newer.first_seen_at, cluster_id: 'cluster' }, { reviewed_revision: '11', priority: 'high' });
 });
@@ -355,10 +378,8 @@ it("defaults to application scope and resets pagination when including Constella
   await renderPage();
   await settled(() => expect(findings.list).toHaveBeenLastCalledWith(expect.objectContaining({ workload_scope: "application", offset: 200 })));
   await settled(() => expect(host.textContent).toContain("42 Constellation findings hidden"));
-  const toggle = host.querySelector<HTMLInputElement>('[aria-label="Include Constellation system workloads"]')!;
-  expect(toggle.checked).toBe(false);
-  await act(async () => toggle.click());
-  await settled(() => expect(findings.list).toHaveBeenLastCalledWith(expect.objectContaining({ workload_scope: "all", offset: 0 })));
-  expect(params().get("include_system")).toBe("true");
+  // The header "System workloads" switch owns the scope (lib/system-scope).
+  await act(async () => setIncludeSystemPreference(true));
+  await settled(() => expect(findings.list).toHaveBeenLastCalledWith(expect.objectContaining({ workload_scope: "all" })));
   await settled(() => expect(host.textContent).toContain("42 Constellation findings included"));
 });

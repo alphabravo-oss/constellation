@@ -1,31 +1,17 @@
 // Route: /settings/attestation-trust.
 import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
-import {
-  ArrowLeft,
-  BadgeCheck,
-  CircleCheck,
-  Pen,
-  Fingerprint,
-  Plus,
-  RefreshCw,
-  ShieldCheck,
-  Trash2,
-} from "lucide-react";
+import { BadgeCheck, CircleCheck, Pen, Plus, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 
-import {
-  repositoryScanAttestationTrustPolicies,
-  type RepositoryAttestationTrustPolicy,
-  type RepositoryAttestationTrustPolicyInput,
-} from "@/api/client";
+import { repositoryScanAttestationTrustPolicies, type RepositoryAttestationTrustPolicy, type RepositoryAttestationTrustPolicyInput } from "@/api/client";
 import { PageHeader } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { apiErrorText } from "@/lib/api-error";
 
 export function AttestationTrustPage() {
   const qc = useQueryClient();
@@ -81,8 +67,8 @@ export function AttestationTrustPage() {
           <div className="mt-2 flex flex-wrap gap-1">
             <StatusPill active={policy.enabled} label={policy.enabled ? "enabled" : "disabled"} />
             <StatusPill active={policy.auto_verify} label={policy.auto_verify ? "auto" : "manual"} />
-            <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px]">{policy.verifier_mode || "keyless"}</span>
-            {policy.require_rekor ? <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px]">rekor</span> : null}
+            <span className="rounded-md bg-muted px-1.5 py-0.5 text-micro">{policy.verifier_mode || "keyless"}</span>
+            {policy.require_rekor ? <span className="rounded-md bg-muted px-1.5 py-0.5 text-micro">rekor</span> : null}
           </div>
         </>
       ),
@@ -146,11 +132,6 @@ export function AttestationTrustPage() {
   return (
     <div className="space-y-6" data-testid="attestation-trust-page">
       <PageHeader
-        eyebrow={
-          <Link to="/settings" className="inline-flex items-center gap-1 hover:text-foreground">
-            <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Back to Settings
-          </Link>
-        }
         title={
           <span className="flex items-center gap-2">
             <ShieldCheck className="h-5 w-5" aria-hidden />
@@ -169,14 +150,9 @@ export function AttestationTrustPage() {
       <VerdictBanner
         status={policiesQ.isError ? "degraded" : "info"}
         title={policiesQ.isError ? "Trust policy inventory unavailable" : policiesQ.isPending ? "Loading trust policies" : stats.total === 0 ? "No attestation trust policies reported" : `${stats.enabled} enabled trust policies reported`}
-        detail="Trust policies configure attestation verification. Admission enforcement depends on the admission profiles that require this evidence."
-      />
+        detail="Trust policies configure attestation verification. Admission enforcement depends on the admission profiles that require this evidence." numbers={[{ label: "Policies", value: policiesQ.isSuccess ? stats.total : "—" }, { label: "Enabled", value: policiesQ.isSuccess ? stats.enabled : "—" }, { label: "Auto verify", value: policiesQ.isSuccess ? stats.autoVerify : "—" }]} />
 
-      <StatGrid>
-        <StatCard label="Policies" value={policiesQ.isSuccess ? stats.total : "—"} icon={<Fingerprint className="h-3.5 w-3.5" aria-hidden />} />
-        <StatCard label="Enabled" value={policiesQ.isSuccess ? stats.enabled : "—"} tone="accent" icon={<CircleCheck className="h-3.5 w-3.5" aria-hidden />} />
-        <StatCard label="Auto verify" value={policiesQ.isSuccess ? stats.autoVerify : "—"} icon={<BadgeCheck className="h-3.5 w-3.5" aria-hidden />} />
-      </StatGrid>
+      
 
       <section data-testid="attestation-trust-table">
         <Card
@@ -214,7 +190,7 @@ export function AttestationTrustPage() {
 
 function StatusPill({ active, label }: { active: boolean; label: string }) {
   return (
-    <span className={`rounded-md px-1.5 py-0.5 text-[10px] ${active ? "bg-status-success/10 text-status-success" : "bg-muted text-muted-foreground"}`}>
+    <span className={`rounded-md px-1.5 py-0.5 text-micro ${active ? "bg-status-success/10 text-status-success" : "bg-muted text-muted-foreground"}`}>
       {label}
     </span>
   );
@@ -260,6 +236,5 @@ function firstOrCount(values: string[]): string {
 }
 
 function errorMessage(err: unknown): string {
-  const typed = err as { response?: { data?: unknown }; message?: string };
-  return String(typed.response?.data ?? typed.message ?? err);
+  return apiErrorText(err, String(err));
 }

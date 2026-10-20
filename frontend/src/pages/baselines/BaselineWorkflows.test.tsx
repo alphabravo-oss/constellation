@@ -29,7 +29,7 @@ const actionPath="/clusters/$clusterId/runtime/baselines/$baselineId/actions/$ac
 const base="/clusters/cluster/runtime/baselines/default%2Fapi";
 async function edit(){await render(<BaselineRuleFormPage/>,rulePath,`${base}/rules/rule/edit`);await settled(()=>expect(host.querySelector("form")).not.toBeNull());}
 async function settled(check:()=>void){await vi.waitFor(async()=>{await act(async()=>{});check();});}
-const button=(name:string)=>[...host.querySelectorAll("button")].find(b=>b.textContent?.trim()===name)!;
+const button=(name:string)=>[...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === name || b.getAttribute("aria-label") === name || b.getAttribute("data-export-label") === name)!;
 function field(label:string):HTMLInputElement|HTMLSelectElement{return [...host.querySelectorAll("label")].find(e=>e.querySelector("span")?.textContent===label)!.querySelector("input,select")!;}
 async function input(label:string,value:string){await act(async()=>{const el=field(label);const type=el instanceof HTMLSelectElement?HTMLSelectElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(type,"value")!.set!.call(el,value);el.dispatchEvent(new Event(el instanceof HTMLSelectElement?"change":"input",{bubbles:true}));});}
 async function submit(){await act(async()=>host.querySelector("form")!.dispatchEvent(new Event("submit",{bubbles:true,cancelable:true})));}

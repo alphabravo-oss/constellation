@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { fileProfiles, type FileProfileDetail, type FileProfileRule } from "@/api/client";
 import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
 import { FileMonitorPage } from "./FileMonitorPage";
+import { setIncludeSystemPreference } from "@/lib/system-scope";
 import { FileMonitorFormPage } from "./FileMonitorFormPage";
 
 const route = vi.hoisted(() => ({ ruleId: undefined as string | undefined, search: "workload=workload", navigate: vi.fn(), setParams: vi.fn(), clusterId: "cluster" as string | undefined, cluster: { id: "cluster" } as { id: string } | undefined, loading: false }));
@@ -18,7 +19,7 @@ const profile = { workload_id: "workload", cluster_id: "cluster", name: "Worker"
 let root: Root;
 let host: HTMLDivElement;
 let client: QueryClient;
-beforeEach(() => { route.ruleId = undefined; route.search = "workload=workload"; route.clusterId = "cluster"; route.cluster = { id: "cluster" }; route.loading = false; vi.mocked(fileProfiles.get).mockResolvedValue(profile); vi.mocked(fileProfiles.inventory).mockImplementation(async params => ({ profiles: [], total: 0, limit: 100, offset: params.offset ?? 0, has_more: false, sort: params.sort ?? "workload", order: params.order ?? "asc", org_id: "org", cluster_id: "cluster", namespaces: ["team"], source: "retained_file_events", source_complete: true, summary_scope: "matching_shared_profiles", filters: { q: params.q ?? "", namespace: params.namespace ?? "", mode: params.mode ?? "", platform_role: params.platform_role ?? "", hide_platform: params.hide_platform ?? false }, summary: { total: 0, learn: 0, monitor: 0, enforce: 0, rules: 0, alerts: 0, blocks: 0, retained_events: 0, ambiguous: 0 } })); vi.mocked(fileProfiles.list).mockResolvedValue({ profiles: [profile], summary: { total: 1, learn: 0, monitor: 1, enforce: 0 } }); });
+beforeEach(() => { setIncludeSystemPreference(true); route.ruleId = undefined; route.search = "workload=workload"; route.clusterId = "cluster"; route.cluster = { id: "cluster" }; route.loading = false; vi.mocked(fileProfiles.get).mockResolvedValue(profile); vi.mocked(fileProfiles.inventory).mockImplementation(async params => ({ profiles: [], total: 0, limit: 100, offset: params.offset ?? 0, has_more: false, sort: params.sort ?? "workload", order: params.order ?? "asc", org_id: "org", cluster_id: "cluster", namespaces: ["team"], source: "retained_file_events", source_complete: true, summary_scope: "matching_shared_profiles", filters: { q: params.q ?? "", namespace: params.namespace ?? "", mode: params.mode ?? "", platform_role: params.platform_role ?? "", hide_platform: params.hide_platform ?? false }, summary: { total: 0, learn: 0, monitor: 0, enforce: 0, rules: 0, alerts: 0, blocks: 0, retained_events: 0, ambiguous: 0 } })); vi.mocked(fileProfiles.list).mockResolvedValue({ profiles: [profile], summary: { total: 1, learn: 0, monitor: 1, enforce: 0 } }); });
 afterEach(() => { act(() => root?.unmount()); client?.clear(); host?.remove(); vi.resetAllMocks(); localStorage.clear(); });
 async function renderPage(form = true) {
   host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
@@ -26,7 +27,7 @@ async function renderPage(form = true) {
   await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{ org_id: "org", user_id: "user" }}>{form ? <FileMonitorFormPage /> : <FileMonitorPage />}</TablePreferencesProvider></QueryClientProvider>));
 }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => { }); check(); }); }
-function button(label: string) { return [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === label)!; }
+function button(label: string) { return [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === label || b.getAttribute("aria-label") === label || b.getAttribute("data-export-label") === label)!; }
 function disclosure(label: string) { return [...host.querySelectorAll("details")].find((details) => details.querySelector("summary")?.textContent?.trim() === label)!; }
 async function submit() { await act(async () => { host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); }); }
 async function changeFilter(value: string) { await act(async () => { const input = host.querySelector("input")!; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); }); }
@@ -88,7 +89,7 @@ it("uses dedicated scoped create/edit links and requires a delete confirmation",
   await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Delete rule /etc/"]')!.click()); expect(fileProfiles.deleteRule).not.toHaveBeenCalled();
   vi.mocked(fileProfiles.deleteRule).mockResolvedValue({ deleted: "rule" });
   await act(async () => button("Delete rule").click()); await settled(() => expect(fileProfiles.deleteRule).toHaveBeenCalledWith("workload", "rule", expect.anything(), { cluster_id: "cluster" }));
-  expect(host.textContent).toContain("Profiles configure behavior"); expect([...host.querySelectorAll("button")].some(b => b.textContent?.includes("Export CSV"))).toBe(true);
+  expect(host.textContent).toContain("Profiles configure behavior"); expect([...host.querySelectorAll("button")].some(b => b.textContent?.includes("Export CSV") || b.getAttribute("aria-label") === "Export CSV" || b.getAttribute("data-export-label") === "Export CSV")).toBe(true);
 });
 
 
@@ -142,7 +143,7 @@ it("provides a refresh after server conflict without replacing the draft", async
 });
 
 it("locks another write after an unconfirmed response and provides inspection", async () => {
-  route.ruleId = "rule"; await renderPage(); await settled(() => expect(host.querySelector("form")).not.toBeNull()); vi.mocked(fileProfiles.updateRule).mockResolvedValue({ ...rule, id: "other-rule" }); await submit(); await settled(() => expect(host.textContent).toContain("Save response could not be confirmed")); expect(button("Save").disabled).toBe(true); expect([...host.querySelectorAll("a")].find(a => a.textContent === "Inspect current rules")?.getAttribute("href")).toBe("/clusters/cluster/file-monitor?workload=workload"); await submit(); expect(fileProfiles.updateRule).toHaveBeenCalledOnce();
+  route.ruleId = "rule"; await renderPage(); await settled(() => expect(host.querySelector("form")).not.toBeNull()); vi.mocked(fileProfiles.updateRule).mockResolvedValue({ ...rule, id: "other-rule" }); await submit(); await settled(() => expect(host.textContent).toContain("Save response could not be confirmed")); expect(button("Save").disabled).toBe(true); expect([...host.querySelectorAll("a")].find((a) => a.textContent === "Inspect current rules" || a.getAttribute("aria-label") === "Inspect current rules" || a.getAttribute("data-export-label") === "Inspect current rules")?.getAttribute("href")).toBe("/clusters/cluster/file-monitor?workload=workload"); await submit(); expect(fileProfiles.updateRule).toHaveBeenCalledOnce();
 });
 
 it("does not navigate a later workspace when a pending reviewed save completes", async () => {

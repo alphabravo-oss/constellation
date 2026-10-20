@@ -7,6 +7,15 @@ import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
 import { TestRouter } from "@/test/router";
 import { compliance, type ComplianceEvidenceItem, type ComplianceEvidenceParams, type ComplianceEvidenceResponse } from "@/api/client";
 import { ComplianceEvidenceInventory, evidenceResponseMatches } from "./ComplianceEvidenceInventory";
+
+/** Kit Select keeps a hidden native mirror right before its trigger. */
+function nativeSelect(root: ParentNode, selector: string): HTMLSelectElement | null {
+  const element = root.querySelector(selector);
+  if (!element) return null;
+  if (element.tagName === "SELECT") return element as HTMLSelectElement;
+  // The kit Select keeps a hidden native mirror tagged with the trigger id.
+  return element.id ? root.querySelector<HTMLSelectElement>(`select[data-mirror-for="${element.id}"]`) : null;
+}
 vi.mock("@/api/client", () => ({ compliance: { evidence: vi.fn(), exportEvidenceCSV: vi.fn() } }));
 let root: Root; let host: HTMLDivElement; let client: QueryClient; let history: RouterHistory;
 let identity: { org_id: string; user_id: string } | null;
@@ -32,8 +41,8 @@ async function render(search = "") { history = createMemoryHistory({ initialEntr
 async function rerender() { await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={identity}><TestRouter history={history}><TestPage /></TestRouter></TablePreferencesProvider></QueryClientProvider>)); if (updatePage) await act(async () => updatePage!({cluster, ready})); }
 async function settle(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
 function rows() { return host.querySelectorAll('[data-testid="compliance-source-evidence-table"] tbody tr'); }
-function button(text: string) { return [...host.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent?.trim() === text)!; }
-async function select(selector: string, value: string) { await act(async () => { const input = host.querySelector<HTMLSelectElement>(selector)!; Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event("change", { bubbles: true })); }); }
+function button(text: string) { return [...host.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.trim() === text || item.getAttribute("aria-label") === text || item.getAttribute("data-export-label") === text)!; }
+async function select(selector: string, value: string) { await act(async () => { const input = nativeSelect(host, selector)!; Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event("change", { bubbles: true })); }); }
 it("reads past the old source cap with full matching counts and independent server pages", async () => {
  await render("&evidence_page=12&status=graded&page=4&context=a&context=b"); await settle(() => expect(rows()).toHaveLength(100));
  expect(host.textContent).toContain("1,205 source evidence rows"); expect(host.textContent).toContain("Source evidence 1100"); expect(host.textContent).not.toContain("Source evidence 0");
@@ -50,7 +59,7 @@ it("pushes source/status filters and sorting while preserving unrelated control 
  await act(async () => history.back());
  const observedSortSelector = '[data-testid="compliance-source-evidence-table"] th[data-column-id="observed"][aria-sort="descending"] .app-table-header-button';
  await settle(() => {
-  expect(host.querySelector<HTMLSelectElement>("#evidence-status")!.value).toBe("");
+  expect(nativeSelect(host, "#evidence-status")!.value).toBe("");
   expect(rows()).toHaveLength(100);
   const observedSort = host.querySelector<HTMLButtonElement>(observedSortSelector);
   expect(observedSort?.textContent?.trim()).toBe("Observed");

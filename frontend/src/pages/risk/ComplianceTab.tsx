@@ -6,7 +6,7 @@ import { recordRows, type RiskTabProps } from "./workspace";
 
 export default function ComplianceTab({ workspace }: RiskTabProps) {
   const { entity, clusterId } = workspace;
-  const link = <a href={`/clusters/${clusterId}/compliance`} className="text-sm text-primary hover:underline">Open cluster compliance context</a>;
+  const link = <a href={`/clusters/${clusterId}/compliance`} className="text-sm text-link">Open cluster compliance context</a>;
   if (entity?.type === "node") {
     const rows = recordRows(entity.data.cis, "checks");
     const columns: Column<Record<string, unknown>>[] = [

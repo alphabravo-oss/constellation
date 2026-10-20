@@ -8,9 +8,9 @@ import { useRouteSearchParams } from "@/lib/route-search";
 import { Button } from "@/components/ui/button";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
+import { Select } from "@/components/ui/form";
 
 export function ResponsePage() {
   const { clusterId, cluster, isLoading } = useCluster();
@@ -45,20 +45,14 @@ function ResponseCatalog({ clusterId }: { clusterId: string }) {
     { id: "edit", kind: "actions", size: 176, minSize: 160, maxSize: 192, header: "Manage", hideable: false, exportable: false, cell: (r) => <Button variant="ghost" disabled={q.isError || q.isFetching} onClick={() => openEditor(r)} aria-label={`Edit override for ${r.name}`}><Pencil className="h-4 w-4" /> Edit override</Button> },
   ];
   return <div className="space-y-6" data-testid="response-catalog-page" data-cluster-id={clusterId}>
-    <PageHeader title="Response Catalog" description="Review built-in response rules and their organization-wide overrides. These settings are shared across clusters; authored response rules have a separate configuration."
+    <PageHeader title="Built-in response catalog" description="Review built-in response rules and their organization-wide overrides. These settings are shared across clusters; authored response rules have a separate configuration."
       actions={<><Button onClick={() => void navigate({ href: `/clusters/${clusterId}/response-rules` })}>Authored response rules</Button><Button disabled={q.isFetching} onClick={() => void q.refetch()}><RefreshCw className="h-4 w-4" /> Refresh</Button></>} />
     {q.isPending ? <LoadingState label="Loading response catalog…" /> : !q.data ? <ErrorState title="Could not load the organization response catalog." action={<Button onClick={() => void q.refetch()}>Retry</Button>} /> : <>
-      <VerdictBanner detailMode={q.isError ? "inline" : "disclosure"} status={q.isError ? "degraded" : "info"} title={q.isError ? "Response catalog could not be refreshed" : `${rules.filter((r) => r.enabled).length} built-in rules are enabled across the organization`} detail={q.isError ? "Showing the last loaded settings. Refresh before editing an override." : "Configured modes and actions describe response settings. Actual enforcement depends on the runtime agents and action delivery."} />
-      <StatGrid>
-        <StatCard label="Built-in rules" value={rules.length} />
-        <StatCard label="Enabled" value={rules.filter((r) => r.enabled).length} />
-        <StatCard label="Enabled · monitor" value={rules.filter((r) => r.enabled && r.mode === "monitor").length} />
-        <StatCard label="Enabled · enforce" value={rules.filter((r) => r.enabled && r.mode === "enforce").length} />
-        <StatCard label="Organization overrides" value={rules.filter((r) => r.managed).length} />
-      </StatGrid>
+      <VerdictBanner detailMode={q.isError ? "inline" : "disclosure"} status={q.isError ? "degraded" : "info"} title={q.isError ? "Response catalog could not be refreshed" : `${rules.filter((r) => r.enabled).length} built-in rules are enabled across the organization`}  numbers={[{ label: "Built-in rules", value: rules.length }, { label: "Enabled", value: rules.filter((r) => r.enabled).length }, { label: "Enabled · monitor", value: rules.filter((r) => r.enabled && r.mode === "monitor").length }, { label: "Enabled · enforce", value: rules.filter((r) => r.enabled && r.mode === "enforce").length }]} detail={<><p>{q.isError ? "Showing the last loaded settings. Refresh before editing an override." : "Configured modes and actions describe response settings. Actual enforcement depends on the runtime agents and action delivery."}</p><p>{"Organization overrides"}: {rules.filter((r) => r.managed).length}</p></>} />
+      
       <div className="grid gap-4 sm:grid-cols-2" data-testid="response-rule-filters">
         <label className="block space-y-2 text-sm"><span className="font-medium">Search built-in rules</span><input value={filter} onChange={(e) => setFilter("q", e.target.value)} className="h-10 w-full rounded-md border border-border bg-card px-3" placeholder="Rule name, match or action" /></label>
-        <label className="block space-y-2 text-sm"><span className="font-medium">Event type</span><select value={eventType} onChange={(e) => setFilter("event", e.target.value)} className="h-10 w-full rounded-md border border-border bg-card px-3"><option value="all">All event types</option>{eventType !== "all" && !eventTypes.includes(eventType) && <option value={eventType}>Unknown event type: {eventType}</option>}{eventTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
+        <label className="block space-y-2 text-sm"><span className="font-medium">Event type</span><Select value={eventType} onChange={(e) => setFilter("event", e.target.value)} className="h-10 w-full rounded-md border border-border bg-card px-3"><option value="all">All event types</option>{eventType !== "all" && !eventTypes.includes(eventType) && <option value={eventType}>Unknown event type: {eventType}</option>}{eventTypes.map((type) => <option key={type} value={type}>{type}</option>)}</Select></label>
       </div>
       <p className="text-xs text-muted-foreground">{filtered.length} matching rules out of {rules.length} loaded organization rules.</p>
       <DataTable rows={filtered} columns={columns} rowKey={(r) => r.id} onRowClick={q.isError || q.isFetching ? undefined : openEditor} preferencesKey="response-catalog" exportFileName="response-catalog.csv" testId="response-rules-table" rowTestId={() => "response-rule-row"} emptyState={<EmptyState title={rules.length ? "No matching rules" : "No built-in response rules"} hint={rules.length ? "Change the search or event type filter." : "No rules were returned by the organization catalog."} />} />

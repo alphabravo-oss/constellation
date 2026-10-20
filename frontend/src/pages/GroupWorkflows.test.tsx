@@ -9,6 +9,15 @@ import { GroupsPage } from "./GroupsPage";
 import { GroupSettingsPage } from "./GroupSettingsPage";
 import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
 
+/** Kit Select keeps a hidden native mirror right before its trigger. */
+function nativeSelect(root: ParentNode, selector: string): HTMLSelectElement | null {
+  const element = root.querySelector(selector);
+  if (!element) return null;
+  if (element.tagName === "SELECT") return element as HTMLSelectElement;
+  // The kit Select keeps a hidden native mirror tagged with the trigger id.
+  return element.id ? root.querySelector<HTMLSelectElement>(`select[data-mirror-for="${element.id}"]`) : null;
+}
+
 const route = vi.hoisted(() => ({ groupId: "group", orgId: "org", userId: "user", clusterId: "cluster" as string | undefined, resolvedClusterId: "cluster" as string | undefined, clusterLoading: false, clusterError: null as Error | null, search: "", navigate: vi.fn(), setSearch: vi.fn() }));
 vi.mock("@/api/client", () => ({ policies: { serviceModeDefaults: vi.fn(), updateServiceModeDefaults: vi.fn() }, groupsApi: { list: vi.fn(), usage: vi.fn(), update: vi.fn(), create: vi.fn(), delete: vi.fn(), promote: vi.fn(), exportYaml: vi.fn(), importYaml: vi.fn() } }));
 vi.mock("@/hooks/useCluster", () => ({ useCluster: () => ({ clusterId: route.clusterId, isLoading: route.clusterLoading, cluster: route.resolvedClusterId ? { id: route.resolvedClusterId } : undefined, error: route.clusterError }) }));
@@ -34,7 +43,7 @@ async function renderPage(page: ReactNode, beforeRender?: (queryClient: QueryCli
 async function rerenderPage(page: ReactNode) { await act(async () => root.render(<QueryClientProvider client={client}>{page}</QueryClientProvider>)); }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
 async function submit() { await act(async () => { host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); }); }
-function button(text: string) { return [...host.querySelectorAll("button")].find((item) => item.textContent?.trim() === text)!; }
+function button(text: string) { return [...host.querySelectorAll("button")].find((item) => item.textContent?.trim() === text || item.getAttribute("aria-label") === text || item.getAttribute("data-export-label") === text)!; }
 async function changeInput(selector: string, value: string) {
   const input = host.querySelector<HTMLInputElement>(selector)!;
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); });
@@ -142,7 +151,7 @@ it("creates a scoped group from structured fields and cancels without writes", a
   await renderPage(<GroupFormPage />);
   expect(groupsApi.list).not.toHaveBeenCalled();
   await settled(() => expect(host.querySelector("form")).not.toBeNull());
-  expect(host.querySelector<HTMLSelectElement>("#group-profile-mode")?.value).toBe("discover");
+  expect(nativeSelect(host, "#group-profile-mode")?.value).toBe("discover");
   await changeInput("#group-name", "New group");
   await changeInput("#group-value-0", "staging");
   await submit();
@@ -235,7 +244,7 @@ it("saves group defaults through explicit Save and scoped API", async () => {
   vi.mocked(policies.updateServiceModeDefaults).mockResolvedValue({ cluster_id: "cluster", policy_mode: "protect", profile_mode: "discover" });
   await renderPage(<GroupSettingsPage />);
   await settled(() => expect(host.querySelector("form")).not.toBeNull());
-  await act(async () => { const select = host.querySelector<HTMLSelectElement>("#default-network-mode")!; select.value = "protect"; select.dispatchEvent(new Event("change", { bubbles: true })); });
+  await act(async () => { const select = nativeSelect(host, "#default-network-mode")!; select.value = "protect"; select.dispatchEvent(new Event("change", { bubbles: true })); });
   expect(policies.updateServiceModeDefaults).not.toHaveBeenCalled();
   await submit();
   await settled(() => expect(route.navigate).toHaveBeenCalledWith({ href: "/clusters/cluster/groups" }));
@@ -245,9 +254,9 @@ it("preserves group settings draft after refresh and failed save", async () => {
   vi.mocked(policies.updateServiceModeDefaults).mockRejectedValue(new Error("private details"));
   await renderPage(<GroupSettingsPage />);
   await settled(() => expect(host.querySelector("form")).not.toBeNull());
-  await act(async () => { const select = host.querySelector<HTMLSelectElement>("#default-network-mode")!; select.value = "protect"; select.dispatchEvent(new Event("change", { bubbles: true })); client.setQueryData(["service-mode-defaults", "cluster"], { cluster_id: "cluster", policy_mode: "discover", profile_mode: "monitor" }); });
-  expect(host.querySelector<HTMLSelectElement>("#default-network-mode")?.value).toBe("protect");
-  expect(host.querySelector<HTMLSelectElement>("#default-profile-mode")?.value).toBe("discover");
+  await act(async () => { const select = nativeSelect(host, "#default-network-mode")!; select.value = "protect"; select.dispatchEvent(new Event("change", { bubbles: true })); client.setQueryData(["service-mode-defaults", "cluster"], { cluster_id: "cluster", policy_mode: "discover", profile_mode: "monitor" }); });
+  expect(nativeSelect(host, "#default-network-mode")?.value).toBe("protect");
+  expect(nativeSelect(host, "#default-profile-mode")?.value).toBe("discover");
   await submit();
   await settled(() => expect(host.textContent).toContain("Your draft is preserved"));
   expect(route.navigate).not.toHaveBeenCalled();
@@ -274,9 +283,9 @@ it("keeps an edited group draft visible after a refresh request fails", async ()
 it("keeps settings draft visible if the response loses cluster scope and blocks another save", async () => {
   await renderPage(<GroupSettingsPage />);
   await settled(() => expect(host.querySelector("form")).not.toBeNull());
-  await act(async () => { const select = host.querySelector<HTMLSelectElement>("#default-network-mode")!; select.value = "protect"; select.dispatchEvent(new Event("change", { bubbles: true })); client.setQueryData(["service-mode-defaults", "cluster"], { cluster_id: "other", policy_mode: "monitor", profile_mode: "monitor" }); });
+  await act(async () => { const select = nativeSelect(host, "#default-network-mode")!; select.value = "protect"; select.dispatchEvent(new Event("change", { bubbles: true })); client.setQueryData(["service-mode-defaults", "cluster"], { cluster_id: "other", policy_mode: "monitor", profile_mode: "monitor" }); });
   await settled(() => expect(button("Save").disabled).toBe(true));
-  expect(host.querySelector<HTMLSelectElement>("#default-network-mode")?.value).toBe("protect");
+  expect(nativeSelect(host, "#default-network-mode")?.value).toBe("protect");
   await submit();
   expect(policies.updateServiceModeDefaults).not.toHaveBeenCalled();
 });
@@ -294,11 +303,11 @@ const authoringKinds = ["create", "edit", "settings"] as const;
 type AuthoringKind = typeof authoringKinds[number];
 function authoringPage(kind: AuthoringKind) { route.groupId = kind === "create" ? "" : "group"; return kind === "settings" ? <GroupSettingsPage /> : <GroupFormPage />; }
 async function draftAuthoring(kind: AuthoringKind) {
-  if (kind === "settings") await act(async () => { const select = host.querySelector<HTMLSelectElement>("#default-network-mode")!; select.value = "protect"; select.dispatchEvent(new Event("change", { bubbles: true })); });
+  if (kind === "settings") await act(async () => { const select = nativeSelect(host, "#default-network-mode")!; select.value = "protect"; select.dispatchEvent(new Event("change", { bubbles: true })); });
   else await changeInput("#group-name", "Retained authoring draft");
 }
 function expectAuthoringDraft(kind: AuthoringKind) {
-  if (kind === "settings") expect(host.querySelector<HTMLSelectElement>("#default-network-mode")?.value).toBe("protect");
+  if (kind === "settings") expect(nativeSelect(host, "#default-network-mode")?.value).toBe("protect");
   else expect(host.querySelector<HTMLInputElement>("#group-name")?.value).toBe("Retained authoring draft");
 }
 function expectNoAuthoringWrite() { expect(groupsApi.create).not.toHaveBeenCalled(); expect(groupsApi.update).not.toHaveBeenCalled(); expect(policies.updateServiceModeDefaults).not.toHaveBeenCalled(); }

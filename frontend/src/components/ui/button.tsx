@@ -1,24 +1,25 @@
 import { type ButtonHTMLAttributes, type ElementType, forwardRef } from "react";
-import { Slot } from "@radix-ui/react-slot";
+import { Slot } from "radix-ui";
 import { cn } from "@/lib/cn";
+import { buttonBaseClass, buttonIntentClass, buttonSizeClass, type ButtonIntent, type ButtonSize } from "@/ui";
 
-type Variant = "primary" | "secondary" | "ghost" | "outline" | "destructive";
+type Variant = "primary" | "secondary" | "ghost" | "outline" | "destructive" | "link";
 type Size = "sm" | "md" | "lg" | "icon";
 
-const variantClass: Record<Variant, string> = {
-  primary:    "bg-primary text-primary-foreground hover:bg-[color-mix(in_oklab,var(--color-primary)_88%,white)] shadow-[var(--elev-1)]",
-  secondary:  "bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklab,var(--color-secondary)_92%,var(--color-foreground))]",
-  ghost:      "hover:bg-accent text-foreground",
-  outline:    "border border-border bg-transparent text-foreground hover:bg-accent",
-  destructive:"bg-destructive text-destructive-foreground hover:bg-[color-mix(in_oklab,var(--color-destructive)_88%,white)]",
+/**
+ * Product button on the kit's intents. `primary` is the teal accent and is
+ * reserved for the page's main action; everything else is the neutral bordered
+ * default or ghost.
+ */
+const intent: Record<Variant, ButtonIntent> = {
+  primary: "primary",
+  secondary: "default",
+  outline: "default",
+  ghost: "ghost",
+  destructive: "destructive",
+  link: "link",
 };
-
-const sizeClass: Record<Size, string> = {
-  sm:   "h-7 px-2.5 text-xs gap-1.5 rounded",
-  md:   "h-8 px-3 text-sm gap-2 rounded-md",
-  lg:   "h-9 px-4 text-sm gap-2 rounded-md",
-  icon: "h-7 w-7 rounded",
-};
+const size: Record<Size, ButtonSize> = { sm: "sm", md: "sm", lg: "md", icon: "icon" };
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant;
@@ -27,19 +28,15 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
-  { className, variant = "secondary", size = "md", asChild, ...rest },
+  { className, variant = "secondary", size: sizeProp = "md", asChild, type, ...rest },
   ref,
 ) {
-  const Comp: ElementType = asChild ? Slot : "button";
+  const Comp: ElementType = asChild ? Slot.Root : "button";
   return (
     <Comp
       ref={ref}
-      className={cn(
-        "inline-flex items-center justify-center whitespace-nowrap font-medium transition-colors duration-100 disabled:pointer-events-none disabled:opacity-50",
-        variantClass[variant],
-        sizeClass[size],
-        className,
-      )}
+      type={asChild ? undefined : (type ?? "button")}
+      className={cn(buttonBaseClass, buttonIntentClass[intent[variant]], buttonSizeClass[size[sizeProp]], "[&_svg]:h-4 [&_svg]:w-4", className)}
       {...rest}
     />
   );

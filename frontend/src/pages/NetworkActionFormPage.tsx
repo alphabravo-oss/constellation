@@ -29,6 +29,7 @@ import {
   NetworkPolicyLifecycleActionForm,
   type LifecycleAction,
 } from "./NetworkPolicyLifecycleActionForm";
+import { apiErrorMessage } from "@/lib/api-error";
 
 type Action = "isolate" | "quarantine" | "block-ip" | "approve-policy";
 const ACTIONS: Record<
@@ -93,9 +94,7 @@ function validIP(ip: string) {
   }
 }
 function errorMessage(error: unknown) {
-  const response = (
-    error as { response?: { data?: { error?: string } } } | null
-  )?.response?.data?.error;
+  const response = apiErrorMessage(error);
   return (
     response ||
     (error instanceof Error

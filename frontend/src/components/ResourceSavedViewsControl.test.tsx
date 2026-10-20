@@ -89,7 +89,7 @@ it("opens dedicated authoring with exact return context and effective platform p
   );
   await act(async () =>
     [...host.querySelectorAll<HTMLButtonElement>("button")]
-      .find((b) => b.textContent === "Save deployment view")!
+      .find((b) => b.textContent?.trim() === "Save view" || b.getAttribute("aria-label") === "Save deployment view" || b.getAttribute("data-export-label") === "Save deployment view")!
       .click(),
   );
   await vi.waitFor(() =>

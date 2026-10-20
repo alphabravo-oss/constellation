@@ -1,3 +1,4 @@
+import { apiErrorCode } from "@/lib/api-error";
 export interface FindingIdentity {
   id: string;
   first_seen_at: string;
@@ -57,8 +58,8 @@ export function findingChooserHref(cluster: string, id: string) {
   return `/clusters/${encodeURIComponent(cluster)}/findings?${new URLSearchParams({ view: "instances", lifecycle: "all", q: `id:${id}` })}`;
 }
 export function ambiguousFinding(error: unknown) {
-  const response = (error as { response?: { status?: number; data?: { code?: string } } } | undefined)?.response;
-  return response?.status === 409 && response.data?.code === "ambiguous_finding_id";
+  const response = (error as { response?: { status?: number } } | undefined)?.response;
+  return response?.status === 409 && apiErrorCode(error) === "ambiguous_finding_id";
 }
 export function findingReceiptMatches(receipt: unknown, reviewed: FindingIdentity, cluster: string, comment = false) {
   if (!receipt || typeof receipt !== "object" || !comment && (receipt as { status?: string }).status !== "ok") return false;

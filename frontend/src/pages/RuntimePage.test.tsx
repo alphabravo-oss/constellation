@@ -8,6 +8,7 @@ import { TestRouter } from "@/test/router";
 import { downloadCsv } from "@/lib/csv";
 vi.mock("@/lib/csv",()=>({downloadCsv:vi.fn()}));
 import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
+import { chooseExport, exportAvailable } from "@/test/export-menu";
 import { RuntimePage } from "./RuntimePage";
 
 const scope = vi.hoisted(() => ({ available: true, resolvedId: "", loading: false, error: null as Error | null }));
@@ -47,7 +48,7 @@ beforeEach(() => {
 afterEach(() => { act(() => root?.unmount()); host?.remove(); client?.clear(); vi.resetAllMocks(); });
 // The first route mounts two asynchronous queries; allow the same bounded
 // render budget under concurrent CI load as the other inventory workflows.
-async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }, { timeout: 3000 }); }
+async function settled(check: () => void | Promise<void>) { await vi.waitFor(async () => { await act(async () => {}); await check(); }, { timeout: 3000 }); }
 async function render(url = "/clusters/cluster-a/runtime", seed?: (client: QueryClient) => void) {
   host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); seed?.(client);
@@ -56,7 +57,7 @@ async function render(url = "/clusters/cluster-a/runtime", seed?: (client: Query
 }
 async function rerender() { await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={identity}><TestRouter path="/clusters/$id/runtime" history={history}><RuntimePage /></TestRouter></TablePreferencesProvider></QueryClientProvider>)); }
 async function tab(label: string) {
-  const trigger = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((item) => item.textContent === label)!;
+  const trigger = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((item) => item.textContent === label || item.getAttribute("aria-label") === label || item.getAttribute("data-export-label") === label)!;
   await act(async () => trigger.focus());
   await settled(() => expect(trigger.getAttribute('aria-selected')).toBe("true"));
 }
@@ -169,7 +170,7 @@ it.each(["live","evidence","workloads"])("retains server role metadata and expli
  const data=overview();data.recent_events=[{...evidenceEvent(),platform_role:"core"},{...evidenceEvent("cluster-a","unknown"),platform_role:""}];data.workloads=[{...data.workloads[0],platform_role:"core"},{...data.workloads[0],workload_id:"prod/customer",platform_role:""}];
  vi.mocked(enterprise.runtime).mockResolvedValue(data);vi.mocked(runtimeEvents.list).mockResolvedValue(historyResponse({},[{...rawEvent(),cluster_id:"cluster-a",platform_role:"core"},{...rawEvent(),id:"unknown",workload_id:"prod/customer",platform_role:""}]));
  await render(`/clusters/cluster-a/runtime?tab=${workspace}`);await settled(()=>expect(host.textContent).toContain("core"));
- const exportButton=[...host.querySelectorAll<HTMLButtonElement>("button")].find(button=>button.textContent==="Export CSV")!;await act(async()=>exportButton.click());
+ if(workspace==="live"){await chooseExport("This table",host);}else{const exportButton=[...host.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Export CSV" || button.getAttribute("aria-label") === "Export CSV" || button.getAttribute("data-export-label") === "Export CSV")!;await act(async()=>exportButton.click());}
  const [,headers,rows]=vi.mocked(downloadCsv).mock.calls.at(-1)!;const column=headers.indexOf("platform_role");expect(column).toBeGreaterThanOrEqual(0);expect(rows.map(row=>row[column])).toEqual(["core",""]);expect(rows.flat()).not.toContain("Not classified");
 });
 it("rejects foreign-cluster raw event metadata instead of exporting it",async()=>{
@@ -177,11 +178,11 @@ it("rejects foreign-cluster raw event metadata instead of exporting it",async()=
 });
 it("lets the operator change the initially compact live-event density",async()=>{
  await render();await settled(()=>expect(host.querySelector('[data-testid="runtime-live-table"]')).not.toBeNull());const table=host.querySelector('[data-testid="runtime-live-table"]')!;const cell=()=>table.querySelector<HTMLElement>('tbody td')!;
- expect(cell().className).toContain("py-0.5");await act(async()=>table.querySelector<HTMLButtonElement>('[aria-label="comfy density"]')!.click());expect(cell().className).toContain("py-2");
+ expect(cell().className).toContain("py-1.5");await act(async()=>table.querySelector<HTMLButtonElement>('[aria-label="comfy density"]')!.click());expect(cell().className).toContain("py-3");
 });
 
 const historyRows = () => Array.from({length:205},(_,index)=>({...rawEvent(),id:index<2?"shared-uuid":`event-${index}`,at:new Date(Date.UTC(2026,9,10,12,0,index)).toISOString(),workload_id:`operations/service-${index}`,namespace:"operations",kind:index%2?"file_open":"exec",source:"ebpf",verdict:index%2?"observed":"alert",severity:"high" as const,payload:{message:`Evidence ${index}`}}));
-const findButton=(text:string)=>[...host.querySelectorAll<HTMLButtonElement>("button")].find(button=>button.textContent?.trim()===text)!;
+const findButton=(text:string)=>[...host.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === text || button.getAttribute("aria-label") === text || button.getAttribute("data-export-label") === text)!;
 async function selectHistory(id:string,value:string){await act(async()=>{const input=host.querySelector<HTMLSelectElement>(id)!;Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype,"value")!.set!.call(input,value);input.dispatchEvent(new Event("change",{bubbles:true}));});}
 it("continues beyond the old latest100 cap and exports every matching record with server page counts",async()=>{
  vi.mocked(runtimeEvents.list).mockImplementation(async request=>historyResponse(request,historyRows()));
@@ -190,7 +191,7 @@ it("continues beyond the old latest100 cap and exports every matching record wit
  await settled(()=>expect(host.querySelectorAll('[data-testid="runtime-live-table"] tbody tr')).toHaveLength(5));
  expect(summaryValues()).toEqual(["205","103","0","0","205"]);expect(host.textContent).toContain("operations/service-200");expect(host.textContent).not.toContain("operations/service-0");
  expect(runtimeEvents.list).toHaveBeenLastCalledWith(expect.objectContaining({offset:200,limit:100,sort:"at",order:"desc"}));
- await act(async()=>findButton("Export matching CSV").click());expect(runtimeEvents.exportCSV).toHaveBeenCalledWith(expect.objectContaining({offset:200,cluster_id:"cluster-a"}), expect.any(Function));
+ await chooseExport("Matching rows", host);expect(runtimeEvents.exportCSV).toHaveBeenCalledWith(expect.objectContaining({offset:200,cluster_id:"cluster-a"}), expect.any(Function));
  await settled(()=>expect(host.textContent).toContain("Exported all 205 matching records across pages"));
  await act(async()=>findButton("Prev").click());await settled(()=>expect(host.querySelectorAll('[data-testid="runtime-live-table"] tbody tr')).toHaveLength(100));
  expect(new URLSearchParams(history.location.search).getAll("context")).toEqual(["a","b"]);expect(history.location.hash).toBe("#runtime");
@@ -199,7 +200,7 @@ it("continues beyond the old latest100 cap and exports every matching record wit
 it("pushes server filter/sort history, restores Back and leaves window scope unchanged",async()=>{
  vi.mocked(runtimeEvents.list).mockImplementation(async request=>historyResponse(request,historyRows().filter(event=>!request?.verdict||event.verdict===request.verdict)));
  await render("/clusters/cluster-a/runtime?page=2&hours=6&context=original");await settled(()=>expect(host.querySelector('[data-testid="runtime-live-table"]')).not.toBeNull());
- await selectHistory("#runtime-event-verdict","alert");await settled(()=>expect(runtimeEvents.list).toHaveBeenLastCalledWith(expect.objectContaining({verdict:"alert",offset:0})));
+ await selectHistory('select[aria-label="Verdict"]',"alert");await settled(()=>expect(runtimeEvents.list).toHaveBeenLastCalledWith(expect.objectContaining({verdict:"alert",offset:0})));
  expect(history.location.search).toContain("hours=6");expect(history.location.search).not.toContain("page=2");
  await act(async()=>host.querySelector<HTMLButtonElement>('th[aria-sort="descending"] button')!.click());await settled(()=>expect(runtimeEvents.list).toHaveBeenLastCalledWith(expect.objectContaining({sort:"at",order:"asc"})));
  await act(async()=>history.back());await settled(()=>expect(host.querySelector('th[aria-sort="descending"]')).not.toBeNull());
@@ -217,18 +218,18 @@ it("keeps exact timestamp bounds through requests and rejects reversed microseco
 it("isolates the owner cache and withholds history/export during account changes or failed reads",async()=>{
  await render();await settled(()=>expect(host.querySelector('[data-testid="runtime-live-table"]')).not.toBeNull());
  identity={org_id:"other-org",user_id:"other-user"};vi.mocked(runtimeEvents.list).mockRejectedValue(new Error("New owner unavailable"));await rerender();await settled(()=>expect(host.textContent).toContain("New owner unavailable"));
- expect(host.querySelector('[data-testid="runtime-live-table"]')).toBeNull();expect(summaryValues()).toEqual(["—","—","—","—","—"]);expect(findButton("Export matching CSV")).toBeUndefined();
+ expect(host.querySelector('[data-testid="runtime-live-table"]')).toBeNull();expect(summaryValues()).toEqual(["—","—","—","—","—"]);expect(await exportAvailable("Matching rows", host)).toBe(false);
  expect(client.getQueryCache().getAll().filter(query=>query.queryKey[0]==="runtime-events-live").map(query=>query.queryKey[1])).toEqual(["org:user","other-org:other-user"]);
  identity=null;await rerender();expect(host.textContent).toContain("Resolve the current account");expect(runtimeEvents.list).toHaveBeenCalledTimes(2);
 });
 it.each(["null-row","missing-workload","bad-summary","duplicate-row-id","wrong-page","wrong-time","object-bound"])("withholds malformed %s history rather than crashing or exposing an unconfirmed export",async scenario=>{
  vi.mocked(runtimeEvents.list).mockImplementation(async request=>{const data=historyResponse(request,[rawEvent(),{...rawEvent(),id:"second"}]);if(scenario==="object-bound")data.after={} as unknown as string;else if(scenario==="wrong-time")data.events[0]={...data.events[0],at:"2026-10-10T12:00:00.000001Z",row_id:`${data.events[0].id}@2026-10-10T12:00:00.000001Z`};else if(scenario==="bad-summary")data.summary!.total=20;else if(scenario==="wrong-page")data.offset=100;else if(scenario==="duplicate-row-id")data.events[1].row_id=data.events[0].row_id;else data.events[0]=(scenario==="null-row"?null:{...data.events[0],workload_id:undefined}) as unknown as RuntimeEvent;return data;});
- await render(["wrong-time","object-bound"].includes(scenario)?"/clusters/cluster-a/runtime?after=2026-10-10T12:00:00.000002Z":undefined);await settled(()=>expect(host.textContent).toContain("Runtime events do not match the selected scope, filters or page"));expect(host.querySelector('[data-testid="runtime-live-table"]')).toBeNull();expect(findButton("Export matching CSV")).toBeUndefined();
+ await render(["wrong-time","object-bound"].includes(scenario)?"/clusters/cluster-a/runtime?after=2026-10-10T12:00:00.000002Z":undefined);await settled(()=>expect(host.textContent).toContain("Runtime events do not match the selected scope, filters or page"));expect(host.querySelector('[data-testid="runtime-live-table"]')).toBeNull();expect(await exportAvailable("Matching rows", host)).toBe(false);
 });
 it("reports a capped matching export and a retryable download failure",async()=>{
  vi.mocked(runtimeEvents.exportCSV).mockResolvedValueOnce({total:100005,exported:100000,limit:100000,truncated:true}).mockRejectedValueOnce(new Error("Download failed"));
- await render();await settled(()=>expect(host.querySelector('[data-testid="runtime-live-table"]')).not.toBeNull());await act(async()=>findButton("Export matching CSV").click());
- await settled(()=>expect(host.textContent).toContain("Export capped at 100,000 of 100,005"));await act(async()=>findButton("Export matching CSV").click());await settled(()=>expect(host.textContent).toContain("Matching CSV could not be exported"));
+ await render();await settled(()=>expect(host.querySelector('[data-testid="runtime-live-table"]')).not.toBeNull());await chooseExport("Matching rows", host);
+ await settled(()=>expect(host.textContent).toContain("Export capped at 100,000 of 100,005"));await chooseExport("Matching rows", host);await settled(()=>expect(host.textContent).toContain("Matching CSV could not be exported"));
 });
 
 it("keeps repeated event UUIDs distinct by timestamp and refuses an ambiguous legacy selection",async()=>{

@@ -36,7 +36,7 @@ function GroupSettingsLoader({ clusterId, listPath, scopeReady, recheckScope }: 
   if ((q.isPending || q.isFetching) && !saved) return <LoadingState label="Loading group settings…" />;
   if (!saved) return <ErrorState title="Group settings could not be loaded for the selected cluster." action={<Button onClick={() => void q.refetch()}>Retry</Button>} />;
   return <>
-    {scopeReady && (!validResponse || q.fetchStatus !== "idle") && <ErrorState title="Could not refresh group settings. Your draft is preserved; retry before saving." action={<Button onClick={() => void q.refetch()}>Retry</Button>} />}
+    {scopeReady && (!validResponse || q.fetchStatus !== "idle") && <ErrorState title="Could not refresh group settings. your draft is preserved; retry before saving." action={<Button onClick={() => void q.refetch()}>Retry</Button>} />}
     <GroupSettingsEditor clusterId={clusterId} listPath={listPath} initial={saved} unavailable={!scopeReady || !validResponse || q.fetchStatus !== "idle"} recheckScope={recheckScope} />
   </>;
 }

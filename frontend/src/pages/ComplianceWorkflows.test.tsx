@@ -9,6 +9,15 @@ import { CompliancePage } from "./CompliancePage";
 import { ComplianceExemptionFormPage } from "./ComplianceExemptionFormPage";
 import { ComplianceScheduleFormPage } from "./ComplianceScheduleFormPage";
 
+/** Kit Select keeps a hidden native mirror right before its trigger. */
+function nativeSelect(root: ParentNode, selector: string): HTMLSelectElement | null {
+  const element = root.querySelector(selector);
+  if (!element) return null;
+  if (element.tagName === "SELECT") return element as HTMLSelectElement;
+  // The kit Select keeps a hidden native mirror tagged with the trigger id.
+  return element.id ? root.querySelector<HTMLSelectElement>(`select[data-mirror-for="${element.id}"]`) : null;
+}
+
 const route = vi.hoisted(() => ({ scheduleId: undefined as string | undefined, orgId: "org", userId: "user", clusterId: "cluster" as string | undefined, cluster: { id: "cluster" } as { id: string } | undefined, loading: false, error: null as Error | null, search: "framework=cis&control_id=1.2&filter=a&filter=b", navigate: vi.fn(), setSearch: vi.fn() }));
 vi.mock("sonner", () => ({ toast: { info: vi.fn(), warning: vi.fn(), error: vi.fn(), success: vi.fn() } }));
 vi.mock("@/api/client", () => ({ compliance: { frameworks: vi.fn(), checks: vi.fn(), summary: vi.fn(), listExemptions: vi.fn(), createExemption: vi.fn(), revokeExemption: vi.fn(), evidence: vi.fn(), listDBSchedules: vi.fn(), createSchedule: vi.fn(), patchSchedule: vi.fn(), runScheduleNow: vi.fn(), deleteSchedule: vi.fn(), scheduleRuns: vi.fn(), downloadRunArtifact: vi.fn(), exportChecksCSV: vi.fn() } }));
@@ -44,12 +53,12 @@ async function renderPage(node: ReactNode) {
 async function rerender() { await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{org_id:route.orgId,user_id:route.userId}}>{cloneElement(mounted as ReactElement)}</TablePreferencesProvider></QueryClientProvider>)); }
 async function settled(checkResult: () => void) { await vi.waitFor(async () => { await act(async () => {}); checkResult(); }); }
 async function edit(selector: string, value: string) {
-  const field = host.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector)!;
+  const field = (nativeSelect(host, selector) ?? host.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector))!;
   const prototype = field.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : field.tagName === "SELECT" ? window.HTMLSelectElement.prototype : HTMLInputElement.prototype;
   await act(async () => { Object.getOwnPropertyDescriptor(prototype, "value")!.set!.call(field, value); field.dispatchEvent(new Event(field.tagName === "SELECT" ? "change" : "input", { bubbles: true })); });
 }
 async function click(label: string) {
-  const button = [...host.querySelectorAll("button")].find((item) => item.textContent?.trim() === label || item.getAttribute("aria-label") === label);
+  const button = [...host.querySelectorAll("button")].find((item) => item.textContent?.trim() === label || item.getAttribute("aria-label") === label || item.getAttribute("data-export-label") === label);
   expect(button).toBeDefined(); await act(async () => button!.click());
 }
 async function submit() { await act(async () => { host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); }); }
@@ -114,7 +123,7 @@ describe("schedule form", () => {
   it.each([["pdf", "html", "json"], ["pdf", "json", "csv"]])("prefers a supported evidence format over PDF", async (...formats) => {
     vi.mocked(compliance.listDBSchedules).mockResolvedValue({ ...options, report_formats: formats });
     await renderPage(<ComplianceScheduleFormPage />); await settled(() => expect(host.querySelector("form")).not.toBeNull());
-    expect([...host.querySelectorAll("select")].find(select => select.id === "schedule-format")!.value).toBe(formats.includes("html") ? "html" : "json");
+    expect(nativeSelect(host, "#schedule-format")!.value).toBe(formats.includes("html") ? "html" : "json");
   });
   it("blocks authoring when report options fail", async () => {
     vi.mocked(compliance.listDBSchedules).mockRejectedValue(new Error("private")); await renderPage(<ComplianceScheduleFormPage />);
@@ -473,12 +482,12 @@ describe("schedule configuration edit", () => {
   it("prefills custom values and sends only a changed cron without enabled or DTO metadata", async () => {
     const schedule = await renderEdit(scheduleForEdit({ framework: "legacy-framework" }));
     expect(host.querySelector<HTMLInputElement>("#schedule-name")!.value).toBe(schedule.name);
-    expect(host.querySelector<HTMLSelectElement>("#schedule-framework")!.value).toBe("legacy-framework");
-    expect(host.querySelector<HTMLSelectElement>("#schedule-cadence")!.value).toBe("custom");
+    expect(nativeSelect(host, "#schedule-framework")!.value).toBe("legacy-framework");
+    expect(nativeSelect(host, "#schedule-cadence")!.value).toBe("custom");
     expect(host.querySelector<HTMLInputElement>("#schedule-cron")!.value).toBe(schedule.cron_expression);
     expect(host.querySelector<HTMLInputElement>("#schedule-timezone")!.value).toBe(schedule.timezone);
-    expect(host.querySelector<HTMLSelectElement>("#schedule-format")!.value).toBe("legacy-format");
-    expect(host.querySelector<HTMLSelectElement>("#schedule-template")!.value).toBe("legacy-template");
+    expect(nativeSelect(host, "#schedule-format")!.value).toBe("legacy-format");
+    expect(nativeSelect(host, "#schedule-template")!.value).toBe("legacy-template");
     expect(host.textContent).toContain("Configured state: Disabled");
     expect(host.querySelector<HTMLButtonElement>('[data-testid="wizard-submit"]')!.disabled).toBe(true);
     vi.mocked(compliance.patchSchedule).mockResolvedValue({ ...schedule, cron_expression: "17 6 * * 3" });
@@ -512,7 +521,7 @@ describe("schedule configuration edit", () => {
 
   it("keeps a configured legacy template and offers only the existing replacement", async () => {
     const schedule = await renderEdit();
-    const templates = host.querySelector<HTMLSelectElement>("#schedule-template")!;
+    const templates = nativeSelect(host, "#schedule-template")!;
     expect([...templates.options].map(option => option.value)).toEqual(["legacy-template", "compliance-detailed"]);
     vi.mocked(compliance.patchSchedule).mockResolvedValue({ ...schedule, report_template: "compliance-detailed" });
     await edit("#schedule-template", "compliance-detailed"); await submit();
@@ -568,8 +577,8 @@ describe("schedule configuration edit", () => {
     });
     expect(compliance.patchSchedule).not.toHaveBeenCalled();
     await settled(() => expect(host.textContent).toContain("Your draft selection is retained"));
-    expect(host.querySelector<HTMLSelectElement>("#schedule-framework")!.value).toBe("pci");
-    expect(host.querySelector<HTMLSelectElement>("#schedule-format")!.value).toBe("sarif");
+    expect(nativeSelect(host, "#schedule-framework")!.value).toBe("pci");
+    expect(nativeSelect(host, "#schedule-format")!.value).toBe("sarif");
   });
 
   it.each(["schedule", "frameworks"])("blocks an invalidated %s cache before a retained submit", async kind => {
@@ -625,11 +634,11 @@ describe("schedule configuration edit", () => {
   it("preserves an unrecognized delivery kind without flattening it during another edit", async () => {
     const delivery = [{ kind: "legacy-channel", endpoint: "https://legacy.example.test", receiver_id: "legacy", opaque: ["kept"] }] as unknown as ComplianceScheduleDB["delivery"];
     const schedule = await renderEdit(scheduleForEdit({ delivery }));
-    expect(host.querySelector<HTMLSelectElement>("#delivery-kind-0")!.value).toBe("legacy-channel");
+    expect(nativeSelect(host, "#delivery-kind-0")!.value).toBe("legacy-channel");
     vi.mocked(compliance.patchSchedule).mockResolvedValue(schedule);
     await edit("#schedule-description", "Changed description"); await submit();
     await settled(() => expect(compliance.patchSchedule).toHaveBeenCalledExactlyOnceWith("editable", { expected_updated_at: schedule.updated_at, description: "Changed description" }));
-    expect(host.querySelector<HTMLSelectElement>("#delivery-kind-0")!.value).toBe("legacy-channel");
+    expect(nativeSelect(host, "#delivery-kind-0")!.value).toBe("legacy-channel");
   });
 
   it("does not send an enabled-state change when a fresh row changes an unrelated field", async () => {

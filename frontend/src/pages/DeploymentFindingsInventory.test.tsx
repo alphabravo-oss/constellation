@@ -34,7 +34,7 @@ async function render(search = "", seed?: (client: QueryClient) => void) {
   host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host); client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); client.setQueryData(sourceKey, detail); seed?.(client); history = createMemoryHistory({ initialEntries: [`/clusters/cluster/deployments/deployment${search}`] }); await act(async () => root.render(tree()));
 }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
-const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent?.trim() === label)!;
+const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === label || b.getAttribute("aria-label") === label || b.getAttribute("data-export-label") === label)!;
 async function click(label: string) { await act(async () => button(label).click()); }
 async function search(value: string) { await act(async () => { const input = host.querySelector<HTMLInputElement>('[aria-label="Search deployment findings"]')!; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); }); }
 async function choose(label: string, value: string) { await act(async () => { const input = host.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!; Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event("change", { bubbles: true })); }); }
@@ -57,7 +57,7 @@ it("sends lifecycle/severity/fixability and sorting before pagination without re
   await render("?tab=findings&findings_lifecycle=all&findings_severity=high&findings_fixable=true&findings_sort=finding&findings_order=asc"); await settled(() => expect(host.querySelectorAll("tbody tr")).toHaveLength(2)); expect(host.querySelector("tbody tr")?.textContent).toContain("finding 9");
   await choose("Deployment finding lifecycle", "accepted"); await settled(() => expect(host.querySelectorAll("tbody tr")).toHaveLength(1)); expect(deployments.findings).toHaveBeenLastCalledWith("deployment", expect.objectContaining({ lifecycle: "accepted", severity: "high", fixable: true }));
   await act(async () => history.back()); await settled(() => expect(host.querySelectorAll("tbody tr")).toHaveLength(2));
-  await act(async () => [...host.querySelectorAll<HTMLButtonElement>("thead button")].find(b => b.textContent === "Risk")!.click()); await settled(() => expect(deployments.findings).toHaveBeenLastCalledWith("deployment", expect.objectContaining({ sort: "risk", order: "desc", offset: 0 })));
+  await act(async () => [...host.querySelectorAll<HTMLButtonElement>("thead button")].find((b) => b.textContent === "Risk" || b.getAttribute("aria-label") === "Risk" || b.getAttribute("data-export-label") === "Risk")!.click()); await settled(() => expect(deployments.findings).toHaveBeenLastCalledWith("deployment", expect.objectContaining({ sort: "risk", order: "desc", offset: 0 })));
 });
 it("exports all matching records separately from the selected visible columns on this page", async () => {
   await render("?tab=findings&findings_page=14"); await settled(() => expect(host.querySelectorAll("tbody tr")).toHaveLength(5)); await click("Export matching CSV"); await settled(() => expect(host.textContent).toContain("Exported all 1,305 matching records across pages"));
@@ -113,7 +113,7 @@ it("supports the continuation ceiling and recovers an empty page", async () => {
 
 it("retains legacy lifecycle observations under all without claiming a healthy or completed status", async () => {
  const row={...deploymentFindingFixture(),lifecycle:"legacy-retained-state"};vi.mocked(deployments.findings).mockImplementation(async(id,params)=>deploymentFindingPage(params,[row],id));
- await render("?findings_lifecycle=all");await settled(()=>expect(host.querySelector("tbody")?.textContent).toContain("legacy-retained-state"));expect(host.textContent).toContain("1 matching workload finding records");
+ await render("?findings_lifecycle=all");await settled(()=>expect(host.querySelector("tbody")?.textContent).toContain("Legacy retained state"));expect(host.textContent).toContain("1 matching workload finding records");
  await inspect();expect(document.querySelector('[data-testid="deployment-finding-record"]')?.textContent).toContain("legacy-retained-state");
 });
 

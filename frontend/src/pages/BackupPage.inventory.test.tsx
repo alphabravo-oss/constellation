@@ -162,7 +162,7 @@ async function rerender() {
 }
 const button = (label: string) =>
   [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-    (b) => b.textContent?.trim() === label,
+    (b) => b.textContent?.trim() === label || b.getAttribute("aria-label") === label || b.getAttribute("data-export-label") === label,
   )!;
 async function input(value: string) {
   await act(async () => {

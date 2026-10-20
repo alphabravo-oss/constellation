@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react";
+import { Checkbox } from "@/components/ui/form";
+import { useCrumbLabel } from "@/lib/page-title";
 import type { ReactNode } from "react";
 import { useParams } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { Boxes, ChevronLeft, Database, Download, FileJson, FileWarning, KeyRound, Layers, ShieldAlert, ShieldCheck } from "lucide-react";
+import { Database, Download, FileJson, FileWarning, KeyRound, Layers, ShieldAlert, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -28,9 +30,8 @@ import { Collapse } from "@/components/ui/collapse";
 import { artifactIssue, scanEngineEvidence } from "@/lib/scan-evidence";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
-import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { VerdictBanner, type VerdictNumber } from "@/components/ui/verdict-banner";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 
 export function ImageScanDetailPage() {
   const { resultId } = useParams({ strict: false });
@@ -52,6 +53,7 @@ export function ImageScanDetailPage() {
 
   const detail = q.data;
   const result = detail?.image_scan_result;
+  useCrumbLabel(result ? imageScanDisplayName(result) : null);
   const clusterWorkloads = useMemo(() => {
     const workloads = detail?.impacted_workloads ?? [];
     return clusterId ? workloads.filter((item) => item.cluster_id === clusterId) : workloads;
@@ -63,12 +65,6 @@ export function ImageScanDetailPage() {
   return (
     <div className="space-y-4" data-testid="image-scan-detail-page" data-cluster-id={clusterId ?? ""}>
       <PageHeader
-        backLink={
-          <a href={`/clusters/${clusterId}/images`} className="inline-flex items-center gap-1 hover:text-foreground">
-            <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
-            Images
-          </a>
-        }
         title={imageScanDisplayName(result)}
         mono
         badges={
@@ -79,19 +75,15 @@ export function ImageScanDetailPage() {
             <SignaturePill item={result} />
           </>
         }
-        description="Scan evidence is shared across the organization. Affected workload links below are filtered to this cluster."
         actions={<Button onClick={() => void q.refetch()} disabled={q.isFetching}>Refresh</Button>}
       />
 
-      <EngineVerdict result={result} />
-
-      <StatGrid data-testid="image-scan-stats">
-        <StatCard label="Findings" value={result.finding_count} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={result.finding_count > 0 ? "high" : "neutral"} />
-        <StatCard label="Packages" value={result.package_count} icon={<Database className="h-3.5 w-3.5" />} />
-        <StatCard label="Secrets" value={result.secret_count} icon={<KeyRound className="h-3.5 w-3.5" />} tone={result.secret_count > 0 ? "critical" : "neutral"} />
-        <StatCard label="Workloads" value={clusterWorkloads.length} icon={<Layers className="h-3.5 w-3.5" />} tone={clusterWorkloads.length > 0 ? "accent" : "neutral"} />
-        <StatCard label="Risk" value={result.max_risk_score} icon={<Boxes className="h-3.5 w-3.5" />} />
-      </StatGrid>
+      <div data-testid="image-scan-stats"><EngineVerdict result={result} numbers={[
+        { label: "findings", value: result.finding_count, tone: result.critical_count > 0 ? "critical" : result.finding_count > 0 ? "high" : "default" },
+        { label: "secrets", value: result.secret_count, tone: result.secret_count > 0 ? "critical" : "default" },
+        { label: "packages", value: result.package_count },
+        { label: "workloads here", value: clusterWorkloads.length },
+      ]} extra={`Highest risk score ${result.max_risk_score}.`} /></div>
 
       <Tabs value={tab} onValueChange={setTab} items={[
         { value: "findings", label: "Vulnerabilities", count: result.finding_count, content: <FindingsTable findings={detail.findings} /> },
@@ -178,13 +170,13 @@ function EvidenceIssue({ title, message }: { title: string; message: string }) {
   </section>;
 }
 
-function EngineVerdict({ result }: { result: ImageScanResult }) {
+function EngineVerdict({ result, numbers, extra }: { result: ImageScanResult; numbers?: VerdictNumber[]; extra?: string }) {
   const evidence = scanEngineEvidence(result.engine_status);
   const incomplete = evidence.engines.some(({ status }) => status !== "succeeded");
   const stale = isStale(result.last_scanned_at);
   const critical = result.critical_count > 0 || result.secret_count > 0;
   const title = critical ? "This image needs urgent review" : incomplete ? "Scanner coverage is incomplete" : stale ? "This scan needs refreshing" : result.finding_count > 0 ? "Vulnerabilities need review" : "No vulnerabilities reported by the completed scanners";
-  return <VerdictBanner status={critical ? "critical" : incomplete || stale || result.finding_count > 0 ? "degraded" : "ok"} title={title} detail={<>{evidence.message}{stale ? " The scan is older than seven days." : ""}</>} />;
+  return <VerdictBanner status={critical ? "critical" : incomplete || stale || result.finding_count > 0 ? "degraded" : "ok"} title={title} numbers={numbers} detail={<>{evidence.message}{stale ? " The scan is older than seven days." : ""}{extra ? ` ${extra}` : ""}</>} />;
 }
 
 function EngineEvidence({ result }: { result: ImageScanResult }) {
@@ -307,16 +299,16 @@ function LayersEvidenceCard({ loading, layers, totalSize, result }: { loading: b
             const instr = cmd.split(/\s+/)[0]?.toUpperCase();
             return (
               <li key={layer.digest || layer.diff_id || index} className="flex items-start gap-3 px-3 py-2">
-                <span className="mt-0.5 w-12 shrink-0 text-right font-mono text-[10px] text-muted-foreground">Layer {layer.index ?? index}</span>
+                <span className="mt-0.5 w-12 shrink-0 text-right font-mono text-micro text-muted-foreground">Layer {layer.index ?? index}</span>
                 <div className="min-w-0 flex-1">
-                  <code className="block whitespace-pre-wrap break-words font-mono text-[11px] leading-snug text-foreground">
+                  <code className="block whitespace-pre-wrap break-words font-mono text-micro leading-snug text-foreground">
                     {cmd
                       ? (["RUN","ADD","COPY","ENV","CMD","ENTRYPOINT","WORKDIR","EXPOSE","USER","LABEL","VOLUME","ARG","FROM"].includes(instr ?? "")
                           ? <><span className="text-[color:var(--color-primary)]">{instr}</span>{cmd.slice(instr!.length)}</>
                           : cmd)
                       : <span className="text-muted-foreground">{layer.media_type || "layer"}</span>}
                   </code>
-                  <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+                  <div className="mt-0.5 flex flex-wrap items-center gap-2 text-micro text-muted-foreground">
                     {layer.in_base_image !== undefined && (
                       <span className={cn("rounded px-1 py-px font-medium", layer.in_base_image ? "bg-muted text-muted-foreground" : "bg-[color-mix(in_oklab,var(--color-primary)_14%,transparent)] text-[color:var(--color-primary)]")}>
                         {layer.in_base_image ? "base" : "app"}
@@ -374,7 +366,7 @@ function ConfigChecksEvidenceCard({ loading, checks }: { loading: boolean; check
       <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
         <div>
           <h2 className="text-sm font-semibold">Image config checks</h2>
-          <p className="text-[10px] text-muted-foreground">CIS-Docker best-practice controls on the image config</p>
+          <p className="text-micro text-muted-foreground">CIS-Docker best-practice controls on the image config</p>
         </div>
         <div className="flex items-center gap-1">
           {fails > 0 && <Pill tone="danger">{fails} fail</Pill>}
@@ -441,9 +433,9 @@ function ScanIdentity({ result }: { result: ImageScanResult }) {
         <Field label="Repository" value={imageReferenceName(result.image_repository) || "-"} />
         <Field label="Tag" value={result.image_tag || "-"} />
         <Field label="Platform" value={result.platform || "-"} />
-        <Field label="Scanner Profile" value={result.scanner_profile} />
+        <Field label="Scanner profile" value={result.scanner_profile} />
         <Field label="Source" value={sourceLabel(result)} />
-        <Field label="Source Ref" value={<Collapse label="Source reference"><code className="break-all text-xs">{result.source_ref || "-"}</code></Collapse>} />
+        <Field label="Source reference" value={<Collapse label="Source reference"><code className="break-all text-xs">{result.source_ref || "-"}</code></Collapse>} />
         <Field label="Digest" value={<DigestDisclosure digest={result.image_digest} />} wide />
         <Field label="Raw reference" value={<Collapse label="Raw image reference"><code className="break-all text-xs">{result.image_ref}</code></Collapse>} wide />
       </dl>
@@ -464,7 +456,7 @@ function FindingsTable({ findings }: { findings: ImageScanFinding[] }) {
             ) : (
               <span className="font-mono text-xs">-</span>
             )}
-            {finding.kev_listed && <span className="rounded px-1 py-px text-[9px] font-semibold text-white" style={{ background: "var(--color-severity-critical)" }} title="CISA Known-Exploited">KEV</span>}
+            {finding.kev_listed && <span className="rounded px-1 py-px text-micro font-semibold text-white" style={{ background: "var(--color-severity-critical)" }} title="CISA Known-Exploited">KEV</span>}
           </span>
           <div className="mt-1 text-xs text-muted-foreground">{finding.title}</div>
         </>
@@ -476,7 +468,7 @@ function FindingsTable({ findings }: { findings: ImageScanFinding[] }) {
       cell: (finding) => (
         <>
           <div className="font-mono text-xs">{finding.package_name || "-"}</div>
-          <div className="mt-1 font-mono text-[11px] text-muted-foreground">{finding.package_version || "-"}</div>
+          <div className="mt-1 font-mono text-micro text-muted-foreground">{finding.package_version || "-"}</div>
         </>
       ),
     },
@@ -498,7 +490,7 @@ function FindingsTable({ findings }: { findings: ImageScanFinding[] }) {
           <p className="mt-1 text-xs text-muted-foreground">All returned vulnerability findings for this image. Fixable only filters this table; the Findings CSV under Identity and exports contains the full scan.</p>
         </div>
         <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground" title="Hide vulnerabilities with no available fix (won't-fix / not-fixed)">
-          <input type="checkbox" checked={fixableOnly} onChange={(e) => setFixableOnly(e.target.checked)} className="h-3.5 w-3.5 accent-[color:var(--color-primary)]" data-testid="image-scan-fixable-toggle" />
+          <Checkbox checked={fixableOnly} onChange={(e) => setFixableOnly(e.target.checked)} aria-label="Fixable only" data-testid="image-scan-fixable-toggle" />
           Fixable only{fixableOnly && hiddenCount > 0 ? ` (${hiddenCount} hidden)` : ""}
         </label>
       </header>
@@ -583,7 +575,7 @@ function BundlePanel({ result }: { result: ImageScanResult }) {
         />
         <ArtifactButton
           icon={FileWarning}
-          label="File Risks"
+          label="File risks"
           disabled={downloading !== null || result.file_risk_count === 0}
           onClick={() => void download("file-risks", () => imageScanResults.downloadFileRisks(result.id))}
         />
@@ -676,7 +668,7 @@ function Pill({ children, tone }: { children: ReactNode; tone: "neutral" | "acce
   return (
     <span
       className={cn(
-        "inline-flex h-5 items-center rounded px-1.5 text-[10px] font-medium",
+        "inline-flex h-5 items-center rounded px-1.5 text-micro font-medium",
         tone === "neutral" && "bg-muted text-muted-foreground",
         tone === "accent" && "bg-primary/10 text-primary",
         tone === "warn" && "bg-status-warning/10 text-status-warning",

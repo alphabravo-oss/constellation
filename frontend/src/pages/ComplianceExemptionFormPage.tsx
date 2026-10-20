@@ -47,7 +47,7 @@ export function ComplianceExemptionFormPage() {
       backLink={<a href={backTo} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Compliance controls</a>} />
     {clusterLoading && !resolvedScope ? <LoadingState label="Loading cluster…" />
       : !clusterId ? <ErrorState title="Select a cluster to create an exemption." />
-      : !resolvedScope || (clusterError && !controlAvailable) ? <ErrorState title="The selected cluster could not be resolved. Review its registration and retry." action={<Button onClick={retryScope}>Retry cluster</Button>} />
+      : !resolvedScope || (clusterError && !controlAvailable) ? <ErrorState title="The selected cluster could not be resolved. review its registration and retry." action={<Button onClick={retryScope}>Retry cluster</Button>} />
       : !framework || !controlID ? <ErrorState title="Select a failing compliance control before creating an exemption." />
       : checks.isPending && !controlAvailable ? <LoadingState label="Loading compliance control…" />
       : !controlAvailable ? <ErrorState title="This compliance control could not be loaded for the selected cluster." action={<Button onClick={() => void checks.refetch()}>Retry</Button>} />

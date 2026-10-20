@@ -1,18 +1,19 @@
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { CloudCog, Database, KeyRound, Search, ShieldAlert } from "lucide-react";
+import { CloudCog } from "lucide-react";
 
 import { serverlessFunctions, type ServerlessFunction } from "@/api/client";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { SeverityBadge } from "@/components/ui/severity-badge";
-import { INVENTORY_PAGE_SIZE, scanInventoryResponseValid, ScanInventoryExport, useInventoryScope, useInventoryRoute, InventoryScopeState, InventoryLoadState, ScanInventoryContinuation } from "./inventory-workspace";
+import { INVENTORY_PAGE_SIZE, scanInventoryResponseValid, InventorySearch, InventoryMoreFilters, FilterLabel, useScanInventoryExport, useInventoryScope, useInventoryRoute, InventoryScopeState, InventoryLoadState, ScanInventoryContinuation } from "./inventory-workspace";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ui/states";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { Collapse } from "@/components/ui/collapse";
 import { cn } from "@/lib/cn";
+import { Select, TextInput } from "@/components/ui/form";
+import { sentenceValue } from "@/components/ui/status-pill";
 
 const postureLevels = ["all", "critical", "high", "medium", "low", "info", "unknown"];
 
@@ -55,7 +56,7 @@ export function ServerlessFunctionsPage() {
           <a href={`/clusters/${clusterId}/serverless/${item.id}`} className="mt-2 block break-all font-mono text-xs font-medium hover:underline">
             {item.function_name || item.function_ref}
           </a>
-          <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{item.function_ref}</div>
+          <div className="mt-1 break-all font-mono text-micro text-muted-foreground">{item.function_ref}</div>
         </div>
       ),
       sort: (a, b) => (a.function_name || a.function_ref).localeCompare(b.function_name || b.function_ref),
@@ -83,99 +84,80 @@ export function ServerlessFunctionsPage() {
         <div className="text-xs">
           <div className="font-medium">{item.latest_job_status || "not queued"}</div>
           <div className="mt-1 text-muted-foreground">{formatDate(item.latest_observed_at || item.last_seen_at)}</div>
-          <div className="mt-1 truncate font-mono text-[10px] text-muted-foreground">{item.inventory_hash || "hash pending"}</div>
+          <div className="mt-1 truncate font-mono text-micro text-muted-foreground">{item.inventory_hash || "hash pending"}</div>
         </div>
       ),
     },
   ];
 
-  if (!scope.ready) return <div className="space-y-4"><PageHeader title="Serverless Functions" description="Organization-wide cloud evidence; the selected cluster provides navigation context only." /><InventoryScopeState scope={scope} /></div>;
+  const matching = useScanInventoryExport({ context: JSON.stringify([scope.owner, clusterId, request]), disabled: !available || q.isFetching, download: shouldDownload => serverlessFunctions.exportCSV(request, shouldDownload) });
+  if (!scope.ready) return <div className="space-y-4"><PageHeader title="Serverless" description="Organization-wide cloud evidence; the selected cluster provides navigation context only." /><InventoryScopeState scope={scope} /></div>;
 
   return (
     <div className="space-y-4" data-testid="serverless-functions-page" data-cluster-id={clusterId ?? ""}>
       <PageHeader
         title="Serverless"
         description="Lambda function package inventory and execution-role posture."
-        actions={
+        actions={<>
+          <Button disabled={q.isFetching || route.debouncing || !scope.ready || !validFilters} onClick={() => void q.refetch()}>Refresh</Button>
           <a
             href={selected ? `/clusters/${clusterId}/serverless/${selected.id}` : `/clusters/${clusterId}/serverless`}
             className={cn(
-              "inline-flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm hover:bg-accent",
+              "inline-flex h-8 items-center gap-2 rounded-md border border-border px-3 text-meta font-medium hover:bg-accent",
               !selected && "pointer-events-none opacity-50",
             )}
           >
             <CloudCog className="h-4 w-4" aria-hidden />
-            Open Function
+            Open function
           </a>
-        }
+        </>}
       />
 
-      <VerdictBanner status={q.isError || invalid || !validFilters ? "degraded" : "info"} title={q.isError || invalid || !validFilters ? "Serverless functions are unavailable" : !available ? "Loading serverless functions" : summary.total ? "Review matching serverless functions" : "No matching serverless functions"} detail="Metrics cover all organization-wide records matching the server filters." />
-      {available && <StatGrid data-testid="serverless-summary">
-        <StatCard label="Matching functions" value={summary.total.toLocaleString()} icon={<CloudCog className="h-3.5 w-3.5" />} hint={`${summary.providers} providers · ${summary.regions} regions`} />
-        <StatCard label="Open Findings" value={summary.findings.toLocaleString()} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={summary.critical_high > 0 ? "high" : "neutral"} hint={`${summary.critical_high} critical/high`} />
-        <StatCard label="Packages" value={summary.packages.toLocaleString()} icon={<Database className="h-3.5 w-3.5" />} hint={`${summary.scanned} with evidence`} />
-        <StatCard label="Role Risks" value={summary.role_risks.toLocaleString()} icon={<KeyRound className="h-3.5 w-3.5" />} tone={summary.role_risks > 0 ? "high" : "neutral"} hint="critical/high role posture" />
-      </StatGrid>}
-
-      <div className="flex flex-wrap gap-3"><Button disabled={q.isFetching || route.debouncing || !scope.ready || !validFilters} onClick={() => void q.refetch()}>Refresh</Button><ScanInventoryExport context={JSON.stringify([scope.owner, clusterId, request])} disabled={!available || q.isFetching} download={shouldDownload => serverlessFunctions.exportCSV(request, shouldDownload)} /></div>
+      <VerdictBanner status={q.isError || invalid || !validFilters ? "degraded" : "info"} title={q.isError || invalid || !validFilters ? "Serverless functions are unavailable" : !available ? "Loading serverless functions" : summary.total ? `${summary.total.toLocaleString()} matching functions` : "No matching serverless functions"}
+        numbers={available ? [
+          { label: "functions", value: summary.total.toLocaleString(), title: `${summary.providers} providers · ${summary.regions} regions` },
+          { label: "open findings", value: summary.findings.toLocaleString(), tone: summary.critical_high > 0 ? "high" : "default", title: `${summary.critical_high} critical or high` },
+          { label: "role risks", value: summary.role_risks.toLocaleString(), tone: summary.role_risks > 0 ? "high" : "default", title: "Critical or high role posture" },
+        ] : undefined}
+        detail={<div className="space-y-1">
+          {available && <p data-testid="serverless-summary">Matching functions {summary.total.toLocaleString()} ({summary.providers} providers · {summary.regions} regions) · open findings {summary.findings.toLocaleString()} ({summary.critical_high} critical/high) · packages {summary.packages.toLocaleString()} ({summary.scanned} with evidence) · role risks {summary.role_risks.toLocaleString()}</p>}
+          <p>Organization-wide cloud evidence; the selected cluster provides navigation context only. Metrics cover all records matching the server filters. Matching CSV includes fixed inventory columns across all pages (up to 100,000 records).</p>
+        </div>} />
       {q.isFetching && q.isSuccess && <p role="status" className="text-sm text-muted-foreground">Refreshing scan inventory…</p>}
-      <p className="text-xs text-muted-foreground">Matching CSV includes fixed inventory columns across all matching pages (up to 100,000 records). The table’s page CSV follows visible columns.</p>
-      <section className="rounded-lg border border-border bg-card p-3">
-        <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_170px]">
-          <label className="relative block">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search function name or reference"
-              className="w-full rounded-md border border-border bg-background py-2 pl-9 pr-3 text-sm"
-              data-testid="serverless-search"
-            />
-          </label>
-          <select
-            value={posture}
-            onChange={(event) => setPosture(event.target.value)}
-            className="rounded-md border border-border bg-background p-2 text-sm"
-            data-testid="serverless-posture-filter"
-          >
-            {postureLevels.map((item) => (
-              <option key={item} value={item}>{item === "all" ? "All posture" : item}</option>
-            ))}
-          </select>
-        </div>
-      </section>
-
-      <div className="flex flex-wrap gap-3"><label className="text-xs">Provider<input aria-label="Provider filter" className="ml-2 rounded border border-input bg-background px-2 py-1" value={route.params.get("provider") ?? ""} onChange={event => route.update({ provider: event.target.value }, true, true)} /></label><label className="text-xs">Account Id<input aria-label="Account Id filter" className="ml-2 rounded border border-input bg-background px-2 py-1" value={route.params.get("account_id") ?? ""} onChange={event => route.update({ account_id: event.target.value }, true, true)} /></label><label className="text-xs">Region<input aria-label="Region filter" className="ml-2 rounded border border-input bg-background px-2 py-1" value={route.params.get("region") ?? ""} onChange={event => route.update({ region: event.target.value }, true, true)} /></label></div>
-      <p className="text-xs text-muted-foreground">Organization-wide cloud evidence; the selected cluster provides navigation context only. Search runs on the server. Role posture and sorting run on the server before pagination.</p>
+      {matching.status}
       {!validFilters && <ErrorState title="The requested server filter or sort is invalid. Choose a listed value to recover." action={<Button onClick={() => route.update({ sort: null, order: null, posture: null })}>Reset filters and sort</Button>} />}
-      {available && <ScanInventoryContinuation total={q.data?.total} page={route.page} rows={functions.length} matching={filtered.length} hasMore={hasMore} onPage={route.setPage} />}
       {available && selectedID && !selected && <ErrorState title="The selected record is unavailable on this page or hidden by its filters." action={<Button onClick={() => setSelectedID(null)}>Clear selection</Button>} />}
       <section className="flex flex-col gap-4">
-        <div data-testid="serverless-table">
-          {!available ? validFilters ? <InventoryLoadState label="Serverless functions" query={q} invalid={invalid} debouncing={route.debouncing} /> : null : <DataTable
+        <div data-testid={available ? "serverless-table" : "serverless-table-loading"}>
+          {validFilters && (q.isError || invalid) ? <InventoryLoadState label="Serverless functions" query={q} invalid={invalid} debouncing={route.debouncing} /> : validFilters ? <DataTable
             rows={filtered}
             pagination={false}
             manualSorting
             sort={{ id: sort, dir: order as "asc" | "desc" }}
             onSortChange={next => route.update({ sort: next?.id ?? null, order: next?.dir ?? null })}
             preferencesKey="serverless-functions-inventory"
+            toolbar={<>
+              <InventorySearch value={query} onChange={setQuery} label="Search serverless functions" placeholder="Search function name or reference" testId="serverless-search" />
+              <Select value={posture} onChange={(event) => setPosture(event.target.value)} className="h-9" data-testid="serverless-posture-filter" aria-label="Role posture filter">
+                {postureLevels.map((item) => <option key={item} value={item}>{item === "all" ? "Any posture" : sentenceValue(item)}</option>)}
+              </Select>
+              <TextInput aria-label="Provider filter" placeholder="Provider" className="h-9 w-32" value={route.params.get("provider") ?? ""} onChange={event => route.update({ provider: event.target.value }, true, true)} />
+              <InventoryMoreFilters count={[route.params.get("account_id"), route.params.get("region")].filter(Boolean).length}>
+                <FilterLabel label="Account ID"><TextInput aria-label="Account Id filter" value={route.params.get("account_id") ?? ""} onChange={event => route.update({ account_id: event.target.value }, true, true)} /></FilterLabel>
+                <FilterLabel label="Region"><TextInput aria-label="Region filter" value={route.params.get("region") ?? ""} onChange={event => route.update({ region: event.target.value }, true, true)} /></FilterLabel>
+              </InventoryMoreFilters>
+            </>}
+            exportOptions={[matching.option]}
             exportFileName="constellation-serverless-functions-server-page"
-            exportLabel="Export this page CSV"
+            exportLabel="This page"
             columns={columns}
             rowKey={(item) => item.id}
             onRowClick={(item) => setSelectedID(item.id)}
             selected={selected ? new Set([selected.id]) : undefined}
-            emptyState={
-              q.isPending ? (
-                <div className="px-3 py-8 text-center text-xs text-muted-foreground">Loading serverless functions...</div>
-              ) : (
-                <div className="px-3 py-8 text-center text-xs text-muted-foreground">No serverless functions match the current filters.</div>
-              )
-            }
-          />}
+            emptyState={!available ? <InventoryLoadState label="Serverless functions" query={q} invalid={invalid} debouncing={route.debouncing} /> : <div className="px-3 py-8 text-center text-sm text-muted-foreground">No serverless functions match the current filters.</div>}
+          /> : null}
         </div>
-
+        {available && <ScanInventoryContinuation total={q.data?.total} page={route.page} rows={functions.length} matching={filtered.length} hasMore={hasMore} onPage={route.setPage} />}
         {selected && <Collapse label="Selected record summary"><ServerlessPreview item={selected} clusterId={clusterId} /></Collapse>}
       </section>
     </div>
@@ -249,7 +231,7 @@ function PostureBadge({ level }: { level?: string }) {
 function MiniMetric({ label, value, tone }: { label: string; value: number; tone: "normal" | "warn" | "danger" }) {
   return (
     <div className={cn("rounded-md border border-border p-2", tone === "danger" && "border-destructive/40 bg-destructive/10", tone === "warn" && "border-status-warning/40 bg-status-warning/10")}>
-      <div className="text-[10px] text-muted-foreground">{label}</div>
+      <div className="text-micro text-muted-foreground">{label}</div>
       <div className="mt-1 text-lg font-semibold">{value}</div>
     </div>
   );
@@ -268,7 +250,7 @@ function Pill({ children, tone }: { children: ReactNode; tone: "neutral" | "acce
   return (
     <span
       className={cn(
-        "inline-flex h-5 items-center rounded px-1.5 text-[10px] font-medium",
+        "inline-flex h-5 items-center rounded px-1.5 text-micro font-medium",
         tone === "neutral" && "bg-muted text-muted-foreground",
         tone === "accent" && "bg-primary/10 text-primary",
         tone === "warn" && "bg-status-warning/10 text-status-warning",

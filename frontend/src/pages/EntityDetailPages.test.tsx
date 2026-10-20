@@ -70,13 +70,13 @@ async function render(kind: "node" | "function" | "cve" | "global-cve", url?: st
  history = createMemoryHistory({ initialEntries: [initial] });
  await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{ org_id: "org", user_id: "user" }}><TestRouter path={path} history={history}>{kind === 'node' ? <NodeDetailPage /> : kind === 'function' ? <ServerlessFunctionDetailPage /> : <CVEDetailPage />}</TestRouter></TablePreferencesProvider></QueryClientProvider>));
 }
-const stats = (name: string) => [...host.querySelectorAll(`[data-testid="${name}"] .app-stat-value`)].map((item) => item.textContent);
-const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent === label)!;
-async function tab(label: string) { const trigger = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((item) => item.textContent === label)!; await act(async () => trigger.focus()); await settled(() => expect(trigger.getAttribute('aria-selected')).toBe('true')); }
+const stats = (name: string) => [...host.querySelectorAll(`[data-testid="${name}"] [data-testid="verdict-numbers"] dd`)].map((item) => item.textContent);
+const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent === label || item.getAttribute("aria-label") === label || item.getAttribute("data-export-label") === label)!;
+async function tab(label: string) { const trigger = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((item) => item.textContent === label || item.getAttribute("aria-label") === label || item.getAttribute("data-export-label") === label)!; await act(async () => trigger.focus()); await settled(() => expect(trigger.getAttribute('aria-selected')).toBe('true')); }
 
 it('shows five reported node KPIs with a server-scoped host finding workspace', async () => {
- await render('node'); await settled(() => expect(host.textContent).toContain('1 matching finding instances')); expect(stats('node-stats')).toEqual(['2401', '4', '1', '1', '1']);
- expect(host.textContent).toContain('1 matching finding instances'); expect(host.textContent).toContain('unique CVE / advisory IDs'); expect(host.textContent).toContain('host-package'); expect(host.textContent).not.toContain('Fixture benchmark'); expect(host.textContent).not.toContain('fixture-process'); expect(host.querySelector('[data-testid="node-stats"]')!.children).toHaveLength(5);
+ await render('node'); await settled(() => expect(host.textContent).toContain('1 matching finding instances')); expect(stats('node-stats')).toEqual(['2401', '1', '4', '1']);
+ expect(host.textContent).toContain('1 matching finding instances'); expect(host.textContent).toContain('unique CVE / advisory IDs'); expect(host.textContent).toContain('host-package'); expect(host.textContent).not.toContain('Fixture benchmark'); expect(host.textContent).not.toContain('fixture-process'); expect(host.querySelector('[data-testid="node-stats"] [data-testid="verdict-numbers"]')!.children).toHaveLength(4);
 });
 it.each(['node', 'function', 'cve'] as const)('does not query %s details before cluster scope is settled', async (kind) => {
  scope.loading = true; await render(kind); expect(nodes.get).not.toHaveBeenCalled(); expect(serverlessFunctions.get).not.toHaveBeenCalled(); expect(api.get).not.toHaveBeenCalled(); expect(cve.affectedInventory).not.toHaveBeenCalled();
@@ -84,7 +84,7 @@ it.each(['node', 'function', 'cve'] as const)('does not query %s details before 
 });
 it('keeps uncollected node values distinct from zero and preserves peer evidence through URL history', async () => {
  const data = nodeDetail(); delete data.node.last_scanned_at; delete data.node.packages_observed_at; vi.mocked(nodes.get).mockResolvedValue(data);
- await render('node', '/clusters/cluster-a/nodes/node-a?context=keep'); await settled(() => expect(stats('node-stats')[0]).toBe('Not scanned')); expect(stats('node-stats')[1]).toBe('Not collected'); expect(host.textContent).toContain('collection or scan gaps');
+ await render('node', '/clusters/cluster-a/nodes/node-a?context=keep'); await settled(() => expect(stats('node-stats')[0]).toBe('Not scanned')); expect(stats('node-stats')[2]).toBe('Not collected'); expect(host.textContent).toContain('collection or scan gaps');
  await tab('CIS benchmark'); expect(history.location.search).toContain('tab=cis'); expect(history.location.search).toContain('context=keep'); expect(host.textContent).toContain('Fixture benchmark');
  await tab('Containers'); expect(host.textContent).toContain('registry.example/full-image-reference-without-clipping:v1'); await act(async () => history.back()); await settled(() => expect(host.textContent).toContain('Fixture benchmark'));
  await tab('Packages'); expect(host.querySelector('[data-testid="node-package-inventory"]')).not.toBeNull(); expect(host.textContent).toContain('host-package');
@@ -106,7 +106,7 @@ it('queues only the freshly reviewed exact node target and visibly reports actio
 });
 it('does not queue an old node after navigation during scan preflight', async () => {
  await render('node'); await settled(() => expect(button('Scan node')).toBeDefined()); let release!: (data: NodeDetail) => void; vi.mocked(nodes.get).mockImplementationOnce(() => new Promise((resolve) => { release = resolve; })); await act(async () => button('Scan node').click()); await settled(() => expect(release).toBeDefined());
- await act(async () => history.push('/clusters/cluster-b/nodes/node-b')); await settled(() => expect(host.textContent).toContain('node-b')); await act(async () => release(nodeDetail())); expect(nodes.scan).not.toHaveBeenCalled(); expect(host.querySelector<HTMLAnchorElement>('a')?.getAttribute('href')).toBe('/clusters/cluster-b/nodes');
+ await act(async () => history.push('/clusters/cluster-b/nodes/node-b')); await settled(() => expect(host.textContent).toContain('node-b')); await act(async () => release(nodeDetail())); expect(nodes.scan).not.toHaveBeenCalled(); expect(host.querySelector('a[href^="/clusters/cluster-a"]')).toBeNull();
 });
 it('rejects a changed scan target discovered during preflight', async () => {
  await render('node'); await settled(() => expect(button('Scan node')).toBeDefined()); const changed = nodeDetail(); changed.node.scan_target_id = 'another-target'; vi.mocked(nodes.get).mockResolvedValueOnce(changed); await act(async () => button('Scan node').click()); await settled(() => expect(host.textContent).toContain('scan target changed')); expect(nodes.scan).not.toHaveBeenCalled();
@@ -115,7 +115,7 @@ it('retains the literal router-decoded node name instead of decoding it a second
  await render('node', '/clusters/cluster-a/nodes/node%252Fa'); await settled(() => expect(nodes.get).toHaveBeenCalledWith('cluster-a', 'node%2Fa')); expect(nodes.get).not.toHaveBeenCalledWith('cluster-a', 'node/a');
 });
 it('discloses organization-wide serverless scope and replaces the synthetic role-risk count', async () => {
- await render('function'); await settled(() => expect(stats('serverless-function-stats')).toEqual(['125', '400', '1', '5'])); expect(host.textContent).toContain('Organization-wide cloud evidence'); expect(host.textContent).toContain('navigation context only'); expect(host.textContent).toContain('Server fetch limit: 100 rows');
+ await render('function'); await settled(() => expect(stats('serverless-function-stats')).toEqual(['125', '5', '400', '1'])); expect(host.textContent).toContain('Organization-wide cloud evidence'); expect(host.textContent).toContain('navigation context only'); expect(host.textContent).toContain('Server fetch limit: 100 rows');
  expect(host.textContent).toContain('Organization function finding'); expect(host.querySelector('a[href*="/findings/"]')).toBeNull(); expect(host.textContent).not.toContain('Role Risk'); expect(host.textContent).not.toContain('function-package'); expect(host.textContent).not.toContain('job-a');
 });
 it('deep-links serverless packages and jobs with honest source limits and full evidence', async () => {
@@ -127,11 +127,11 @@ it('retains every reported attached policy beyond the old six-row cutoff', async
  await act(async () => summary.click()); expect(host.textContent).toContain('managed-7'); expect(host.textContent).toContain('inline-7');
 });
 it('keeps serverless missing package and layer metadata unknown', async () => {
- const data = functionDetail(); data.latest_evidence = null; delete data.serverless_function.layers; vi.mocked(serverlessFunctions.get).mockResolvedValue(data); await render('function'); await settled(() => expect(stats('serverless-function-stats')[1]).toBe('Not collected')); expect(stats('serverless-function-stats')[2]).toBe('Not reported'); expect(host.textContent).toContain('No collected package evidence returned');
+ const data = functionDetail(); data.latest_evidence = null; delete data.serverless_function.layers; vi.mocked(serverlessFunctions.get).mockResolvedValue(data); await render('function'); await settled(() => expect(stats('serverless-function-stats')[2]).toBe('Not collected')); expect(stats('serverless-function-stats')[3]).toBe('Not reported'); expect(host.textContent).toContain('No collected package evidence returned');
 });
 it('rejects an unrelated serverless function response and does not reuse old entity evidence after navigation', async () => {
  vi.mocked(serverlessFunctions.get).mockResolvedValueOnce(functionDetail('wrong')); await render('function'); await settled(() => expect(host.textContent).toContain('does not match the requested function ID')); expect(host.querySelector('[data-testid="serverless-function-stats"]')).toBeNull();
- await act(async () => history.push('/clusters/cluster-b/serverless/function-b?tab=jobs')); await settled(() => expect(host.textContent).toContain('Function function-b')); expect(host.querySelector<HTMLAnchorElement>('a')?.getAttribute('href')).toBe('/clusters/cluster-b/serverless');
+ await act(async () => history.push('/clusters/cluster-b/serverless/function-b?tab=jobs')); await settled(() => expect(host.textContent).toContain('Function function-b')); expect(host.querySelector('a[href^="/clusters/cluster-a"]')).toBeNull();
 });
 it('keeps successful serverless rows during refresh then exposes failure without empty success', async () => {
  await render('function'); await settled(() => expect(stats('serverless-function-stats')[0]).toBe('125')); let reject!: (error: Error) => void; vi.mocked(serverlessFunctions.get).mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; })); let fetch!: Promise<void>;
@@ -142,7 +142,7 @@ it('shows full selected-view CVE metrics and semantic server image workspace', a
  await render('cve'); await settled(() => expect(stats('cve-detail-stats')).toEqual(['1','2','80','1'])); expect(host.textContent).toContain('listed as known exploited'); expect(host.textContent).not.toContain('Server fetch limit: 500 rows'); expect(host.querySelector('[data-testid="cve-affected-workloads"]')).toBeNull(); expect(host.querySelector<HTMLAnchorElement>('a[href*="/images/"]')?.getAttribute('href')).toBe('/clusters/cluster-a/images/image-a'); expect(cve.affectedInventory).toHaveBeenCalledWith('CVE-2026-1234','images',expect.objectContaining({cluster_id:'cluster-a',limit:100,offset:0}));
 });
 it('keeps global CVE evidence organization scoped without inventing a navigation cluster', async () => {
- scope.resolved=false;scope.error=new Error('No navigation cluster');await render('global-cve');await settled(()=>expect(stats('cve-detail-stats')[0]).toBe('1'));expect(host.textContent).toContain('across the organization');expect(cve.affectedInventory).toHaveBeenCalledWith('CVE-2026-1234','images',expect.objectContaining({cluster_id:undefined}));expect(host.querySelector<HTMLAnchorElement>('a')?.getAttribute('href')).toBe('/cve');expect(host.querySelector('a[href*="/images/"]')).toBeNull();
+ scope.resolved=false;scope.error=new Error('No navigation cluster');await render('global-cve');await settled(()=>expect(stats('cve-detail-stats')[0]).toBe('1'));expect(host.textContent).toContain('across the organization');expect(cve.affectedInventory).toHaveBeenCalledWith('CVE-2026-1234','images',expect.objectContaining({cluster_id:undefined}));expect(host.querySelector('a[href^="/clusters/"]')).toBeNull();expect(host.querySelector('a[href*="/images/"]')).toBeNull();
 });
 it('keeps pending affected counts unknown and visibly recovers through Retry', async()=>{
  let reject!:(error:Error)=>void;vi.mocked(cve.affectedInventory).mockImplementationOnce(()=>new Promise((_,fail)=>{reject=fail;}));await render('cve');await settled(()=>expect(stats('cve-detail-stats')).toEqual(['—','—','—','—']));expect(host.textContent).toContain('Loading affected evidence');await act(async()=>reject(new Error('Affected unavailable')));await settled(()=>expect(host.textContent).toContain('Affected unavailable'));expect(stats('cve-detail-stats')).toEqual(['—','—','—','—']);await act(async()=>button('Retry affected evidence').click());await settled(()=>expect(stats('cve-detail-stats')[0]).toBe('1'));

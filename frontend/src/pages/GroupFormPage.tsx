@@ -56,7 +56,7 @@ export function GroupAuthoringScope({ clusterId, resolvedClusterId, isLoading, h
     void qc.invalidateQueries({ queryKey: ["cluster", clusterId] });
   };
   if (!scopeReady && !wasReady) return isLoading || registryFetching > 0 || detailFetching > 0 ? <LoadingState label="Loading cluster…" />
-    : <ErrorState title="The selected cluster could not be resolved. Review its registration and retry." action={<Button onClick={retryScope}>Retry cluster</Button>} />;
+    : <ErrorState title="The selected cluster could not be resolved. review its registration and retry." action={<Button onClick={retryScope}>Retry cluster</Button>} />;
   return <>
     {!scopeReady && <ErrorState title="Current cluster scope is unavailable or refreshing. Your draft is preserved; saving is paused until the cluster resolves." action={<Button onClick={retryScope}>Retry cluster</Button>} />}
     {children(scopeReady, recheckScope)}

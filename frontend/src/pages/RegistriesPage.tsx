@@ -7,10 +7,6 @@ import { useNavigate } from "@tanstack/react-router";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  TriangleAlert,
-  Boxes,
-  Clock,
-  Database,
   Plus,
   RotateCw,
   Trash2,
@@ -35,7 +31,6 @@ import {
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { StatusPill } from "@/components/ui/status-pill";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { useCluster } from "@/hooks/useCluster";
 import { KINDS } from "@/lib/registry-form";
 import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
@@ -48,7 +43,7 @@ export function RegistriesPage() {
   if (!identity)
     return (
       <div className="space-y-4">
-        <PageHeader title="Container Registries" />
+        <PageHeader title="Registries" />
         <p role="status">Resolving organization…</p>
       </div>
     );
@@ -372,12 +367,11 @@ function RegistriesWorkspace({
   return (
     <div className="space-y-4" data-testid="registries-page">
       <PageHeader
-        title="Container Registries"
-        description="Configure registries Constellation should pull image metadata from on a cadence and enqueue new tags for scanning."
+        title="Registries"
+        description="Registries Constellation syncs image metadata from and scans new tags for."
         actions={
           <div className="flex flex-wrap gap-2">
             <Button
-              variant="outline"
               onClick={() => {
                 void qc.invalidateQueries({ queryKey: ["registries", owner] });
                 void qc.invalidateQueries({
@@ -388,14 +382,13 @@ function RegistriesWorkspace({
             >
               Refresh
             </Button>
-            <button
-              type="button"
+            <Button
+              variant="primary"
               onClick={() => void navigate({ href: `${base}/new` })}
-              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
               data-testid="add-registry"
             >
               <Plus className="h-3.5 w-3.5" /> Add registry
-            </button>
+            </Button>
           </div>
         }
       />
@@ -440,44 +433,17 @@ function RegistriesWorkspace({
                       ? "Add a registry to begin scanning"
                       : "Registry inventory is available"
         }
-        detail="Queue KPIs cover all organization image jobs, including manual scans. Row counts cover all jobs linked to that registry and refresh independently."
+        numbers={[
+          { label: "registries", value: registryReady ? summary.total : "—" },
+          { label: "failed syncs", value: registryReady ? summary.failedSync : "—", tone: summary.failedSync > 0 ? "warning" : "default", title: registryReady ? `${summary.healthy} successful last sync` : undefined },
+          { label: "images seen", value: registryReady ? summary.images : "—" },
+          { label: "failed image jobs", value: imageJobs?.failed ?? "—", tone: imageJobs?.failed ? "error" : "default", title: "Organization image jobs" },
+        ]}
+        detail={<div className="space-y-1">
+          <p data-testid="registry-operator-summary">Registries {registryReady ? summary.total : "—"} · successful last sync {registryReady ? summary.healthy : "—"}{registryReady ? ` (${summary.failedSync} failed or partial)` : ""} · images seen {registryReady ? summary.images : "—"} · active image jobs (organization) {imageJobs?.active ?? "—"}{imageJobs ? ` (${imageJobs.pending} pending)` : ""} · failed image jobs (organization) {imageJobs?.failed ?? "—"}</p>
+          <p>Queue KPIs cover all organization image jobs, including manual scans. Row counts cover all jobs linked to that registry and refresh independently.</p>
+        </div>}
       />
-      <StatGrid data-testid="registry-operator-summary">
-        <StatCard
-          label="Registries"
-          value={registryReady ? summary.total : "—"}
-          icon={<Database className="h-3.5 w-3.5" />}
-        />
-        <StatCard
-          label="Successful last sync"
-          value={registryReady ? summary.healthy : "—"}
-          icon={<CirclePlay className="h-3.5 w-3.5" />}
-          tone={summary.failedSync > 0 ? "medium" : "neutral"}
-          hint={
-            registryReady
-              ? `${summary.failedSync} failed or partial`
-              : undefined
-          }
-        />
-        <StatCard
-          label="Images seen"
-          value={registryReady ? summary.images : "—"}
-          icon={<Boxes className="h-3.5 w-3.5" />}
-        />
-        <StatCard
-          label="Active image jobs (organization)"
-          value={imageJobs?.active ?? "—"}
-          icon={<Clock className="h-3.5 w-3.5" />}
-          tone={imageJobs?.active ? "low" : "neutral"}
-          hint={imageJobs ? `${imageJobs.pending} pending` : undefined}
-        />
-        <StatCard
-          label="Failed image jobs (organization)"
-          value={imageJobs?.failed ?? "—"}
-          icon={<TriangleAlert className="h-3.5 w-3.5" />}
-          tone={imageJobs?.failed ? "high" : "neutral"}
-        />
-      </StatGrid>
 
       <DataTable<RegistryDTO>
         rows={rows}
@@ -507,7 +473,7 @@ function KindBadge({ kind }: { kind: RegistryKind }) {
   const meta = KINDS.find((k) => k.kind === kind);
   return (
     <span className="inline-flex items-center gap-1.5">
-      <span className="grid h-5 w-5 place-items-center rounded-sm bg-muted text-[9px] font-semibold uppercase">
+      <span className="grid h-5 w-5 place-items-center rounded-sm bg-muted text-micro font-semibold ">
         {kind.slice(0, 2)}
       </span>
       <span className="text-xs">{meta?.label ?? kind}</span>
@@ -554,7 +520,7 @@ type RegistryJobCounts = {
 
 function RegistryJobPills({ counts }: { counts?: RegistryJobCounts }) {
   if (!counts || (counts.active === 0 && counts.failed === 0)) {
-    return <span className="text-[10px] text-muted-foreground">idle</span>;
+    return <span className="text-micro text-muted-foreground">idle</span>;
   }
   return (
     <div className="flex flex-wrap items-center gap-1">

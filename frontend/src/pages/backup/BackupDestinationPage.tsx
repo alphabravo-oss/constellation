@@ -70,7 +70,7 @@ export function BackupDestinationPage() {
         backLink={<Link to="/settings/backup" className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Backup &amp; Restore</Link>}
       />
 
-      <Card title="Where backups are stored" description="Local disk is simple but not durable; Amazon S3 is durable, off-cluster storage.">
+      <Card title="Where backups are stored" description="Local disk is simple but not durable; amazon S3 is durable, off-cluster storage.">
         <form
           className="space-y-5"
           onSubmit={(e) => {

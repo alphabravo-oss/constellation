@@ -3,6 +3,7 @@ import { useParams } from "@tanstack/react-router";
 import { assets, type AssetDetail } from "@/api/client";
 import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
 import { useCluster } from "@/hooks/useCluster";
+import { apiErrorText } from "@/lib/api-error";
 
 export const assetDetailKey = (clusterId: string | undefined, assetId: string | undefined, owner?: string) => ["asset", clusterId, assetId, owner] as const;
 
@@ -51,8 +52,7 @@ export function useAssetDetailScope() {
 }
 
 export function assetErrorMessage(error: unknown) {
-  const server = (error as { response?: { data?: { error?: string } } } | undefined)?.response?.data?.error;
-  return server || (error instanceof Error ? error.message : "The request failed. Please try again.");
+  return apiErrorText(error, "The request failed. Please try again.");
 }
 
 export function assetDate(value: string) {

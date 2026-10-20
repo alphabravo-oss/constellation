@@ -8,11 +8,11 @@ import { useMemo, isValidElement, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowUpRight,
-  CircleCheck,
+  
   CircleDot,
-  Clock3,
-  CircleMinus,
-  Radio,
+  
+  
+  
 } from "lucide-react";
 
 import {
@@ -31,13 +31,13 @@ import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { StatusPill } from "@/components/ui/status-pill";
 import { Button } from "@/components/ui/button";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { ErrorState } from "@/components/ui/states";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { useRouteSearchParams } from "@/lib/route-search";
 import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
 import { sortClustersByActivity } from "@/lib/clusters";
+import { Select } from "@/components/ui/form";
 
 // --- types -----------------------------------------------------------------
 
@@ -791,7 +791,7 @@ export function CoveragePage() {
       cell: (r) => (
         <div className="flex flex-col gap-0.5">
           <span className="font-medium text-foreground">{r.name}</span>
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+          <span className="text-micro  text-muted-foreground">
             {r.pillar} · {r.scope === "cluster" ? "selected cluster" : "organization-wide"}
           </span>
         </div>
@@ -855,24 +855,22 @@ export function CoveragePage() {
     <div className="space-y-4" data-testid="coverage-page">
       <PageHeader
         title="Posture"
-        description="Reported evidence per capability, with organization sources and selected-cluster sources shown separately."
-        actions={<Button onClick={() => { for (const source of allSources) void source.refetch(); }} disabled={allSources.some(source => source.isFetching)}>Refresh evidence</Button>}
+        actions={<Button onClick={() => { for (const source of allSources) void source.refetch(); }} disabled={allSources.some(source => source.isFetching)}>Refresh</Button>}
       />
 
-      <VerdictBanner status={rows.some(row => row.status === "unavailable") ? "degraded" : "info"} title={rows.some(row => row.status === "unavailable") ? "Some posture evidence is unavailable" : "Review reported capability evidence"} detail="Records and configured modes do not prove policy delivery, enforcement or protection. Organization-wide sources remain separate from the selected cluster." />
-      <StatGrid data-testid="coverage-stats">
-        <StatCard label="Rows with evidence" value={rows.filter(row => row.status === "active" || row.status === "partial" || row.status === "idle").length} icon={<CircleCheck className="h-3.5 w-3.5" />} />
-        <StatCard label="Unavailable capability rows" value={rows.filter(row => row.status === "unavailable").length} icon={<CircleMinus className="h-3.5 w-3.5" />} />
-        <StatCard label="Loaded audit records · 24h" value={audit24} valueKind={typeof audit24 === "number" ? "number" : "text"} hint="Up to 100 loaded audit records" />
-        <StatCard label="Loaded runtime records · 24h" value={runtime24} valueKind={typeof runtime24 === "number" ? "number" : "text"} hint="Up to 50 loaded runtime records" icon={<Radio className="h-3.5 w-3.5" />} />
-        <StatCard label="Loaded scan jobs · 24h" value={scans24} valueKind={typeof scans24 === "number" ? "number" : "text"} hint="Up to 200 loaded scan jobs" icon={<Clock3 className="h-3.5 w-3.5" />} />
-      </StatGrid>
+      <div data-testid="coverage-stats"><VerdictBanner status={rows.some(row => row.status === "unavailable") ? "degraded" : "info"} title={rows.some(row => row.status === "unavailable") ? "Some posture evidence is unavailable" : "Review reported capability evidence"} numbers={[
+          { label: "with evidence", value: rows.filter(row => row.status === "active" || row.status === "partial" || row.status === "idle").length },
+          { label: "unavailable", value: rows.filter(row => row.status === "unavailable").length, tone: rows.some(row => row.status === "unavailable") ? "warning" : "default" },
+          { label: "audit records, 24 h", value: audit24, title: "Up to 100 loaded audit records" },
+          { label: "runtime records, 24 h", value: runtime24, title: "Up to 50 loaded runtime records" },
+        ]}
+        detail={<div className="space-y-1"><p>Loaded scan jobs in 24 h: {scans24}. Samples: Up to 100 loaded audit records, Up to 50 loaded runtime records, Up to 200 loaded scan jobs.</p><p>Records and configured modes do not prove policy delivery, enforcement or protection. Organization-wide sources remain separate from the selected cluster.</p></div>} /></div>
       {qClusters.isError && <ErrorState title="The cluster inventory is unavailable." action={<Button onClick={() => void qClusters.refetch()}>Retry clusters</Button>} />}
       {selectedCluster && !clusterReady && !qClusters.isFetching && !qClusters.isPending && <ErrorState title="The requested cluster is not available in the current organization." />}
       <div className="flex min-w-0 flex-col gap-3 rounded-md border border-border bg-card p-3 lg:flex-row lg:items-start">
         <div className="flex min-w-0 flex-1 flex-col gap-2">
-          <label htmlFor="coverage-cluster-select" className="text-[10px] uppercase tracking-wider text-muted-foreground">Cluster scope</label>
-          <select
+          <label htmlFor="coverage-cluster-select" className="text-micro  text-muted-foreground">Cluster scope</label>
+          <Select
             id="coverage-cluster-select"
             className="h-8 w-full min-w-0 max-w-full rounded-md border border-border bg-background px-2 text-sm"
             value={clusterId ?? ""}
@@ -885,12 +883,12 @@ export function CoveragePage() {
             {clusterList.map((c) => (
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
-          </select>
-          <span className="text-[11px] text-muted-foreground">applies to network · auto-netpolicy · process baseline</span>
+          </Select>
+          <span className="text-micro text-muted-foreground">applies to network · auto-netpolicy · process baseline</span>
         </div>
         <div className="flex min-w-0 flex-col gap-2 lg:w-48 lg:flex-none">
-          <label htmlFor="coverage-pillar-select" className="text-[10px] uppercase tracking-wider text-muted-foreground">Pillar</label>
-          <select
+          <label htmlFor="coverage-pillar-select" className="text-micro  text-muted-foreground">Pillar</label>
+          <Select
             id="coverage-pillar-select"
             className="h-8 w-full min-w-0 max-w-full rounded-md border border-border bg-background px-2 text-sm"
             value={pillarFilter}
@@ -901,14 +899,14 @@ export function CoveragePage() {
             {pillars.map((p) => (
               <option key={p} value={p}>{p}</option>
             ))}
-          </select>
+          </Select>
         </div>
       </div>
 
       {pillarFilter && !pillars.includes(pillarFilter) && <ErrorState title="The requested pillar filter is invalid." action={<Button onClick={() => update("pillar", "")}>Clear pillar filter</Button>} />}
       <Tabs value={tab} onValueChange={setTab} items={[{ value: "all", label: "All sources", content: workspace }, { value: "organization", label: "Organization", content: workspace }, { value: "cluster", label: "Selected cluster", content: workspace }]} />
       {!['all', 'organization', 'cluster'].includes(tab) && <ErrorState title="The requested workspace tab is invalid." action={<Button onClick={() => setTab("all")}>Show all sources</Button>} />}
-      <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+      <div className="flex items-center gap-3 text-micro text-muted-foreground">
         <CircleDot className="h-3 w-3" />
         <span>
           Source limits: audit 100, runtime 50, scan jobs 200, AI assets 50. These are samples, not complete 24-hour totals. Source records may overlap. Status: <strong>Evidence reported</strong> = source-specific records or activity ·{" "}

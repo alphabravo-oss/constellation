@@ -20,7 +20,7 @@ async function render() { host = document.createElement('div'); document.body.ap
 async function settle(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }, { timeout: 3000 }); }
 it('passes owned scope and platform preference, preserving actual custom-install roles in shown CSV', async () => {
   await render(); await settle(() => expect(host.querySelector('tbody')).not.toBeNull()); expect(network.peersEvidence).toHaveBeenCalledWith({ workload: 'custom/agent', cluster_id: 'cluster', hours: 24, hide_platform: false }); expect(host.querySelector('tbody')?.textContent).toContain('Core');
-  await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Export shown peers CSV')!.click()); const [,headers,rows] = vi.mocked(downloadCsv).mock.calls.at(-1)!; expect(rows[0][headers.indexOf('Platform role')]).toBe('core');
+  await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => (button.textContent === 'Export shown peers CSV' || button.getAttribute('aria-label') === 'Export shown peers CSV'))!.click()); const [,headers,rows] = vi.mocked(downloadCsv).mock.calls.at(-1)!; expect(rows[0][headers.indexOf('Platform role')]).toBe('core');
   hidden = true; await act(async () => root.render(tree())); await settle(() => expect(network.peersEvidence).toHaveBeenLastCalledWith(expect.objectContaining({ hide_platform: true }))); await settle(() => expect(host.querySelector('tbody')?.textContent).toContain('Unclassified')); expect(host.querySelector('tbody')?.textContent).not.toContain('Core');
 });
 it('discloses the capped diagnostic source without claiming the selected direction is complete', async () => {

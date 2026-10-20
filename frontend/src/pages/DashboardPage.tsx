@@ -1,13 +1,13 @@
 import { useRouteSearchParams } from "@/lib/route-search";
 import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
-import { findingHref, findingRowKey } from "@/lib/finding-instance";
+import { findingHref } from "@/lib/finding-instance";
 import { useMemo, useRef } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient, useIsFetching } from "@tanstack/react-query";
 import { useExportGuard } from "@/hooks/useExportGuard";
 import { clusterCacheReady } from "@/lib/cluster-evidence";
 import { downloadCsv } from "@/lib/csv";
-import { Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, Cell, LabelList, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
   OctagonAlert, TriangleAlert, ShieldAlert, ShieldCheck, Activity,
   TrendingUp, ArrowUpRight, ExternalLink, Database, FileWarning,
@@ -50,8 +50,9 @@ import { ScannerDbCapacity } from "@/components/ScannerDbCapacity";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { Collapse } from "@/components/ui/collapse";
-import { ErrorState } from "@/components/ui/states";
+import { ErrorState, LoadingState } from "@/components/ui/states";
 import { PageHeader } from "@/components/ui/page";
+import { useIncludeSystem } from "@/lib/system-scope";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { fmtBytes, fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/cn";
@@ -76,8 +77,8 @@ const SCORE_FACTORS = [
 ] as const;
 
 export function DashboardPage() {
-  const [scopeParams, setScopeParams] = useRouteSearchParams();
-  const includeSystem = scopeParams.get("include_system") === "true";
+  const [scopeParams] = useRouteSearchParams();
+  const includeSystem = useIncludeSystem(scopeParams);
   const workloadScope = includeSystem ? "all" as const : "application" as const;
   const operator = useTablePreferencesIdentity();
   const findingOwner = `${operator?.org_id}:${operator?.user_id}`;
@@ -301,7 +302,7 @@ export function DashboardPage() {
     {id:"count",header:"Reported / loaded count",kind:"count",cell:row=>row.count,exportValue:row=>row.count},
     {id:"source",header:"Source",kind:"text",wrap:true,cell:row=>row.source,exportValue:row=>row.source},
     {id:"population",header:"Scope and source limits",kind:"text",wrap:true,cell:row=>row.population,exportValue:row=>row.population},
-    {id:"destination",header:"Destination contract",kind:"text",wrap:true,cell:row=><a href={row.destination} className="text-primary hover:underline">{row.destinationLabel}</a>,exportValue:row=>`${row.destinationLabel} · ${row.destination}`},
+    {id:"destination",header:"Destination contract",kind:"text",wrap:true,cell:row=><a href={row.destination} className="text-link">{row.destinationLabel}</a>,exportValue:row=>`${row.destinationLabel} · ${row.destination}`},
   ];
 
 
@@ -309,35 +310,35 @@ export function DashboardPage() {
 
   const overviewView = <div className="space-y-5">
       {/* Action items + recent activity */}
-      <section className="c-rise c-rise-3 grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Panel
           className="min-w-0"
-          title="Action Items"
-          subtitle="Top 10 critical/high findings from 250 open findings ranked by risk"
+          title="Action items"
+          subtitle="Highest-risk critical and high findings"
           icon={<ShieldAlert className="h-3.5 w-3.5" />}
-          rightSlot={<a href={clusterPath("/findings?view=instances&lifecycle=open")} className="text-[11px] text-muted-foreground hover:text-foreground">view all <ArrowUpRight className="inline h-3 w-3" /></a>}
+          rightSlot={<a href={clusterPath("/findings?view=instances&lifecycle=open")} className="text-link text-meta">View all</a>}
         >
-          {open.isError ? <ErrorState title="Could not load action items." action={<Button onClick={() => void open.refetch()}>Retry</Button>} /> : open.isPending ? <p className="p-3 text-sm text-muted-foreground">Loading action items…</p> : topActions.length === 0 ? (
+          {open.isError ? <ErrorState title="Could not load action items." action={<Button onClick={() => void open.refetch()}>Retry</Button>} /> : open.isPending ? <LoadingState label="Loading action items" variant="panel" /> : topActions.length === 0 ? (
             <EmptyState
               title="No critical or high findings in the loaded sample"
               hint="When new severe findings appear they'll show up here for one-click triage."
-              icon={<ShieldCheck className="h-8 w-8" />}
+              icon={<ShieldCheck />}
             />
           ) : (
             <ul className="divide-y divide-border">
-              {topActions.map((f) => (
-                <li key={findingRowKey(f)} className="accent-slide flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors">
+              {topActions.map(({ finding: f, key, instances }) => (
+                <li key={key} data-testid="action-item" data-advisory={f.external_id ?? f.title} className="flex items-center gap-3 px-3 py-2 transition-colors hover:bg-muted/40">
                   <SeverityBadge severity={f.severity} kev={false} />
                   <div className="min-w-0 flex-1">
                     <a href={findingHref(f, clusterId)} className="text-sm hover:underline truncate block" title={f.title}>
                       {f.title}
                     </a>
-                    <div className="text-[10px] text-mono text-muted-foreground">
-                      {f.external_id ?? f.id.slice(0, 10)} · {f.kind} · {fmtRelative(f.last_seen_at)}
+                    <div className="text-micro text-mono text-muted-foreground">
+                      {f.external_id ?? "No advisory id"} · {instances === 1 ? "1 instance" : <a href={clusterPath(`/findings?view=instances&lifecycle=open&q=${encodeURIComponent(`cve:${f.external_id ?? ""}`)}`)} className="hover:underline" data-testid="action-item-instances">{instances} instances</a>} · {fmtRelative(f.last_seen_at)}
                     </div>
                   </div>
                   <RiskScore score={f.risk_score} size="sm" />
-                  <Button size="sm" variant="outline" onClick={() => navigate({ href: findingHref(f, clusterId) })}>Triage</Button>
+                  <Button size="sm" onClick={() => navigate({ href: findingHref(f, clusterId) })}>Triage</Button>
                 </li>
               ))}
             </ul>
@@ -345,27 +346,38 @@ export function DashboardPage() {
         </Panel>
 
         <Panel
-          title="Security Events"
-          rightSlot={<a href={eventEvidencePath} className="text-xs text-primary hover:underline">View matching events</a>}
-          subtitle="High + critical alerts · last 14 days"
+          title="Security events"
+          rightSlot={<a href={eventEvidencePath} className="text-link text-meta">View matching events</a>}
+          subtitle="High and critical alerts, last 14 days"
           icon={<TriangleAlert className="h-3.5 w-3.5" />}
         >
           {(() => {
             if (eventsTimelineQ.isError) return <ErrorState title="Could not load event history." />;
-            if (eventsTimelineQ.isPending) return <p className="p-3 text-xs text-muted-foreground">Loading events…</p>;
+            if (eventsTimelineQ.isPending) return <LoadingState label="Loading events" variant="panel" />;
             const raw = eventsTimelineQ.data?.events_timeline ?? [];
             const totalAlerts = raw.reduce((a, d) => a + d.total, 0);
             if (totalAlerts === 0) return <EmptyState title="No alerting events" hint="No high/critical security events in the last 14 days." />;
-            const tl = raw.map((d) => ({ date: d.date, high: Math.max(0, d.total - d.critical), critical: d.critical }));
+            // A continuous 14-day axis (days without alerts are zero), one label per bar.
+            const byDate = new Map(raw.map((d) => [d.date.slice(0, 10), d]));
+            const end = raw.length ? new Date(`${raw[raw.length - 1].date.slice(0, 10)}T00:00:00Z`) : new Date();
+            const tl = Array.from({ length: 14 }, (_, index) => {
+              const day = new Date(end.getTime() - (13 - index) * 86_400_000).toISOString().slice(0, 10);
+              const d = byDate.get(day);
+              return { date: day, high: d ? Math.max(0, d.total - d.critical) : 0, critical: d?.critical ?? 0 };
+            });
             return (
               <div className="p-3">
-                <div className="mb-1 text-xs text-muted-foreground">{totalAlerts.toLocaleString()} alerts · {raw.reduce((a, d) => a + d.critical, 0).toLocaleString()} critical</div>
-                <ResponsiveContainer width="100%" height={140}>
-                  <BarChart data={tl} barCategoryGap={2}>
-                    <XAxis dataKey="date" tickFormatter={(d: string) => d.slice(5)} tick={{ fontSize: 9, fill: "var(--color-muted-foreground)" }} interval={1} axisLine={false} tickLine={false} />
-                    <Tooltip contentStyle={tooltipStyle} labelFormatter={(d) => d} formatter={(v: number, n: string) => [v, n === "critical" ? "Critical" : "High"]} />
-                    <Bar dataKey="high" stackId="a" fill="var(--color-severity-high)" radius={[0, 0, 0, 0]} />
-                    <Bar dataKey="critical" stackId="a" fill="var(--color-severity-critical)" radius={[2, 2, 0, 0]} />
+                <div className="mb-1 flex items-center gap-4 text-meta text-muted-foreground"><span>{totalAlerts.toLocaleString()} alerts · {raw.reduce((a, d) => a + d.critical, 0).toLocaleString()} critical</span><span className="ml-auto flex items-center gap-1.5"><span aria-hidden className="h-2 w-2 rounded-sm bg-muted-foreground/45" />High</span><span className="flex items-center gap-1.5"><span aria-hidden className="h-2 w-2 rounded-sm bg-severity-critical" />Critical</span></div>
+                <ResponsiveContainer width="100%" height={168}>
+                  <BarChart data={tl} barCategoryGap={3} margin={{ top: 16, right: 4, bottom: 0, left: 0 }} data-testid="events-chart">
+                    <CartesianGrid vertical={false} stroke="hsl(var(--border))" />
+                    <XAxis dataKey="date" tickFormatter={(d: string, index: number) => { const day = new Date(`${d}T00:00:00Z`); const n = day.getUTCDate(); return index === 0 || n === 1 ? day.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" }) : String(n); }} tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} interval={0} axisLine={false} tickLine={false} />
+                    <YAxis width={44} tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} axisLine={false} tickLine={false} allowDecimals={false} tickFormatter={(v: number) => v >= 1000 ? `${Math.round(v / 100) / 10}k` : String(v)} />
+                    <Tooltip cursor={{ fill: "hsl(var(--muted) / 0.5)" }} contentStyle={tooltipStyle} labelFormatter={(d) => d} formatter={(v: number, n: string) => [v, n === "critical" ? "Critical" : "High"]} />
+                    <Bar dataKey="high" stackId="a" fill="hsl(var(--muted-foreground) / 0.45)" radius={[0, 0, 0, 0]} />
+                    <Bar dataKey="critical" stackId="a" fill="var(--color-severity-critical)" radius={[2, 2, 0, 0]}>
+                      <LabelList valueAccessor={(entry: { payload?: { high: number; critical: number } }) => { const total = (entry.payload?.high ?? 0) + (entry.payload?.critical ?? 0); return total ? (total >= 1000 ? `${Math.round(total / 100) / 10}k` : total) : ""; }} position="top" style={{ fontSize: 11, fill: "var(--color-muted-foreground)" }} />
+                    </Bar>
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -374,22 +386,22 @@ export function DashboardPage() {
         </Panel>
 
         <Panel
-          title="Organization Recent Activity"
-          rightSlot={<a href={activityPath} className="text-xs text-primary hover:underline">{activityCohortAvailable ? "View selected activity" : "View organization audit history"}</a>}
-          subtitle="Latest 20 organization audit records; showing up to eight"
+          title="Recent organization activity"
+          rightSlot={<a href={activityPath} className="text-link text-meta">{activityCohortAvailable ? "View selected activity" : "View organization audit history"}</a>}
+          subtitle="Latest audit records"
           icon={<Activity className="h-3.5 w-3.5" />}
         >
-          {sum.isError ? <ErrorState title="Could not load recent activity." /> : sum.isPending ? <p className="p-3 text-xs text-muted-foreground">Loading activity…</p> : recent.length === 0 ? (
+          {sum.isError ? <ErrorState title="Could not load recent activity." /> : sum.isPending ? <LoadingState label="Loading activity" variant="panel" /> : recent.length === 0 ? (
             <EmptyState title="No recent activity" hint="Triage actions and runtime events will appear here." />
           ) : (
             <ul className="divide-y divide-border">
               {recent.slice(0, 8).map((r, i) => (
                 <li key={i} className="px-3 py-2 text-xs">
                   <div className="flex items-center gap-1.5">
-                    <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-mono">{r.id ? <a href={`/organization/audit?event_id=${encodeURIComponent(r.id)}`} className="hover:underline">{r.action}</a> : r.action}</span>
-                    <span className="text-muted-foreground text-[10px]">{r.target_kind}</span>
+                    <span className="rounded bg-muted px-1.5 py-0.5 text-micro text-mono">{r.id ? <a href={`/organization/audit?event_id=${encodeURIComponent(r.id)}`} className="hover:underline">{r.action}</a> : r.action}</span>
+                    <span className="text-muted-foreground text-micro">{r.target_kind}</span>
                   </div>
-                  <div className="mt-0.5 text-mono text-[10px] text-muted-foreground truncate">
+                  <div className="mt-0.5 text-mono text-micro text-muted-foreground truncate">
                     {r.target_id} · {fmtRelative(r.at)}
                   </div>
                 </li>
@@ -403,35 +415,29 @@ export function DashboardPage() {
   </div>;
   const postureView = <div className="space-y-5">
       {/* Hero band — Security RISK Score (NV model: higher = worse) + its 6 weighted factors */}
-      <section className="c-rise c-rise-1 grid grid-cols-1 gap-6 rounded-md border border-border bg-card p-5 star-field lg:grid-cols-2">
+      <section className="grid grid-cols-1 gap-6 rounded-lg border border-border bg-card p-5 lg:grid-cols-2">
         <div className="flex flex-col items-center justify-center gap-3 border-b border-border/60 pb-5 lg:border-b-0 lg:border-r lg:pb-0 lg:pr-5">
           {posture ? <RiskGauge score={risk} label="risk score" size={132} /> : <p className="text-sm text-muted-foreground">Risk score unavailable</p>}
           <div className="text-center">
-            <div className="text-display text-sm font-semibold leading-none" style={{ color: risk <= 20 ? "var(--color-severity-low)" : risk <= 50 ? "var(--color-severity-medium)" : "var(--color-severity-critical)" }}>
+            <div className="text-display text-sm font-semibold leading-none" style={{ color: risk <= 20 ? "var(--color-status-success)" : risk <= 50 ? "var(--color-severity-medium)" : "var(--color-severity-critical)" }}>
               {!posture ? "—" : risk <= 20 ? "Good" : risk <= 50 ? "Fair" : "Poor"}
             </div>
-            <div className="mt-1 text-[11px] text-muted-foreground">{summaryData?.open_findings ?? "—"} open findings</div>
+            <div className="mt-1 text-micro text-muted-foreground">{summaryData?.open_findings ?? "—"} open findings</div>
           </div>
         </div>
         <div className="flex flex-col justify-between gap-5">
-          <StatGrid>
-            <StatCard label="Critical" value={summaryData ? counts.critical : "—"} tone="critical" icon={<OctagonAlert className="h-3 w-3" />} href={clusterPath("/findings?severity=critical&lifecycle=open")} trend={trends.critical} />
-            <StatCard label="High" value={summaryData ? counts.high : "—"} tone="high" icon={<TriangleAlert className="h-3 w-3" />} href={clusterPath("/findings?severity=high&lifecycle=open")} trend={trends.high} />
-            <StatCard label="Open" value={summaryData ? counts.open : "—"} tone="accent" icon={<Activity className="h-3 w-3" />} href={clusterPath("/findings?view=instances&lifecycle=open")} trend={trends.open} />
-            <StatCard label="Accepted" value={summaryData ? counts.accepted : "—"} tone="neutral" icon={<ShieldCheck className="h-3 w-3" />} href={clusterPath("/findings?lifecycle=accepted")} />
-          </StatGrid>
           {/* Risk factors — NV's 6 weighted contributors (bar = share of its cap). */}
           <div>
-            <div className="mb-2 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">Risk factors · points of 100</div>
+            <div className="mb-2 text-meta font-medium text-muted-foreground">Risk factors (points of 100)</div>
             <div className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2 xl:grid-cols-3">
               {SCORE_FACTORS.map(({ k, label, cap }) => {
                 const v = posture?.score_breakdown?.[k] ?? 0;
                 const ratio = v / cap;
                 return (
-                  <div key={k} className="flex items-center gap-2 text-[11px]">
+                  <div key={k} className="flex items-center gap-2 text-micro">
                     <span className="w-[104px] shrink-0 text-muted-foreground">{label}</span>
                     <div className="h-1.5 flex-1 rounded-full bg-muted overflow-hidden">
-                      <div className="h-full rounded-full" style={{ width: `${Math.round(ratio * 100)}%`, background: ratio >= 0.66 ? "var(--color-severity-critical)" : ratio >= 0.33 ? "var(--color-severity-high)" : "var(--color-severity-medium)" }} />
+                      <div className="h-full rounded-full" style={{ width: `${Math.round(ratio * 100)}%`, background: "hsl(var(--muted-foreground) / 0.7)" }} />
                     </div>
                     <span className="w-11 shrink-0 text-right text-mono tabular-nums text-muted-foreground">{posture ? v : "—"}/{cap}</span>
                   </div>
@@ -444,7 +450,7 @@ export function DashboardPage() {
 
       <Collapse label="Additional posture metrics">
       {/* Posture metrics — one uniform, scannable grid (compliance · runtime · vuln location · hardening) */}
-      <StatGrid className="c-rise c-rise-2">
+      <StatGrid>
         <StatCard label="Compliance" value={complianceSum.isPending ? "…" : compliancePosture.pct == null ? "—" : `${compliancePosture.pct}%`}
           tone={compliancePosture.pct == null ? "neutral" : compliancePosture.pct >= 90 ? "low" : compliancePosture.pct >= 70 ? "medium" : "high"}
           icon={<ShieldCheck className="h-3 w-3" />} href={clusterPath("/compliance?tab=controls&framework=all&status=graded")}
@@ -465,9 +471,9 @@ export function DashboardPage() {
   </div>;
   const networkView = <div className="space-y-5">
       {/* Exposed services (ingress/egress) + enforcement coverage — NV signature panels */}
-      <section className="c-rise c-rise-2 grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="space-y-4">
-          <Panel title="Exposed Services" subtitle="Observed over seven days · up to 50 workloads per direction; CSV covers returned rows" rightSlot={<Button size="sm" disabled={!exposureQ.data || exposureQ.isError || exposureQ.isFetching} onClick={() => downloadCsv("constellation-exposure", ["Direction", "Workload", "Namespace", "Platform role", "External peers", "Sessions", "Policy mode"], [
+          <Panel title="Exposed services" subtitle="Observed over seven days · up to 50 workloads per direction; CSV covers returned rows" rightSlot={<Button size="sm" disabled={!exposureQ.data || exposureQ.isError || exposureQ.isFetching} onClick={() => downloadCsv("constellation-exposure", ["Direction", "Workload", "Namespace", "Platform role", "External peers", "Sessions", "Policy mode"], [
             ...(exposureQ.data?.ingress ?? []).map((service) => ["ingress", service.workload, service.namespace, service.platform_role ?? "", service.external_peers, service.sessions, service.policy_mode]),
             ...(exposureQ.data?.egress ?? []).map((service) => ["egress", service.workload, service.namespace, service.platform_role ?? "", service.external_peers, service.sessions, service.policy_mode]),
           ])}>Export CSV</Button>} icon={<Activity className="h-3.5 w-3.5" />}>
@@ -484,10 +490,10 @@ export function DashboardPage() {
           </Panel>
 
           <Panel
-            title="Top Network Denies"
+            title="Top network denies"
             subtitle="Top blocked service pairs in the loaded last-24h sample (up to 5,000 pairs)"
             icon={<ShieldAlert className="h-3.5 w-3.5" />}
-            rightSlot={<a href={clusterPath("/network?tab=conversations&hours=24&verdict_group=blocked&hide_platform=false")} className="text-[11px] text-muted-foreground hover:text-foreground">view conversations <ArrowUpRight className="inline h-3 w-3" /></a>}
+            rightSlot={<a href={clusterPath("/network?tab=conversations&hours=24&verdict_group=blocked&hide_platform=false")} className="text-link text-meta">View conversations</a>}
           >
             <div data-testid="dashboard-network-denies">
               {conversationsQ.isError ? <ErrorState title="Could not load network conversations." /> : conversationsQ.isPending ? (
@@ -505,13 +511,13 @@ export function DashboardPage() {
                             <span className="px-1.5 text-muted-foreground">→</span>
                             <span className="font-mono">{row.to}</span>
                           </div>
-                          <div className="mt-0.5 truncate text-[10px] text-muted-foreground">
+                          <div className="mt-0.5 truncate text-micro text-muted-foreground">
                             {fmtBytes(row.bytes)} · {row.packets.toLocaleString()} packets
                             {(row.apps?.length ?? 0) > 0 && ` · ${row.apps?.slice(0, 3).join(", ")}`}
                             {row.last_seen && ` · ${fmtRelative(row.last_seen)}`}
                           </div>
                         </div>
-                        <span className="shrink-0 rounded bg-[color-mix(in_oklab,var(--color-status-error)_16%,transparent)] px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-[color:var(--color-status-error)]">
+                        <span className="shrink-0 rounded bg-[color-mix(in_oklab,var(--color-status-error)_16%,transparent)] px-1.5 py-0.5 text-micro font-medium  text-[color:var(--color-status-error)]">
                           {row.verdict || "deny"}
                         </span>
                       </a>
@@ -523,12 +529,12 @@ export function DashboardPage() {
           </Panel>
         </div>
         <div className="space-y-4">
-        <Panel title="Policy Mode Maturity" subtitle="Current group enforcement modes" icon={<ShieldCheck className="h-3.5 w-3.5" />}>
+        <Panel title="Policy mode maturity" subtitle="Current group enforcement modes" icon={<ShieldCheck className="h-3.5 w-3.5" />}>
           <div className="p-3 space-y-4">
             {(() => {
               if (!posture) return <p className="text-sm text-muted-foreground">Enforcement summary unavailable.</p>;
               const e = posture.enforcement;
-              if (!e || typeof e.groups !== "number") return <div className="space-y-3"><p className="text-sm text-muted-foreground">Configured group modes not reported.</p><div className="flex flex-wrap gap-4 text-xs"><a href={clusterPath("/groups")} className="text-primary hover:underline">Manage group modes</a><a href={clusterPath("/groups/settings")} className="text-primary hover:underline">Edit new-service defaults</a></div></div>;
+              if (!e || typeof e.groups !== "number") return <div className="space-y-3"><p className="text-sm text-muted-foreground">Configured group modes not reported.</p><div className="flex flex-wrap gap-4 text-xs"><a href={clusterPath("/groups")} className="text-link">Manage group modes</a><a href={clusterPath("/groups/settings")} className="text-link">Edit new-service defaults</a></div></div>;
               const groups = e.groups;
               return (
                 <>
@@ -540,13 +546,13 @@ export function DashboardPage() {
                     const modeRows = ["discover", "monitor", "protect"].map(mode => ({ mode, cves: cm[mode], exposed: em[mode] }));
                     return <div className="border-t border-border pt-3 space-y-2"><p className="text-xs text-muted-foreground">Reported risk by configured group mode · these counters are not applier health. Vulnerability IDs are deduplicated within each mode and may occur in more than one mode. Workloads use their strongest configured group mode; workloads without a matching group are excluded. Exposure counts workloads reporting a net_exposure risk-factor key, including zero or null values.</p><DataTable rows={modeRows} columns={[
                       { id: "mode", header: "Configured mode", kind: "name", cell: row => row.mode },
-                      { id: "cves", header: "Distinct open vulnerability IDs", kind: "count", cell: row => row.cves == null ? "Not reported" : <a className="text-primary hover:underline" href={clusterPath(`/findings?view=cve&kind=vulnerability&lifecycle=open&target_type=image-workload&group_mode=${row.mode}&id_scope=all`)}>{row.cves}</a> },
-                      { id: "exposed", header: "Exposed workloads", kind: "count", cell: row => row.exposed == null ? "Not reported" : <a className="text-primary hover:underline" href={clusterPath(`/deployments?hide_platform=false&risk_fact=net_exposure&group_mode=${row.mode}`)}>{row.exposed}</a> },
-                    ]} rowKey={row => row.mode} showDensityToggle={false} showColumnChooser={false} pagination={false} testId="dashboard-risk-by-mode"/><p className="text-xs text-muted-foreground">Platform / Host distinct open vulnerability IDs: {cm.platform == null ? "Not reported" : <a href={clusterPath("/findings?view=cve&kind=vulnerability&lifecycle=open&target_type=platform&id_scope=all")} className="text-primary hover:underline">{cm.platform}</a>} / {cm.host == null ? "Not reported" : <a href={clusterPath("/findings?view=cve&kind=vulnerability&lifecycle=open&target_type=host&id_scope=all")} className="text-primary hover:underline">{cm.host}</a>}.</p></div>;
+                      { id: "cves", header: "Distinct open vulnerability IDs", kind: "count", cell: row => row.cves == null ? "Not reported" : <a className="text-link" href={clusterPath(`/findings?view=cve&kind=vulnerability&lifecycle=open&target_type=image-workload&group_mode=${row.mode}&id_scope=all`)}>{row.cves}</a> },
+                      { id: "exposed", header: "Exposed workloads", kind: "count", cell: row => row.exposed == null ? "Not reported" : <a className="text-link" href={clusterPath(`/deployments?hide_platform=false&risk_fact=net_exposure&group_mode=${row.mode}`)}>{row.exposed}</a> },
+                    ]} rowKey={row => row.mode} showDensityToggle={false} showColumnChooser={false} pagination={false} testId="dashboard-risk-by-mode"/><p className="text-xs text-muted-foreground">Platform / Host distinct open vulnerability IDs: {cm.platform == null ? "Not reported" : <a href={clusterPath("/findings?view=cve&kind=vulnerability&lifecycle=open&target_type=platform&id_scope=all")} className="text-link">{cm.platform}</a>} / {cm.host == null ? "Not reported" : <a href={clusterPath("/findings?view=cve&kind=vulnerability&lifecycle=open&target_type=host&id_scope=all")} className="text-link">{cm.host}</a>}.</p></div>;
                   })()}
                   <div className="flex flex-wrap gap-4 border-t border-border pt-3 text-xs">
-                    <a href={clusterPath("/groups")} className="text-primary hover:underline">Manage group modes</a>
-                    <a href={clusterPath("/groups/settings")} className="text-primary hover:underline">Edit new-service defaults</a>
+                    <a href={clusterPath("/groups")} className="text-link">Manage group modes</a>
+                    <a href={clusterPath("/groups/settings")} className="text-link">Edit new-service defaults</a>
                   </div>
                   <div className="flex items-center justify-between border-t border-border pt-2 text-xs">
                     <span className="text-muted-foreground">Admission control</span>
@@ -563,12 +569,12 @@ export function DashboardPage() {
             })()}
           </div>
         </Panel>
-        <Panel title="Top Vulnerable Assets" subtitle="Up to six reported workloads ranked by critical/high inventory counts" icon={<OctagonAlert className="h-3.5 w-3.5" />}
+        <Panel title="Top vulnerable assets" subtitle="Up to six reported workloads ranked by critical/high inventory counts" icon={<OctagonAlert className="h-3.5 w-3.5" />}
           rightSlot={(posture?.top_vulnerable?.length ?? 0) > 0 ? (
             <button type="button"
               onClick={() => downloadCsv("constellation-vulnerable-workloads", ["Deployment ID", "Cluster ID", "Namespace", "Workload", "Platform Role", "Critical", "High"],
                 (posture?.top_vulnerable ?? []).map((t) => [t.id ?? "", t.cluster_id ?? "", t.namespace, t.name, t.platform_role ?? "Unknown", t.critical, t.high]))}
-              className="rounded-md border border-border bg-card px-2 py-1 text-[10px] font-medium hover:bg-accent">
+              className="rounded-md border border-border bg-card px-2 py-1 text-micro font-medium hover:bg-accent">
               Export CSV
             </button>
           ) : undefined}
@@ -582,10 +588,10 @@ export function DashboardPage() {
                   <a href={t.id ? clusterPath(`/deployments/${encodeURIComponent(t.id)}`) : clusterPath(`/deployments?q=${encodeURIComponent(t.name)}&namespace=${encodeURIComponent(t.namespace)}&hide_platform=false`)} className="flex items-center gap-2 px-3 py-2 hover:bg-muted/40 transition-colors">
                     <div className="min-w-0 flex-1">
                       <div className="text-xs font-medium truncate">{t.name}</div>
-                      <div className="text-[10px] text-muted-foreground truncate">{t.namespace}{t.inventory_presence === "scaled_to_zero" ? " · scaled to zero" : t.inventory_presence === "unverified" ? " · presence unverified" : ""}{!t.id && " · namespace + name search"}</div>
+                      <div className="text-micro text-muted-foreground truncate">{t.namespace}{t.inventory_presence === "scaled_to_zero" ? " · scaled to zero" : t.inventory_presence === "unverified" ? " · presence unverified" : ""}{!t.id && " · namespace + name search"}</div>
                     </div>
-                    {t.critical > 0 && <span className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white" style={{ background: "var(--color-severity-critical)" }}>{t.critical}C</span>}
-                    {t.high > 0 && <span className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white" style={{ background: "var(--color-severity-high)" }}>{t.high}H</span>}
+                    {t.critical > 0 && <span className="rounded px-1.5 py-0.5 text-micro text-mono font-semibold text-white" style={{ background: "var(--color-severity-critical)" }}>{t.critical}C</span>}
+                    {t.high > 0 && <span className="rounded px-1.5 py-0.5 text-micro text-mono font-semibold text-white" style={{ background: "var(--color-severity-high)" }}>{t.high}H</span>}
                   </a>
                 </li>
               ))}
@@ -610,7 +616,7 @@ export function DashboardPage() {
       )}
 
       {clusterId && (
-        <section className="c-rise c-rise-1 space-y-4" data-testid="dashboard-operator-strip">
+        <section className="space-y-4" data-testid="dashboard-operator-strip">
           <StatGrid data-testid="dashboard-component-health">
             {COMPONENT_ROLES.map((role) => {
               const health = componentHealth.roles[role.id];
@@ -637,7 +643,7 @@ export function DashboardPage() {
             >
               <div className="mb-3 flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                  <div className="flex items-center gap-1.5 text-micro  text-muted-foreground">
                     <Database className="h-3 w-3" />
                     Organization Scanner DB
                   </div>
@@ -677,7 +683,7 @@ export function DashboardPage() {
               >
                 <div className="mb-3 flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+                    <div className="flex items-center gap-1.5 text-micro  text-muted-foreground">
                       <GitBranch className="h-3 w-3" />
                       Organization Federation
                     </div>
@@ -707,7 +713,7 @@ export function DashboardPage() {
       {scannerUnavailable && <ErrorState title="Could not refresh organization scanner health." action={<Button onClick={() => { void scanStatus.refetch(); void scannerWorkers.refetch(); void bundle.refetch(); }}>Retry</Button>} />}
       {federationUnavailable && <ErrorState title="Could not refresh organization federation health." action={<Button onClick={() => { void federationState.refetch(); if (federationState.data?.state === "master") void federationMembers.refetch(); }}>Retry</Button>} />}
       {clusterId && (
-        <section className="c-rise c-rise-2">
+        <section className="">
           <PlatformPanel
             data={platformData}
             loading={platform.isPending}
@@ -726,8 +732,8 @@ export function DashboardPage() {
   </div>;
   const trendsView = <div className="space-y-5">
       {/* Bottom row: distribution · CVE DB · trend */}
-      <section className="c-rise c-rise-5 grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Panel title="Severity Distribution" icon={<TriangleAlert className="h-3.5 w-3.5" />}>
+      <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <Panel title="Severity distribution" icon={<TriangleAlert className="h-3.5 w-3.5" />}>
           {sum.isError ? <ErrorState title="Could not load severity totals." /> : sum.isPending ? <p className="p-3 text-xs text-muted-foreground">Loading severity totals…</p> : severityCounts.length === 0 ? (
             <EmptyState title="No open findings" />
           ) : (
@@ -795,7 +801,7 @@ export function DashboardPage() {
                   <Row k="Bundle records" v={<span className="text-mono text-muted-foreground">{Number(bundle.data.record_count).toLocaleString()}</span>} />
                   <Row k="Signed"  v={
                     bundle.data.signed ? (
-                      <span className="rounded bg-[color-mix(in_oklab,var(--color-status-success)_18%,transparent)] px-1.5 py-0.5 text-[10px] text-[color:var(--color-status-success)] text-mono">cosign · {String(bundle.data.signer_identity ?? "—")}</span>
+                      <span className="rounded bg-[color-mix(in_oklab,var(--color-status-success)_18%,transparent)] px-1.5 py-0.5 text-micro text-[color:var(--color-status-success)] text-mono">cosign · {String(bundle.data.signer_identity ?? "—")}</span>
                     ) : <span className="text-muted-foreground">unsigned</span>
                   } />
                   <Row k="Imported" v={<span className="text-mono text-muted-foreground">{new Date(String(bundle.data.imported_at)).toLocaleString()}</span>} />
@@ -815,11 +821,11 @@ export function DashboardPage() {
         <Panel title="Loaded findings · 14 day trend" icon={<TrendingUp className="h-3.5 w-3.5" />}>
           <div className="px-2">
             <Sparkline data={trends.openSeries} width={300} height={80} color="var(--color-primary)" />
-            <div className="mt-2 flex items-center justify-between text-[10px] text-muted-foreground">
+            <div className="mt-2 flex items-center justify-between text-micro text-muted-foreground">
               <span>250 open findings ranked by risk · 14d ago</span>
               <span>today</span>
             </div>
-            <div className="mt-2 text-mono text-[11px]">
+            <div className="mt-2 text-mono text-micro">
               <span className="text-foreground">Records in loaded sample with first-seen dates in this window: </span>
               <span className="text-foreground">{trends.openSeries.reduce((a, b) => a + b, 0)}</span>
               <span className="text-muted-foreground"> · peak {Math.max(0, ...trends.openSeries)}</span>
@@ -830,36 +836,21 @@ export function DashboardPage() {
   </div>;
   return (
     <div className="space-y-5" data-testid="dashboard-page" data-cluster-id={clusterId ?? ""}>
-      <div className="space-y-1">
-        <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={includeSystem} aria-label="Include Constellation system workloads" onChange={(event) => {
-          const checked = event.target.checked;
-          setScopeParams((current) => { const next = new URLSearchParams(current); if (checked) next.set("include_system", "true"); else next.delete("include_system"); return next; });
-        }} />Include Constellation system workloads</label>
-        <p className="text-xs text-muted-foreground">Filters findings and vulnerability metrics. Inventory, hardening, policy coverage, and operational signals cover the whole cluster.</p>
-      </div>
       <PageHeader
-        title={scopeReady && cluster?.name ? `${cluster.name} — Dashboard` : "Security Dashboard"}
-        description={
-          clusterId
-            ? "Risk-first snapshot for this cluster. Click any tile to drill in."
-            : "A risk-first snapshot of your fleet. Click any tile to drill in."
-        }
+        title="Overview"
         actions={
           <DashboardReportDownload orgId={operator?.org_id} clusterId={clusterId} scopeReady={scopeReady} owner={operator?.org_id && operator.user_id ? findingOwner : undefined} />
         }
       />
-
-
-      <VerdictBanner status={clusterError || sum.isError ? "degraded" : !posture ? "info" : risk > 50 ? "critical" : risk > 20 ? "degraded" : "ok"}
+      <div data-testid="dashboard-summary"><VerdictBanner status={clusterError || sum.isError ? "degraded" : !posture ? "info" : risk > 50 ? "critical" : risk > 20 ? "degraded" : "ok"}
         title={clusterError ? "Cluster context unavailable" : !scopeReady ? clusterLoading ? "Resolving cluster" : "Select a resolved cluster" : sum.isError ? "Security summary unavailable" : !posture ? sum.isPending ? "Loading security posture" : "Security posture not reported" : `Security risk: ${risk}/100`}
-        detail={`Higher scores indicate more risk. Summary counts cover ${clusterId ? "this cluster" : "the organization"}; action items and finding trends use a bounded sample.`} />
-      <StatGrid data-testid="dashboard-summary">
-        <StatCard label="Risk score" value={posture?.security_score ?? "—"} href={scopeReady ? clusterPath("/dashboard?tab=posture") : undefined} />
-        <StatCard label="Critical" value={summaryData ? counts.critical : "—"} tone="critical" href={scopeReady ? clusterPath("/findings?severity=critical&lifecycle=open") : undefined} />
-        <StatCard label="High" value={summaryData ? counts.high : "—"} tone="high" href={scopeReady ? clusterPath("/findings?severity=high&lifecycle=open") : undefined} />
-        <StatCard label="Open" value={summaryData?.open_findings ?? "—"} href={scopeReady ? clusterPath("/findings?view=instances&lifecycle=open") : undefined} />
-        <StatCard label="Accepted" value={summaryData?.accepted_risks ?? "—"} href={scopeReady ? clusterPath("/findings?lifecycle=accepted") : undefined} />
-      </StatGrid>
+        numbers={[
+          { label: "critical", value: summaryData ? counts.critical.toLocaleString() : "—", tone: "critical", href: scopeReady ? clusterPath("/findings?severity=critical&lifecycle=open") : undefined, testId: "dashboard-critical" },
+          { label: "high", value: summaryData ? counts.high.toLocaleString() : "—", tone: "high", href: scopeReady ? clusterPath("/findings?severity=high&lifecycle=open") : undefined, testId: "dashboard-high" },
+          { label: "open", value: summaryData ? counts.open.toLocaleString() : "—", href: scopeReady ? clusterPath("/findings?view=instances&lifecycle=open") : undefined, testId: "dashboard-open" },
+          { label: "accepted", value: summaryData ? counts.accepted.toLocaleString() : "—", href: scopeReady ? clusterPath("/findings?lifecycle=accepted") : undefined, testId: "dashboard-accepted" },
+        ]}
+        detail={<div className="space-y-1"><p>Risk score is 0–100; higher means more risk.</p><p>Counts cover this cluster{includeSystem ? " including" : " excluding"} system workloads (header switch). Action items and trends use a bounded sample of the 250 highest-risk open findings.</p></div>} /></div>
       {scopeReady && sum.isError && <ErrorState title="Could not refresh dashboard totals." action={<Button onClick={() => void sum.refetch()}>Retry</Button>} />}
       {!scopeReady ? clusterError ? <ErrorState title="Could not resolve this cluster." action={<Button onClick={() => { void qc.invalidateQueries({ queryKey: ["clusters"] }); void qc.invalidateQueries({ queryKey: ["cluster", clusterId] }); }}>Retry</Button>} /> : <p role="status" className="text-sm text-muted-foreground">{clusterLoading ? "Resolving cluster…" : "Select a resolved cluster to view the dashboard."}</p> : <Tabs value={tab} onValueChange={setTab} items={[
         { value: "overview", label: "Overview", content: overviewView },
@@ -953,13 +944,13 @@ const COMPONENT_ROLES: Array<{ id: ComponentRoleID; label: string; icon: React.R
 function ExposedRow({ s, dir, clusterPath }: { s: import("@/api/client").ExposedService; dir: "ingress" | "egress"; clusterPath: (p: string) => string }) {
   return (
     <a href={clusterPath(`/network?tab=conversations&hours=168&from=${encodeURIComponent(dir === "ingress" ? "external" : s.workload)}&to=${encodeURIComponent(dir === "ingress" ? s.workload : "external")}&hide_platform=false`)} className="flex items-center gap-3 px-3 py-2 hover:bg-muted/40 transition-colors">
-      <span className={cn("shrink-0 rounded px-1.5 py-0.5 text-[9px] uppercase tracking-wide font-medium",
-        dir === "ingress" ? "bg-[color-mix(in_oklab,var(--color-severity-high)_16%,transparent)] text-[color:var(--color-severity-high)]" : "bg-muted text-muted-foreground")}>
+      <span className={cn("shrink-0 rounded px-1.5 py-0.5 text-micro  font-medium",
+        dir === "ingress" ? "border border-border text-foreground" : "bg-muted text-muted-foreground")}>
         {dir === "ingress" ? "in" : "out"}
       </span>
       <div className="min-w-0 flex-1">
         <div className="text-xs font-medium truncate">{s.namespace ? `${s.namespace}/` : ""}{s.name}</div>
-        <div className="text-[10px] text-muted-foreground truncate">
+        <div className="text-micro text-muted-foreground truncate">
           {s.external_peers} external {dir === "ingress" ? "clients" : "dests"}
           {s.protocols.length > 0 && ` · ${s.protocols.join("/")}`}
           {s.ports.length > 0 && ` · :${s.ports.slice(0, 6).join(", :")}`}
@@ -969,16 +960,16 @@ function ExposedRow({ s, dir, clusterPath }: { s: import("@/api/client").Exposed
       <div className="flex shrink-0 items-center gap-1">
         {s.policy_mode && (
           <span title={`Network policy mode: ${s.policy_mode}`}
-            className={cn("rounded px-1.5 py-0.5 text-[9px] uppercase tracking-wide font-medium",
-              s.policy_mode === "protect" ? "bg-[color-mix(in_oklab,var(--color-severity-low)_18%,transparent)] text-[color:var(--color-severity-low)]"
-                : s.policy_mode === "monitor" ? "bg-[color-mix(in_oklab,var(--color-severity-medium)_18%,transparent)] text-[color:var(--color-severity-medium)]"
-                : "bg-[color-mix(in_oklab,var(--color-severity-high)_18%,transparent)] text-[color:var(--color-severity-high)]")}>
+            className={cn("rounded px-1.5 py-0.5 text-micro  font-medium",
+              s.policy_mode === "protect" ? "bg-status-success/12 text-status-success"
+                : s.policy_mode === "monitor" ? "bg-status-warning/12 text-status-warning"
+                : "bg-status-info/12 text-status-info")}>
             {s.policy_mode}
           </span>
         )}
-        {s.critical > 0 && <span className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white" style={{ background: "var(--color-severity-critical)" }}>{s.critical}C</span>}
-        {s.high > 0 && <span className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white" style={{ background: "var(--color-severity-high)" }}>{s.high}H</span>}
-        {s.critical === 0 && s.high === 0 && <span className="text-[10px] text-muted-foreground">no crit/high</span>}
+        {s.critical > 0 && <span className="rounded px-1.5 py-0.5 text-micro text-mono font-semibold text-white" style={{ background: "var(--color-severity-critical)" }}>{s.critical}C</span>}
+        {s.high > 0 && <span className="rounded px-1.5 py-0.5 text-micro text-mono font-semibold text-white" style={{ background: "var(--color-severity-high)" }}>{s.high}H</span>}
+        {s.critical === 0 && s.high === 0 && <span className="text-micro text-muted-foreground">no crit/high</span>}
       </div>
     </a>
   );
@@ -997,13 +988,13 @@ function ModeMaturity({ label, groups, discover, monitor, protect }: {
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
-        <span className="text-[11px] font-medium text-foreground">{label}</span>
+        <span className="text-micro font-medium text-foreground">{label}</span>
 
       </div>
       <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-muted">
         {modes.map((m) => m.v > 0 && <div key={m.label} style={{ width: `${(m.v / total) * 100}%`, background: m.color }} title={`${m.label}: ${m.v}`} />)}
       </div>
-      <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+      <div className="flex items-center gap-3 text-micro text-muted-foreground">
         {modes.map((m) => <span key={m.label} className="flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full" style={{ background: m.color }} />{m.label} {m.v}</span>)}
       </div>
     </div>
@@ -1021,13 +1012,13 @@ function Panel({
   className?: string;
 }) {
   return (
-    <section className={cn("rounded-md border border-border bg-card", className)}>
-      <header className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+    <section className={cn("rounded-lg border border-border bg-card", className)}>
+      <header className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
         <div className="flex items-center gap-2 min-w-0">
           {icon && <span className="text-muted-foreground">{icon}</span>}
           <div className="min-w-0">
-            <h2 className="text-display text-sm font-semibold tracking-tight truncate">{title}</h2>
-            {subtitle && <p className="text-[10px] text-muted-foreground truncate">{subtitle}</p>}
+            <h2 className="truncate text-section-title font-semibold">{title}</h2>
+            {subtitle && <p className="truncate text-meta text-muted-foreground">{subtitle}</p>}
           </div>
         </div>
         {rightSlot}
@@ -1040,7 +1031,7 @@ function Panel({
 function Row({ k, v }: { k: string; v: React.ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-3">
-      <dt className="text-[10px] uppercase tracking-wider text-muted-foreground">{k}</dt>
+      <dt className="text-micro  text-muted-foreground">{k}</dt>
       <dd className="text-right">{v}</dd>
     </div>
   );
@@ -1073,7 +1064,7 @@ function PlatformPanel({
   ];
   return (
     <Panel
-      title="Platform Scan"
+      title="Platform scan"
       subtitle="Kubernetes control plane, kubelet, and platform add-on evidence for this cluster"
       icon={<ServerCog className="h-3.5 w-3.5" />}
       rightSlot={<Button size="sm" variant="outline" disabled={!canScan} onClick={onScan}>
@@ -1138,7 +1129,7 @@ function StatusChip({ value }: { value: string }) {
         : "var(--color-status-error)";
   return (
     <span
-      className="rounded px-1.5 py-0.5 text-[10px] uppercase tracking-wider"
+      className="rounded px-1.5 py-0.5 text-micro "
       style={{
         backgroundColor: `color-mix(in oklab, ${tone} 18%, transparent)`,
         color: tone,
@@ -1303,11 +1294,27 @@ function timeValue(iso?: string): number {
   return Number.isFinite(t) ? t : 0;
 }
 
-function prioritizeActionItems(items: Finding[]): Finding[] {
-  return items
-    .filter((f) => f.severity === "critical" || f.severity === "high")
-    .sort((a, b) => b.risk_score - a.risk_score)
-    .slice(0, 10);
+export interface ActionItem { finding: Finding; key: string; instances: number }
+
+/**
+ * Action items are advisories, not instances: one row per CVE/advisory id
+ * (title when there is no id), carrying how many open instances it has in the
+ * loaded sample. Ordered by the highest instance risk.
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function prioritizeActionItems(items: Finding[]): ActionItem[] {
+  const byId = new Map<string, ActionItem>();
+  for (const f of items) {
+    if (f.severity !== "critical" && f.severity !== "high") continue;
+    const key = f.external_id || `title:${f.title}`;
+    const current = byId.get(key);
+    if (!current) byId.set(key, { finding: f, key, instances: 1 });
+    else {
+      current.instances += 1;
+      if (f.risk_score > current.finding.risk_score) current.finding = f;
+    }
+  }
+  return [...byId.values()].sort((a, b) => b.finding.risk_score - a.finding.risk_score || b.instances - a.instances).slice(0, 10);
 }
 
 interface SeverityTrend {

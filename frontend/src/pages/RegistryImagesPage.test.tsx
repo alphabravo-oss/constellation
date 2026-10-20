@@ -14,6 +14,7 @@ import {
 } from "@/api/client";
 import { TestRouter } from "@/test/router";
 import { downloadCsv } from "@/lib/csv";
+import { chooseExport, exportAvailable } from "@/test/export-menu";
 import { RegistryImagesPage } from "./RegistryImagesPage";
 const scope = vi.hoisted(() => ({
   clusterId: "cluster",
@@ -121,18 +122,18 @@ async function render(search = "", prepare?: (client: QueryClient) => void) {
     ),
   );
 }
-async function settled(check: () => void) {
+async function settled(check: () => void | Promise<void>) {
   await vi.waitFor(
     async () => {
       await act(async () => {});
-      check();
+      await check();
     },
     { timeout: 3000 },
   );
 }
 const button = (text: string) =>
   [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-    (b) => b.textContent?.trim() === text,
+    (b) => b.textContent?.trim() === text || b.getAttribute("aria-label") === text || b.getAttribute("data-export-label") === text,
   )!;
 async function select(label: string, value: string) {
   await act(async () => {
@@ -180,7 +181,7 @@ it.each(["registry", "images", "wrong-registry", "wrong-page", "wrong-scope"])(
     expect(host.textContent).not.toContain("No repositories match");
     expect(host.querySelector("table")).toBeNull();
     expect(
-      host.querySelector(".app-stat-grid")?.textContent?.match(/—/g),
+      host.querySelector('[data-testid="verdict-numbers"]')?.textContent?.match(/—/g),
     ).toHaveLength(4);
     if (failed.includes("registry"))
       expect(registries.images).not.toHaveBeenCalled();
@@ -207,7 +208,7 @@ it("retains all tags, page CSV and real pagination history", async () => {
       order: "desc",
     }),
   );
-  await act(async () => button("Export this page CSV").click());
+  await chooseExport("This table", host);
   expect(vi.mocked(downloadCsv).mock.calls.at(-1)?.[2][0]).toContain(
     "one; two; three; four; fifth",
   );
@@ -234,8 +235,8 @@ it("uses matching summaries and exports exact filters beyond500", async () => {
     "?q=tail%25_&scan_status=scanned&severity=critical&sort=repository&order=asc&page=7#proof",
   );
   await settled(() => expect(host.querySelector("table")).not.toBeNull());
-  expect(host.querySelector(".app-stat-grid")?.textContent).toContain("900");
-  expect(host.querySelector(".app-stat-grid")?.textContent).toContain("200");
+  expect(host.querySelector('[data-testid="verdict-numbers"]')?.textContent).toContain("900");
+  expect(host.querySelector('[data-testid="verdict-numbers"]')?.textContent).toContain("200");
   expect(registries.images).toHaveBeenLastCalledWith("registry", {
     q: "tail%_",
     scan_status: "scanned",
@@ -245,7 +246,7 @@ it("uses matching summaries and exports exact filters beyond500", async () => {
     limit: 100,
     offset: 600,
   });
-  await act(async () => button("Export matching CSV").click());
+  await chooseExport("Matching rows", host);
   expect(registries.imagesCSV).toHaveBeenCalledWith("registry", {
     q: "tail%_",
     scan_status: "scanned",
@@ -316,8 +317,11 @@ it("controls server vulnerability ordering and restores URL sort", async () => {
     "registry",
     expect.objectContaining({ sort: "vulnerabilities", order: "desc" }),
   );
-  expect(host.querySelector("tbody tr")?.textContent).toContain(
-    "repo-source-first",
+  // The table stays mounted while the re-sorted page loads; wait for its rows.
+  await settled(() =>
+    expect(host.querySelector("tbody tr")?.textContent).toContain(
+      "repo-source-first",
+    ),
   );
   await act(async () => button("Vulnerabilities").click());
   await settled(() =>
@@ -337,20 +341,20 @@ it("controls server vulnerability ordering and restores URL sort", async () => {
 });
 it("blocks stale export during debounce and failed refresh", async () => {
   await render();
-  await settled(() =>
-    expect(button("Export matching CSV").disabled).toBe(false),
+  await settled(async () =>
+    expect(await exportAvailable("Matching rows", host)).toBe(true),
   );
   await input("new%_");
-  expect(button("Export matching CSV").disabled).toBe(true);
-  expect(host.querySelector("table")).toBeNull();
+  expect(await exportAvailable("Matching rows", host)).toBe(false);
+  expect(host.querySelector("tbody td[data-column-id]")).toBeNull();
   await settled(() =>
     expect(registries.images).toHaveBeenLastCalledWith(
       "registry",
       expect.objectContaining({ q: "new%_", offset: 0 }),
     ),
   );
-  await settled(() =>
-    expect(button("Export matching CSV").disabled).toBe(false),
+  await settled(async () =>
+    expect(await exportAvailable("Matching rows", host)).toBe(true),
   );
   vi.mocked(registries.images).mockRejectedValue(new Error("offline"));
   await act(async () => {
@@ -359,9 +363,9 @@ it("blocks stale export during debounce and failed refresh", async () => {
   await settled(() => expect(host.textContent).toContain("unavailable"));
   expect(host.querySelector("table")).toBeNull();
   expect(
-    host.querySelector(".app-stat-grid")?.textContent?.match(/—/g),
+    host.querySelector('[data-testid="verdict-numbers"]')?.textContent?.match(/—/g),
   ).toHaveLength(4);
-  expect(button("Export matching CSV").disabled).toBe(true);
+  expect(await exportAvailable("Matching rows", host)).toBe(false);
 });
 it("hides inventory after a failed registry refresh", async () => {
   await render();
@@ -374,7 +378,7 @@ it("hides inventory after a failed registry refresh", async () => {
     expect(host.textContent).toContain("Image inventory is unavailable"),
   );
   expect(host.querySelector("table")).toBeNull();
-  expect(button("Export matching CSV").disabled).toBe(true);
+  expect(await exportAvailable("Matching rows", host)).toBe(false);
 });
 it("offers truthful first-page recovery for empty later pages", async () => {
   vi.mocked(registries.images).mockImplementation(async (_id, p) =>
@@ -399,7 +403,7 @@ it.each([
   await render(`?${query}`);
   await settled(() => expect(host.textContent).toContain("unavailable"));
   expect(registries.images).not.toHaveBeenCalled();
-  expect(button("Export matching CSV").disabled).toBe(true);
+  expect(await exportAvailable("Matching rows", host)).toBe(false);
 });
 it.each(["missing", "foreign", "error", "loading"])(
   "requires settled exact cluster context: %s",
@@ -425,7 +429,7 @@ it("hides stored digest until disclosure", async () => {
     ]),
   );
   await render();
-  await settled(() => expect(host.querySelector("tbody")).not.toBeNull());
+  await settled(() => expect(host.querySelector('td[data-column-id="repository"]')).not.toBeNull());
   const cell = host.querySelector('td[data-column-id="repository"]')!;
   expect(cell.querySelector("span")?.textContent).toBe("team/app");
   expect(cell.querySelector("details")?.open).toBe(false);
@@ -435,10 +439,10 @@ it("hides stored digest until disclosure", async () => {
 it("reports matching CSV errors without success", async () => {
   vi.mocked(registries.imagesCSV).mockRejectedValue(new Error("offline"));
   await render();
-  await settled(() =>
-    expect(button("Export matching CSV").disabled).toBe(false),
+  await settled(async () =>
+    expect(await exportAvailable("Matching rows", host)).toBe(true),
   );
-  await act(async () => button("Export matching CSV").click());
+  await chooseExport("Matching rows", host);
   await settled(() =>
     expect(host.textContent).toContain("Matching CSV could not be exported"),
   );

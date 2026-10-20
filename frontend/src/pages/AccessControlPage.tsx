@@ -1,27 +1,19 @@
 import { useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ArrowRight, KeyRound, Pencil, Plus, ShieldCheck, Trash2, UserRoundCog, UsersRound, UserPlus } from "lucide-react";
+import { ArrowRight, Pencil, Plus, Trash2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 
-import {
-  accessControl,
-  accessControlAdmin,
-  authServersApi,
-  type AccessControlRole,
-  type AccessControlUser,
-  type AccessControlPermissionMatrixRow,
-  type AccessControlAPIToken,
-} from "@/api/client";
+import { accessControl, accessControlAdmin, authServersApi, type AccessControlRole, type AccessControlUser, type AccessControlPermissionMatrixRow, type AccessControlAPIToken } from "@/api/client";
 import { PageHeader, PageContainer } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
 import { Collapse } from "@/components/ui/collapse";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/ui/states";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { StatusPill } from "@/components/ui/status-pill";
 
 const userColumns: Column<AccessControlUser>[] = [
   {
@@ -41,7 +33,7 @@ const userColumns: Column<AccessControlUser>[] = [
     cell: (u) => <div className="flex flex-wrap gap-1">{u.roles.map((role) => <Badge key={role}>{role}</Badge>)}</div>,
   },
   { id: "status", header: "Status", exportValue: (u) => [u.status, u.locked ? "locked" : "", u.password_reset_required ? "reset required" : ""].filter(Boolean).join("; "), kind: "status", size: 176, minSize: 144, maxSize: 224, wrap: true, cell: (u) => <div className="flex flex-wrap gap-1"><Status value={u.status} />{u.locked && <Status value="locked" />}{u.password_reset_required && <Status value="reset required" />}</div> },
-  { id: "last_seen", header: "Last Seen", exportValue: (u) => u.last_login_at ?? "", kind: "date", size: 224, minSize: 208, maxSize: 240, cell: (u) => formatDate(u.last_login_at), className: "text-xs text-muted-foreground" },
+  { id: "last_seen", header: "Last seen", exportValue: (u) => u.last_login_at ?? "", kind: "date", size: 224, minSize: 208, maxSize: 240, cell: (u) => formatDate(u.last_login_at), className: "text-xs text-muted-foreground" },
 ];
 
 const roleColumns: Column<AccessControlRole>[] = [
@@ -144,7 +136,7 @@ export function AccessControlPage() {
   ];
 
   if (q.isPending) return <p className="text-sm text-muted-foreground">Loading access control...</p>;
-  if (q.isError || !q.data) return <PageContainer><PageHeader title="Access Control" description="Users, roles and scoped access for your organization." /><VerdictBanner status="degraded" title="Access inventory unavailable" /><ErrorState error={q.error} action={<Button onClick={() => void q.refetch()}>Retry</Button>} /></PageContainer>;
+  if (q.isError || !q.data) return <PageContainer><PageHeader title="Access control" description="Users, roles and scoped access for your organization." /><VerdictBanner status="degraded" title="Access inventory unavailable" /><ErrorState error={q.error} action={<Button onClick={() => void q.refetch()}>Retry</Button>} /></PageContainer>;
   const data = q.data;
 
   const tabs = [
@@ -158,7 +150,7 @@ export function AccessControlPage() {
             <button
               type="button"
               onClick={() => navigate({ href: "/settings/access/users/new" })}
-              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:opacity-90"
+              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-brand px-3 text-meta font-medium text-brand-foreground transition-colors hover:bg-brand/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
             >
               <UserPlus className="h-3.5 w-3.5" /> New user
             </button>
@@ -173,7 +165,7 @@ export function AccessControlPage() {
     },
     {
       value: "roles",
-      label: "Roles & Permissions",
+      label: "Roles and permissions",
       count: roles.length,
       content: (
         <div className="space-y-6">
@@ -240,7 +232,7 @@ export function AccessControlPage() {
     },
     {
       value: "sso",
-      label: "SSO / Auth",
+      label: "Single sign-on",
       count: authServersQuery.isSuccess ? authProviders.length : undefined,
       content: (
         <Card
@@ -303,7 +295,7 @@ export function AccessControlPage() {
     },
     {
       value: "service-accounts",
-      label: "Service Accounts",
+      label: "Service accounts",
       count: data?.service_accounts?.length,
       content: (
         <Card
@@ -366,17 +358,12 @@ export function AccessControlPage() {
   return (
     <PageContainer>
       <PageHeader
-        title="Access Control"
+        title="Access control"
         description="Who can do what in your organization — users, roles, scoped bindings, SSO, and service accounts."
       />
 
-      <VerdictBanner status="info" title={`${data.summary.users_total} users and ${data.summary.role_bindings_total} scoped bindings reported`} detail="Review roles and bindings to understand organization access." actions={<Button variant="outline" disabled={q.isFetching} onClick={() => void q.refetch()}>Refresh</Button>} />
-      <StatGrid>
-        <StatCard label="Users" value={data?.summary.users_total ?? 0} icon={<UsersRound className="h-3.5 w-3.5" />} />
-        <StatCard label="Roles" value={data?.summary.roles_total ?? 0} icon={<ShieldCheck className="h-3.5 w-3.5" />} />
-        <StatCard label="Bindings" value={data?.summary.role_bindings_total ?? 0} icon={<UserRoundCog className="h-3.5 w-3.5" />} />
-        <StatCard label="API tokens" value={data?.summary.api_tokens_total ?? 0} icon={<KeyRound className="h-3.5 w-3.5" />} href="/settings/api-tokens" />
-      </StatGrid>
+      <VerdictBanner status="info" title={`${data.summary.users_total} users and ${data.summary.role_bindings_total} scoped bindings reported`} detail="Review roles and bindings to understand organization access." actions={<Button variant="outline" disabled={q.isFetching} onClick={() => void q.refetch()}>Refresh</Button>} numbers={[{ label: "Users", value: data?.summary.users_total ?? 0 }, { label: "Roles", value: data?.summary.roles_total ?? 0 }, { label: "Bindings", value: data?.summary.role_bindings_total ?? 0 }, { label: "API tokens", value: data?.summary.api_tokens_total ?? 0, href: "/settings/api-tokens" }]} />
+      
 
       <Tabs value={tab} onValueChange={setTab} items={tabs} />
     </PageContainer>
@@ -384,18 +371,18 @@ export function AccessControlPage() {
 }
 
 function Badge({ children }: { children: React.ReactNode }) {
-  return <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{children}</span>;
+  return <span className="rounded-md bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">{children}</span>;
 }
 
 function Status({ value }: { value: string }) {
-  const cls = value === "active" || value === "enabled" || value === "configured"
-    ? "bg-[color:var(--color-status-success)]/15 text-[color:var(--color-status-success)]"
+  const tone: "success" | "warning" | "error" | "info" | "pending" | "neutral" = value === "active" || value === "enabled" || value === "configured"
+    ? "success"
     : value === "rotation_due" || value === "planned" || value === "medium" || value === "pending_rotation" || value === "restricted"
-      ? "bg-[color:var(--color-status-warning)]/15 text-[color:var(--color-status-warning)]"
+      ? "warning"
     : value === "disabled" || value === "expired" || value === "high" || value === "critical" || value === "suspended" || value === "locked"
-        ? "bg-[color:var(--color-status-error)]/15 text-[color:var(--color-status-error)]"
-        : "bg-muted text-muted-foreground";
-  return <span className={`rounded-md px-2 py-1 text-xs ${cls}`}>{value}</span>;
+        ? "error"
+        : "neutral";
+  return <StatusPill label={value} tone={tone} />;
 }
 
 function formatDate(value: string) {

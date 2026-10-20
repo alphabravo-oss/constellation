@@ -2,15 +2,15 @@ import type { Severity } from "@/api/client";
 
 /**
  * Background+text utility classes for a severity badge / chip.
- * Uses OKLCH-based tokens defined in index.css; bg is a translucent wash, text
- * is the saturated value — ensures AA contrast against the dark surface.
+ * Kit severity ramp (HSL light/dark pairs): a quiet wash with the severity
+ * text color, AA on both themes.
  */
 export const severityBg: Record<Severity, string> = {
-  info:     "bg-[color-mix(in_oklab,var(--color-severity-info)_18%,transparent)] text-[color:var(--color-severity-info)] ring-1 ring-inset ring-[color-mix(in_oklab,var(--color-severity-info)_36%,transparent)]",
-  low:      "bg-[color-mix(in_oklab,var(--color-severity-low)_18%,transparent)] text-[color:var(--color-severity-low)] ring-1 ring-inset ring-[color-mix(in_oklab,var(--color-severity-low)_36%,transparent)]",
-  medium:   "bg-[color-mix(in_oklab,var(--color-severity-medium)_18%,transparent)] text-[color:var(--color-severity-medium)] ring-1 ring-inset ring-[color-mix(in_oklab,var(--color-severity-medium)_36%,transparent)]",
-  high:     "bg-[color-mix(in_oklab,var(--color-severity-high)_18%,transparent)] text-[color:var(--color-severity-high)] ring-1 ring-inset ring-[color-mix(in_oklab,var(--color-severity-high)_36%,transparent)]",
-  critical: "bg-[color-mix(in_oklab,var(--color-severity-critical)_22%,transparent)] text-[color:var(--color-severity-critical)] ring-1 ring-inset ring-[color-mix(in_oklab,var(--color-severity-critical)_48%,transparent)]",
+  info:     "border border-severity-info/45 text-severity-info",
+  low:      "border border-severity-low/45 text-severity-low",
+  medium:   "border border-severity-medium/45 text-severity-medium",
+  high:     "border border-severity-high/45 text-severity-high",
+  critical: "border border-severity-critical/45 text-severity-critical",
 };
 
 export function severityOrder(sev: Severity): number {

@@ -8,19 +8,27 @@ type NeuVectorCompatibilityChip = {
 type NeuVectorCompatibilityChipsProps = {
   items: NeuVectorCompatibilityChip[];
   testId?: string;
+  /**
+   * NeuVector mapping hints are migration material: they render only in the
+   * migration surfaces (Settings › NeuVector migration, the switchboard),
+   * never in primary product views (C1).
+   */
+  migration?: boolean;
 };
 
 export function NeuVectorCompatibilityChips({
   items,
   testId = "neuvector-compatibility",
+  migration = false,
 }: NeuVectorCompatibilityChipsProps) {
+  if (!migration) return null;
   return (
     <section className="flex flex-wrap gap-2" data-testid={testId}>
       {items.map((item) => {
-        const className = "rounded-md border border-primary/20 bg-primary/5 px-2.5 py-1 text-xs font-medium text-primary";
+        const className = "inline-flex h-7 items-center rounded-full border border-border px-2.5 text-meta font-medium text-foreground";
         if (item.to) {
           return (
-            <Link key={item.label} to="." href={item.to} className={`${className} hover:border-primary/40 hover:bg-primary/10`}>
+            <Link key={item.label} to="." href={item.to} className={`${className} hover:bg-accent`}>
               {item.label}
             </Link>
           );

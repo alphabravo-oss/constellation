@@ -11,6 +11,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { networkRules, type NetworkRuleInventoryResponse } from "@/api/client";
 import { downloadCsv } from "@/lib/csv";
 import { NetworkRulesPage } from "./NetworkRulesPage";
+import { chooseExport } from "@/test/export-menu";
+import { setIncludeSystemPreference } from "@/lib/system-scope";
 import { ruleInventory, ruleRow } from "./network-rule-test-fixture";
 
 const scope = vi.hoisted(() => ({
@@ -58,6 +60,8 @@ beforeEach(() => {
     truncated: false,
   });
 });
+// Rule inventories follow the header "System workloads" scope; these tests use the full inventory.
+beforeEach(() => setIncludeSystemPreference(true));
 afterEach(() => {
   act(() => root?.unmount());
   client?.clear();
@@ -159,7 +163,7 @@ it("starts in full server evaluation order and never treats first filtered row a
     )?.disabled,
   ).toBe(true);
   await input('input[aria-label="Search network rules"]', "lower");
-  await settle(() => expect(host.querySelectorAll("tbody tr")).toHaveLength(1));
+  await settle(() => expect(host.querySelectorAll('[data-testid="network-rules-table"] tbody tr')).toHaveLength(1));
   const move = host.querySelector<HTMLButtonElement>(
     'button[title="Move to top (evaluate first)"]',
   )!;
@@ -231,11 +235,7 @@ it("exports matching server scope with a fresh post-response guard and distingui
     "/clusters/cluster/network-rules?page=2&action=deny&sort=matches&order=desc",
   );
   await ready();
-  await act(async () =>
-    [...host.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.textContent === "Export matching CSV")!
-      .click(),
-  );
+  await chooseExport("Matching rows", host);
   await settle(() =>
     expect(host.textContent).toContain(
       "Exported all 205 matching records across pages",
@@ -262,7 +262,7 @@ it("exports matching server scope with a fresh post-response guard and distingui
   expect(current()).toBe(false);
   const pageButton = [
     ...host.querySelectorAll<HTMLButtonElement>("button"),
-  ].find((button) => button.textContent === "Export page CSV");
+  ].find((button) => button.textContent === "Export page CSV" || button.getAttribute("aria-label") === "Export page CSV" || button.getAttribute("data-export-label") === "Export page CSV");
   await act(async () => pageButton?.click());
   expect(downloadCsv).not.toHaveBeenCalled();
 });
@@ -288,7 +288,7 @@ it.each(["scope", "summary", "null-row", "pair", "role", "duplicate"])(
     await settle(() =>
       expect(host.textContent).toContain("Could not load network rules"),
     );
-    expect(host.querySelector("table")).toBeNull();
+    expect(host.querySelector("tbody td[data-column-id]")).toBeNull();
     expect(host.querySelectorAll('a[title="Edit"]')).toHaveLength(0);
   },
 );
@@ -304,7 +304,7 @@ it("does not render stale cached rows or successful zero counts after a failed r
   await settle(() =>
     expect(host.textContent).toContain("Could not load network rules"),
   );
-  expect(host.querySelector("table")).toBeNull();
+  expect(host.querySelector("tbody td[data-column-id]")).toBeNull();
   expect(host.textContent).not.toContain("No matching network rules");
   expect(host.textContent).not.toContain("private details");
 });
@@ -320,7 +320,7 @@ it("does not query unresolved clusters or expose another operator cached table",
     () => new Promise<NetworkRuleInventoryResponse>(() => {}),
   );
   await act(async () => root.render(tree()));
-  expect(host.querySelector("table")).toBeNull();
+  expect(host.querySelector("tbody td[data-column-id]")).toBeNull();
   expect(
     client.getQueriesData({
       queryKey: ["network-rules-inventory", "org:other"],

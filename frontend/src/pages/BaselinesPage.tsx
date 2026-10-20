@@ -5,7 +5,7 @@ import { baselines as baselinesApi, type BaselineSummary, type BaselineMode, typ
 import { PageHeader } from "@/components/ui/page";
 import { StatusPill, ModePill } from "@/components/ui/status-pill";
 import { DataTable, type Column as TableColumn } from "@/components/ui/data-table";
-import { StatGrid, StatCard } from "@/components/ui/stat-card";
+import { usePlatformComponentVisibility } from "@/hooks/usePlatformComponentVisibility";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { ErrorState, LoadingState } from "@/components/ui/states";
@@ -15,9 +15,10 @@ import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext"
 import { clusterCacheReady } from "@/lib/cluster-evidence";
 import { INVENTORY_MAX_PAGE } from "@/lib/inventory-pagination";
 import { cn } from "@/lib/cn";
-import { useInventoryRoute, ScanInventoryExport } from "./inventory-workspace";
+import { InventorySearch, useInventoryRoute, useScanInventoryExport } from "./inventory-workspace";
 import { useBaselineScope, baselinePath } from "./baselines/context";
 import { BASELINE_INVENTORY_SORTS, baselineInventoryMatches } from "./baselines/inventory";
+import { Checkbox, Select } from "@/components/ui/form";
 
 const COLUMNS: Array<{ mode: BaselineMode; title: string; tagline: string; tone: "info" | "warning" | "success"; icon: typeof Activity }> = [
  { mode: "learn", title: "Learn", tagline: "Configured to learn observed processes.", tone: "info", icon: Activity },
@@ -36,7 +37,8 @@ export function BaselinesPage() {
   const namespace = (params.get("namespace") ?? "").trim();
   const rawMode = params.get("mode") ?? "";
   const mode = rawMode === "all" ? "" : rawMode;
-  const hidePlatform = params.get("hide_platform") === "true";
+  const [platformHidden] = usePlatformComponentVisibility();
+  const hidePlatform = params.has("hide_platform") ? params.get("hide_platform") === "true" : platformHidden;
   const sort = params.get("sort") ?? "workload";
   const order = params.get("order") ?? "asc";
   const rawPage = params.get("page");
@@ -82,23 +84,23 @@ export function BaselinesPage() {
     { id: "owners", header: "Inventory owners", kind: "count", cell: p => p.owner_ambiguous ? `${p.owner_count} (ambiguous)` : p.owner_count, exportValue: p => p.owner_count },
     { id: "configured", header: "Mode state", kind: "status", cell: p => p.configured ? "Configured" : "Default learn", exportValue: p => p.configured },
   ];
+  const matching = useScanInventoryExport({ context, disabled: !available, download: exportCSV });
+  const toolbar = <>
+    <InventorySearch value={route.query} onChange={route.setQuery} label="Search workloads" />
+    <Select aria-label="Namespace" value={namespace} onChange={e => route.update({ namespace: e.target.value })} className="h-9 max-w-48"><option value="">Any namespace</option>{(data?.namespaces ?? []).filter(Boolean).map(ns => <option key={ns}>{ns}</option>)}{namespace && !data?.namespaces.includes(namespace) && <option>{namespace}</option>}</Select>
+    <Select aria-label="Mode" value={mode} onChange={e => route.update({ mode: e.target.value })} className="h-9"><option value="">Any mode</option>{COLUMNS.map(c => <option key={c.mode} value={c.mode}>{c.title}</option>)}</Select>
+    {(route.query || namespace || mode) && <Button variant="ghost" onClick={() => route.update({ q: null, namespace: null, mode: null, hide_platform: null, sort: null, order: null })}>Reset filters</Button>}
+  </>;
   const pageControls = data && <Pager page={route.page} pageSize={100} total={data.total} rowsOnPage={profiles.length} onPage={route.setPage} />;
   return <div className="space-y-5" data-testid="baselines-page" data-cluster-id={clusterId ?? ""}>
-    <PageHeader title="Process Baselines" description="Review configured process profiles and observed execution evidence for this cluster." actions={<Button disabled={!scopeReady || !owner || invalid || q.isFetching || route.debouncing} onClick={retry}>Refresh</Button>} />
-    <VerdictBanner status={data ? "info" : "degraded"} title={data ? `${data.total.toLocaleString()} matching workload profiles` : "Process profile evidence unavailable"} detail={<><p>Modes describe configured behavior. Agent activity and enforcement must be verified separately.</p><p>Totals cover every matching retained process profile, including saved profiles and authored rules without a current inventory owner. Observed process and 24-hour alert/block counts use all retained process events for the workload and exact owned pods; they do not establish collection completeness. Detail pages retain their separately labeled latest-1,000-event sample. Lifecycle cards cover the current server page and preview up to five process names. Matching CSV exports up to 100,000 profiles across pages; page CSV uses selected visible columns.</p>{data && <p>{data.summary.processes.toLocaleString()} observed process identities · {data.summary.alerts_24h.toLocaleString()} retained 24-hour alerts · {data.summary.blocks_24h.toLocaleString()} retained 24-hour blocks · {data.summary.rules.toLocaleString()} configured rules · {data.summary.ambiguous_owners.toLocaleString()} ambiguous inventory owners across matching profiles.</p>}</>} />
-    <StatGrid><StatCard label="Matching profiles" value={data?.total ?? "—"} />{COLUMNS.map(c => <StatCard key={c.mode} label={c.title} value={data?.summary[c.mode] ?? "—"} />)}</StatGrid>
-    <div className="flex flex-wrap gap-3">
-      <label className="text-sm">Search workloads<input aria-label="Search workloads" value={route.query} onChange={e => route.setQuery(e.target.value)} className="ml-2 rounded border border-border bg-background px-3 py-2" /></label>
-      <label className="text-sm">Namespace<select aria-label="Namespace" value={namespace} onChange={e => route.update({ namespace: e.target.value })} className="ml-2 rounded border border-border bg-background px-3 py-2"><option value="">All namespaces</option>{(data?.namespaces ?? []).filter(Boolean).map(ns => <option key={ns}>{ns}</option>)}{namespace && !data?.namespaces.includes(namespace) && <option>{namespace}</option>}</select></label>
-      <label className="text-sm">Mode<select aria-label="Mode" value={mode} onChange={e => route.update({ mode: e.target.value })} className="ml-2 rounded border border-border bg-background px-3 py-2"><option value="">All modes</option>{COLUMNS.map(c => <option key={c.mode} value={c.mode}>{c.title}</option>)}</select></label>
-      <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={hidePlatform} onChange={e => route.update({ hide_platform: String(e.target.checked) })} /> Hide platform workloads</label>
-      <Button variant="outline" onClick={() => route.update({ q: null, namespace: null, mode: null, hide_platform: null, sort: null, order: null })}>Reset filters</Button>
-    </div>
+    <PageHeader title="Process baselines" description="Configured process profiles and observed execution evidence." actions={<Button disabled={!scopeReady || !owner || invalid || q.isFetching || route.debouncing} onClick={retry}>Refresh</Button>} />
+    <VerdictBanner status={data ? "info" : "degraded"} title={data ? `${data.total.toLocaleString()} matching workload profiles` : "Process profile evidence unavailable"} numbers={COLUMNS.map(c => ({ label: c.title.toLowerCase(), value: data?.summary[c.mode] ?? "—" }))} detail={<><p>Modes describe configured behavior. Agent activity and enforcement must be verified separately.</p><p>Totals cover every matching retained process profile, including saved profiles and authored rules without a current inventory owner. Observed process and 24-hour alert/block counts use all retained process events for the workload and exact owned pods; they do not establish collection completeness. Detail pages retain their separately labeled latest-1,000-event sample. Lifecycle cards cover the current server page and preview up to five process names. Matching CSV exports up to 100,000 profiles across pages; page CSV uses selected visible columns.</p>{data && <p>{data.summary.processes.toLocaleString()} observed process identities · {data.summary.alerts_24h.toLocaleString()} retained 24-hour alerts · {data.summary.blocks_24h.toLocaleString()} retained 24-hour blocks · {data.summary.rules.toLocaleString()} configured rules · {data.summary.ambiguous_owners.toLocaleString()} ambiguous inventory owners across matching profiles.</p>}</>} />
+    <p className="sr-only" data-testid="baselines-summary">Matching profiles <span className="app-stat-value">{data?.total ?? "—"}</span>{COLUMNS.map(c => <span key={c.mode}> {c.title} <span className="app-stat-value">{data?.summary[c.mode] ?? "—"}</span></span>)}</p>
     {!scopeReady || !owner ? scope.error || !owner ? <ErrorState title={owner ? "Could not resolve this cluster." : "Sign in to load process profiles."} action={<Button onClick={retry}>Retry</Button>} /> : <LoadingState label="Resolving cluster…" /> : invalid ? <ErrorState title="Choose supported profile filters, sorting, and a valid page." /> : q.isError || invalidResponse ? <ErrorState title="Could not load or refresh process profiles." action={<Button onClick={retry}>Retry</Button>} /> : !data ? <LoadingState label="Loading profiles…" /> : <>
-      <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs text-muted-foreground">{data.total.toLocaleString()} matching profiles · {profiles.length} on page {route.page + 1}</p><ScanInventoryExport context={context} disabled={!available} download={exportCSV} /></div>
+      <p className="sr-only">{data.total.toLocaleString()} matching profiles · {profiles.length} on page {route.page + 1}</p>{matching.status}
       <Tabs value={["inventory", "lifecycle"].includes(tab) ? tab : "inventory"} onValueChange={setTab} items={[
-        { value: "inventory", label: "Inventory", content: <DataTable rows={profiles} columns={columns} rowKey={p => p.row_id} rowTestId={p => `baselines-card-${p.workload_id}`} testId="baselines-table" preferencesKey="process-baselines" defaultHiddenColumnIds={["namespace", "alerts", "blocks", "learn_started", "platform-role", "owners", "configured"]} manualSorting sort={{ id: sort, dir: order as "asc" | "desc" }} onSortChange={next => route.update({ sort: next?.id ?? "workload", order: next?.dir ?? (sort === "workload" && order === "asc" ? "desc" : "asc") })} pagination={false} exportFileName="process-baselines-page" exportLabel="Export this page CSV" emptyState={<p>No profiles match these filters or page.</p>} /> },
-        { value: "lifecycle", label: "Lifecycle", content: <div className="space-y-4"><p className="text-xs text-muted-foreground">Current server page: {profiles.length} of {data.total.toLocaleString()} matching profiles. Mode totals above cover all matches.</p><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={highlight} onChange={e => setHighlight(e.target.checked)} /> Highlight learning profiles observed for at least 14 days with no new process in the last 24 hours</label><p className="text-xs text-muted-foreground">A review hint based on retained observations. Nothing is promoted automatically.</p><section className="grid gap-4 lg:grid-cols-3" data-testid="baselines-columns">{COLUMNS.map(c => <Column key={c.mode} {...c} Icon={c.icon} profiles={profiles.filter(p => p.mode === c.mode)} highlightIDs={highlight ? profiles.filter(qualifiesForAutoPromote).map(p => p.workload_id) : []} loading={false} clusterId={clusterId!} />)}</section></div> },
+        { value: "inventory", label: "Inventory", content: <DataTable rows={profiles} columns={columns} rowKey={p => p.row_id} rowTestId={p => `baselines-card-${p.workload_id}`} testId="baselines-table" preferencesKey="process-baselines" defaultHiddenColumnIds={["namespace", "alerts", "blocks", "learn_started", "platform-role", "owners", "configured"]} manualSorting sort={{ id: sort, dir: order as "asc" | "desc" }} onSortChange={next => route.update({ sort: next?.id ?? "workload", order: next?.dir ?? (sort === "workload" && order === "asc" ? "desc" : "asc") })} pagination={false} toolbar={toolbar} exportOptions={[matching.option]} exportFileName="process-baselines-page" exportLabel="This page" emptyState={<p>No profiles match these filters or page.</p>} /> },
+        { value: "lifecycle", label: "Lifecycle", content: <div className="space-y-4"><p className="text-xs text-muted-foreground">Current server page: {profiles.length} of {data.total.toLocaleString()} matching profiles. Mode totals above cover all matches.</p><label className="flex items-center gap-2 text-sm"><Checkbox checked={highlight} onChange={e => setHighlight(e.target.checked)} aria-label="Highlight promotion candidates" /> Highlight learning profiles observed for at least 14 days with no new process in the last 24 hours</label><p className="text-xs text-muted-foreground">A review hint based on retained observations. Nothing is promoted automatically.</p><section className="grid gap-4 lg:grid-cols-3" data-testid="baselines-columns">{COLUMNS.map(c => <Column key={c.mode} {...c} Icon={c.icon} profiles={profiles.filter(p => p.mode === c.mode)} highlightIDs={highlight ? profiles.filter(qualifiesForAutoPromote).map(p => p.workload_id) : []} loading={false} clusterId={clusterId!} />)}</section></div> },
       ]} />
       {profiles.length === 0 && route.page > 0 && <Button onClick={() => route.setPage(0)}>First page</Button>}
       {pageControls}
@@ -136,7 +138,7 @@ function Column({
             <h2 className="text-sm font-semibold">{title}</h2>
             <StatusPill label={String(profiles.length)} tone={tone} dot={false} uppercase={false} />
           </div>
-          <p className="mt-0.5 text-[11px] text-muted-foreground">{tagline}</p>
+          <p className="mt-0.5 text-micro text-muted-foreground">{tagline}</p>
         </div>
       </header>
       <div className="flex-1 space-y-2 p-3" data-testid={`baselines-column-cards-${mode}`}>
@@ -186,7 +188,7 @@ function ProfileCard({
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="truncate text-[11px] uppercase tracking-wider text-muted-foreground">
+          <p className="truncate text-micro  text-muted-foreground">
             {profile.namespace}
           </p>
           <p className="truncate text-sm font-semibold">{profile.name}</p>
@@ -194,13 +196,13 @@ function ProfileCard({
         <ModePill mode={profile.mode} />
       </div>
 
-      <dl className="mt-3 grid grid-cols-3 gap-2 text-[11px]">
+      <dl className="mt-3 grid grid-cols-3 gap-2 text-micro">
         <Stat label="Procs" value={profile.learned_processes_count} />
         <Stat label="Alerts · retained 24h" value={profile.monitored_alerts_24h} tone={profile.monitored_alerts_24h > 0 ? "warning" : "muted"} />
         <Stat label="Blocks · retained 24h" value={profile.enforced_blocks_24h} tone={profile.enforced_blocks_24h > 0 ? "error" : "muted"} />
       </dl>
 
-      <div className="mt-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+      <div className="mt-2 flex items-center gap-1.5 text-micro text-muted-foreground">
         <Clock3 className="h-3 w-3" aria-hidden />
         <span>Learn started {age}</span>
       </div>
@@ -211,7 +213,7 @@ function ProfileCard({
           {top.map((p, index) => (
             <span
               key={`${p}:${index}`}
-              className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground"
+              className="rounded bg-muted px-1.5 py-0.5 text-micro font-mono text-muted-foreground"
             >
               {p}
             </span>
@@ -220,7 +222,7 @@ function ProfileCard({
       )}
 
       {highlight && (
-        <span className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-primary">
+        <span className="absolute right-2 top-2 inline-flex items-center gap-1 rounded-full bg-primary/15 px-1.5 py-0.5 text-micro font-semibold  text-primary">
           <Sparkles className="h-2.5 w-2.5" aria-hidden /> Ready
         </span>
       )}

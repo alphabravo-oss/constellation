@@ -1,29 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import {
-  ArrowLeft,
-  Save,
-  Download,
-  CloudUpload,
-  Clock,
-  RefreshCw,
-  Calendar,
-  CircleCheck,
-  TriangleAlert,
-  CirclePlay,
-  Pencil,
-  Cloud,
-  HardDrive,
-} from "lucide-react";
+import { Save, Download, CloudUpload, Clock, RefreshCw, Calendar, CircleCheck, TriangleAlert, CirclePlay, Pencil, Cloud, HardDrive } from "lucide-react";
 
-import {
-  backupsApi,
-  type BackupSummary,
-  type BackupSchedule,
-  type BackupInventoryParams,
-} from "@/api/client";
+import { backupsApi, type BackupSummary, type BackupSchedule, type BackupInventoryParams } from "@/api/client";
 import { PageHeader } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { StatCard, StatGrid } from "@/components/ui/stat-card";
@@ -36,16 +17,8 @@ import { TextInput, Select } from "@/components/ui/form";
 import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
 import { useExportGuard, exportQueryReady } from "@/hooks/useExportGuard";
 import { INVENTORY_MAX_PAGE } from "@/lib/inventory-pagination";
-import {
-  useInventoryRoute,
-  ScanInventoryExport,
-  ScanInventoryContinuation,
-} from "./inventory-workspace";
-import {
-  backupFiltersValid,
-  backupInventoryValid,
-  backupRowValid,
-} from "./backup-inventory";
+import { useInventoryRoute, ScanInventoryExport, ScanInventoryContinuation } from "./inventory-workspace";
+import { backupFiltersValid, backupInventoryValid, backupRowValid } from "./backup-inventory";
 
 export function BackupPage() {
   const qc = useQueryClient();
@@ -347,20 +320,12 @@ export function BackupPage() {
   return (
     <div className="space-y-6" data-testid="backup-page">
       <PageHeader
-        eyebrow={
-          <Link
-            to="/settings"
-            className="inline-flex items-center gap-1 font-normal normal-case tracking-normal hover:text-foreground"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" aria-hidden /> Back to Settings
-          </Link>
-        }
         title={
           <span className="flex items-center gap-2">
             <Save className="h-5 w-5" aria-hidden /> Backup &amp; Restore
           </span>
         }
-        description="Signed, portable full-org backups. Restore on any Constellation instance."
+        description="Signed, portable full-org backups. restore on any Constellation instance."
         actions={
           <Button
             variant="primary"

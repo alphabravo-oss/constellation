@@ -22,8 +22,8 @@ export function RoutingConfigFormPage() {
   const conflict = !!initial && q.data?.revision !== initial.revision;
   return <div className="space-y-6" data-testid="routing-config-form-page"><PageHeader title="Edit notification routing" description="Change the default destination or edit the complete organization-wide routing YAML. Save persists the entire document."
     backLink={<Link to="." href={backTo} className="inline-flex items-center gap-2"><ArrowLeft className="h-4 w-4" /> Integrations</Link>} />
-    {!initial ? q.isPending || q.isSuccess && q.isFetching || q.isSuccess && validRoutingSnapshot(q.data) ? <LoadingState label="Loading saved routing…" /> : <ErrorState title="Could not load saved routing. No editable document is available." action={<Button onClick={() => void q.refetch()}>Retry</Button>} /> : <>
-      {q.isError && <ErrorState title="Could not refresh routing. Your draft is preserved. Refresh before saving." action={<Button onClick={() => void q.refetch()}>Retry</Button>} />}
+    {!initial ? q.isPending || q.isSuccess && q.isFetching || q.isSuccess && validRoutingSnapshot(q.data) ? <LoadingState label="Loading saved routing…" /> : <ErrorState title="Could not load saved routing. no editable document is available." action={<Button onClick={() => void q.refetch()}>Retry</Button>} /> : <>
+      {q.isError && <ErrorState title="Could not refresh routing. your draft is preserved. refresh before saving." action={<Button onClick={() => void q.refetch()}>Retry</Button>} />}
       {conflict && <p role="alert" className="text-sm text-status-error">Routing changed elsewhere. Your draft is preserved. Reopen the latest saved routing before saving.</p>}
       <RoutingConfigEditor initial={initial} canSave={q.isSuccess && !q.isFetching && !conflict} />
     </>}
@@ -42,7 +42,7 @@ function RoutingConfigEditor({ initial, canSave }: { initial: RoutingSnapshot; c
     <Card title="Routing configuration" description="The default receiver handles alerts with no matching child route."><form className="space-y-6" onSubmit={(event) => { event.preventDefault(); if (canSave && !validation && draft !== initial.yaml && !isRevisionConflict(save.error) && !save.isPending) save.mutate(); }}>
       <fieldset disabled={save.isPending} className="space-y-5">
         {parsed.ok ? <Field label="Default receiver" htmlFor="routing-default-receiver"><Select id="routing-default-receiver" value={parsed.model.defaultReceiver} disabled={!recQ.isSuccess || recQ.isFetching} onChange={(event) => setDraft(serializeRouting({ ...parsed.model, defaultReceiver: event.target.value }))}><option value="">No default receiver</option>{options.map((name) => <option key={name} value={name}>{name}</option>)}</Select></Field> : <p className="text-sm text-muted-foreground">This configuration requires the complete YAML editor. Its content is preserved below.</p>}
-        {recQ.isError && <ErrorState title="Could not load receiver choices. The YAML draft is preserved." action={<Button onClick={() => void recQ.refetch()}>Retry</Button>} />}
+        {recQ.isError && <ErrorState title="Could not load receiver choices. the YAML draft is preserved." action={<Button onClick={() => void recQ.refetch()}>Retry</Button>} />}
         <Collapse label="Advanced: complete routing YAML" defaultOpen={!parsed.ok}><div className="space-y-3"><p className="text-sm text-muted-foreground">Edit the complete document, including nested routing trees and advanced settings. Empty YAML clears the saved routing configuration.</p><div className="overflow-hidden rounded-md border border-border" data-testid="routing-yaml-editor"><Editor height="420px" language="yaml" theme="vs-dark" value={draft} onChange={(value) => setDraft(value ?? "")} options={{ readOnly: save.isPending }} /></div></div></Collapse>
       </fieldset>
       {validation && <p role="alert" className="text-sm text-status-error">{validation}</p>}

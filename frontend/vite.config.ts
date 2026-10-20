@@ -74,6 +74,9 @@ export default defineConfig({
     host: "0.0.0.0",
     port: Number(process.env.VITE_PORT ?? 5173),
     strictPort: true,
+    // Playwright writes traces/screenshots under the frontend: never reload the
+    // dev page mid-test because of them.
+    watch: { ignored: ["**/test-results/**", "**/playwright-report/**", "**/e2e/**", "**/.playwright-auth/**"] },
     proxy: {
       "/api": apiURL,
       "/openapi.json": apiURL,

@@ -7,7 +7,8 @@ import {
   type ColumnDef,
   type SortingState,
 } from "@tanstack/react-table";
-import { ArrowUpDown, Check, ChevronDown, ChevronUp, Download, RotateCcw, Rows2, Rows3, Rows4, SlidersHorizontal } from "lucide-react";
+import { ArrowUpDown, Check, ChevronDown, ChevronUp, Columns3, Download, Info, RotateCcw, Rows2, Rows3, Rows4 } from "lucide-react";
+import { ExportMenu, Form, Tooltip, ToolbarButton, type ExportOption } from "@/ui";
 import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
 import { cn } from "@/lib/cn";
 import { downloadCsv, type CsvCell } from "@/lib/csv";
@@ -109,6 +110,12 @@ export interface DataTableProps<T> {
   sourceCount?: number;
   /** Disable internal paging for bounded, scrollable detail inventories. */
   pagination?: boolean;
+  /** Left side of the table toolbar: search, up to three filters, More filters, view toggle. */
+  toolbar?: ReactNode;
+  /** Right side, before the table controls (saved views). */
+  toolbarEnd?: ReactNode;
+  /** Server-side export scopes; merged with "This table" into one Export menu. */
+  exportOptions?: ExportOption[];
 }
 
 const TABLE_PAGE_SIZE = 100;
@@ -166,6 +173,9 @@ function DataTableView<T>({
   sourceLimit,
   sourceCount,
   pagination = true,
+  toolbar,
+  toolbarEnd,
+  exportOptions,
 }: DataTableProps<T>) {
   const [requestedPage, setRequestedPage] = useState(0);
   const storedPreferences = useMemo(() => readStoredTablePreferences(preferencesKey, preferenceMigration), [preferencesKey, preferenceMigration]);
@@ -266,8 +276,9 @@ function DataTableView<T>({
   }, [densityProp]);
 
   const density = densityProp ?? internalDensity;
-  const rowH = density === "compact" ? "h-6" : density === "comfy" ? "h-10" : "h-8";
-  const cellPad = density === "compact" ? "px-2 py-0.5" : density === "comfy" ? "px-3 py-2" : "px-2.5 py-1.5";
+  // Kit row heights: compact 36, cozy 40, comfortable 44.
+  const rowH = density === "compact" ? "h-9" : density === "comfy" ? "h-11" : "h-10";
+  const cellPad = density === "compact" ? "px-3 py-1.5" : density === "comfy" ? "px-3 py-3" : "px-3 py-2";
 
   // Look up the Column facade by id when rendering headers/cells (avoids
   // threading the facade through TanStack column meta typing).
@@ -392,60 +403,68 @@ function DataTableView<T>({
   }
 
   const shouldShowColumnChooser = (showColumnChooser ?? !!preferencesKey) && columns.length > 1;
-  const shouldShowExport = Boolean(exportFileName);
+  const shouldShowExport = Boolean(exportFileName) || !!exportOptions?.length;
   const canChangeDensity = densityProp === undefined || !!onDensityChange;
-  const shouldShowToolbar = (showDensityToggle && canChangeDensity) || shouldShowColumnChooser || shouldShowExport || semanticLayout;
+  const shouldShowToolbar = (showDensityToggle && canChangeDensity) || shouldShowColumnChooser || shouldShowExport || semanticLayout || !!toolbar || !!toolbarEnd;
+  const allExportOptions: ExportOption[] = [
+    ...(exportOptions ?? []),
+    ...(exportFileName ? [{ label: exportOptions?.length ? "This table" : exportLabel, description: "Visible columns, every loaded row", onSelect: exportVisibleRows, disabled: canExport ? !canExport() : false }] : []),
+  ];
   const tableLabel = ariaLabel ?? `Table: ${columns.slice(0, 3).map(column => headerText(column.header, column.id)).join(", ")}`;
 
   return (
-    <div className={cn("app-data-table min-w-0 max-w-full rounded-md border border-border bg-card overflow-hidden", className)} data-testid={testId}>
+    <div className={cn("app-data-table min-w-0 max-w-full overflow-hidden rounded-lg border border-border bg-card", className)} data-testid={testId}>
       {shouldShowToolbar && (
-        <div className="flex flex-wrap items-center justify-end gap-2 border-b border-border px-2 py-1">
-          {shouldShowExport && (
-            <button
-              type="button"
-              onClick={exportVisibleRows}
-              disabled={canExport ? !canExport() : false}
-              aria-label={exportLabel}
-              title={exportLabel}
-              data-testid={testId ? `${testId}-export-csv` : undefined}
-              className="inline-flex h-7 items-center gap-1.5 rounded border border-border bg-card px-2 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Download className="h-3.5 w-3.5" />
-              <span>{exportLabel}</span>
-            </button>
-          )}
-          {shouldShowColumnChooser && (
-            <ColumnChooser
-              columns={columns}
-              hiddenIds={hiddenIds}
-              visibleColumns={visibleColumns.length}
-              onVisibleChange={setColumnVisible}
-              onReset={resetColumns}
-              onResetPreferences={resetPreferences}
-              testId={testId}
-            />
-          )}
-          {semanticLayout && <ColumnLayoutMenu columns={orderedColumns.map(column => ({ id: column.id, label: headerText(column.header, column.id) }))}
-            pinning={pinning} onMove={moveColumn} onPin={pinColumn} onResetWidth={id => resizeColumn(id)} onReset={() => setArrangement({})} />}
-          {showDensityToggle && canChangeDensity && (
-            <div className="flex items-center gap-1">
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground mr-2">Density</span>
-              <DensityBtn current={density} value="compact" onClick={() => setDensity("compact")} icon={Rows4} label="compact" />
-              <DensityBtn current={density} value="cozy" onClick={() => setDensity("cozy")} icon={Rows3} label="cozy" />
-              <DensityBtn current={density} value="comfy" onClick={() => setDensity("comfy")} icon={Rows2} label="comfy" />
-            </div>
-          )}
+        <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2" data-slot="table-toolbar">
+          {toolbar ? <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 2xl:flex-nowrap">{toolbar}</div> : <div className="flex-1" />}
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+            {toolbarEnd}
+            {shouldShowColumnChooser && (
+              <ColumnChooser
+                columns={columns}
+                hiddenIds={hiddenIds}
+                visibleColumns={visibleColumns.length}
+                onVisibleChange={setColumnVisible}
+                onReset={resetColumns}
+                onResetPreferences={resetPreferences}
+                testId={testId}
+              />
+            )}
+            {semanticLayout && <ColumnLayoutMenu columns={orderedColumns.map(column => ({ id: column.id, label: headerText(column.header, column.id) }))}
+              pinning={pinning} onMove={moveColumn} onPin={pinColumn} onResetWidth={id => resizeColumn(id)} onReset={() => setArrangement({})} />}
+            {showDensityToggle && canChangeDensity && (
+              <div className="flex h-9 items-center rounded-md border border-border p-0.5" role="group" aria-label="Row density">
+                <DensityBtn current={density} value="compact" onClick={() => setDensity("compact")} icon={Rows4} label="compact" />
+                <DensityBtn current={density} value="cozy" onClick={() => setDensity("cozy")} icon={Rows3} label="cozy" />
+                <DensityBtn current={density} value="comfy" onClick={() => setDensity("comfy")} icon={Rows2} label="comfy" />
+              </div>
+            )}
+            {shouldShowExport && (allExportOptions.length > 1 ? (
+              <span data-testid={testId ? `${testId}-export-menu` : undefined}><ExportMenu options={allExportOptions} /></span>
+            ) : allExportOptions.length === 1 ? (
+              <ToolbarButton
+                onClick={allExportOptions[0].onSelect}
+                disabled={allExportOptions[0].disabled}
+                aria-label={/^export\b/i.test(allExportOptions[0].label) ? allExportOptions[0].label : `Export ${allExportOptions[0].label.charAt(0).toLowerCase()}${allExportOptions[0].label.slice(1)}`}
+                data-export-label={allExportOptions[0].label}
+                title={allExportOptions[0].description}
+                data-testid={testId ? `${testId}-export-csv` : undefined}
+              >
+                <Download className="h-4 w-4" />
+                Export
+              </ToolbarButton>
+            ) : null)}
+          </div>
         </div>
       )}
-      {pinned.suspended && <p className="border-b border-border px-3 py-2 text-xs text-muted-foreground">Column pinning pauses at this width so every column remains reachable. Your saved pins are retained.</p>}
-      {preferencesUnavailable && <div role="status" className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2 text-xs text-muted-foreground"><span>Table preferences could not be saved. Changes apply to this tab.</span><button type="button" className="text-primary underline underline-offset-2" onClick={() => setPreferencesWriteAttempt(attempt => attempt + 1)}>Retry saving preferences</button></div>}
-      {sorting[0] && hiddenIds.has(sorting[0].id) && <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2 text-xs">
+      {pinned.suspended && <p className="border-b border-border px-3 py-2 text-meta text-muted-foreground">Column pinning pauses at this width so every column remains reachable. Your saved pins are retained.</p>}
+      {preferencesUnavailable && <div role="status" className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2 text-meta text-muted-foreground"><span>Table preferences could not be saved. Changes apply to this tab.</span><button type="button" className="text-link" onClick={() => setPreferencesWriteAttempt(attempt => attempt + 1)}>Retry saving preferences</button></div>}
+      {sorting[0] && hiddenIds.has(sorting[0].id) && <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2 text-meta">
         <span>Sorted by {headerText(columns.find(column => column.id === sorting[0].id)?.header, sorting[0].id)} ({sorting[0].desc ? "descending" : "ascending"}) · hidden column</span>
-        {(hiddenColumnIds === undefined || onHiddenColumnIdsChange) && <button type="button" className="text-primary underline underline-offset-2" onClick={() => setColumnVisible(sorting[0].id, true)}>Show sort column</button>}
-        {!manualSorting && <button type="button" className="text-primary underline underline-offset-2" onClick={() => handleSortingChange([])}>Clear sort</button>}
+        {(hiddenColumnIds === undefined || onHiddenColumnIdsChange) && <button type="button" className="text-link" onClick={() => setColumnVisible(sorting[0].id, true)}>Show sort column</button>}
+        {!manualSorting && <button type="button" className="text-link" onClick={() => handleSortingChange([])}>Clear sort</button>}
       </div>}
-      <div ref={scrollRef} className="app-table-scroll overflow-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary" tabIndex={0} role="region" aria-label={`Scrollable ${tableLabel}`} onKeyDown={event => {
+      <div ref={scrollRef} className="app-table-scroll overflow-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" tabIndex={0} role="region" aria-label={`Scrollable ${tableLabel}`} onKeyDown={event => {
         if (event.target !== event.currentTarget || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
         const element = event.currentTarget;
         if (element.scrollWidth <= element.clientWidth || !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
@@ -459,17 +478,13 @@ function DataTableView<T>({
             {visibleColumns.map((column, index) => <col key={column.id} style={{ width: columnWidths[index] }} />)}
           </colgroup>}
           <thead className="sticky top-0 z-10">
-            <tr className="border-b border-border text-xs">
+            <tr className="border-b border-border">
               {selectable && (
-                <th scope="col" className={cn("w-8 px-2 py-2 text-left", pinned.offsets.size > 0 && "app-table-pinned")} style={pinned.offsets.size > 0 ? { position: "sticky", left: 0 } : undefined}>
-                  <input
-                    type="checkbox"
-                    checked={allSelected}
-                    ref={input => { if (input) input.indeterminate = partiallySelected; }}
-                    aria-checked={partiallySelected ? "mixed" : allSelected}
-                    onChange={toggleAll}
+                <th scope="col" className={cn("w-8 px-3 py-2 text-left", pinned.offsets.size > 0 && "app-table-pinned")} style={pinned.offsets.size > 0 ? { position: "sticky", left: 0 } : undefined}>
+                  <Form.Checkbox
+                    checked={partiallySelected ? "indeterminate" : allSelected}
+                    onCheckedChange={toggleAll}
                     aria-label="Select all"
-                    className="accent-[color:var(--color-primary)]"
                   />
                 </th>
               )}
@@ -485,7 +500,7 @@ function DataTableView<T>({
                     data-align={layout.align}
                     aria-sort={dir ? (dir === "asc" ? "ascending" : "descending") : undefined}
                     className={cn(
-                      "relative h-10 py-2 font-semibold select-none",
+                      "relative h-10 py-2 select-none",
                       cellPad,
                       pinned.offsets.has(h.column.id) && "app-table-pinned",
                       c?.className,
@@ -533,7 +548,7 @@ function DataTableView<T>({
                   tabIndex={onRowClick ? 0 : undefined}
                   className={cn(
                     "border-b border-border last:border-b-0 transition-colors",
-                    onRowClick && "app-data-table-row-clickable cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[color:var(--color-primary)]",
+                    onRowClick && "app-data-table-row-clickable cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                     !isSel && "hover:bg-[var(--table-row-hover)]",
                     rowH,
                   )}
@@ -551,13 +566,11 @@ function DataTableView<T>({
                 >
                   {selectable && (
                     <td className={cn("px-2", pinned.offsets.size > 0 && "app-table-pinned")} style={pinned.offsets.size > 0 ? { position: "sticky", left: 0 } : undefined}>
-                      <input
-                        type="checkbox"
+                      <Form.Checkbox
                         checked={!!isSel}
-                        onChange={() => toggleOne(k)}
+                        onCheckedChange={() => toggleOne(k)}
                         onClick={(e) => e.stopPropagation()}
                         aria-label="Select row"
-                        className="accent-[color:var(--color-primary)]"
                       />
                     </td>
                   )}
@@ -586,7 +599,7 @@ function DataTableView<T>({
               <tr>
                 <td colSpan={visibleColumns.length + (selectable ? 1 : 0)}>
                   {emptyState ?? (
-                    <div className="px-6 py-10 text-center text-xs text-muted-foreground">No rows.</div>
+                    <div className="px-6 py-10 text-center text-sm text-muted-foreground">No matching rows</div>
                   )}
                 </td>
               </tr>
@@ -595,17 +608,24 @@ function DataTableView<T>({
         </table>
       </div>
       {(pageCount > 1 || sourceLimit !== undefined) && (
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-3 py-2 text-xs text-muted-foreground" data-testid={testId ? `${testId}-page-scope` : undefined}>
-          <span>
-            Showing {visibleRows.length ? page * TABLE_PAGE_SIZE + 1 : 0}–{page * TABLE_PAGE_SIZE + visibleRows.length} of {modelRows.length.toLocaleString()} matching loaded rows.
-            {sourceLimit !== undefined && <> Server fetch limit: {sourceLimit.toLocaleString()} rows ({(sourceCount ?? rows.length).toLocaleString()} loaded); filters and totals use loaded rows only.</>}
-            {exportFileName && " Table CSV exports all matching loaded rows."}
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-3 py-2 text-sm text-muted-foreground" data-testid={testId ? `${testId}-page-scope` : undefined}>
+          <span className="flex items-center gap-1.5 tabular-nums">
+            <span>Showing {visibleRows.length ? page * TABLE_PAGE_SIZE + 1 : 0}–{page * TABLE_PAGE_SIZE + visibleRows.length} of {modelRows.length.toLocaleString()}</span>
+            <span className="sr-only"> matching loaded rows.</span>
+            {sourceLimit !== undefined && (
+              <Tooltip content={<span className="block max-w-xs">Server fetch limit: {sourceLimit.toLocaleString()} rows ({(sourceCount ?? rows.length).toLocaleString()} loaded); filters and totals use loaded rows only.{exportFileName ? " Table CSV exports all matching loaded rows." : ""}</span>}>
+                <button type="button" aria-label="About these rows" className="inline-flex h-5 w-5 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring">
+                  <Info className="h-3.5 w-3.5" aria-hidden />
+                </button>
+              </Tooltip>
+            )}
+            {sourceLimit !== undefined && <span className="sr-only">Server fetch limit: {sourceLimit.toLocaleString()} rows</span>}
           </span>
           {pageCount > 1 && (
             <div className="flex items-center gap-2">
-              <button type="button" disabled={page === 0} onClick={() => setRequestedPage(page - 1)} className="rounded border border-border px-2 py-1 hover:bg-accent disabled:opacity-40">Previous</button>
-              <span>Page {page + 1} of {pageCount}</span>
-              <button type="button" disabled={page + 1 >= pageCount} onClick={() => setRequestedPage(page + 1)} className="rounded border border-border px-2 py-1 hover:bg-accent disabled:opacity-40">Next</button>
+              <button type="button" disabled={page === 0} onClick={() => setRequestedPage(page - 1)} className="h-8 rounded-md border border-border px-2.5 transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50">Previous</button>
+              <span className="tabular-nums">Page {page + 1} of {pageCount}</span>
+              <button type="button" disabled={page + 1 >= pageCount} onClick={() => setRequestedPage(page + 1)} className="h-8 rounded-md border border-border px-2.5 transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50">Next</button>
             </div>
           )}
         </div>
@@ -634,24 +654,22 @@ function ColumnChooser<T>({
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
-        <button
-          type="button"
+        <ToolbarButton
           aria-label="Columns"
-          title="Columns"
           data-testid={testId ? `${testId}-columns-trigger` : undefined}
-          className="inline-flex h-7 w-7 items-center justify-center rounded border border-border bg-card text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
-          <SlidersHorizontal className="h-3.5 w-3.5" />
-        </button>
+          <Columns3 className="h-4 w-4" />
+          <span className="hidden 2xl:inline">Columns</span>
+        </ToolbarButton>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content
           align="end"
           sideOffset={6}
           data-testid={testId ? `${testId}-columns-menu` : undefined}
-          className="z-50 min-w-52 rounded-md border border-border bg-card p-1 shadow-xl"
+          className="z-popover min-w-52 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-elev-popover"
         >
-          <div className="px-2 py-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">Columns</div>
+          <div className="px-2 py-1.5 text-meta font-semibold text-muted-foreground">Columns</div>
           {columns.map((column) => {
             const checked = !hiddenIds.has(column.id) || column.hideable === false;
             const disabled = column.hideable === false || (checked && visibleColumns <= 1);
@@ -663,7 +681,7 @@ function ColumnChooser<T>({
                 onCheckedChange={(next) => onVisibleChange(column.id, next === true)}
                 onSelect={(event) => event.preventDefault()}
                 className={cn(
-                  "relative flex cursor-pointer select-none items-center gap-2 rounded px-2 py-1.5 pl-7 text-xs outline-none transition-colors focus:bg-accent",
+                  "relative flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 pl-7 text-sm outline-none transition-colors focus:bg-accent",
                   disabled && "cursor-not-allowed opacity-50",
                 )}
               >
@@ -677,12 +695,12 @@ function ColumnChooser<T>({
           <DropdownMenu.Separator className="my-1 h-px bg-border" />
           <DropdownMenu.Item
             onSelect={onReset}
-            className="flex cursor-pointer select-none items-center gap-2 rounded px-2 py-1.5 text-xs outline-none transition-colors focus:bg-accent"
+            className="flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent"
           >
             <RotateCcw className="h-3.5 w-3.5 text-muted-foreground" />
             Reset columns
           </DropdownMenu.Item>
-          <DropdownMenu.Item onSelect={onResetPreferences} className="flex cursor-pointer select-none items-center gap-2 rounded px-2 py-1.5 text-xs outline-none transition-colors focus:bg-accent">
+          <DropdownMenu.Item onSelect={onResetPreferences} className="flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent">
             <RotateCcw className="h-3.5 w-3.5 text-muted-foreground" />
             Reset table preferences
           </DropdownMenu.Item>
@@ -701,11 +719,11 @@ function DensityBtn({ current, value, onClick, icon: Icon, label }: { current: D
       aria-pressed={current === value}
       title={`${label} density`}
       className={cn(
-        "rounded p-1 hover:bg-accent transition-colors",
-        current === value ? "text-foreground bg-accent" : "text-muted-foreground",
+        "inline-flex h-7 w-7 items-center justify-center rounded-sm transition-colors hover:bg-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring",
+        current === value ? "bg-accent text-foreground" : "text-muted-foreground",
       )}
     >
-      <Icon className="h-3.5 w-3.5" />
+      <Icon className="h-4 w-4" />
     </button>
   );
 }

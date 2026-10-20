@@ -139,7 +139,7 @@ function AdmissionRuleEditor({ clusterId }: { clusterId?: string }) {
                     data-testid={`admission-risk-shortcut-${shortcut.id}`}
                   >
                     <span className="block text-xs font-medium text-foreground">{shortcut.name}</span>
-                    <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">{shortcut.description}</span>
+                    <span className="mt-0.5 block text-micro leading-relaxed text-muted-foreground">{shortcut.description}</span>
                   </button>
                 );
               })}
@@ -183,11 +183,11 @@ function AdmissionRuleEditor({ clusterId }: { clusterId?: string }) {
                     <div className="flex-1">{valueInput(row, i)}</div>
                     <button type="button" onClick={() => removeRow(i)} className="mt-2 rounded p-1 text-muted-foreground hover:bg-accent" title="Remove"><X className="h-3.5 w-3.5" /></button>
                   </div>
-                  {opt && <p className="pl-1 text-[11px] text-muted-foreground">{opt.help}</p>}
+                  {opt && <p className="pl-1 text-micro text-muted-foreground">{opt.help}</p>}
                 </div>
               );
             })}
-            <button type="button" onClick={addRow} className="inline-flex items-center gap-1 text-xs text-[color:var(--color-primary)] hover:underline"><Plus className="h-3.5 w-3.5" /> Add criterion</button>
+            <button type="button" onClick={addRow} className="inline-flex items-center gap-1 text-xs text-link"><Plus className="h-3.5 w-3.5" /> Add criterion</button>
           </div>
 
           {save.isError && <p role="alert" className="text-sm text-status-error">Could not create this admission rule. Your draft is preserved. Check the criteria and try again.</p>}

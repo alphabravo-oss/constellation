@@ -16,7 +16,7 @@ import { Field, TextInput, Select } from "@/components/ui/form";
 import { Collapse } from "@/components/ui/collapse";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 
-const CADENCES = [{ label: "Daily at 02:00", cron: "0 2 * * *" }, { label: "Weekly Monday at 02:00", cron: "0 2 * * 1" }, { label: "Monthly on the 1st at 02:00", cron: "0 2 1 * *" }, { label: "Every 5 minutes", cron: "*/5 * * * *" }];
+const CADENCES = [{ label: "Daily at 02:00", cron: "0 2 * * *" }, { label: "Weekly monday at 02:00", cron: "0 2 * * 1" }, { label: "Monthly on the 1st at 02:00", cron: "0 2 1 * *" }, { label: "Every 5 minutes", cron: "*/5 * * * *" }];
 
 type ScheduleConfiguration = Pick<ComplianceScheduleDB, "name" | "description" | "framework" | "cron_expression" | "timezone" | "delivery" | "report_format" | "report_template">;
 type SchedulePatch = Partial<ScheduleConfiguration>;
@@ -56,7 +56,7 @@ function NewComplianceScheduleFormPage() {
     <PageHeader title="New compliance schedule" description="Configure recurring evidence reports for this cluster. Creating a schedule does not confirm that a report has run or been delivered."
       backLink={<Link to="." href={backTo} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Compliance schedules</Link>} />
     {clusterLoading && !resolvedScope ? <LoadingState label="Loading cluster…" /> : !clusterId ? <ErrorState title="Select a cluster to create a schedule." />
-      : !resolvedScope || (clusterError && !loaded) ? <ErrorState title="The selected cluster could not be resolved. Review its registration and retry." action={<Button onClick={retryScope}>Retry cluster</Button>} />
+      : !resolvedScope || (clusterError && !loaded) ? <ErrorState title="The selected cluster could not be resolved. review its registration and retry." action={<Button onClick={retryScope}>Retry cluster</Button>} />
       : !loaded && failed ? <ErrorState title="Schedule options could not be loaded." action={<Button onClick={retry}>Retry</Button>} />
       : !loaded ? <LoadingState label="Loading frameworks and report formats…" />
       : !editorFrameworks?.length || !editorFormats?.length ? <ErrorState title="No frameworks or report formats are available for a new schedule." />
@@ -124,7 +124,7 @@ function EditComplianceScheduleFormPage({ scheduleId }: { scheduleId: string }) 
     }
   };
   return <div className="space-y-6">
-    <PageHeader title="Edit compliance schedule" description="Edit configuration. Enable or disable this schedule from the schedule list."
+    <PageHeader title="Edit compliance schedule" description="Edit configuration. enable or disable this schedule from the schedule list."
       backLink={<Link to="." href={backTo} className="inline-flex items-center gap-1 hover:text-foreground"><ArrowLeft className="h-3.5 w-3.5" /> Compliance schedules</Link>} />
     {!initial ? scope.loading || list.isPending && ready || list.isFetching ? <LoadingState label="Loading schedule…" /> : <ErrorState title="This schedule is unavailable in the current organization and cluster." action={<Button onClick={retry}>Retry</Button>} /> : <>
       <p className="text-sm text-muted-foreground">{initial.cluster_id ? "Cluster schedule" : "Organization schedule · applies across clusters"} · Configured state: {(row?.enabled ?? initial.enabled) ? "Enabled" : "Disabled"}</p>

@@ -4,32 +4,21 @@ import { useIsFetching, useMutation, useQuery, useQueryClient } from "@tanstack/
 import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
 import { useInventoryRoute, ScanInventoryExport } from "./inventory-workspace";
 import { Pager } from "@/components/ui/pager";
-import { Activity, TriangleAlert, Clock, Gauge, Search, ServerCog, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { Clock, Gauge, Search, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { toast } from "sonner";
 
-import {
-  componentsInventory,
-  supportBundles,
-  type ComponentDiagnosticCheck,
-  type ComponentDiagnosticConfig,
-  type ComponentDiagnosticCounter,
-  type ComponentDiagnostics,
-  type ComponentInstance,
-  type ComponentRollup,
-  type ComponentInventoryResponse,
-  type ComponentsInventoryParams,
-} from "@/api/client";
+import { componentsInventory, supportBundles, type ComponentDiagnosticCheck, type ComponentDiagnosticConfig, type ComponentDiagnosticCounter, type ComponentDiagnostics, type ComponentInstance, type ComponentRollup, type ComponentInventoryResponse, type ComponentsInventoryParams } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { cn } from "@/lib/cn";
 import { NV_COMPONENT_ROLES, normalizeNVRole, nvRoleAlias } from "@/lib/component-roles";
 import { PageHeader } from "@/components/ui/page";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
 import { Tabs } from "@/components/ui/tabs";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorState, LoadingState } from "@/components/ui/states";
+import { Select } from "@/components/ui/form";
 
 const statuses = ["all", "healthy", "degraded", "stale", "drift", "crashlooping", "missing", "not-observed"];
 
@@ -119,7 +108,7 @@ export function ComponentsPage() {
             <Pill tone="neutral">{item.role}</Pill>
           </div>
           <div className="mt-2 font-medium">{item.display_name}</div>
-          <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{item.hostname}</div>
+          <div className="mt-1 break-all font-mono text-micro text-muted-foreground">{item.hostname}</div>
         </>
       ),
     },
@@ -182,7 +171,7 @@ export function ComponentsPage() {
             <StatusPill status={row.status} />
           </div>
           <div className="mt-1 text-xs font-medium" title={row.displayName}>{row.displayName}</div>
-          <div className="mt-0.5 font-mono text-[10px] text-muted-foreground" title={row.component}>{row.component}</div>
+          <div className="mt-0.5 font-mono text-micro text-muted-foreground" title={row.component}>{row.component}</div>
         </div>
       ),
       sort: (a, b) => a.roleRank - b.roleRank || a.displayName.localeCompare(b.displayName),
@@ -241,16 +230,10 @@ export function ComponentsPage() {
         description="Live health and build inventory of every Constellation component — controller, scanner, importer, admission, discoverer, and runtime agents — with heartbeat and drift diagnostics."
       />
 
-      <VerdictBanner status={!inventoryAvailable ? "info" : (summary?.crashlooping ?? 0) || (summary?.missing ?? 0) ? "critical" : attention ? "degraded" : (summary?.total_instances ?? 0) ? "ok" : "info"}
+      <div data-testid={inventoryAvailable ? "component-summary" : undefined}><VerdictBanner status={!inventoryAvailable ? "info" : (summary?.crashlooping ?? 0) || (summary?.missing ?? 0) ? "critical" : attention ? "degraded" : (summary?.total_instances ?? 0) ? "ok" : "info"}
         title={!inventoryAvailable ? q.isError || q.isSuccess && !inventoryScopeValid ? "Component inventory is unavailable" : "Loading component inventory" : attention ? `${attention} component${attention === 1 ? " needs" : "s need"} attention` : (summary?.total_instances ?? 0) ? "Observed components are healthy" : "No component instances observed"}
-        detail="Health totals, families and versions cover all active-cluster heartbeats received within the last 24 hours. Inventory filters and matching CSV apply across every server page; older heartbeats are outside this source." />
-      {inventoryAvailable && <StatGrid data-testid="component-summary">
-        <StatCard label="Instances" value={summary?.total_instances ?? "—"} icon={<ServerCog className="h-3.5 w-3.5" />} />
-        <StatCard label="Healthy" value={summary?.healthy ?? "—"} icon={<Activity className="h-3.5 w-3.5" />} />
-        <StatCard label="Needs attention" value={summary ? attention : "—"} tone={attention ? "medium" : "neutral"} hint="Unhealthy instances and missing expected component families." />
-        <StatCard label="Crashlooping" value={summary?.crashlooping ?? "—"} tone={(summary?.crashlooping ?? 0) ? "critical" : "neutral"} />
-        <StatCard label="Missing" value={summary?.missing ?? "—"} tone={(summary?.missing ?? 0) ? "critical" : "neutral"} icon={<TriangleAlert className="h-3.5 w-3.5" />} />
-      </StatGrid>}
+         numbers={inventoryAvailable ? [{ label: "Instances", value: summary?.total_instances ?? "—" }, { label: "Healthy", value: summary?.healthy ?? "—" }, { label: "Needs attention", value: summary ? attention : "—", tone: (attention ? "warning" : "default"), title: "Unhealthy instances and missing expected component families." }, { label: "Crashlooping", value: summary?.crashlooping ?? "—", tone: ((summary?.crashlooping ?? 0) ? "critical" : "default") }] : undefined} detail={<><p>Health totals, families and versions cover all active-cluster heartbeats received within the last 24 hours. Inventory filters and matching CSV apply across every server page; older heartbeats are outside this source.</p><p>{"Missing"}: {summary?.missing ?? "—"}</p></>} /></div>
+      
       {inventoryAvailable && q.isFetching && <p role="status" className="text-sm text-muted-foreground">Refreshing component inventory…</p>}
       <Tabs value={tab} onValueChange={(value) => updateURL({ tab: value === "inventory" ? null : value })} items={[
         { value: "inventory", label: "Inventory", content: (<div className="space-y-4">
@@ -274,7 +257,7 @@ export function ComponentsPage() {
                 )}
               >
                 <span>{item.label}</span>
-                <span className="font-mono text-[10px]">{count}</span>
+                <span className="font-mono text-micro">{count}</span>
               </button>
             );
           })}
@@ -291,7 +274,7 @@ export function ComponentsPage() {
               data-testid="component-search"
             />
           </label>
-          <select
+          <Select
             value={status}
             aria-label="Component status"
             onChange={(event) => updateURL({ status: event.target.value === "all" ? null : event.target.value })}
@@ -301,7 +284,7 @@ export function ComponentsPage() {
             {statuses.map((item) => (
               <option key={item} value={item}>{item === "all" ? "All statuses" : item}</option>
             ))}
-          </select>
+          </Select>
         </div>
       </section>
 
@@ -574,15 +557,15 @@ function ComponentPreview({
           <Pill tone="accent">{item.scope} · {item.kind}</Pill>
         </div>
         <dl className="mt-4 grid gap-2 text-sm">
-          <Field label="NeuVector Role" value={alias.label} />
+          <Field label="Legacy role alias" value={alias.label} />
           <Field label="Role" value={item.role} />
           <Field label="Kind" value={item.kind} />
           <Field label="Version" value={item.version || "-"} />
           <Field label="Commit" value={item.commit || "-"} />
-          <Field label="Build Time" value={formatDate(item.build_time)} />
-          <Field label="First Seen" value={formatDate(item.first_seen_at)} />
-          <Field label="Last Seen" value={formatDate(item.last_seen_at)} />
-          <Field label="Status Reason" value={item.status_reason || item.last_error || "-"} />
+          <Field label="Build time" value={formatDate(item.build_time)} />
+          <Field label="First seen" value={formatDate(item.first_seen_at)} />
+          <Field label="Last seen" value={formatDate(item.last_seen_at)} />
+          <Field label="Status reason" value={item.status_reason || item.last_error || "-"} />
         </dl>
       </section>
       <DiagnosticsPanel diagnostics={diagnostics} loading={diagnosticsLoading} error={diagnosticsError} onRetry={onRetryDiagnostics} bundleScopeReady={bundleScopeReady} />
@@ -656,9 +639,9 @@ function DiagnosticsPanel({ diagnostics, loading, error, onRetry, bundleScopeRea
         </div>
       </div>
       <p className="text-xs text-muted-foreground">Support bundles cover the organization; they are not limited to this component or cluster.</p>
-      {supportBundle.isError && <ErrorState title="Could not queue an organization support bundle. Try again." />}
+      {supportBundle.isError && <ErrorState title="Could not queue an organization support bundle. try again." />}
       {queuedJobId && <p className="text-xs text-muted-foreground" role="status" data-testid="component-support-bundle-feedback">
-        Bundle job <span className="font-mono">{queuedJobId}</span> queued. <a href="/settings/health?tab=bundles" className="text-[color:var(--color-primary)] hover:underline">View status and download in System Health</a>.
+        Bundle job <span className="font-mono">{queuedJobId}</span> queued. <a href="/settings/health?tab=bundles" className="text-link">View status and download in System Health</a>.
       </p>}
       <div className="grid grid-cols-2 gap-2">
         {counters.map((counter) => (
@@ -719,7 +702,7 @@ function DiagnosticList({ checks }: { checks: ComponentDiagnosticCheck[] }) {
             </div>
             <StatusPill status={check.status} />
           </div>
-          {check.value !== undefined ? <div className="mt-2 break-all font-mono text-[11px]">{formatDiagnosticValue(check.value)}</div> : null}
+          {check.value !== undefined ? <div className="mt-2 break-all font-mono text-micro">{formatDiagnosticValue(check.value)}</div> : null}
           {check.reason ? <div className="mt-2 break-all text-muted-foreground">{check.reason}</div> : null}
         </div>
       ))}
@@ -780,7 +763,7 @@ function CounterMini({ item }: { item: ComponentInstance }) {
 function Mini({ label, value }: { label: string; value: number }) {
   return (
     <div>
-      <div className="text-[10px] uppercase text-muted-foreground">{label}</div>
+      <div className="text-micro  text-muted-foreground">{label}</div>
       <div className="font-semibold">{value}</div>
     </div>
   );
@@ -804,12 +787,12 @@ function StatusPill({ status }: { status: string }) {
     : status === "missing" || status === "crashlooping"
         ? "bg-[color:var(--color-status-error)]/15 text-[color:var(--color-status-error)]"
         : "bg-muted text-muted-foreground";
-  return <span className={cn("inline-flex h-5 items-center rounded px-1.5 text-[10px] font-medium", tone)}>{status}</span>;
+  return <span className={cn("inline-flex h-5 items-center rounded px-1.5 text-micro font-medium", tone)}>{status}</span>;
 }
 
 function Pill({ children, tone }: { children: ReactNode; tone: "neutral" | "accent" }) {
   return (
-    <span className={cn("inline-flex h-5 items-center rounded px-1.5 text-[10px] font-medium", tone === "neutral" && "bg-muted text-muted-foreground", tone === "accent" && "bg-primary/10 text-primary")}>
+    <span className={cn("inline-flex h-5 items-center rounded px-1.5 text-micro font-medium", tone === "neutral" && "bg-muted text-muted-foreground", tone === "accent" && "bg-primary/10 text-primary")}>
       {children}
     </span>
   );

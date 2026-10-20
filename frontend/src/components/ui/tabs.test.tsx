@@ -28,7 +28,7 @@ async function render(url: string) {
 }
 
 async function select(label: string) {
-  const trigger = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(item => item.textContent === label)!;
+  const trigger = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((item) => item.textContent === label || item.getAttribute("aria-label") === label || item.getAttribute("data-export-label") === label)!;
   // Radix activates tabs on keyboard focus as well as pointer-down.
   await act(async () => trigger.focus());
   await vi.waitFor(() => expect(trigger.getAttribute("aria-selected")).toBe("true"));

@@ -25,7 +25,7 @@ export function SavedViewsMenu<T extends SavedViewBase>({ views, onApply, onDele
           <DropdownMenu.Item asChild onSelect={() => onApply(view)} textValue={view.name}>
             <button type="button" aria-label={`Apply view ${view.name}`} className="min-w-0 flex-1 rounded px-2 py-2 text-left text-xs outline-none focus:bg-accent">
               <span className="block break-words font-medium">{view.name}</span>
-              <span className="block truncate text-[10px] text-muted-foreground">{summary(view)}</span>
+              <span className="block truncate text-micro text-muted-foreground">{summary(view)}</span>
             </button>
           </DropdownMenu.Item>
           <DropdownMenu.Item asChild onSelect={() => onDelete(view.id)} textValue={`Delete ${view.name}`}>

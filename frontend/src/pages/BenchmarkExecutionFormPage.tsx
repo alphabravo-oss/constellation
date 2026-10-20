@@ -390,7 +390,7 @@ function BenchmarkExecutionEditor({
           </Button>
         )}
         {review.isError && (
-          <ErrorState title="The current execution could not be reviewed. Saving remains paused." />
+          <ErrorState title="The current execution could not be reviewed. saving remains paused." />
         )}
         <div className="flex gap-3">
           <Button

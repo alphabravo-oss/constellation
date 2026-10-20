@@ -8,6 +8,15 @@ import { TestRouter } from "@/test/router";
 import { compliance, type ComplianceCheck, type ComplianceChecksParams, type ComplianceChecksResponse } from "@/api/client";
 import { CompliancePage } from "./CompliancePage";
 import { benchPage } from "@/test/benchmark-fixtures";
+
+/** Kit Select keeps a hidden native mirror right before its trigger. */
+function nativeSelect(root: ParentNode, selector: string): HTMLSelectElement | null {
+  const element = root.querySelector(selector);
+  if (!element) return null;
+  if (element.tagName === "SELECT") return element as HTMLSelectElement;
+  // The kit Select keeps a hidden native mirror tagged with the trigger id.
+  return element.id ? root.querySelector<HTMLSelectElement>(`select[data-mirror-for="${element.id}"]`) : null;
+}
 const scope = vi.hoisted(() => ({ id: "cluster", resolved: "cluster", loading: false, error: null as Error | null }));
 vi.mock("@/hooks/useCluster", () => ({ useCluster: () => ({ clusterId: scope.id, cluster: { id: scope.resolved }, isLoading: scope.loading, error: scope.error }) }));
 vi.mock("@/api/client", () => ({ compliance: { frameworks: vi.fn(), checks: vi.fn(), summary: vi.fn(), listExemptions: vi.fn(), revokeExemption: vi.fn(), evidence: vi.fn(), listDBSchedules: vi.fn(), exportChecksCSV: vi.fn(), benchRequests: vi.fn(), benchRequest: vi.fn() } }));
@@ -36,25 +45,25 @@ async function render(search="") {history=createMemoryHistory({initialEntries:[`
 async function rerender(){await act(async()=>root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{...identity}}><TestRouter history={history}><CompliancePage /></TestRouter></TablePreferencesProvider></QueryClientProvider>));}
 async function settle(check:()=>void){await vi.waitFor(async()=>{await act(async()=>{});check();});}
 function rows(){return host.querySelectorAll('[data-testid="compliance-controls-table"] tbody tr');}
-function button(text:string){return [...host.querySelectorAll<HTMLButtonElement>("button")].find(item=>item.textContent?.trim()===text)!;}
-async function select(selector:string,value:string){await act(async()=>{const input=host.querySelector<HTMLSelectElement>(selector)!;Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,"value")!.set!.call(input,value);input.dispatchEvent(new Event("change",{bubbles:true}));});}
+function button(text:string){return [...host.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.trim() === text || item.getAttribute("aria-label") === text || item.getAttribute("data-export-label") === text)!;}
+async function select(selector:string,value:string){await act(async()=>{const input=nativeSelect(host, selector)!;Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,"value")!.set!.call(input,value);input.dispatchEvent(new Event("change",{bubbles:true}));});}
 it("opens the dashboard graded cross-framework cohort with its exact denominator and duplicate control rows",async()=>{
  await render("?tab=controls&framework=all&status=graded");await settle(()=>expect(rows()).toHaveLength(3));
  expect(compliance.checks).toHaveBeenLastCalledWith(expect.objectContaining({framework:"all",status:"graded",cluster_id:"cluster",limit:100,offset:0}));
- const metrics=host.querySelector('[data-testid="compliance-summary"]')!;expect(metrics.textContent).toContain("67%");expect(metrics.textContent).toContain("Matching evidence rows3");expect(metrics.children).toHaveLength(5);
+ const metrics=host.querySelector('[data-testid="compliance-summary"]')!;expect(metrics.textContent).toContain("67%");expect(metrics.textContent).toContain("Matching evidence rows3");expect(metrics.querySelector('[data-testid="verdict-numbers"]')!.children).toHaveLength(4);expect(metrics.textContent).toContain("Ungraded");
  expect(host.textContent).toContain("Evidence target 1");expect(host.textContent).toContain("Evidence target 2");expect(host.textContent).toContain("Evidence target 3");expect(host.textContent).not.toContain("Evidence target 4");expect(host.textContent).not.toContain("Evidence target 5");
- expect(host.querySelector<HTMLSelectElement>("#compliance-framework")!.value).toBe("all");expect(compliance.evidence).not.toHaveBeenCalled();expect(compliance.listDBSchedules).not.toHaveBeenCalled();
+ expect(nativeSelect(host, "#compliance-framework")!.value).toBe("all");expect(compliance.evidence).not.toHaveBeenCalled();expect(compliance.listDBSchedules).not.toHaveBeenCalled();
 });
 it("reads stable server pages, keeps full totals and exports the same cohort across pages",async()=>{
  vi.mocked(compliance.checks).mockImplementation(async params=>response(params as ComplianceChecksParams,Array.from({length:205},(_,i)=>row(i,i<150?"pass":"fail",i%2?"pci":"cis"))));
  await render("?framework=all&status=graded&page=2");await settle(()=>expect(rows()).toHaveLength(100));expect(host.textContent).toContain("Evidence target 100");expect(host.textContent).not.toContain("Evidence target 0");expect(host.querySelector('[data-testid="compliance-summary"]')!.textContent).toContain("Matching evidence rows205");
- await act(async()=>button("Export matching CSV").click());expect(compliance.exportChecksCSV).toHaveBeenCalledWith(expect.objectContaining({framework:"all",status:"graded",offset:100}), expect.any(Function));await settle(()=>expect(host.textContent).toContain("Exported all 3 matching records across pages"));
+ await act(async()=>button("Matching rows").click());expect(compliance.exportChecksCSV).toHaveBeenCalledWith(expect.objectContaining({framework:"all",status:"graded",offset:100}), expect.any(Function));await settle(()=>expect(host.textContent).toContain("Exported all 3 matching records across pages"));
  await act(async()=>button("Next").click());await settle(()=>expect(rows()).toHaveLength(5));expect(history.location.search).toContain("page=3");
 });
 it("updates filter URL and restores the earlier cohort on Back without losing repeated context or hash",async()=>{
  await render("?framework=all&status=graded&context=a&context=b#controls");await settle(()=>expect(rows()).toHaveLength(3));
  await select("#compliance-status","pass");await settle(()=>expect(rows()).toHaveLength(2));expect(history.location.search).toContain("status=pass");expect(new URLSearchParams(history.location.search).getAll("context")).toEqual(["a","b"]);expect(history.location.hash).toBe("#controls");
- await act(async()=>history.back());await settle(()=>expect(rows()).toHaveLength(3));expect(host.querySelector<HTMLSelectElement>("#compliance-status")!.value).toBe("graded");
+ await act(async()=>history.back());await settle(()=>expect(rows()).toHaveLength(3));expect(nativeSelect(host, "#compliance-status")!.value).toBe("graded");
 });
 it("keeps server order and a controlled sorting header synchronized with URL history",async()=>{
  await render("?framework=all&status=graded&sort=framework&order=desc");await settle(()=>expect(rows()).toHaveLength(3));
@@ -72,12 +81,12 @@ it("keeps server order and a controlled sorting header synchronized with URL his
 });
 it("retains current successful reads during refresh then withholds failed evidence and export",async()=>{
  await render("?status=graded");await settle(()=>expect(rows()).toHaveLength(3));let reject!:(reason:Error)=>void;vi.mocked(compliance.checks).mockImplementation(()=>new Promise((_resolve,no)=>{reject=no;}));
- let refresh!:Promise<void>;await act(async()=>{refresh=client.invalidateQueries({queryKey:["compliance","checks"]});});await settle(()=>expect(host.textContent).toContain("Refreshing control evidence"));expect(rows()).toHaveLength(3);expect(button("Export matching CSV").disabled).toBe(true);
- await act(async()=>{reject(new Error("private failure"));await refresh;});await settle(()=>expect(host.textContent).toContain("Controls could not be loaded or refreshed"));expect(rows()).toHaveLength(0);expect(host.querySelector('[data-testid="compliance-summary"]')!.textContent).not.toContain("67%");expect(button("Export matching CSV")).toBeUndefined();expect(host.textContent).not.toContain("private failure");expect(host.textContent).not.toContain("No evaluated controls match");
+ let refresh!:Promise<void>;await act(async()=>{refresh=client.invalidateQueries({queryKey:["compliance","checks"]});});await settle(()=>expect(host.textContent).toContain("Refreshing control evidence"));expect(rows()).toHaveLength(3);expect(button("Matching rows").disabled).toBe(true);
+ await act(async()=>{reject(new Error("private failure"));await refresh;});await settle(()=>expect(host.textContent).toContain("Controls could not be loaded or refreshed"));expect(rows()).toHaveLength(0);expect(host.querySelector('[data-testid="compliance-summary"]')!.textContent).not.toContain("67%");expect(button("Matching rows")).toBeUndefined();expect(host.textContent).not.toContain("private failure");expect(host.textContent).not.toContain("No evaluated controls match");
 });
 it.each(["mismatched scope","mismatched filter","duplicated row identity","wrong page"])("withholds %s response instead of accepting evidence",async condition=>{
  vi.mocked(compliance.checks).mockImplementation(async params=>{const data=response(params as ComplianceChecksParams);if(condition==="mismatched scope")data.checks[0].cluster_id="foreign";if(condition==="mismatched filter")data.status="fail";if(condition==="duplicated row identity")data.checks[1].id=data.checks[0].id;if(condition==="wrong page")data.offset=100;return data;});
- await render("?status=graded");await settle(()=>expect(host.textContent).toContain("Controls could not be loaded or refreshed"));expect(rows()).toHaveLength(0);expect(button("Export matching CSV")).toBeUndefined();
+ await render("?status=graded");await settle(()=>expect(host.textContent).toContain("Controls could not be loaded or refreshed"));expect(rows()).toHaveLength(0);expect(button("Matching rows")).toBeUndefined();
 });
 it("clears old scope evidence on cluster change and rejects unresolved cluster reads",async()=>{
  await render("?status=graded");await settle(()=>expect(rows()).toHaveLength(3));scope.id="other";scope.resolved="cluster";await rerender();expect(rows()).toHaveLength(0);expect(compliance.checks).toHaveBeenCalledTimes(1);
@@ -90,7 +99,7 @@ it("does not claim a passing percentage when the cohort contains no graded rows"
  await render("?status=ungraded");await settle(()=>expect(rows()).toHaveLength(4));expect(host.textContent).toContain("No graded controls in this cohort");expect(host.querySelector('[data-testid="compliance-summary"]')!.textContent).not.toContain("100%");expect(host.querySelector('[data-testid="compliance-summary"]')!.textContent).toContain("Graded pass—");
 });
 it("preserves reported custom frameworks and rejects invalid status without fetching or a loading claim",async()=>{
- vi.mocked(compliance.checks).mockImplementation(async params=>response(params as ComplianceChecksParams,[row(1,"fail","custom")]));await render("?framework=custom");await settle(()=>expect(rows()).toHaveLength(1));expect(host.querySelector<HTMLSelectElement>("#compliance-framework")!.value).toBe("custom");
+ vi.mocked(compliance.checks).mockImplementation(async params=>response(params as ComplianceChecksParams,[row(1,"fail","custom")]));await render("?framework=custom");await settle(()=>expect(rows()).toHaveLength(1));expect(nativeSelect(host, "#compliance-framework")!.value).toBe("custom");
  await act(async()=>history.push("/clusters/cluster/compliance?status=invalid"));await settle(()=>expect(host.textContent).toContain("Choose a supported status or sort"));expect(compliance.checks).toHaveBeenCalledTimes(1);expect(host.textContent).not.toContain("Loading controls");
 });
 

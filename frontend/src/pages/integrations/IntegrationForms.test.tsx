@@ -7,6 +7,15 @@ import { RoutingRuleFormPage } from "./RoutingRuleFormPage";
 import { RoutingConfigFormPage } from "./RoutingConfigFormPage";
 import { SmtpSettingsFormPage } from "./SmtpSettingsFormPage";
 import { parseRouting } from "@/lib/integration-routing";
+
+/** Kit Select keeps a hidden native mirror right before its trigger. */
+function nativeSelect(root: ParentNode, selector: string): HTMLSelectElement | null {
+  const element = root.querySelector(selector);
+  if (!element) return null;
+  if (element.tagName === "SELECT") return element as HTMLSelectElement;
+  // The kit Select keeps a hidden native mirror tagged with the trigger id.
+  return element.id ? root.querySelector<HTMLSelectElement>(`select[data-mirror-for="${element.id}"]`) : null;
+}
 const route = vi.hoisted(() => ({ index: "0" as string | undefined, search: "revision=4", navigate: vi.fn() }));
 vi.mock("@/api/client", () => ({ routing: { get: vi.fn(), put: vi.fn() }, receivers: { list: vi.fn() }, systemConfigApi: { get: vi.fn(), patch: vi.fn() } }));
 vi.mock("@/lib/route-search", () => ({ useRouteSearchParams: () => [new URLSearchParams(route.search), vi.fn()] }));
@@ -23,9 +32,9 @@ beforeEach(() => { route.index = "0"; route.search = "revision=4"; vi.mocked(rou
 afterEach(() => { act(() => root?.unmount()); client?.clear(); host?.remove(); vi.resetAllMocks(); });
 async function renderPage(page = "rule") { host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host); client = new QueryClient({ defaultOptions: { queries: { retry: false } } }); await act(async () => root.render(<QueryClientProvider client={client}>{page === "rule" ? <RoutingRuleFormPage /> : page === "raw" ? <RoutingConfigFormPage /> : <SmtpSettingsFormPage />}</QueryClientProvider>)); }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
-function button(text: string) { return [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === text)!; }
+function button(text: string) { return [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === text || b.getAttribute("aria-label") === text || b.getAttribute("data-export-label") === text)!; }
 async function click(text: string) { await act(async () => button(text).click()); }
-async function change(selector: string, value: string) { await act(async () => { const el = host.querySelector<HTMLSelectElement | HTMLInputElement | HTMLTextAreaElement>(selector)!; const proto = el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(el, value); el.dispatchEvent(new Event(el instanceof HTMLSelectElement ? "change" : "input", { bubbles: true })); }); }
+async function change(selector: string, value: string) { await act(async () => { const el = (nativeSelect(host, selector) ?? host.querySelector<HTMLSelectElement | HTMLInputElement | HTMLTextAreaElement>(selector))!; const proto = el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(el, value); el.dispatchEvent(new Event(el instanceof HTMLSelectElement ? "change" : "input", { bubbles: true })); }); }
 async function ready() { await settled(() => expect(host.querySelector("form")).not.toBeNull()); }
 it.each(["stale", "missing-index", "invalid-index", "missing-revision"])("blocks a %s route edit instead of editing another route", async (scenario) => {
   if (scenario === "stale") route.search = "revision=3"; else if (scenario === "missing-index") route.index = "8"; else if (scenario === "invalid-index") route.index = "-1"; else route.search = "";
@@ -35,7 +44,7 @@ it.each(["rule", "raw", "smtp"])("does not expose a blank %s form after an initi
   vi.mocked(routing.get).mockRejectedValue(new Error("private transport")); vi.mocked(systemConfigApi.get).mockRejectedValue(new Error("private transport")); await renderPage(page); await settled(() => expect(host.querySelector('[data-testid="error-state"]')).not.toBeNull()); expect(host.querySelector("form")).toBeNull(); expect(host.textContent).not.toContain("private transport");
 });
 it("saves a route using its loaded revision and preserves advanced fields and external names", async () => {
-  vi.mocked(routing.put).mockResolvedValue({ status: "ok", revision: 5 }); await renderPage(); await ready(); await settled(() => expect(button("Save route").disabled).toBe(false)); expect(host.querySelector<HTMLSelectElement>("#route-receiver")?.value).toBe("external-sink"); await change("#route-value-0", "high"); await click("Save route");
+  vi.mocked(routing.put).mockResolvedValue({ status: "ok", revision: 5 }); await renderPage(); await ready(); await settled(() => expect(button("Save route").disabled).toBe(false)); expect(nativeSelect(host, "#route-receiver")?.value).toBe("external-sink"); await change("#route-value-0", "high"); await click("Save route");
   await settled(() => expect(route.navigate).toHaveBeenCalledWith({ href: "/settings/integrations?tab=routes" })); const [text, revision] = vi.mocked(routing.put).mock.calls[0]; expect(revision).toBe(4); const parsed = parseRouting(text); expect(parsed.ok).toBe(true); if (parsed.ok) { expect(parsed.model.routes[0]).toMatchObject({ receiver: "external-sink", match: { severity: "high" }, matchers: ["owner=platform"], raw: { group_interval: "5m" } }); expect(parsed.model.rootRaw).toEqual({ group_wait: "30s" }); expect(parsed.model.docRaw).toEqual({ inhibit_rules: [] }); }
 });
 it("creates and persists a route on one Save without a separate list-page draft", async () => {

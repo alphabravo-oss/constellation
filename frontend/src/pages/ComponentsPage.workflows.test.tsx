@@ -29,16 +29,17 @@ async function renderPage(search = "", beforeRender?: (queryClient: QueryClient)
   await act(async () => root.render(<QueryClientProvider client={client}><TestRouter history={history}><ComponentsPage /></TestRouter></QueryClientProvider>));
 }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }, { timeout: 3000 }); }
-const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.trim() === label)!;
+const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.trim() === label || item.getAttribute("aria-label") === label || item.getAttribute("data-export-label") === label)!;
 async function click(label: string) { await act(async () => { const element = button(label); if (element.getAttribute("role") === "tab") element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })); else element.click(); }); }
 async function selectComponent(id: string) { const row = [...host.querySelectorAll<HTMLTableRowElement>('[data-testid="component-inventory-table"] tbody tr')].find((item) => item.textContent?.includes(`Component ${id}`))!; await act(async () => row.click()); }
 async function search(value: string) { await act(async () => { const input = host.querySelector<HTMLInputElement>('[aria-label="Search components"]')!; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); }); }
 async function status(value: string) { await act(async () => { const select = host.querySelector<HTMLSelectElement>('[aria-label="Component status"]')!; select.value = value; select.dispatchEvent(new Event("change", { bubbles: true })); }); }
 const params = () => new URLSearchParams(history.location.search);
 
-it("shows the inventory as primary, five health KPIs and crashlooping attention, without automatic inspection", async () => {
+it("shows the inventory as primary, four inline health numbers (missing in Details) and crashlooping attention, without automatic inspection", async () => {
   await renderPage(); await settled(() => expect(host.querySelector('[data-testid="component-inventory-table"]')).not.toBeNull());
-  expect(host.querySelector('[data-testid="component-summary"]')!.children).toHaveLength(5);
+  expect(host.querySelector('[data-testid="component-summary"] [data-testid="verdict-numbers"]')!.children).toHaveLength(4);
+  expect(host.querySelector('[data-testid="component-summary"]')!.textContent).toContain("Missing");
   expect(host.textContent).toContain("1 component needs attention"); expect(host.textContent).toContain("Crashlooping1");
   expect(host.querySelector('[data-testid="component-version-matrix"]')).toBeNull(); expect(host.querySelector('[data-testid="component-rollups"]')).toBeNull();
   expect(componentsInventory.get).not.toHaveBeenCalled(); expect(componentsInventory.diagnostics).not.toHaveBeenCalled();

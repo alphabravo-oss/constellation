@@ -1,5 +1,6 @@
 import { useIsFetching, useQueryClient } from "@tanstack/react-query";
 import { useCluster } from "@/hooks/useCluster";
+import { apiErrorText } from "@/lib/api-error";
 
 /** Shared only by the entity detail pages: a route ID alone is not scope proof. */
 export function useEntityClusterScope(required = true) {
@@ -29,6 +30,5 @@ export function useEntityClusterScope(required = true) {
 }
 
 export function entityDetailError(error: unknown) {
-  return (error as { response?: { data?: { error?: string } } } | undefined)?.response?.data?.error ||
-    (error instanceof Error ? error.message : "The evidence request failed. Please try again.");
+  return apiErrorText(error, "The evidence request failed. Please try again.");
 }

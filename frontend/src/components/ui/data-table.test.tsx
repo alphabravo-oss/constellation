@@ -42,7 +42,7 @@ describe("DataTable acceptance", () => {
     expect(JSON.parse(localStorage.getItem(storageKey("default-density"))!).density).toBe("comfy");
     act(() => root?.render(<DataTable rows={rows} columns={columns} rowKey={row => row.id} density="compact" />));
     expect(host?.querySelector('[aria-label="comfy density"]')).toBeNull();
-    expect(host?.querySelector("tbody tr")?.className).toContain("h-6");
+    expect(host?.querySelector("tbody tr")?.className).toContain("h-9");
   });
   it("repairs stale and all-hidden preferences before rendering and persists the repaired state", () => {
     localStorage.setItem(storageKey("stale"), JSON.stringify({ hiddenColumnIds: ["name", "risk", "risk", "owner", "retired", 42], density: "tiny" }));
@@ -68,7 +68,7 @@ describe("DataTable acceptance", () => {
     render(<DataTable rows={list} columns={[columns[0], { ...columns[1], sort: (a,b) => a.risk-b.risk }]} rowKey={row => row.id} hiddenColumnIds={["risk"]} defaultSort={{ id: "risk", dir: "desc" }} onSortChange={onSortChange} />);
     expect(host?.textContent).toContain("Sorted by Risk (descending) · hidden column");
     expect(host?.querySelector("tbody tr")?.textContent).toBe("worker");
-    act(() => [...host!.querySelectorAll("button")].find(button => button.textContent === "Clear sort")?.click());
+    act(() => [...host!.querySelectorAll("button")].find((button) => button.textContent === "Clear sort" || button.getAttribute("aria-label") === "Clear sort" || button.getAttribute("data-export-label") === "Clear sort")?.click());
     expect(onSortChange).toHaveBeenCalledWith(null);
     expect(host?.textContent).not.toContain("hidden column");
     expect(host?.querySelector("tbody tr")?.textContent).toBe("api");
@@ -96,10 +96,10 @@ describe("DataTable acceptance", () => {
     render(<DataTable rows={rows} columns={columns} rowKey={row => row.id} preferencesKey="blocked" />);
     expect(host?.querySelector('[role="status"]')?.textContent).toContain("could not be saved");
     act(() => host?.querySelector<HTMLButtonElement>('[aria-label="compact density"]')?.click());
-    expect(host?.querySelector("tbody tr")?.className).toContain("h-6");
+    expect(host?.querySelector("tbody tr")?.className).toContain("h-9");
     expect(host?.querySelector('[aria-label="compact density"]')?.getAttribute("aria-pressed")).toBe("true");
     unavailable = false;
-    act(() => [...host!.querySelectorAll("button")].find(button => button.textContent === "Retry saving preferences")?.click());
+    act(() => [...host!.querySelectorAll("button")].find((button) => button.textContent === "Retry saving preferences" || button.getAttribute("aria-label") === "Retry saving preferences" || button.getAttribute("data-export-label") === "Retry saving preferences")?.click());
     expect(host?.querySelector('[role="status"]')).toBeNull();
     expect(JSON.parse(storage.getItem(storageKey("blocked"))!).density).toBe("compact");
   });
@@ -107,8 +107,8 @@ describe("DataTable acceptance", () => {
   it("shows mixed selection and exposes the scroll area to keyboard users", () => {
     const list = [rows[0], {...rows[0],id:"two"}];
     render(<DataTable rows={list} columns={columns} rowKey={row => row.id} selectable selected={new Set(["one"])} />);
-    const all = host?.querySelector<HTMLInputElement>('input[aria-label="Select all"]');
-    expect(all?.indeterminate).toBe(true);
+    const all = host?.querySelector<HTMLButtonElement>('button[role="checkbox"][aria-label="Select all"]');
+    expect(all?.getAttribute("data-state")).toBe("indeterminate");
     expect(all?.getAttribute("aria-checked")).toBe("mixed");
     expect(host?.querySelector('[role="region"]')?.getAttribute("tabindex")).toBe("0");
   });
@@ -118,12 +118,12 @@ describe("DataTable acceptance", () => {
     const changed = vi.fn();
     const view = (selected: Set<string>) => <TablePreferencesProvider identity={{org_id:"org",user_id:"user"}}><DataTable rows={list} columns={columns} rowKey={row=>row.id} selectable selected={selected} onSelectedChange={changed}/></TablePreferencesProvider>;
     render(view(new Set(["100"])));
-    act(() => host?.querySelector<HTMLInputElement>('input[aria-label="Select all"]')?.click());
+    act(() => host?.querySelector<HTMLButtonElement>('button[aria-label="Select all"]')?.click());
     const all = changed.mock.calls[0][0] as Set<string>;
     expect(all.size).toBe(101);
     expect(all.has("100")).toBe(true);
     act(() => root?.render(view(all)));
-    act(() => host?.querySelector<HTMLInputElement>('input[aria-label="Select all"]')?.click());
+    act(() => host?.querySelector<HTMLButtonElement>('button[aria-label="Select all"]')?.click());
     expect([...changed.mock.calls[1][0]]).toEqual(["100"]);
   });
 
@@ -142,7 +142,7 @@ describe("DataTable acceptance", () => {
   it("allows hiding the last optional column when a required column remains", async () => {
     render(<DataTable rows={rows} columns={[{...columns[0],hideable:false},columns[1]]} rowKey={row => row.id} preferencesKey="required" />);
     await act(async () => { host?.querySelector<HTMLButtonElement>('[aria-label="Columns"]')?.dispatchEvent(new MouseEvent("pointerdown",{bubbles:true,button:0})); });
-    const risk = [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find(item => item.textContent === "Risk");
+    const risk = [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"]')].find((item) => item.textContent === "Risk" || item.getAttribute("aria-label") === "Risk" || item.getAttribute("data-export-label") === "Risk");
     await act(async () => { risk?.click(); });
     expect([...host!.querySelectorAll("th")].map(cell => cell.textContent)).toEqual(["Name"]);
   });
@@ -222,7 +222,7 @@ describe("DataTable preferences", () => {
     expect(host?.textContent).not.toContain("Owner");
     expect(host?.textContent).not.toContain("platform");
     expect(document.querySelector("[data-testid='unit-table-columns-trigger']")).not.toBeNull();
-    expect(host?.querySelector("tbody tr")?.className).toContain("h-6");
+    expect(host?.querySelector("tbody tr")?.className).toContain("h-9");
   });
 
   it("keeps non-hideable columns visible even when stored preferences hide them", () => {
@@ -365,7 +365,7 @@ it("isolates preferences across identities without copying stale columns or dens
   expect(host?.textContent).not.toContain("Owner");
   act(() => root?.render(<TablePreferencesProvider identity={{ org_id: "other-org", user_id: "user" }}>{table}</TablePreferencesProvider>));
   expect(host?.textContent).toContain("Owner");
-  expect(host?.querySelector("tbody tr")?.className).not.toContain("h-6");
+  expect(host?.querySelector("tbody tr")?.className).not.toContain("h-9");
   expect(JSON.parse(localStorage.getItem(storageKey("scoped", "other-org"))!).hiddenColumnIds).toEqual([]);
   act(() => root?.render(<TablePreferencesProvider identity={{ org_id: "org", user_id: "other-user" }}>{table}</TablePreferencesProvider>));
   expect(host?.textContent).toContain("Owner");
@@ -376,7 +376,7 @@ it("does not adopt legacy preferences with unknown ownership", () => {
   localStorage.setItem("constellation.table.legacy.v1", JSON.stringify({ hiddenColumnIds: ["owner"], density: "compact" }));
   render(<DataTable rows={rows} columns={columns} rowKey={(row) => row.id} preferencesKey="legacy" />);
   expect(host?.textContent).toContain("Owner");
-  expect(host?.querySelector("tbody tr")?.className).not.toContain("h-6");
+  expect(host?.querySelector("tbody tr")?.className).not.toContain("h-9");
 });
 
 it("keeps bounded detail inventories scrollable without changing default pagination", () => {

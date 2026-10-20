@@ -9,7 +9,7 @@ import { PageHeader } from "@/components/ui/page";
 import { Collapse } from "@/components/ui/collapse";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Field, TextInput } from "@/components/ui/form";
+import { Field, TextInput, Select, Checkbox } from "@/components/ui/form";
 
 /**
  * RegisterClusterPage — /settings/clusters/new. A dedicated form page (the
@@ -92,9 +92,9 @@ kubectl -n constellation-system create secret generic constellation-init-bundle 
             </Field>}
             {!bundleId && <Collapse label="Advanced registration settings">
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Distribution" htmlFor="cluster-distro"><select id="cluster-distro" className="w-full rounded border border-input bg-background p-2" value={distro} onChange={(e) => setDistro(e.target.value)}>{["k8s", "k3s", "eks", "gke", "aks", "openshift"].map((value) => <option key={value}>{value}</option>)}</select></Field>
+                <Field label="Distribution" htmlFor="cluster-distro"><Select id="cluster-distro" className="w-full rounded border border-input bg-background p-2" value={distro} onChange={(e) => setDistro(e.target.value)}>{["k8s", "k3s", "eks", "gke", "aks", "openshift"].map((value) => <option key={value}>{value}</option>)}</Select></Field>
                 <Field label="Region" htmlFor="cluster-region"><TextInput id="cluster-region" value={region} onChange={(e) => setRegion(e.target.value)} placeholder="us-east-1" /></Field>
-                <Field label="Expires after" htmlFor="cluster-ttl"><select id="cluster-ttl" className="w-full rounded border border-input bg-background p-2" value={ttl} onChange={(e) => setTtl(e.target.value)}>{[["24h", "24 hours"], ["168h", "7 days"], ["720h", "30 days"], ["2160h", "90 days"]].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
+                <Field label="Expires after" htmlFor="cluster-ttl"><Select id="cluster-ttl" className="w-full rounded border border-input bg-background p-2" value={ttl} onChange={(e) => setTtl(e.target.value)}>{[["24h", "24 hours"], ["168h", "7 days"], ["720h", "30 days"], ["2160h", "90 days"]].map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></Field>
               </div>
             </Collapse>}
             {bundleId && <p>Rotating replaces the existing credentials. Save the returned bundle and update the target cluster.</p>}
@@ -116,7 +116,7 @@ kubectl -n constellation-system create secret generic constellation-init-bundle 
               <dt className="text-muted-foreground">Cluster ID</dt><dd className="font-mono break-all">{mint.cluster_id}</dd>
               <dt className="text-muted-foreground">Bundle expires</dt><dd className="font-mono">{new Date(mint.expires_at).toLocaleString()}</dd>
             </dl>
-            <p className="mt-3 text-[11px] text-muted-foreground">
+            <p className="mt-3 text-micro text-muted-foreground">
               This is the only time the raw tokens are shown. Save the bundle now — lose it and you'll rotate.
             </p>
           </Card>
@@ -126,8 +126,8 @@ kubectl -n constellation-system create secret generic constellation-init-bundle 
               <div className="flex items-center justify-end">
                 <CopyButton text={`kubectl apply -f ${mint.import_url}`} />
               </div>
-              <pre className="overflow-auto rounded border border-border bg-muted/30 p-3 text-[11px] text-mono" data-testid="import-command">kubectl apply -f {mint.import_url}</pre>
-              <p className="text-[11px] text-muted-foreground">
+              <pre className="overflow-auto rounded border border-border bg-muted/30 p-3 text-micro text-mono" data-testid="import-command">kubectl apply -f {mint.import_url}</pre>
+              <p className="text-micro text-muted-foreground">
                 Connects back to <span className="font-mono">{mint.server_url}</span> and goes active once it checks in.
               </p>
             </div>
@@ -156,28 +156,28 @@ kubectl -n constellation-system create secret generic constellation-init-bundle 
                       </Button>
                     </div>
                   </div>
-                  <pre className="max-h-56 overflow-auto rounded border border-border bg-muted/30 p-3 text-[11px] text-mono" data-testid="bundle-yaml">{mint.yaml}</pre>
+                  <pre className="max-h-56 overflow-auto rounded border border-border bg-muted/30 p-3 text-micro text-mono" data-testid="bundle-yaml">{mint.yaml}</pre>
                 </section>
                 <section>
                   <div className="mb-1 flex items-center justify-between">
                     <div className="text-xs font-semibold">2. Create the secret on the target cluster</div>
                     <CopyButton text={secretCmd} />
                   </div>
-                  <pre className="overflow-auto rounded border border-border bg-muted/30 p-3 text-[11px] text-mono">{secretCmd}</pre>
+                  <pre className="overflow-auto rounded border border-border bg-muted/30 p-3 text-micro text-mono">{secretCmd}</pre>
                 </section>
                 <section>
                   <div className="mb-1 flex items-center justify-between">
                     <div className="text-xs font-semibold">3. Install the full platform (consumer mode)</div>
                     <CopyButton text={helmCmd} />
                   </div>
-                  <pre className="overflow-auto rounded border border-border bg-muted/30 p-3 text-[11px] text-mono">{helmCmd}</pre>
+                  <pre className="overflow-auto rounded border border-border bg-muted/30 p-3 text-micro text-mono">{helmCmd}</pre>
                 </section>
               </div>
             </Collapse>
           </Card>
 
           <div className="flex items-center gap-3">
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={saved} onChange={(e) => setSaved(e.target.checked)} />I saved the registration bundle or installation command.</label>
+            <label className="flex items-center gap-2 text-sm"><Checkbox  checked={saved} onChange={(e) => setSaved(e.target.checked)} />I saved the registration bundle or installation command.</label>
             <Button variant="ghost" size="lg" onClick={() => navigate({ href: back })}>Done</Button>
           </div>
         </div>

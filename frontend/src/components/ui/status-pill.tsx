@@ -1,51 +1,50 @@
 import { cn } from "@/lib/cn";
 
+type Tone = "neutral" | "success" | "warning" | "error" | "info" | "pending" | "accent";
+
+const DOT: Record<Tone, string> = {
+  neutral: "bg-status-neutral",
+  success: "bg-status-success",
+  warning: "bg-status-warning",
+  error: "bg-status-error",
+  info: "bg-status-info",
+  pending: "bg-status-pending",
+  accent: "bg-brand",
+};
+
+/** Sentence-case a lifecycle/state value: "in_progress" → "In progress". */
+export function sentenceValue(value: string): string {
+  const words = value.replace(/[_-]+/g, " ").trim();
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : words;
+}
+
 /**
- * Generic status pill — used for lifecycle, mode (learn/monitor/enforce),
- * and arbitrary "state" badges. Visual is a small dot + label.
+ * Status pill: dot + sentence-case label on a neutral chip. Status color is on
+ * the dot only (never color alone).
  */
 export function StatusPill({
   label,
   tone = "neutral",
   className,
   dot = true,
-  uppercase = true,
 }: {
   label: string;
-  tone?: "neutral" | "success" | "warning" | "error" | "info" | "pending" | "accent";
+  tone?: Tone;
   className?: string;
   dot?: boolean;
+  /** @deprecated values are always sentence case now. */
   uppercase?: boolean;
 }) {
-  const color =
-    tone === "success" ? "var(--color-status-success)" :
-    tone === "warning" ? "var(--color-status-warning)" :
-    tone === "error"   ? "var(--color-status-error)" :
-    tone === "info"    ? "var(--color-status-info)" :
-    tone === "pending" ? "var(--color-status-pending)" :
-    tone === "accent"  ? "var(--color-primary)" :
-    "var(--color-muted-foreground)";
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded h-5 px-2 text-[10px] font-medium ring-1 ring-inset",
-        uppercase && "uppercase tracking-wider",
-        className,
-      )}
-      style={{
-        background: `color-mix(in oklab, ${color} 14%, transparent)`,
-        color,
-        boxShadow: `inset 0 0 0 1px color-mix(in oklab, ${color} 28%, transparent)`,
-      }}
-    >
-      {dot && <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: color }} />}
-      {label}
+    <span className={cn("inline-flex h-5 shrink-0 items-center gap-1.5 rounded-full border border-border bg-muted/40 px-2 text-micro font-medium leading-none text-foreground", className)}>
+      {dot && <span aria-hidden className={cn("h-1.5 w-1.5 rounded-full", DOT[tone])} />}
+      {sentenceValue(label)}
     </span>
   );
 }
 
 export function ModePill({ mode }: { mode: "learn" | "monitor" | "enforce" | "discover" | "protect" }) {
-  const tone: "warning" | "info" | "success" | "accent" =
+  const tone: Tone =
     mode === "learn" || mode === "discover" ? "info" :
     mode === "monitor" ? "warning" :
     mode === "enforce" || mode === "protect" ? "success" : "info";
@@ -53,11 +52,11 @@ export function ModePill({ mode }: { mode: "learn" | "monitor" | "enforce" | "di
 }
 
 export function LifecycleBadge({ lifecycle }: { lifecycle: string }) {
-  const tone: "neutral" | "success" | "warning" | "info" | "error" | "pending" =
+  const tone: Tone =
     lifecycle === "resolved" ? "success" :
     lifecycle === "suppressed" ? "neutral" :
     lifecycle === "accepted" ? "pending" :
     lifecycle === "triaged" || lifecycle === "in_progress" ? "info" :
     lifecycle === "open" ? "warning" : "neutral";
-  return <StatusPill label={lifecycle.replace("_", " ")} tone={tone} />;
+  return <StatusPill label={lifecycle} tone={tone} />;
 }

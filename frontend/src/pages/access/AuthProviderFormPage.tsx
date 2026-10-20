@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Field, TextInput, Select, Switch, Textarea } from "@/components/ui/form";
+import { apiErrorMessage } from "@/lib/api-error";
 
 const BACK_TO = "/settings/access?tab=sso";
 
@@ -242,7 +243,7 @@ function AuthProviderForm({ provider }: { provider: AuthServer | null }) {
           </div>
           {connectionTest.isSuccess && <p role="status" className="text-sm text-status-success">Saved {provider?.type.toUpperCase()} connection passed.</p>}
           {connectionTest.isError && <p role="alert" className="text-sm text-status-error">
-            {(connectionTest.error as { response?: { data?: { message?: string } } })?.response?.data?.message ?? "Saved connection test failed."}
+            {apiErrorMessage(connectionTest.error) ?? "Saved connection test failed."}
           </p>}
           {isEdit && <p className="text-xs text-muted-foreground">Connection test uses the last saved provider settings, not unsaved edits.</p>}
         </form>

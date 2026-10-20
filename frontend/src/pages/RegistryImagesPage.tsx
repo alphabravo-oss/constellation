@@ -1,24 +1,25 @@
 // Registry-discovered repositories with full server filtering, summaries and exports.
 import { useParams } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, Boxes } from "lucide-react";
+import { ChevronLeft } from "lucide-react";
 import { registries, type RegistryImageRow } from "@/api/client";
 import {
   useInventoryScope,
   useInventoryRoute,
   InventoryScopeState,
   InventoryLoadState,
-  ScanInventoryExport,
+  InventorySearch,
+  useScanInventoryExport,
 } from "./inventory-workspace";
 import { Button } from "@/components/ui/button";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Pager } from "@/components/ui/pager";
 import { DigestDisclosure } from "@/components/ui/digest-disclosure";
 import { fmtRelative } from "@/lib/format";
+import { Select } from "@/components/ui/form";
 
 const sorts = [
   "repository",
@@ -193,8 +194,8 @@ export function RegistryImagesPage() {
         <span
           className={
             image.scanned
-              ? "rounded px-1.5 py-0.5 text-[10px] font-medium bg-[color-mix(in_oklab,var(--color-severity-low)_16%,transparent)] text-[color:var(--color-severity-low)]"
-              : "rounded px-1.5 py-0.5 text-[10px] font-medium bg-muted text-muted-foreground"
+              ? "rounded px-1.5 py-0.5 text-micro font-medium bg-[color-mix(in_oklab,var(--color-severity-low)_16%,transparent)] text-[color:var(--color-severity-low)]"
+              : "rounded px-1.5 py-0.5 text-micro font-medium bg-muted text-muted-foreground"
           }
         >
           {image.scanned ? "scanned" : "not scanned"}
@@ -212,14 +213,14 @@ export function RegistryImagesPage() {
       exportValue: (image) => `critical=${image.critical}; high=${image.high}`,
       cell: (image) =>
         image.critical + image.high === 0 ? (
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-micro text-muted-foreground">
             {image.scanned ? "no crit/high" : "—"}
           </span>
         ) : (
           <span className="flex items-center justify-end gap-1">
             {image.critical > 0 && (
               <span
-                className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white"
+                className="rounded px-1.5 py-0.5 text-micro text-mono font-semibold text-white"
                 style={{ background: "var(--color-severity-critical)" }}
               >
                 {image.critical}C
@@ -227,7 +228,7 @@ export function RegistryImagesPage() {
             )}
             {image.high > 0 && (
               <span
-                className="rounded px-1.5 py-0.5 text-[10px] text-mono font-semibold text-white"
+                className="rounded px-1.5 py-0.5 text-micro text-mono font-semibold text-white"
                 style={{ background: "var(--color-severity-high)" }}
               >
                 {image.high}H
@@ -275,6 +276,7 @@ export function RegistryImagesPage() {
         image.last_seen_at ? fmtRelative(image.last_seen_at) : "—",
     },
   ];
+  const matching = useScanInventoryExport({ context: JSON.stringify([scope.owner, regId, filters]), disabled: !ready || !summary?.total, download: shouldDownload => registries.imagesCSV(regId!, filters, shouldDownload) });
   if (!scope.ready)
     return (
       <div className="space-y-4">
@@ -282,6 +284,21 @@ export function RegistryImagesPage() {
         <InventoryScopeState scope={scope} />
       </div>
     );
+  const toolbar = <>
+    <InventorySearch value={route.query} onChange={route.setQuery} label="Search registry repositories" placeholder="Search repositories" />
+    <Select aria-label="Registry scan status" value={scanStatus} onChange={(event) => route.update({ scan_status: event.target.value === "all" ? null : event.target.value })} className="h-9">
+      <option value="all">Any scan status</option>
+      <option value="scanned">Scanned</option>
+      <option value="unscanned">Not scanned</option>
+    </Select>
+    <Select aria-label="Registry image severity" value={severity} onChange={(event) => route.update({ severity: event.target.value === "all" ? null : event.target.value })} className="h-9">
+      <option value="all">Any severity</option>
+      <option value="critical">Critical present</option>
+      <option value="high">High present</option>
+      <option value="none">No critical or high</option>
+    </Select>
+    {(route.query || scanStatus !== "all" || severity !== "all") && <Button variant="ghost" onClick={() => route.update({ q: null, scan_status: null, severity: null, sort: null, order: null })}>Reset filters</Button>}
+  </>;
   return (
     <div className="space-y-4">
       <PageHeader
@@ -295,10 +312,9 @@ export function RegistryImagesPage() {
           </a>
         }
         title={registryReady ? reg.data.name : "Registry images"}
-        description="Organization-wide repositories discovered in this registry. Scan evidence uses the latest organization-wide result for each repository."
+        description="Repositories discovered in this registry, with their latest scan evidence."
         actions={
           <Button
-            variant="outline"
             disabled={reg.isFetching || imgs.isFetching}
             onClick={() => {
               void reg.refetch();
@@ -330,100 +346,15 @@ export function RegistryImagesPage() {
                     ? "Image vulnerabilities need attention"
                     : "No recorded critical or high findings"
         }
-        detail="Counts cover every matching repository; scan evidence does not establish coverage for every tag or digest."
+        numbers={[
+          { label: "repositories", value: summary?.total ?? "—" },
+          { label: "scanned", value: summary?.scanned ?? "—", title: summary ? `${summary.unscanned} without scan evidence` : undefined },
+          { label: "critical", value: summary?.critical ?? "—", tone: summary?.critical ? "critical" : "default" },
+          { label: "high", value: summary?.high ?? "—", tone: summary?.high ? "high" : "default" },
+        ]}
+        detail="Counts cover every matching repository; scan evidence does not establish coverage for every tag or digest. Matching CSV covers up to 100,000 repositories; page CSV follows visible columns."
       />
-      <StatGrid>
-        <StatCard
-          label="Matching repositories"
-          value={summary?.total ?? "—"}
-          icon={<Boxes className="h-3.5 w-3.5" />}
-        />
-        <StatCard
-          label="With scan evidence"
-          value={summary?.scanned ?? "—"}
-          hint={
-            summary ? `${summary.unscanned} without scan evidence` : undefined
-          }
-        />
-        <StatCard
-          label="Critical"
-          value={summary?.critical ?? "—"}
-          tone={summary?.critical ? "critical" : "neutral"}
-        />
-        <StatCard
-          label="High"
-          value={summary?.high ?? "—"}
-          tone={summary?.high ? "high" : "neutral"}
-        />
-      </StatGrid>
-      <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card p-3">
-        <label className="min-w-0 flex-1 text-xs">
-          Repository
-          <input
-            value={route.query}
-            onChange={(event) => route.setQuery(event.target.value)}
-            placeholder="Search repository…"
-            aria-label="Search registry repositories"
-            className="block w-full min-w-0 rounded-md border border-border bg-background px-3 py-2 text-sm"
-          />
-        </label>
-        <label className="text-xs">
-          Scan evidence
-          <select
-            aria-label="Registry scan status"
-            value={scanStatus}
-            onChange={(event) =>
-              route.update({
-                scan_status:
-                  event.target.value === "all" ? null : event.target.value,
-              })
-            }
-            className="block rounded-md border border-border bg-background p-2 text-sm"
-          >
-            <option value="all">Any status</option>
-            <option value="scanned">Scanned</option>
-            <option value="unscanned">Not scanned</option>
-          </select>
-        </label>
-        <label className="text-xs">
-          Severity
-          <select
-            aria-label="Registry image severity"
-            value={severity}
-            onChange={(event) =>
-              route.update({
-                severity:
-                  event.target.value === "all" ? null : event.target.value,
-              })
-            }
-            className="block rounded-md border border-border bg-background p-2 text-sm"
-          >
-            <option value="all">Any severity</option>
-            <option value="critical">Critical present</option>
-            <option value="high">High present</option>
-            <option value="none">No critical/high in scan</option>
-          </select>
-        </label>
-        <Button
-          variant="outline"
-          onClick={() =>
-            route.update({
-              q: null,
-              scan_status: null,
-              severity: null,
-              sort: null,
-              order: null,
-            })
-          }
-        >
-          Reset filters
-        </Button>
-        <ScanInventoryExport
-          context={JSON.stringify([scope.owner, regId, filters])}
-          disabled={!ready || !summary?.total}
-          download={shouldDownload => registries.imagesCSV(regId!, filters, shouldDownload)}
-        />
-      </div>
+      {matching.status}
       {!registryReady ? (
         reg.isError ? (
           <p role="alert">
@@ -433,7 +364,7 @@ export function RegistryImagesPage() {
         ) : (
           <p>Loading registry…</p>
         )
-      ) : !ready ? (
+      ) : !ready && (imgs.isError || invalid) ? (
         <InventoryLoadState
           label="Registry images"
           query={imgs}
@@ -443,7 +374,7 @@ export function RegistryImagesPage() {
       ) : (
         <>
           <DataTable
-            rows={rows}
+            rows={ready ? rows : []}
             columns={columns}
             rowKey={(image) => image.id}
             pagination={false}
@@ -456,9 +387,11 @@ export function RegistryImagesPage() {
                 order: value?.dir ?? "desc",
               })
             }
+            toolbar={toolbar}
+            exportOptions={[matching.option]}
             exportFileName={`registry-images-page-${route.page + 1}`}
-            exportLabel="Export this page CSV"
-            emptyState={
+            exportLabel="This page"
+            emptyState={!ready ? <InventoryLoadState label="Registry images" query={imgs} invalid={invalid} debouncing={route.debouncing} /> :
               <EmptyState
                 title={
                   route.page
@@ -469,18 +402,16 @@ export function RegistryImagesPage() {
               />
             }
           />
-          <p className="text-xs text-muted-foreground">
-            Showing {rows.length ? route.offset + 1 : 0}–
-            {rows.length ? route.offset + rows.length : 0} of {imgs.data.total}{" "}
-            matching repositories. Matching CSV covers up to 100,000; page CSV
-            follows visible columns.
+          {ready && <>
+          <p className="sr-only">
+            Showing {rows.length ? route.offset + 1 : 0}–{rows.length ? route.offset + rows.length : 0} of {imgs.data!.total} matching repositories.
           </p>
           {rows.length > 0 && (
             <Pager
               page={route.page}
               pageSize={100}
-              total={imgs.data.total}
-              hasMore={imgs.data.has_more}
+              total={imgs.data!.total}
+              hasMore={imgs.data!.has_more}
               rowsOnPage={rows.length}
               onPage={route.setPage}
             />
@@ -488,6 +419,7 @@ export function RegistryImagesPage() {
           {!rows.length && route.page > 0 && (
             <Button onClick={() => route.setPage(0)}>First page</Button>
           )}
+          </>}
         </>
       )}
     </div>

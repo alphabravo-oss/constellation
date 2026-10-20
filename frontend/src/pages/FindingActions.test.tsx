@@ -34,7 +34,7 @@ async function renderPage(kind: Kind | "detail", beforeRender?: (queryClient: Qu
 async function rerenderPage(kind: Kind | "detail") { await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={identity}>{page(kind)}</TablePreferencesProvider></QueryClientProvider>)); }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
 async function change(selector: string, value: string) { await act(async () => { const input = host.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector)!; const prototype = input.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); }); }
-const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.trim() === label)!;
+const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent?.trim() === label || item.getAttribute("aria-label") === label || item.getAttribute("data-export-label") === label)!;
 async function submit() { await act(async () => host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }))); }
 function noWrites() { expect(findings.instanceAcceptRisk).not.toHaveBeenCalled(); expect(findings.instanceSuppress).not.toHaveBeenCalled(); expect(findings.instanceAddComment).not.toHaveBeenCalled(); }
 async function draft(kind: Kind) { await renderPage(kind); await settled(() => expect(host.querySelector("form")).not.toBeNull()); await change("#finding-action-text", "  Retained justification and controls  "); }
@@ -134,7 +134,8 @@ it("keeps detail history read-only and links to dedicated actions in the same cl
   await renderPage("detail"); await settled(() => expect(host.textContent).toContain("Saved history"));
   expect(host.querySelector("form,textarea,input")).toBeNull();
   for (const path of ["accept-risk", "suppress", "comments/new"]) expect(host.querySelector(`a[href="/clusters/cluster/findings/finding/${path}?first_seen_at=2026-01-01T00%3A00%3A00Z"]`)).not.toBeNull();
-  expect(host.querySelector('a[href="/clusters/cluster/findings"]')).not.toBeNull(); noWrites();
+  // The way back to the list is the shell breadcrumb ("All clusters › Findings › CVE"), not a page link.
+  noWrites();
 });
 it("distinguishes failed history from an empty thread and retries it", async () => {
   vi.mocked(findings.instanceComments).mockRejectedValueOnce(new Error("private comments details"));
@@ -194,7 +195,6 @@ it("updates detail action and asset links when the active entity and cluster cha
   vi.mocked(findings.instance).mockResolvedValue({ ...finding, id: "another", row_id: "another:1767225600", cluster_id: "another-cluster", asset_id: "another-asset", lifecycle: "accepted" });
   await rerenderPage("detail"); await settled(() => expect(host.querySelector('a[href="/clusters/another-cluster/findings/another/accept-risk?first_seen_at=2026-01-01T00%3A00%3A00Z"]')).not.toBeNull());
   expect(host.querySelector('a[href="/clusters/cluster/findings/finding/accept-risk?first_seen_at=2026-01-01T00%3A00%3A00Z"]')).toBeNull();
-  expect(host.querySelector('a[href="/clusters/another-cluster/findings"]')).not.toBeNull();
   expect(host.querySelector('[data-testid="finding-affected-asset-detail"]')!.getAttribute("href")).toBe("/clusters/another-cluster/assets/another-asset");
   expect(host.querySelector('[data-testid="finding-exception-link"]')!.getAttribute("href")).toContain("/clusters/another-cluster/exceptions?");
   noWrites();

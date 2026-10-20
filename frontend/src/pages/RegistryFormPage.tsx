@@ -9,6 +9,7 @@ import { Collapse } from "@/components/ui/collapse";
 import { useCluster } from "@/hooks/useCluster";
 import { useEditorVisit } from "@/hooks/useEditorVisit";
 import { KINDS, AUTH_KINDS, CADENCES, PROMOTION_THRESHOLDS, type RegistryScheduleMode, buildScanPolicy, scheduleFromRegistry, buildScanCadence, registryCredentialsForSave } from "@/lib/registry-form";
+import { Select, Checkbox } from "@/components/ui/form";
 
 export function RegistryFormPage() {
   const { regId } = useParams({ strict: false });
@@ -151,18 +152,18 @@ function RegistryForm({ editorContext, editing, onSaved, onCancel }: { editorCon
         </Row>
 
         <Row label="Auth">
-          <select
+          <Select
             className="block w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
             value={authKind}
             onChange={(e) => setAuthKind(e.target.value as RegistryAuthKind)}
           >
             {AUTH_KINDS.map((a) => <option key={a} value={a}>{a}</option>)}
-          </select>
+          </Select>
         </Row>
 
         {authKind !== "none" && kindMeta && (
           <div className="rounded-md border border-border bg-card p-3 space-y-2">
-            <div className="text-sm uppercase tracking-wider text-muted-foreground">
+            <div className="text-sm  text-muted-foreground">
               Credentials for {kindMeta.label}
             </div>
             {editing?.has_secret && <p className="text-xs text-muted-foreground">Leave all fields blank to keep saved credentials. To replace them, enter the complete credential set.</p>}
@@ -182,7 +183,7 @@ function RegistryForm({ editorContext, editing, onSaved, onCancel }: { editorCon
         )}
 
         <Row label="Scan cadence">
-          <select
+          <Select
             className="block w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
             value={scheduleMode}
             onChange={(e) => setScheduleMode(e.target.value as RegistryScheduleMode)}
@@ -192,7 +193,7 @@ function RegistryForm({ editorContext, editing, onSaved, onCancel }: { editorCon
                 {c === "custom" ? "custom interval" : c === "cron" ? "cron schedule" : c}
               </option>
             ))}
-          </select>
+          </Select>
         </Row>
 
         {scheduleMode === "custom" && (
@@ -237,14 +238,14 @@ function RegistryForm({ editorContext, editing, onSaved, onCancel }: { editorCon
             />
           </Row>
           <Row label="Tag selection">
-            <select
+            <Select
               className="block w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               value={tagSelection}
               onChange={(e) => setTagSelection(e.target.value as RegistryScanPolicy["tag_selection"])}
             >
               <option value="all">all tags</option>
               <option value="latest">latest tag only</option>
-            </select>
+            </Select>
           </Row>
           <Row label="Max image age">
             <input
@@ -283,7 +284,7 @@ function RegistryForm({ editorContext, editing, onSaved, onCancel }: { editorCon
             />
           </Row>
           <Row label="Promotion threshold">
-            <select
+            <Select
               className="block w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               value={promotionThreshold}
               onChange={(e) => setPromotionThreshold(e.target.value)}
@@ -291,27 +292,24 @@ function RegistryForm({ editorContext, editing, onSaved, onCancel }: { editorCon
               {PROMOTION_THRESHOLDS.map((threshold) => (
                 <option key={threshold} value={threshold}>{threshold}</option>
               ))}
-            </select>
+            </Select>
           </Row>
           <label className="flex min-h-[54px] items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={rescanAfterDBUpdate}
               onChange={(e) => setRescanAfterDBUpdate(e.target.checked)}
             />
             <span>Rescan after DB update</span>
           </label>
           <label className="flex min-h-[54px] items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={ignoreProxy}
               onChange={(e) => setIgnoreProxy(e.target.checked)}
             />
             <span>Ignore proxy</span>
           </label>
           <label className="flex min-h-[54px] items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={scanLayers}
               onChange={(e) => setScanLayers(e.target.checked)}
             />

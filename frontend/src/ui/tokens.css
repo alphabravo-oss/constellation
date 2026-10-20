@@ -1,0 +1,297 @@
+/*
+ * AlphaBravo shared UI kit — design tokens.
+ *
+ * Product-agnostic. Copied verbatim between Astronomer and Constellation
+ * (docs/ui/KIT.md). Every color is an HSL triplet consumed as hsl(var(--x))
+ * so Tailwind utilities keep following the active theme without rebuilding.
+ *
+ * A product overrides only the brand slots (`--brand`, `--brand-from`,
+ * `--brand-to`) — never the neutral or status sets.
+ */
+
+@theme inline {
+  --font-sans: var(--font-app-sans);
+  --font-mono: var(--font-app-mono);
+
+  /* Neutral surfaces */
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-sidebar: hsl(var(--sidebar));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-accent: hsl(var(--sidebar-accent));
+  --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
+
+  /* Brand accent: the ONLY place a product (or an operator's branding
+   * override) injects color. Used for the mark, the active nav indicator and
+   * primary buttons — never for links, selected rows or status. */
+  --color-brand: hsl(var(--brand));
+  --color-brand-foreground: hsl(var(--brand-foreground));
+  --color-brand-from: hsl(var(--brand-from));
+  --color-brand-to: hsl(var(--brand-to));
+
+  /* Status set (one per product, light/dark pairs) */
+  --color-status-success: hsl(var(--status-success));
+  --color-status-warning: hsl(var(--status-warning));
+  --color-status-error: hsl(var(--status-error));
+  --color-status-info: hsl(var(--status-info));
+  --color-status-pending: hsl(var(--status-pending));
+  --color-status-neutral: hsl(var(--status-neutral));
+  /* Legacy alias kept for Astronomer's "high" tone; maps onto severity-high. */
+  --color-status-high: hsl(var(--severity-high));
+
+  /* Severity ramp slot (Constellation's signature; Astronomer borrows it
+   * inside image-scan views only). */
+  --color-severity-critical: hsl(var(--severity-critical));
+  --color-severity-high: hsl(var(--severity-high));
+  --color-severity-medium: hsl(var(--severity-medium));
+  --color-severity-low: hsl(var(--severity-low));
+  --color-severity-info: hsl(var(--severity-info));
+
+  /* Radius */
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+
+  /* Elevation */
+  --shadow-elev-1: var(--elev-1);
+  --shadow-elev-2: var(--elev-2);
+  --shadow-elev-3: var(--elev-3);
+  --shadow-elev-popover: var(--elev-popover);
+
+  /* Type scale. Body 14 / meta 12 / micro 11 (nothing below 11) /
+   * section 14–16 / page title 24. The flat aliases exist so legacy
+   * `text-2xs`/`text-9`/`text-10` call sites are lifted to the 11px floor. */
+  --text-body: 0.875rem;
+  --text-body--line-height: calc(1.25 / 0.875);
+  --text-meta: 0.75rem;
+  --text-meta--line-height: calc(1 / 0.75);
+  --text-micro: 0.6875rem;
+  --text-micro--line-height: calc(1 / 0.6875);
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
+  --text-9: 0.6875rem;
+  --text-10: 0.6875rem;
+  --text-11: 0.6875rem;
+  --text-13: 0.8125rem;
+  --text-section-title: 0.875rem;
+  --text-section-title--line-height: calc(1.25 / 0.875);
+  --text-section-title-lg: 1rem;
+  --text-section-title-lg--line-height: 1.5rem;
+  --text-page-title: 1.5rem;
+  --text-page-title--line-height: calc(2 / 1.5);
+  --text-stat: 1.75rem;
+  --text-stat--line-height: 2rem;
+
+  /* Z-index scale */
+  --z-index-sticky: var(--z-sticky);
+  --z-index-header: var(--z-header);
+  --z-index-chrome: var(--z-chrome);
+  --z-index-overlay: var(--z-overlay);
+  --z-index-popover: var(--z-popover);
+  --z-index-toast: var(--z-toast);
+
+  /* Motion */
+  --ease-soft: var(--motion-ease);
+  --animate-fade-in: fade-in var(--motion-slow) var(--motion-ease);
+  --animate-pulse-dot: pulse-dot 2s ease-in-out infinite;
+  --animate-rise: rise var(--motion-slow) var(--motion-ease);
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@layer base {
+  :root {
+    --font-app-sans: "Inter Variable", system-ui, sans-serif;
+    --font-app-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+
+    /* Neutral set (light) */
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+    --primary: 240 5.9% 10%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --muted: 240 4.8% 95.9%;
+    /* 42% (not shadcn's 46.1%) so 11–12px metadata clears AA on `muted`. */
+    --muted-foreground: 240 3.8% 42%;
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+    /* Same value as status-error so `text-destructive` clears AA on white. */
+    --destructive: 0 75% 42%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 240 5.9% 10%;
+    --radius: 0.5rem;
+    --sidebar: 0 0% 98%;
+    --sidebar-foreground: 240 5.9% 10%;
+    --sidebar-border: 240 5.9% 90%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+
+    /* Brand accent (product default: violet; gradient blue → violet). */
+    --brand: 262 83% 52%;
+    --brand-foreground: 0 0% 100%;
+    --brand-from: 217 91% 56%;
+    --brand-to: 262 83% 52%;
+
+    /* Status set (light) */
+    --status-success: 160 84% 26%;
+    --status-warning: 30 90% 30%;
+    --status-error: 0 75% 42%;
+    --status-info: 217 80% 42%;
+    --status-pending: 239 65% 45%;
+    --status-neutral: 220 9% 40%;
+
+    /* Severity ramp (light) */
+    --severity-critical: 0 75% 42%;
+    --severity-high: 25 90% 36%;
+    --severity-medium: 38 92% 32%;
+    --severity-low: 217 80% 42%;
+    --severity-info: 220 9% 40%;
+
+    /* Elevation */
+    --elev-1: 0 1px 0 hsl(var(--foreground) / 0.06);
+    --elev-2: 0 2px 8px hsl(var(--foreground) / 0.08);
+    --elev-3: 0 8px 24px hsl(var(--foreground) / 0.12);
+    --elev-popover: 0 16px 40px hsl(0 0% 0% / 0.32);
+
+    /* Motion */
+    --motion-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+    --motion-fast: 100ms;
+    --motion-base: 160ms;
+    --motion-slow: 240ms;
+
+    /* Z-index */
+    --z-sticky: 10;
+    --z-header: 30;
+    --z-chrome: 40;
+    --z-overlay: 50;
+    --z-popover: 60;
+    --z-toast: 70;
+
+    /* Density. Comfortable = 44px table rows (20px line + 2 × 12px). The
+     * product sets data-density="compact" on <html> for 36px rows. */
+    --row-py: 0.75rem;
+    --row-h: 2.75rem;
+    --control-h: 2.25rem;
+    --card-p: 1.25rem;
+    --gap-section: 1.5rem;
+
+    /* Shell geometry */
+    --sidebar-w: 15rem;
+    --rail-w: 4rem;
+    --header-h: 3.5rem;
+    --content-gutter: 1.5rem;
+    --content-max: 100rem;
+  }
+
+  :root[data-density="compact"] {
+    --row-py: 0.5rem;
+    --row-h: 2.25rem;
+    --control-h: 2rem;
+    --card-p: 1rem;
+    --gap-section: 1rem;
+  }
+
+  .dark {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 10% 5.5%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 10% 5.5%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 240 5.9% 10%;
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 72% 58%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 240 4.9% 83.9%;
+    --sidebar: 240 10% 4.5%;
+    --sidebar-foreground: 240 4.8% 75%;
+    --sidebar-border: 240 3.7% 12%;
+    --sidebar-accent: 240 3.7% 10%;
+    --sidebar-accent-foreground: 0 0% 98%;
+
+    /* 60% lightness keeps white text at ≥ 4.5:1 on the dark accent. */
+    --brand: 262 83% 60%;
+    --brand-foreground: 0 0% 100%;
+    --brand-from: 217 91% 60%;
+    --brand-to: 262 83% 60%;
+
+    --status-success: 160 72% 45%;
+    --status-warning: 38 92% 56%;
+    --status-error: 0 78% 64%;
+    --status-info: 217 91% 68%;
+    --status-pending: 239 84% 72%;
+    --status-neutral: 220 9% 64%;
+
+    --severity-critical: 0 78% 64%;
+    --severity-high: 25 95% 58%;
+    --severity-medium: 38 92% 56%;
+    --severity-low: 217 91% 68%;
+    --severity-info: 220 9% 64%;
+
+    --elev-1: 0 1px 0 hsl(0 0% 100% / 0.05);
+    --elev-2: 0 2px 8px hsl(0 0% 0% / 0.35);
+    --elev-3: 0 8px 24px hsl(0 0% 0% / 0.45);
+    --elev-popover: 0 16px 40px hsl(0 0% 0% / 0.6);
+  }
+}

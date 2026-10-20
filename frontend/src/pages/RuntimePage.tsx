@@ -1,12 +1,12 @@
 import { ResourceSavedViewsControl } from "@/components/ResourceSavedViewsControl";
 import { useIsFetching, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, Clock3, RadioTower, ShieldAlert, Skull } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { enterprise, runtimeEvents, type RuntimeEvent, type RuntimeOverview, type RuntimeEventsParams } from "@/api/client";
+import { enterprise, runtimeEvents, type RuntimeEvent, type RuntimeOverview, type RuntimeEventsParams, type Severity } from "@/api/client";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { PageHeader } from "@/components/ui/page";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
+import { sentenceValue } from "@/components/ui/status-pill";
+import { SeverityBadge } from "@/components/ui/severity-badge";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { Collapse } from "@/components/ui/collapse";
@@ -16,7 +16,7 @@ import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext"
 import { Field as FormField, Select, TextInput } from "@/components/ui/form";
 import { Pager } from "@/components/ui/pager";
 import { INVENTORY_MAX_PAGE } from "@/lib/inventory-pagination";
-import { useInventoryRoute, ScanInventoryExport } from "./inventory-workspace";
+import { InventoryMoreFilters, InventorySearch, useInventoryRoute, useScanInventoryExport } from "./inventory-workspace";
 import { EVENT_SEVERITIES, EVENT_VERDICTS, eventCSVFilter, runtimeEventFiltersValid, runtimeEventsResponseValid } from "./runtime-event-inventory";
 import { useRouteSearchParams } from "@/lib/route-search";
 import { sameTimelineBoundary, timelineAfterParam } from "@/lib/timeline-filters";
@@ -61,6 +61,7 @@ export function RuntimePage() {
   const overviewReady = clusterReady && !!owner && q.isSuccess && q.data.summary.window_hours === hours;
   const liveScopeMismatch = (liveQ.data !== undefined || liveQ.isSuccess) && !runtimeEventsResponseValid(liveQ.data, liveRequest);
   const liveReady = clusterReady && !!owner && liveFiltersValid && !route.debouncing && liveQ.isSuccess && !liveScopeMismatch;
+  const liveExport = useScanInventoryExport({ context: JSON.stringify(liveKey), disabled: liveQ.isFetching || !liveReady, download: shouldDownload => runtimeEvents.exportCSV(liveRequest, shouldDownload) });
   const liveEvents = liveReady ? liveQ.data.events : [];
   const subsystems = overviewReady ? q.data.subsystems : [];
   const rules = overviewReady ? q.data.rules : [];
@@ -92,7 +93,7 @@ export function RuntimePage() {
           <button type="button" className="text-left font-medium hover:underline" onClick={(click) => { click.stopPropagation(); selectEvent(event.id, event.at); }}>
             {event.workload_id}
           </button>
-          <div className="mt-1 text-[11px] text-muted-foreground">{event.cluster_name || event.cluster_id}</div>
+          <div className="mt-1 text-micro text-muted-foreground">{event.cluster_name || event.cluster_id}</div>
         </>
       ),
     },
@@ -130,7 +131,7 @@ export function RuntimePage() {
       cell: (event) => (
         <div className="flex flex-wrap gap-1">
           {event.attack_techniques.map((technique) => (
-            <span key={technique} className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+            <span key={technique} className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-micro text-muted-foreground">
               {technique}
             </span>
           ))}
@@ -149,45 +150,45 @@ export function RuntimePage() {
       cell: (event) => (
         <>
           <div>{event.message || new Date(event.at).toLocaleTimeString()}</div>
-          {event.rule_name && <div className="mt-1 font-mono text-[11px]">{event.rule_name}</div>}
+          {event.rule_name && <div className="mt-1 font-mono text-micro">{event.rule_name}</div>}
         </>
       ),
     },
   ];
 
   if (!clusterReady) return <div className="space-y-6" data-testid="runtime-page">
-    <PageHeader title="Runtime" description="Inspect runtime events and enforcement evidence for the selected cluster." />
+    <PageHeader title="Runtime activity" description="Reported runtime events and enforcement evidence." />
     {clusterLoading || registryFetching || detailFetching ? <LoadingState label="Resolving runtime cluster…" />
       : <ErrorState title="The selected cluster could not be resolved." error={clusterError} action={<Button onClick={retryCluster}>Retry cluster</Button>} />}
   </div>;
 
+  const liveToolbar = <>
+    <span className="sr-only" data-testid="runtime-live-status">{liveQ.isError || liveScopeMismatch ? "Unavailable" : liveQ.isFetching ? "Refreshing" : "Polling"}</span>
+    <InventorySearch value={route.query} onChange={route.setQuery} label="Search events" />
+    <Select id="runtime-event-severity" aria-label="Minimum severity" className="h-9" value={params.get("severity") || ""} onChange={event => route.update({ severity: event.target.value || null })}><option value="">Any severity</option>{EVENT_SEVERITIES.map(value => <option key={value} value={value}>{sentenceValue(value)} and higher</option>)}</Select>
+    <InventoryMoreFilters count={["verdict", "workload", "kind", "source", "namespace", "node", "after", "before"].filter(key => params.get(key)).length}>
+      <FormField label="Verdict" htmlFor="runtime-event-verdict"><Select id="runtime-event-verdict" aria-label="Verdict" className="w-full" value={params.get("verdict") || ""} onChange={event => route.update({ verdict: event.target.value || null })}><option value="">Any verdict</option>{params.get("verdict")?.includes(",") && <option value={params.get("verdict")!}>{params.get("verdict")}</option>}{EVENT_VERDICTS.map(value => <option key={value} value={value}>{sentenceValue(value)}</option>)}</Select></FormField>
+      {[["workload", "Workload contains"], ["kind", "Kinds (comma separated)"], ["source", "Sources (comma separated)"], ["namespace", "Exact namespace"], ["node", "Exact node"], ["after", "At or after (RFC3339)"], ["before", "Before (RFC3339)"]].map(([key, label]) => <FormField key={key} label={label} htmlFor={`runtime-event-${key}`}><TextInput id={`runtime-event-${key}`} value={params.get(key) || ""} onChange={event => route.update({ [key]: event.target.value || null }, true, true)} /></FormField>)}
+    </InventoryMoreFilters>
+  </>;
   const liveView = <section className="space-y-3" data-testid="runtime-live-events">
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <h2 className="text-sm font-semibold">Runtime event history</h2>
-      <span className="rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground" data-testid="runtime-live-status">{liveQ.isError || liveScopeMismatch ? "Unavailable" : liveQ.isFetching ? "Refreshing" : "Polling"}</span>
-    </div>
-    <ResourceSavedViewsControl inventory="runtime" clusterId={clusterId} ready={liveReady && !liveQ.isFetching && !route.debouncing}/>
-    <div className="flex flex-wrap items-end gap-3">
-      <FormField label="Search events" htmlFor="runtime-event-search" className="min-w-56 flex-1"><TextInput id="runtime-event-search" value={route.query} onChange={event => route.setQuery(event.target.value)} /></FormField>
-      <FormField label="Minimum severity" htmlFor="runtime-event-severity"><Select id="runtime-event-severity" value={params.get("severity") || ""} onChange={event => route.update({ severity: event.target.value || null })}><option value="">All severities</option>{EVENT_SEVERITIES.map(value => <option key={value} value={value}>{value} and higher</option>)}</Select></FormField>
-      <FormField label="Verdict" htmlFor="runtime-event-verdict"><Select id="runtime-event-verdict" value={params.get("verdict") || ""} onChange={event => route.update({ verdict: event.target.value || null })}><option value="">All verdicts</option>{params.get("verdict")?.includes(",") && <option value={params.get("verdict")!}>{params.get("verdict")}</option>}{EVENT_VERDICTS.map(value => <option key={value} value={value}>{value}</option>)}</Select></FormField>
-      <Button disabled={!liveFiltersValid || liveQ.isFetching || route.debouncing || !owner} onClick={() => void liveQ.refetch()}>Refresh events</Button>
-    </div>
-    <Collapse label="Advanced: event filters and source details">
-      <div className="grid gap-3 sm:grid-cols-2">{[["workload", "Workload contains"], ["kind", "Kinds (comma separated)"], ["source", "Sources (comma separated)"], ["namespace", "Exact namespace"], ["node", "Exact node"], ["after", "At or after (RFC3339)"], ["before", "Before (RFC3339)"]].map(([key, label]) => <FormField key={key} label={label} htmlFor={`runtime-event-${key}`}><TextInput id={`runtime-event-${key}`} value={params.get(key) || ""} onChange={event => route.update({ [key]: event.target.value || null }, true, true)} /></FormField>)}</div>
-      <p className="mt-3 text-sm text-muted-foreground">History covers all matching records across pages, with no default time bound. It refreshes every 10 seconds and is separate from the evidence time window. Alerting includes alert, block and quarantine verdicts. Identified workloads count distinct nonblank cluster/workload pairs among matching events. Page CSV uses visible columns; matching CSV includes all event fields, up to 100,000 rows. Reported events do not prove agent coverage or enforcement.</p>
-    </Collapse>
+    <h2 className="sr-only">Runtime event history</h2>
     {!owner ? <ErrorState title="Resolve the current account before loading runtime events." /> : !liveFiltersValid ? <ErrorState title="The requested runtime event filters or page are invalid." action={<Button onClick={() => route.update({ severity: null, verdict: null, after: null, before: null, sort: null, order: null })}>Reset event filters</Button>} />
       : liveQ.isError ? <ErrorState title="Runtime event history could not be loaded or refreshed." error={liveQ.error} action={<Button onClick={() => void liveQ.refetch()}>Retry latest events</Button>} />
       : liveScopeMismatch ? <ErrorState title="Runtime events do not match the selected scope, filters or page." action={<Button onClick={() => void liveQ.refetch()}>Retry latest events</Button>} />
-      : !liveReady ? <LoadingState label="Loading runtime events…" /> : <>
-        <p className="text-sm text-muted-foreground">{liveQ.data.total!.toLocaleString()} event records match these filters.</p>
-        <ScanInventoryExport context={JSON.stringify(liveKey)} disabled={liveQ.isFetching || !liveReady} download={shouldDownload => runtimeEvents.exportCSV(liveRequest, shouldDownload)} />
-        <DataTable rows={liveEvents} rowKey={(event) => event.row_id!} columns={liveColumns} pagination={false} manualSorting sort={{ id: liveSort, dir: liveOrder as "asc" | "desc" }} onSortChange={next => route.update({ sort: next?.id || null, order: next?.dir || null })}
-          defaultDensity="compact" preferencesKey="runtime-live-events" exportFileName="runtime-events-page" testId="runtime-live-table"
-          emptyState={<p className="px-3 py-6 text-sm text-muted-foreground">No runtime events match these filters.</p>} />
-        {route.page > 0 && liveEvents.length === 0 && <Button onClick={() => route.setPage(0)}>First page</Button>}
-        <Pager page={route.page} pageSize={100} total={liveQ.data.total} rowsOnPage={liveEvents.length} onPage={route.setPage} />
+      : <>
+        {liveExport.status}
+        <DataTable rows={liveReady ? liveEvents : []} rowKey={(event) => event.row_id!} columns={liveColumns} pagination={false} manualSorting sort={{ id: liveSort, dir: liveOrder as "asc" | "desc" }} onSortChange={next => route.update({ sort: next?.id || null, order: next?.dir || null })}
+          defaultDensity="compact" preferencesKey="runtime-live-events" exportFileName="runtime-events-page" testId={liveReady ? "runtime-live-table" : "runtime-live-table-loading"}
+          defaultHiddenColumnIds={["node", "attack"]}
+          toolbar={liveToolbar}
+          exportOptions={[liveExport.option]}
+          emptyState={!liveReady ? <LoadingState label="Loading runtime events" /> : <p className="px-3 py-6 text-sm text-muted-foreground">No runtime events match these filters.</p>} />
+        {liveReady && <>
+          <p className="sr-only">{liveQ.data!.total!.toLocaleString()} event records match these filters.</p>
+          {route.page > 0 && liveEvents.length === 0 && <Button onClick={() => route.setPage(0)}>First page</Button>}
+          <Pager page={route.page} pageSize={100} total={liveQ.data!.total} rowsOnPage={liveEvents.length} onPage={route.setPage} />
+        </>}
       </>}
   </section>;
   const evidenceView = withOverview(<div className="space-y-4" data-testid="runtime-event-evidence">
@@ -214,23 +215,29 @@ export function RuntimePage() {
   const incomplete = tab === "live" ? liveQ.isError || liveScopeMismatch || !liveFiltersValid : q.isError;
   const refreshing = tab === "live" ? liveQ.isFetching || route.debouncing : q.isFetching;
   return <div className="space-y-6" data-testid="runtime-page" data-cluster-id={clusterId}>
-    <PageHeader title="Runtime" description="Inspect reported runtime activity and enforcement evidence for this cluster." />
+    <PageHeader title="Runtime activity" description="Reported runtime events and enforcement evidence."
+      actions={<>
+        {tab === "live" && <ResourceSavedViewsControl inventory="runtime" clusterId={clusterId} ready={liveReady && !liveQ.isFetching && !route.debouncing}/>}
+        {tab !== "live" && <Select aria-label="Evidence time window" className="h-8" value={hours} data-testid="runtime-window-select" onChange={(event) => setParams((previous) => { const next = new URLSearchParams(previous); next.set("hours", event.target.value); return next; })}>
+          {WINDOWS.map((window) => <option key={window} value={window}>{window === 168 ? "Last 7 days" : `Last ${window} hours`}</option>)}
+        </Select>}
+        <Button disabled={tab === "live" ? !liveFiltersValid || liveQ.isFetching || route.debouncing || !owner : q.isFetching} onClick={() => void (tab === "live" ? liveQ.refetch() : q.refetch())} aria-label={tab === "live" ? "Refresh events" : "Refresh"}>Refresh</Button>
+      </>} />
     <VerdictBanner status={incomplete ? "degraded" : !primary || refreshing ? "info" : primary.alerts > 0 ? "degraded" : "info"}
-      title={incomplete ? "Runtime evidence is unavailable" : !primary || refreshing ? "Runtime evidence is loading or refreshing" : tab === "live" ? primary.events === 0 ? "No runtime events match these filters" : `${primary.alerts} alerting events match these filters` : summary!.events === 0 ? `No runtime events reported in the selected ${hours}h window` : `${summary!.alerts} alerting events in the selected ${hours}h window`}
-      detail={tab === "live" ? "Metrics cover all matching event records across pages. Alerting includes alert, block and quarantine verdicts. These reports do not prove agent coverage or enforcement." : "Window totals reflect reported events, not proof of agent coverage. Event history covers available history separately."} />
-    {tab !== "live" && summary && clusterId && <p className="text-sm"><a data-testid="runtime-alert-events-link" className="text-primary hover:underline" href={`/clusters/${encodeURIComponent(clusterId)}/timeline?${new URLSearchParams({tab:"event",verdict:"alert,block,quarantine",...(summary.window_start && timelineAfterParam(summary.window_start)?{after:summary.window_start}:{hours:String(hours)})})}`}>Browse all {hours}h alerting event records</a> <span className="text-muted-foreground">Alert, block and quarantine verdicts; full counts and matching export.</span></p>}
-    <StatGrid data-testid="runtime-summary">
-      <StatCard label="Events" value={primary?.events ?? "—"} icon={<Activity className="h-3.5 w-3.5" />} />
-      <StatCard label="Alerts" value={primary?.alerts ?? "—"} tone={(primary?.alerts ?? 0) > 0 ? "medium" : "neutral"} icon={<Skull className="h-3.5 w-3.5" />} />
-      <StatCard label="Blocks" value={primary?.blocks ?? "—"} tone={(primary?.blocks ?? 0) > 0 ? "high" : "neutral"} icon={<ShieldAlert className="h-3.5 w-3.5" />} />
-      <StatCard label="Quarantines" value={primary?.quarantines ?? "—"} icon={<ShieldAlert className="h-3.5 w-3.5" />} />
-      <StatCard label={tab === "live" ? "Identified workloads" : "Affected workloads"} value={primary?.affected_workloads ?? "—"} icon={<RadioTower className="h-3.5 w-3.5" />} />
-    </StatGrid>
-    {tab !== "live" && <label className="flex flex-wrap items-center gap-2 text-sm"><Clock3 className="h-4 w-4 text-muted-foreground" aria-hidden /> Evidence time window
-      <select className="rounded-md border border-border bg-background px-3 py-2" value={hours} data-testid="runtime-window-select" onChange={(event) => setParams((previous) => { const next = new URLSearchParams(previous); next.set("hours", event.target.value); return next; })}>
-        {WINDOWS.map((window) => <option key={window} value={window}>{window === 168 ? "7d" : `${window}h`}</option>)}
-      </select><span className="text-xs text-muted-foreground">Applies to window totals and secondary evidence, not event history.</span>
-    </label>}
+      title={incomplete ? "Runtime evidence is unavailable" : !primary || refreshing ? "Runtime evidence is loading or refreshing" : tab === "live" ? primary.events === 0 ? "No runtime events match these filters" : `${primary.alerts.toLocaleString()} alerting events match these filters` : summary!.events === 0 ? `No runtime events reported in the selected ${hours}h window` : `${summary!.alerts} alerting events in the selected ${hours}h window`}
+      numbers={[
+        { label: "events", value: primary?.events?.toLocaleString() ?? "—" },
+        { label: "alerts", value: primary?.alerts?.toLocaleString() ?? "—", tone: (primary?.alerts ?? 0) > 0 ? "warning" : "default" },
+        { label: "blocks", value: primary?.blocks?.toLocaleString() ?? "—", tone: (primary?.blocks ?? 0) > 0 ? "high" : "default" },
+        { label: tab === "live" ? "workloads" : "affected workloads", value: primary?.affected_workloads?.toLocaleString() ?? "—" },
+      ]}
+      detail={<div className="space-y-1">
+        <dl data-testid="runtime-summary" className="flex flex-wrap gap-x-4 gap-y-1">
+          {([["Events", primary?.events], ["Alerts", primary?.alerts], ["Blocks", primary?.blocks], ["Quarantines", primary?.quarantines], [tab === "live" ? "Identified workloads" : "Affected workloads", primary?.affected_workloads]] as Array<[string, number | undefined]>).map(([label, value]) => <div key={label} className="flex items-baseline gap-1.5"><dt>{label}</dt><dd className="app-stat-value font-medium tabular-nums text-foreground">{value ?? "—"}</dd></div>)}
+        </dl>
+        <p>{tab === "live" ? "Metrics cover all matching event records across pages, with no default time bound; history refreshes every 10 seconds and is separate from the evidence time window. Alerting includes alert, block and quarantine verdicts. Identified workloads count distinct cluster/workload pairs. Matching CSV includes all event fields, up to 100,000 rows. These reports do not prove agent coverage or enforcement." : "Window totals reflect reported events, not proof of agent coverage. Event history covers available history separately."}</p>
+      </div>} />
+    {tab !== "live" && summary && clusterId && <p className="text-sm"><a data-testid="runtime-alert-events-link" className="text-link" href={`/clusters/${encodeURIComponent(clusterId)}/timeline?${new URLSearchParams({tab:"event",verdict:"alert,block,quarantine",...(summary.window_start && timelineAfterParam(summary.window_start)?{after:summary.window_start}:{hours:String(hours)})})}`}>Browse all {hours}h alerting event records</a> <span className="text-muted-foreground">Alert, block and quarantine verdicts; full counts and matching export.</span></p>}
     <Tabs value={tab} onValueChange={setTab} items={[
       { value: "live", label: "Live events", content: liveView },
       { value: "evidence", label: "Window evidence", content: evidenceView },
@@ -278,19 +285,21 @@ const liveColumns: Column<RuntimeEvent>[] = [
     maxSize: 240,
     sort: () => 0,
     exportValue: event => event.at,
-    cell: (e) => <span className="font-mono text-[11px]">{new Date(e.at).toLocaleString()}</span>,
+    cell: (e) => <span className="font-mono text-micro">{new Date(e.at).toLocaleString()}</span>,
   },
   {
     id: "kind",
     header: "Kind",
     kind: "status",
-    size: 140,
-    wrap: true,
+    size: 176,
+    minSize: 168,
+    maxSize: 224,
     sort: () => 0,
-    cell: (e) => <span className="font-mono text-xs">{e.kind}</span>,
+    exportValue: (e) => e.kind,
+    cell: (e) => <span className="font-mono text-13">{e.kind}</span>,
   },
   { id: "source", header: "Source", kind: "text", size: 144, minSize: 112, maxSize: 200, cell: (event) => event.source, sort: () => 0 },
-  { id: "verdict", header: "Verdict", kind: "status", cell: (event) => event.verdict, sort: () => 0 },
+  { id: "verdict", header: "Verdict", kind: "status", cell: (event) => sentenceValue(event.verdict), exportValue: (event) => event.verdict, sort: () => 0 },
   {
     id: "workload",
     sort: () => 0,
@@ -305,7 +314,7 @@ const liveColumns: Column<RuntimeEvent>[] = [
           <div className="font-medium">{e.workload_id || pod || "—"}</div>
           {pod && e.workload_id && <div className="mt-0.5 text-xs text-muted-foreground">{pod}</div>}
           {e.container_id && (
-            <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">{e.container_id.slice(0, 12)}</div>
+            <div className="mt-0.5 font-mono text-micro text-muted-foreground">{e.container_id.slice(0, 12)}</div>
           )}
         </div>
       );
@@ -333,7 +342,7 @@ const liveColumns: Column<RuntimeEvent>[] = [
           <span className="text-xs text-muted-foreground">—</span>
         ) : (
           e.attack_techniques.map((t) => (
-            <span key={t} className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+            <span key={t} className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-micro text-muted-foreground">
               {t}
             </span>
           ))
@@ -348,19 +357,10 @@ const liveColumns: Column<RuntimeEvent>[] = [
     size: 112,
     maxSize: 140,
     sort: () => 0,
-    cell: (e) => (
-      <span
-        className={`rounded-md px-2 py-0.5 text-[10px] font-medium ${
-          e.severity === "critical" || e.severity === "high"
-            ? "bg-destructive/15 text-destructive"
-            : e.severity === "medium"
-            ? "bg-status-warning/15 text-status-warning"
-            : "bg-muted text-muted-foreground"
-        }`}
-      >
-        {e.severity}
-      </span>
-    ),
+    exportValue: (e) => e.severity,
+    cell: (e) => ["critical", "high", "medium", "low", "info"].includes(e.severity)
+      ? <SeverityBadge severity={e.severity as Severity} />
+      : <span className="text-muted-foreground">{e.severity ? sentenceValue(e.severity) : "—"}</span>,
   },
 ];
 
@@ -440,7 +440,7 @@ function RuntimeEventInspector({ event }: { event: RuntimeOverview["recent_event
       <p className="mt-3 text-xs text-muted-foreground">{event.message}</p>
       <div className="mt-3 flex flex-wrap gap-1">
         {event.attack_techniques.map((technique) => (
-          <span key={technique} className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+          <span key={technique} className="rounded-md bg-muted px-1.5 py-0.5 font-mono text-micro text-muted-foreground">
             {technique}
           </span>
         ))}

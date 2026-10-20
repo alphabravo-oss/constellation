@@ -9,12 +9,11 @@ export function KevBadge({ className }: { className?: string }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-0.5 rounded px-1.5 h-4 text-[9px] font-semibold uppercase tracking-wider",
-        "bg-[color-mix(in_oklab,var(--color-severity-critical)_22%,transparent)] text-[color:var(--color-severity-critical)] ring-1 ring-inset ring-[color-mix(in_oklab,var(--color-severity-critical)_48%,transparent)]",
+        "inline-flex h-5 items-center gap-1 rounded-full border border-severity-critical/40 px-2 text-micro font-semibold text-severity-critical",
         className,
       )}
       data-testid="kev-badge"
-      title="CISA Known-Exploited Vulnerability"
+      title="CISA known exploited vulnerability"
     >
       <Crown className="h-2.5 w-2.5 fill-current" /> KEV
     </span>
@@ -28,10 +27,8 @@ export function EpssBadge({ probability, className }: { probability?: number; cl
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded px-1.5 h-4 text-[10px] text-mono",
-        hot
-          ? "bg-[color-mix(in_oklab,var(--color-severity-high)_18%,transparent)] text-[color:var(--color-severity-high)] ring-1 ring-inset ring-[color-mix(in_oklab,var(--color-severity-high)_36%,transparent)]"
-          : "bg-muted text-muted-foreground ring-1 ring-inset ring-border",
+        "inline-flex h-5 items-center gap-1 rounded-full border px-2 font-mono text-micro",
+        hot ? "border-severity-high/40 text-severity-high" : "border-border text-muted-foreground",
         className,
       )}
       title={`EPSS exploit probability ${pct.toFixed(1)}%`}
@@ -46,15 +43,13 @@ export function ReachableBadge({ reachable, className }: { reachable?: boolean; 
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded px-1.5 h-4 text-[10px] font-medium",
-        reachable
-          ? "bg-[color-mix(in_oklab,var(--color-accent-teal)_18%,transparent)] text-[color:var(--color-accent-teal)] ring-1 ring-inset ring-[color-mix(in_oklab,var(--color-accent-teal)_36%,transparent)]"
-          : "bg-muted text-muted-foreground ring-1 ring-inset ring-border",
+        "inline-flex h-5 items-center gap-1 rounded-full border border-border px-2 text-micro font-medium",
+        reachable ? "text-foreground" : "text-muted-foreground",
         className,
       )}
       title={reachable ? "Code path reachable" : "Not reachable via call graph"}
     >
-      <Target className="h-2.5 w-2.5" /> {reachable ? "reachable" : "unreached"}
+      <Target className="h-2.5 w-2.5" /> {reachable ? "Reachable" : "Not reached"}
     </span>
   );
 }

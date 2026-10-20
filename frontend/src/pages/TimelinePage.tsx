@@ -10,7 +10,7 @@ import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext"
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState, useEffect, useRef, type ReactNode } from "react";
 import { useQuery, useQueryClient, useIsFetching } from "@tanstack/react-query";
-import { Save, SlidersHorizontal } from "lucide-react";
+import { Save } from "lucide-react";
 
 import {
   securityTimeline,
@@ -24,7 +24,9 @@ import { PageHeader } from "@/components/ui/page";
 import { Pager } from "@/components/ui/pager";
 import { useRouteSearchParams } from "@/lib/route-search";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
+import { ExportMenu } from "@/ui";
+import { sentenceValue } from "@/components/ui/status-pill";
+import { InventoryMoreFilters } from "./inventory-workspace";
 import { SeverityBadge } from "@/components/ui/severity-badge";
 import { StatusPill } from "@/components/ui/status-pill";
 import { LoadingState, ErrorState, EmptyState } from "@/components/ui/states";
@@ -89,6 +91,7 @@ import {
   inventoryViewHref,
   type TimelineSavedView,
 } from "@/lib/inventory-saved-views";
+import { Select } from "@/components/ui/form";
 
 export function TimelinePage() {
   const {
@@ -458,12 +461,11 @@ export function TimelinePage() {
       data-cluster-id={clusterId ?? ""}
     >
       <PageHeader
-        title="Incident Timeline"
-        description={`DPI threats, runtime events, network violations and audit for ${cluster?.name || clusterId}, in time order.`}
+        title="Incidents"
+        description={`DPI threats, runtime events, network violations and audit for ${cluster?.name || "this cluster"}, in time order.`}
         actions={
           <>
             <Button
-              variant="outline"
               disabled={q.isFetching || sources.size === 0 || invalidWindow}
               onClick={() => void q.refetch()}
             >
@@ -473,7 +475,6 @@ export function TimelinePage() {
             <Button
               type="button"
               size="sm"
-              variant="outline"
               onClick={() => {
                 if (clusterId)
                   void navigate({
@@ -489,12 +490,8 @@ export function TimelinePage() {
             >
               <Save className="h-3.5 w-3.5" aria-hidden /> Save view
             </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={items.length === 0 || q.isFetching}
-              onClick={() =>
+            <ExportMenu options={[
+              { label: "This page", description: "Events shown on this page", disabled: items.length === 0 || q.isFetching, onSelect: () =>
                 downloadCsv(
                   "constellation-security-events",
                   [
@@ -519,16 +516,8 @@ export function TimelinePage() {
                     it.ref ?? "",
                     it.platform_role ?? "",
                   ]),
-                )
-              }
-            >
-              Export current page CSV
-            </Button>
-            <Button
-              disabled={
-                !available || q.isFetching || Boolean(exportState?.pending)
-              }
-              onClick={() => {
+                ) },
+              { label: exportState?.pending ? "Exporting matching events…" : "Matching events", description: "Up to 10,000 matching records", disabled: !available || q.isFetching || Boolean(exportState?.pending), onSelect: () => {
                 if (
                   exportPending.current ||
                   !available ||
@@ -565,23 +554,18 @@ export function TimelinePage() {
                     exportPending.current = false;
                     setExportState(current => current?.owner === exportOwner ? { ...current, pending: false } : current);
                   });
-              }}
-            >
-              Export matching events (up to 10,000)
-            </Button>
+              } },
+            ]} />
           </>
         }
       />
 
       {persistenceError && <ErrorState title={persistenceError} />}
       {exportState?.owner === owner && exportState.error && (
-        <ErrorState
-          title="Matching event export failed."
-          error={exportState.error}
-        />
+        <ErrorState title="Matching event export failed." error={exportState.error} />
       )}
       {exportState?.owner === owner && exportState.result && (
-        <p role="status">{exportState.result}</p>
+        <p role="status" className="text-sm text-muted-foreground">{exportState.result}</p>
       )}
       <VerdictBanner
         status={q.isError || invalidWindow ? "degraded" : "info"}
@@ -598,232 +582,107 @@ export function TimelinePage() {
                     ? `${q.data.total.toLocaleString()} matching event records`
                     : `${items.length} events on this page`
         }
-        detail="Investigate reported event records. Event-only totals cover all matches; mixed-source browsing uses has-more paging. Current-page CSV and full matching CSV have separate scopes. Filters and selection are saved in the URL."
+        numbers={available ? [
+          { label: "critical", value: items.filter((item) => item.severity === "critical").length, tone: items.some((item) => item.severity === "critical") ? "critical" : "default", title: "Critical events on this page" },
+          { label: "high", value: items.filter((item) => item.severity === "high").length, tone: items.some((item) => item.severity === "high") ? "high" : "default", title: "High events on this page" },
+          { label: "sources", value: new Set(items.map((item) => item.source)).size, title: "Sources on this page" },
+        ] : undefined}
+        detail={<div className="space-y-1">
+          {available && <p data-testid="timeline-summary">{q.data?.total !== undefined ? "Matching event records" : "On this page"} {q.data?.total ?? items.length} · critical on page {items.filter((item) => item.severity === "critical").length} · high on page {items.filter((item) => item.severity === "high").length} · sources on page {new Set(items.map((item) => item.source)).size}</p>}
+          {available && q.data && sources.size > 0 && <p>{q.data.lower_only ? `${q.data.after_exclusive ? "Strictly after" : "Since"} ${q.data.from}; no upper time bound.` : `Window: ${new Date(q.data.from).toLocaleString()} – ${new Date(q.data.to).toLocaleString()}`}</p>}
+          <p>Event-only totals cover all matches; mixed-source browsing uses has-more paging. Page CSV and matching CSV have separate scopes. Filters and selection are saved in the URL.</p>
+        </div>}
       />
-      {available && (
-        <StatGrid data-testid="timeline-summary">
-          <StatCard
-            label={
-              q.data?.total !== undefined
-                ? "Matching event records"
-                : "On this page"
-            }
-            value={q.data?.total ?? items.length}
-          />
-          <StatCard
-            label="Critical on page"
-            value={items.filter((item) => item.severity === "critical").length}
-          />
-          <StatCard
-            label="High on page"
-            value={items.filter((item) => item.severity === "high").length}
-          />
-          <StatCard
-            label="Sources on page"
-            value={new Set(items.map((item) => item.source)).size}
-          />
-        </StatGrid>
-      )}
 
-      <div
-        className="flex flex-wrap gap-1 rounded-md border border-border bg-card p-1"
-        data-testid="timeline-category-tabs"
-      >
-        {CATEGORY_TABS.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => selectCategory(tab.id, tab.sources)}
-            className={`h-7 rounded px-2.5 text-xs font-medium transition-colors ${
-              activeCategory === tab.id
-                ? "bg-primary/10 text-primary"
-                : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-            }`}
-            data-testid={`timeline-category-${tab.id}`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      <div
-        className="space-y-3 rounded-md border border-border bg-card px-3 py-3"
-        data-testid="timeline-advanced-filters"
-      >
-        <div className="flex items-center gap-2 text-xs font-semibold">
-          <SlidersHorizontal
-            className="h-3.5 w-3.5 text-muted-foreground"
-            aria-hidden
-          />
-          Filters
-        </div>
-        <div className="grid gap-2 lg:grid-cols-[minmax(260px,1.4fr)_repeat(3,minmax(130px,1fr))]">
-          <QueryInput
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            onClear={() => setQuery("")}
-            placeholder="search title, id, workload, namespace, ref"
-            size="sm"
-          />
-          <FilterTextInput
-            label="Namespace"
-            value={namespace}
-            onChange={setNamespace}
-            placeholder="prod"
-          />
-          <FilterTextInput
-            label="Workload"
-            value={workload}
-            onChange={setWorkload}
-            placeholder="api"
-          />
-          <FilterTextInput
-            label="Reference"
-            value={reference}
-            onChange={setReference}
-            placeholder="policy or target"
-          />
-        </div>
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          <DateFilterInput
-            label="From"
-            value={from}
-            onChange={(value) =>
-              updateFilters({
-                from: value,
-                after: null,
-                hours: null,
-                after_exclusive: null,
-              })
-            }
-          />
-          <DateFilterInput
-            label="To"
-            value={to}
-            onChange={(value) =>
-              updateFilters({
-                to: value,
-                after: null,
-                hours: null,
-                after_exclusive: null,
-              })
-            }
-          />
-          <div className="lg:col-span-2 flex items-end">
-            <Button
+      <div className="flex flex-wrap items-center gap-2" data-testid="timeline-advanced-filters">
+        <div className="inline-flex h-9 items-center rounded-md border border-border p-0.5" data-testid="timeline-category-tabs" role="group" aria-label="Event category">
+          {CATEGORY_TABS.map((tab) => (
+            <button
+              key={tab.id}
               type="button"
-              size="sm"
-              variant="ghost"
-              onClick={clearAdvancedFilters}
-              data-testid="timeline-clear-filters"
+              onClick={() => selectCategory(tab.id, tab.sources)}
+              aria-pressed={activeCategory === tab.id}
+              className={`inline-flex h-7 items-center rounded-sm px-3 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring ${
+                activeCategory === tab.id ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:text-foreground"
+              }`}
+              data-testid={`timeline-category-${tab.id}`}
             >
-              Clear filters
-            </Button>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] font-medium text-muted-foreground mr-1">
-            Type
-          </span>
-          {ALL_SOURCES.map((s) => (
-            <FilterChip
-              key={s}
-              active={sources.has(s)}
-              onClick={() =>
-                updateFilters({
-                  tab: "custom",
-                  type: [...toggle(sources, s)].join(",") || "none",
-                  verdict: null,
-                })
-              }
-            >
-              {SOURCE_META[s].label}
-            </FilterChip>
+              {tab.label}
+            </button>
           ))}
         </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] font-medium text-muted-foreground mr-1">
-            Severity
-          </span>
-          {SEVERITIES.map((s) => (
-            <FilterChip
-              key={s}
-              active={severities.has(s)}
-              onClick={() =>
-                updateFilters({
-                  severity: [...toggle(severities, s)].join(","),
-                })
-              }
-            >
-              {s}
-            </FilterChip>
-          ))}
-        </div>
-        <div className="flex flex-wrap items-end gap-3">
-          <label className="space-y-1 text-xs">
-            <span>Rolling window</span>
-            <select
-              aria-label="Timeline rolling window"
-              value={requestedHours ?? ""}
-              onChange={(event) =>
-                updateFilters({
-                  hours: event.target.value,
-                  after: null,
-                  from: null,
-                  to: null,
-                  after_exclusive: event.target.value
-                    ? String(Boolean(afterExclusive))
-                    : null,
-                })
-              }
-              className="block rounded border border-input bg-background px-2 py-1"
-            >
-              <option value="">Custom or pinned boundary</option>
-              <option value="24">24 hours</option>
-              <option value="336">14 days</option>
-              <option value="168">7 days</option>
-            </select>
-          </label>
-          {sources.size === 1 && sources.has("runtime_event") && (
-            <label className="space-y-1 text-xs">
-              <span>Runtime event verdicts</span>
-              <select
-                aria-label="Runtime event verdicts"
-                value={verdict}
-                onChange={(event) =>
-                  updateFilters({ verdict: event.target.value })
-                }
-                className="block rounded border border-input bg-background px-2 py-1"
-              >
-                <option value="">All verdicts</option>
-                <option value="alert,block,quarantine">
-                  Alert, block or quarantine
-                </option>
-                {TIMELINE_VERDICTS.map((value) => (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
-        </div>
-        <TimelineActiveFilters
-          filters={filters}
-          onClear={clearAdvancedFilters}
+        <QueryInput
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          onClear={() => setQuery("")}
+          placeholder="Search title, id, workload, namespace or reference"
+          aria-label="Search events"
+          className="w-full max-w-xs"
         />
+        <Select
+          aria-label="Timeline rolling window"
+          value={requestedHours ?? ""}
+          onChange={(event) =>
+            updateFilters({
+              hours: event.target.value,
+              after: null,
+              from: null,
+              to: null,
+              after_exclusive: event.target.value ? String(Boolean(afterExclusive)) : null,
+            })
+          }
+          className="h-9"
+        >
+          <option value="">Custom or pinned window</option>
+          <option value="24">Last 24 hours</option>
+          <option value="336">Last 14 days</option>
+          <option value="168">Last 7 days</option>
+        </Select>
+        {sources.size === 1 && sources.has("runtime_event") && (
+          <Select aria-label="Runtime event verdicts" value={verdict} onChange={(event) => updateFilters({ verdict: event.target.value })} className="h-9">
+            <option value="">Any verdict</option>
+            <option value="alert,block,quarantine">Alert, block or quarantine</option>
+            {TIMELINE_VERDICTS.map((value) => <option key={value} value={value}>{sentenceValue(value)}</option>)}
+          </Select>
+        )}
+        <InventoryMoreFilters count={[namespace, workload, reference, from, to].filter(Boolean).length + (severities.size ? 1 : 0)}>
+          <FilterTextInput label="Namespace" value={namespace} onChange={setNamespace} placeholder="prod" />
+          <FilterTextInput label="Workload" value={workload} onChange={setWorkload} placeholder="api" />
+          <FilterTextInput label="Reference" value={reference} onChange={setReference} placeholder="Policy or target" />
+          <div className="grid grid-cols-2 gap-2">
+            <DateFilterInput label="From" value={from} onChange={(value) => updateFilters({ from: value, after: null, hours: null, after_exclusive: null })} />
+            <DateFilterInput label="To" value={to} onChange={(value) => updateFilters({ to: value, after: null, hours: null, after_exclusive: null })} />
+          </div>
+          <div className="space-y-1.5">
+            <p className="text-meta font-medium text-muted-foreground">Type</p>
+            <div className="flex flex-wrap gap-1.5">
+              {ALL_SOURCES.map((s) => (
+                <FilterChip key={s} active={sources.has(s)} onClick={() => updateFilters({ tab: "custom", type: [...toggle(sources, s)].join(",") || "none", verdict: null })}>
+                  {SOURCE_META[s].label}
+                </FilterChip>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <p className="text-meta font-medium text-muted-foreground">Severity</p>
+            <div className="flex flex-wrap gap-1.5">
+              {SEVERITIES.map((s) => (
+                <FilterChip key={s} active={severities.has(s)} onClick={() => updateFilters({ severity: [...toggle(severities, s)].join(",") })}>
+                  {sentenceValue(s)}
+                </FilterChip>
+              ))}
+            </div>
+          </div>
+          <Button type="button" size="sm" variant="ghost" onClick={clearAdvancedFilters} data-testid="timeline-clear-filters">
+            Clear filters
+          </Button>
+        </InventoryMoreFilters>
       </div>
+      <TimelineActiveFilters filters={filters} onClear={clearAdvancedFilters} />
 
       {q.isFetching && !q.isPending && (
-        <p role="status" className="text-xs text-muted-foreground">
+        <p role="status" className="text-sm text-muted-foreground">
           Refreshing timeline…
-        </p>
-      )}
-      {available && q.data && sources.size > 0 && (
-        <p className="text-xs text-muted-foreground">
-          {q.data.lower_only
-            ? `${q.data.after_exclusive ? "Strictly after" : "Since"} ${q.data.from}; no upper time bound.`
-            : `Window: ${new Date(q.data.from).toLocaleString()} – ${new Date(q.data.to).toLocaleString()}`}
         </p>
       )}
       {invalidWindow ? (
@@ -873,7 +732,7 @@ export function TimelinePage() {
                 <button
                   type="button"
                   onClick={() => setSelected(it)}
-                  className="flex w-full items-start gap-2 rounded-md border border-border bg-card px-3 py-2 text-left transition-colors hover:border-[color:var(--color-primary)]/40 hover:bg-accent/40"
+                  className="flex w-full items-start gap-2 rounded-md border border-border bg-card px-3 py-2 text-left transition-colors hover:bg-accent/40 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
                   data-testid="timeline-event-row"
                 >
                   <SeverityBadge severity={it.severity} size="xs" />
@@ -883,18 +742,18 @@ export function TimelinePage() {
                         label={SOURCE_META[it.source].label}
                         tone={SOURCE_META[it.source].tone}
                       />
-                      <span className="truncate text-xs font-medium">
+                      <span className="truncate text-sm font-medium">
                         {it.title}
                       </span>
                     </div>
-                    <div className="text-[10px] font-mono text-muted-foreground">
+                    <div className="text-micro font-mono text-muted-foreground">
                       {[it.namespace, it.workload_id, it.ref]
                         .filter(Boolean)
                         .join(" · ")}
                     </div>
                   </div>
                   <span
-                    className="shrink-0 text-[10px] text-muted-foreground"
+                    className="shrink-0 text-micro text-muted-foreground"
                     title={it.at}
                   >
                     {fmtRelative(it.at)}
@@ -950,15 +809,15 @@ function FilterTextInput({
   placeholder?: string;
 }) {
   return (
-    <label className="block text-xs">
-      <span className="mb-1 block font-medium text-muted-foreground">
+    <label className="block text-meta">
+      <span className="mb-1.5 block font-medium text-muted-foreground">
         {label}
       </span>
       <input
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        className="h-8 w-full rounded-md border border-input bg-card px-2 font-mono text-xs outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-[color:var(--color-primary)] focus:ring-1 focus:ring-[color:var(--color-primary)]"
+        className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-ring"
       />
     </label>
   );
@@ -974,15 +833,15 @@ function DateFilterInput({
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="block text-xs">
-      <span className="mb-1 block font-medium text-muted-foreground">
+    <label className="block text-meta">
+      <span className="mb-1.5 block font-medium text-muted-foreground">
         {label}
       </span>
       <input
         type="datetime-local"
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="h-8 w-full rounded-md border border-input bg-card px-2 font-mono text-xs outline-none transition-colors focus:border-[color:var(--color-primary)] focus:ring-1 focus:ring-[color:var(--color-primary)]"
+        className="h-9 w-full rounded-md border border-input bg-background px-2 font-mono text-meta outline-none focus:ring-2 focus:ring-ring"
       />
     </label>
   );
@@ -1006,13 +865,13 @@ function TimelineActiveFilters({
   if (chips.length === 0) return null;
   return (
     <div className="flex flex-wrap items-center gap-1.5 border-t border-border pt-2">
-      <span className="mr-1 text-[11px] font-medium text-muted-foreground">
+      <span className="mr-1 text-micro font-medium text-muted-foreground">
         Active
       </span>
       {chips.map((chip) => (
         <span
           key={chip}
-          className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 font-mono text-[11px] text-primary"
+          className="rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 font-mono text-micro text-primary"
         >
           {chip}
         </span>
@@ -1020,7 +879,7 @@ function TimelineActiveFilters({
       <button
         type="button"
         onClick={onClear}
-        className="rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted"
+        className="rounded px-1.5 py-0.5 text-micro text-muted-foreground hover:bg-muted"
       >
         clear
       </button>
@@ -1104,7 +963,7 @@ function TimelineDetail({ item }: { item: TimelineItem }) {
       </section>
       <section className="rounded-md border border-border p-3">
         <h3 className="text-xs font-semibold">Raw timeline record</h3>
-        <pre className="mt-2 max-h-[280px] overflow-auto rounded bg-muted p-2 text-[11px]">
+        <pre className="mt-2 max-h-[280px] overflow-auto rounded bg-muted p-2 text-micro">
           {JSON.stringify(item, null, 2)}
         </pre>
       </section>
@@ -1123,7 +982,7 @@ function DetailField({
 }) {
   return (
     <div className="rounded-md border border-border p-2">
-      <dt className="text-[11px] text-muted-foreground">{label}</dt>
+      <dt className="text-micro text-muted-foreground">{label}</dt>
       <dd
         className={`mt-1 break-all text-xs ${mono ? "font-mono" : "font-medium"}`}
       >
@@ -1178,10 +1037,10 @@ function FilterChip({
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-full border px-2.5 py-0.5 text-[11px] capitalize transition-colors ${
+      className={`inline-flex h-7 items-center rounded-full border px-2.5 text-meta transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring ${
         active
-          ? "border-primary bg-primary/10 text-primary"
-          : "border-border bg-transparent text-muted-foreground hover:bg-muted/40"
+          ? "border-foreground/40 bg-accent text-foreground"
+          : "border-border text-muted-foreground hover:bg-accent/60 hover:text-foreground"
       }`}
       aria-pressed={active}
     >

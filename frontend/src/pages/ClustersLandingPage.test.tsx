@@ -10,7 +10,7 @@ const cluster = {id:"one", name:"Cluster", distro:"k3s", state:"connected", depl
 describe("cluster exposure",()=>{
  it("separates distinct current vulnerabilities from historical and unverified occurrences",()=>{
   const html=renderToStaticMarkup(<ClusterTile cluster={cluster}/>);
-  expect(html).toContain("Current critical");expect(html).toContain(">12<");expect(html).toContain(">28<");
+  expect(html).toContain("Critical");expect(html).toContain(">12<");expect(html).toContain(">28<");
   expect(html).toContain("Total occurrences");expect(html).toContain("4,387");
   expect(html).toContain("Partial coverage");expect(html).not.toContain("<details open");
   expect(html).toContain("Historical findings");expect(html).toContain("1,790");expect(html).toContain("Unverified findings");expect(html).toContain("2,461");

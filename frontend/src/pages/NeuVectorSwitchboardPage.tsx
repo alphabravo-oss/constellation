@@ -1,32 +1,9 @@
 import { Link } from "@tanstack/react-router";
-import {
-  ArrowRight,
-  BadgeCheck,
-  BellRing,
-  ClipboardCheck,
-  Database,
-  FileText,
-  GitBranch,
-  Earth,
-  KeyRound,
-  Layers,
-  Network,
-  PackageSearch,
-  RadioTower,
-  ScrollText,
-  Server,
-  ServerCog,
-  ShieldCheck,
-  SlidersHorizontal,
-  UsersRound,
-  WandSparkles,
-  Waypoints,
-} from "lucide-react";
+import { ArrowRight, BadgeCheck, BellRing, Database, FileText, GitBranch, Earth, KeyRound, Layers, Network, PackageSearch, RadioTower, ScrollText, Server, ServerCog, ShieldCheck, SlidersHorizontal, UsersRound, WandSparkles, Waypoints } from "lucide-react";
 
 import { useCluster } from "@/hooks/useCluster";
 import { PageContainer, PageHeader, PageSection } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { Button } from "@/components/ui/button";
 import { Collapse } from "@/components/ui/collapse";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
@@ -96,9 +73,9 @@ export function NeuVectorSwitchboardPage() {
         { label: "Controllers", to: c("components?role=controller") },
         { label: "Enforcers", to: c("components?role=enforcer") },
         { label: "Scanners", to: c("components?role=scanner") },
-        { label: "Sensor Health", to: c("health") },
-        { label: "System Health", to: "/settings/health" },
-        { label: "Scanner Sources", to: "/settings/scanner" },
+        { label: "Sensor health", to: c("health") },
+        { label: "System health", to: "/settings/health" },
+        { label: "Scanner sources", to: "/settings/scanner" },
       ],
       notes: ["Role filters, version drift, scanner queue/cache, diagnostics, applied config revision, and support bundle download are live; remaining work is async signed bundle lifecycle."],
     },
@@ -115,7 +92,7 @@ export function NeuVectorSwitchboardPage() {
         { label: "PCAP", to: c("network?tab=pcap") },
         { label: "Rules", to: c("network?tab=rules") },
         { label: "Threats", to: c("network?tab=threats") },
-        { label: "Network Rules", to: c("network-rules") },
+        { label: "Network rules", to: c("network-rules") },
         { label: "Timeline", to: c("timeline") },
       ],
       notes: ["Map, Conversations, Sessions, PCAP, Rules, and Threats are stable workspace tabs."],
@@ -127,16 +104,16 @@ export function NeuVectorSwitchboardPage() {
       status: "partial",
       icon: <Waypoints className="h-4 w-4" />,
       links: [
-        { label: "Policy Center", to: c("policy") },
+        { label: "Policy center", to: c("policy") },
         { label: "Groups", to: c("groups") },
-        { label: "Network Rules", to: c("network-rules") },
+        { label: "Network rules", to: c("network-rules") },
         { label: "Admission", to: c("admission") },
-        { label: "Runtime Policies", to: c("runtime-policies") },
-        { label: "Process Baselines", to: c("runtime/baselines") },
-        { label: "File Monitor", to: c("file-monitor") },
-        { label: "DLP Sensors -> DLP Rules", to: c("runtime-dlp"), id: "dlp-sensors" },
-        { label: "WAF Sensors -> WAF/DPI", to: c("runtime-signatures"), id: "waf-sensors" },
-        { label: "Response Rules", to: c("response-rules") },
+        { label: "Runtime policies", to: c("runtime-policies") },
+        { label: "Process baselines", to: c("runtime/baselines") },
+        { label: "File monitor", to: c("file-monitor") },
+        { label: "DLP sensors -> DLP rules", to: c("runtime-dlp"), id: "dlp-sensors" },
+        { label: "WAF sensors -> WAF/DPI", to: c("runtime-signatures"), id: "waf-sensors" },
+        { label: "Response rules", to: c("response-rules") },
       ],
       notes: ["DLP and WAF sensor exports land as runtime rules plus group-scope bindings, not inert sensor objects.", "Admission has state, criteria catalog, profile templates, and dry-run outcomes; remaining work is shared group picker and hit counts."],
     },
@@ -148,8 +125,8 @@ export function NeuVectorSwitchboardPage() {
       icon: <ShieldCheck className="h-4 w-4" />,
       links: [
         { label: "Findings", to: c("findings") },
-        { label: "CVE Database", to: "/cve" },
-        { label: "Vuln Profiles", to: c("vuln-profiles") },
+        { label: "CVE database", to: "/cve" },
+        { label: "Vuln profiles", to: c("vuln-profiles") },
         { label: "Exceptions", to: c("exceptions") },
         { label: "Compliance", to: c("compliance") },
       ],
@@ -163,8 +140,8 @@ export function NeuVectorSwitchboardPage() {
       icon: <BellRing className="h-4 w-4" />,
       links: [
         { label: "Timeline", to: c("timeline") },
-        { label: "Audit Log", to: c("audit") },
-        { label: "Response Catalog", to: c("response") },
+        { label: "Audit log", to: c("audit") },
+        { label: "Response catalog", to: c("response") },
         { label: "Integrations", to: "/settings/integrations" },
       ],
       notes: ["Timeline categories, saved views, CSV export, and source-specific detail drawers are live; remaining work is count reconciliation with source tables and risk-report feed."],
@@ -176,14 +153,14 @@ export function NeuVectorSwitchboardPage() {
       status: "partial",
       icon: <KeyRound className="h-4 w-4" />,
       links: [
-        { label: "Access Control", to: "/settings/access" },
-        { label: "API Tokens", to: "/settings/api-tokens" },
-        { label: "Network & Proxy", to: "/settings/network" },
-        { label: "Effective Config", to: "/settings/effective-config" },
+        { label: "Access control", to: "/settings/access" },
+        { label: "API tokens", to: "/settings/api-tokens" },
+        { label: "Network & proxy", to: "/settings/network" },
+        { label: "Effective config", to: "/settings/effective-config" },
         { label: "Backup", to: "/settings/backup" },
         { label: "Connectors", to: "/settings/connectors" },
-        { label: "Migration Imports", to: "/settings/migration" },
-        { label: "API Reference", to: "/openapi.json" },
+        { label: "Migration imports", to: "/settings/migration" },
+        { label: "API reference", to: "/openapi.json" },
       ],
       notes: ["Effective Config shows redacted values, diffs, and component applied-revision reports; remaining work is exact per-key backend provenance and PATCH for mutable settings."],
     },
@@ -194,7 +171,7 @@ export function NeuVectorSwitchboardPage() {
   return (
     <PageContainer data-testid="neuvector-switchboard">
       <PageHeader
-        title="NeuVector Switchboard"
+        title="NeuVector switchboard"
         description="NeuVector navigation and operating concepts mapped to Constellation routes for this cluster."
         actions={
           <Button asChild variant="primary">
@@ -206,15 +183,11 @@ export function NeuVectorSwitchboardPage() {
         }
       />
 
-      <VerdictBanner status="info" title="Navigation reference for this cluster" detail="This directory maps operating concepts to their Constellation pages. Feature mappings are not release or enforcement acceptance results." />
+      <VerdictBanner status="info" title="Navigation reference for this cluster" detail="This directory maps operating concepts to their Constellation pages. Feature mappings are not release or enforcement acceptance results." numbers={[{ label: "NV areas mapped", value: mappings.length, title: "Primary console areas" }, { label: "Parity+ areas", value: mappings.filter((m) => m.status === "better").length, title: "Stronger than NV today" }, { label: "Migration path", value: "Apply", tone: "warning", href: "/settings/migration", title: "Preview, apply, rollback" }]} />
 
-      <StatGrid>
-        <StatCard label="NV areas mapped" value={mappings.length} hint="Primary console areas" icon={<ClipboardCheck className="h-3.5 w-3.5" />} />
-        <StatCard label="Parity+ areas" value={mappings.filter((m) => m.status === "better").length} hint="Stronger than NV today" tone="accent" icon={<BadgeCheck className="h-3.5 w-3.5" />} />
-        <StatCard label="Migration path" value="Apply" hint="Preview, apply, rollback" tone="medium" href="/settings/migration" icon={<WandSparkles className="h-3.5 w-3.5" />} />
-      </StatGrid>
+      
 
-      <PageSection title="Navigation Map" description="Use the NeuVector term on the left and jump to the Constellation equivalent on the right.">
+      <PageSection title="Navigation map" description="Use the NeuVector term on the left and jump to the Constellation equivalent on the right.">
         <div className="grid gap-3">
           {mappings.map((mapping) => (
             <Card key={mapping.nv} padded={false}>
@@ -226,7 +199,7 @@ export function NeuVectorSwitchboardPage() {
                     </span>
                     <div>
                       <div className="text-sm font-semibold text-foreground">{mapping.nv}</div>
-                      <span className={`mt-1 inline-flex rounded border px-1.5 py-0.5 text-[10px] font-medium ${statusClass(mapping.status)}`}>
+                      <span className={`mt-1 inline-flex rounded border px-1.5 py-0.5 text-micro font-medium ${statusClass(mapping.status)}`}>
                         {statusLabel(mapping.status)}
                       </span>
                     </div>
@@ -261,7 +234,7 @@ export function NeuVectorSwitchboardPage() {
 
       <Collapse label="Advanced: operating concepts and migration guidance">
       <div className="grid gap-4 xl:grid-cols-3">
-        <Card title="Mode Vocabulary" description="Operator-facing aliases for policy posture.">
+        <Card title="Mode vocabulary" description="Operator-facing aliases for policy posture.">
           <dl className="grid gap-3 text-sm">
             <ModeRow nv="Discover" constellation="Learn" detail="Observe behavior and collect candidate policy." />
             <ModeRow nv="Monitor" constellation="Monitor" detail="Alert on violations without blocking." />
@@ -269,7 +242,7 @@ export function NeuVectorSwitchboardPage() {
           </dl>
         </Card>
 
-        <Card title="Migration Runway" description="Cutover tasks that should be completed before a production switch.">
+        <Card title="Migration runway" description="Cutover tasks that should be completed before a production switch.">
           <ul className="space-y-2 text-sm">
             <RunwayLink icon={<WandSparkles />} label="Preview NeuVector export" to="/settings/migration" />
             <RunwayLink icon={<ServerCog />} label="Verify components and agents" to={c("components")} />
@@ -280,7 +253,7 @@ export function NeuVectorSwitchboardPage() {
           </ul>
         </Card>
 
-        <Card title="Constellation Advantages" description="Capabilities to preserve and surface during migration.">
+        <Card title="Constellation advantages" description="Capabilities to preserve and surface during migration.">
           <ul className="grid gap-2 text-sm text-foreground">
             <Advantage icon={<PackageSearch />} text="SBOM, VEX, and deeper image evidence" />
             <Advantage icon={<GitBranch />} text="Repository and serverless scanning" />

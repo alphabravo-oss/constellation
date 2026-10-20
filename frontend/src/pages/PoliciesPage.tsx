@@ -1,17 +1,17 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ListChecks, Pencil, Play, Plus, Power, RefreshCw, ShieldCheck, CloudUpload } from "lucide-react";
+import { Pencil, Play, Plus, RefreshCw, CloudUpload } from "lucide-react";
 import { policies, type Policy, type PolicySimulation } from "@/api/client";
 import { useCluster } from "@/hooks/useCluster";
 import { useRouteSearchParams } from "@/lib/route-search";
 import { PageHeader } from "@/components/ui/page";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { Button } from "@/components/ui/button";
 import { ErrorState, EmptyState, LoadingState } from "@/components/ui/states";
+import { StatusPill } from "@/components/ui/status-pill";
 
 const SAMPLE_ADMISSION_MANIFEST = `apiVersion: v1
 kind: Pod
@@ -79,11 +79,11 @@ function PolicyCatalog({ clusterId }: { clusterId: string }) {
     </div>}
   </div>;
   return <div className="space-y-6" data-testid="policies-page" data-cluster-id={clusterId}>
-    <PageHeader title="Policies" description="Review policies available to this cluster, including organization defaults. Open a policy to change its configuration, or test a manifest before enforcing it."
+    <PageHeader title="Policy catalog" description="Review policies available to this cluster, including organization defaults. Open a policy to change its configuration, or test a manifest before enforcing it."
       actions={<><Button disabled={q.isFetching} onClick={() => void q.refetch()}><RefreshCw className="h-4 w-4" /> Refresh</Button><Button onClick={() => void navigate({ href: `/clusters/${clusterId}/admission/import` })}><CloudUpload className="h-4 w-4" /> Import profile</Button><Button variant="primary" disabled={q.isError || !q.data} data-testid="policies-create-cta" onClick={() => void navigate({ href: `/clusters/${clusterId}/policies/new` })}><Plus className="h-4 w-4" /> Create policy</Button></>} />
     {q.isPending ? <LoadingState label="Loading policies…" /> : !q.data ? <ErrorState title="Could not load policies for this cluster." action={<Button onClick={() => void q.refetch()}>Retry</Button>} /> : <>
-      <VerdictBanner detailMode={q.isError ? "inline" : "disclosure"} status={q.isError ? "degraded" : "info"} title={q.isError ? "Policies could not be refreshed" : `${enabledCount} of ${list.length} loaded policies are enabled`} detail={q.isError ? "Showing the last loaded configuration. Refresh before editing." : "These counts describe configuration. They do not confirm enforcement or webhook health."} />
-      <StatGrid><StatCard label="Loaded policies" value={list.length} icon={<ListChecks className="h-4 w-4" />} /><StatCard label="Enabled policies" value={enabledCount} icon={<Power className="h-4 w-4" />} /><StatCard label="Enabled · enforce" value={enforceCount} icon={<ShieldCheck className="h-4 w-4" />} /><StatCard label="Enabled · monitor" value={enabledCount - enforceCount} /></StatGrid>
+      <VerdictBanner detailMode={q.isError ? "inline" : "disclosure"} status={q.isError ? "degraded" : "info"} title={q.isError ? "Policies could not be refreshed" : `${enabledCount} of ${list.length} loaded policies are enabled`} detail={q.isError ? "Showing the last loaded configuration. Refresh before editing." : "These counts describe configuration. They do not confirm enforcement or webhook health."} numbers={[{ label: "Loaded policies", value: list.length }, { label: "Enabled policies", value: enabledCount }, { label: "Enabled · enforce", value: enforceCount }, { label: "Enabled · monitor", value: enabledCount - enforceCount }]} />
+      
       <Tabs value={tab} onValueChange={setTab} items={[{ value: "catalog", label: "Policy catalog", count: list.length, content: <DataTable rows={list} columns={columns} rowKey={(p) => p.id} onRowClick={q.isError ? undefined : (p) => openEditor(p.id)} preferencesKey="policy-catalog" exportFileName="policies.csv" testId="policy-catalog-table" rowTestId={(p) => `policy-row-${p.name}`} emptyState={<EmptyState title="No policies" hint="Create a policy or import an admission profile to get started." />} /> }, { value: "simulator", label: "Admission simulator", content: simulatorTab }]} />
     </>}
   </div>;
@@ -128,12 +128,12 @@ function SimulationMatchCard({ match }: { match: PolicySimulation["matches"][num
                 ) : (
                   <span className="font-medium">{label}</span>
                 )}
-                {meta && <div className="mt-0.5 text-[11px] text-muted-foreground">{meta}</div>}
-                {findingPackage && <div className="mt-0.5 text-[11px] text-muted-foreground">{findingPackage}</div>}
-                {detail.finding?.fixed_version && <div className="mt-0.5 text-[11px] text-muted-foreground">fixed in {detail.finding.fixed_version}</div>}
-                {scanSource && <div className="mt-0.5 break-all text-[11px] text-muted-foreground">{scanSource}</div>}
-                {detail.artifact?.path && <div className="mt-0.5 break-all font-mono text-[10px] text-muted-foreground">{detail.artifact.path}</div>}
-                {imageRef && <div className="mt-0.5 break-all font-mono text-[10px] text-muted-foreground">{imageRef}</div>}
+                {meta && <div className="mt-0.5 text-micro text-muted-foreground">{meta}</div>}
+                {findingPackage && <div className="mt-0.5 text-micro text-muted-foreground">{findingPackage}</div>}
+                {detail.finding?.fixed_version && <div className="mt-0.5 text-micro text-muted-foreground">fixed in {detail.finding.fixed_version}</div>}
+                {scanSource && <div className="mt-0.5 break-all text-micro text-muted-foreground">{scanSource}</div>}
+                {detail.artifact?.path && <div className="mt-0.5 break-all font-mono text-micro text-muted-foreground">{detail.artifact.path}</div>}
+                {imageRef && <div className="mt-0.5 break-all font-mono text-micro text-muted-foreground">{imageRef}</div>}
               </div>
             );
           })}
@@ -178,23 +178,23 @@ function safeInternalHref(href?: string) {
 function Info({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-md bg-muted p-2">
-      <div className="text-[10px] uppercase text-muted-foreground">{label}</div>
+      <div className="text-micro  text-muted-foreground">{label}</div>
       <div className="mt-1 truncate font-medium">{value}</div>
     </div>
   );
 }
 
 function Badge({ children }: { children: string }) {
-  return <span className="rounded-md bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">{children}</span>;
+  return <span className="rounded-md bg-background px-1.5 py-0.5 text-micro text-muted-foreground">{children}</span>;
 }
 
 function Status({ value }: { value: string }) {
-  const cls = value === "allow" || value === "enforced"
-    ? "bg-[color:var(--color-status-success)]/15 text-[color:var(--color-status-success)]"
+  const tone: "success" | "warning" | "error" | "info" | "pending" | "neutral" = value === "allow" || value === "enforced"
+    ? "success"
     : value === "warn"
-      ? "bg-[color:var(--color-status-warning)]/15 text-[color:var(--color-status-warning)]"
+      ? "warning"
       : value === "deny"
-        ? "bg-[color:var(--color-status-error)]/15 text-[color:var(--color-status-error)]"
-        : "bg-muted text-muted-foreground";
-  return <span className={`rounded-md px-2 py-1 text-xs ${cls}`}>{value}</span>;
+        ? "error"
+        : "neutral";
+  return <StatusPill label={value} tone={tone} />;
 }

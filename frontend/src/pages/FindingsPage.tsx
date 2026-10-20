@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 import { useRouteSearchParams } from "@/lib/route-search";
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
-import { Save, Tag, ChevronDown, ListFilter } from "lucide-react";
+import { Save, Tag, ChevronDown } from "lucide-react";
 
 import {
   findings,
@@ -29,7 +29,6 @@ import { Button } from "@/components/ui/button";
 import { ActionBar } from "@/components/ui/action-bar";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { fmtRelative } from "@/lib/format";
 import { SEVERITY_RANK } from "@/lib/severity";
@@ -40,6 +39,11 @@ import { useOperatorDensity } from "@/hooks/useOperatorDensity";
 import { useSavedViews } from "@/hooks/useSavedViews";
 
 import { FINDING_VIEWS_KEY, isFindingSavedView, inventoryViewHref, type FindingSavedView as SavedView } from "@/lib/inventory-saved-views";
+import { Checkbox, Select } from "@/components/ui/form";
+import { ExportMenu, MoreFilters, type ExportOption } from "@/ui";
+import { sentenceValue } from "@/components/ui/status-pill";
+import { useIncludeSystem } from "@/lib/system-scope";
+import { apiRequestId } from "@/lib/api-error";
 
 const DENSITY_KEY     = "constellation.findings.density";
 const INSTANCE_TABLE_KEY = "findings.instances";
@@ -82,7 +86,8 @@ export function FindingsPage() {
   const { clusterId, cluster, isLoading: clusterLoading, error: clusterError } = useCluster();
   const scopeReady = !!identity?.org_id && !!identity?.user_id && !!clusterId && cluster?.id === clusterId && !clusterLoading && !clusterError;
   const [searchParams, setSearchParams] = useRouteSearchParams();
-  const locationHash = useLocation({ select: location => location.hash });
+  const location = useLocation();
+  const locationHash = location?.hash ?? "";
   const severity = (["critical", "high", "medium", "low", "info"] as const).find((value) => value === searchParams.get("severity")) ?? "";
   const kind = (["vulnerability", "iac", "license", "cloud-config", "drift", "signature", "ml-model", "compliance", "runtime"] as const).find((value) => value === searchParams.get("kind")) ?? "";
   const groupMode = searchParams.get("group_mode") ?? "";
@@ -94,7 +99,8 @@ export function FindingsPage() {
   const lifecycle: Lifecycle | "" = lifecycleValue === "all" ? "" : (["open", "triaged", "in_progress", "accepted", "suppressed", "resolved"] as const).find((value) => value === lifecycleValue) ?? "open";
   const query = searchParams.get("q") ?? "";
   const instanceChooser = isFindingChooserQuery(query);
-  const includeSystem = searchParams.get("include_system") === "true" || instanceChooser;
+  const includeSystemScope = useIncludeSystem(searchParams);
+  const includeSystem = includeSystemScope || instanceChooser;
   const workloadScope = includeSystem ? "all" as const : "application" as const;
   const debouncedQuery = useDebounced(query.trim(), 300);
   const querySettled = query.trim() === debouncedQuery;
@@ -179,9 +185,8 @@ export function FindingsPage() {
       cell: (f) => (
         <span className="flex items-center gap-1.5">
           {f.external_id
-            ? <Link to="." href={clusterId ? `/clusters/${clusterId}/cve/${f.external_id}` : `/cve/${f.external_id}`} className="text-mono text-xs hover:text-[color:var(--color-primary)]">{f.external_id}</Link>
+            ? <Link to="." href={clusterId ? `/clusters/${clusterId}/cve/${f.external_id}` : `/cve/${f.external_id}`} className="text-mono text-13">{f.external_id}</Link>
             : <span className="text-mono text-xs text-muted-foreground">{f.id.slice(0, 10)}</span>}
-          {f.kev && <span className="rounded px-1 py-px text-[9px] font-semibold text-white" style={{ background: "var(--color-severity-critical)" }} title="CISA Known-Exploited">KEV</span>}
         </span>
       ),
       exportValue: (f) => f.external_id ?? f.id,
@@ -202,7 +207,7 @@ export function FindingsPage() {
       id: "cvss_vector", kind: "id", size: 208, minSize: 176,
       header: "Vector",
       cell: (f) => (
-        <span className="block truncate text-mono text-[10px] text-muted-foreground" title={f.cvss_vector || undefined}>
+        <span className="block truncate text-mono text-micro text-muted-foreground" title={f.cvss_vector || undefined}>
           {f.cvss_vector || "—"}
         </span>
       ),
@@ -216,7 +221,7 @@ export function FindingsPage() {
         <button
           type="button"
           onClick={() => openFinding(f)}
-          className="text-left text-sm hover:text-[color:var(--color-primary)] truncate block"
+          className="block truncate text-left text-sm hover:underline"
           title={f.title}
         >
           {f.title}
@@ -243,7 +248,7 @@ export function FindingsPage() {
       id: "asset", kind: "id", size: 144, minSize: 128,
       header: "Asset",
       cell: (f) => (
-        <Link to="." href={`/clusters/${clusterId}/risk/asset/${encodeURIComponent(f.asset_id)}`} className="text-mono text-[10px] text-muted-foreground hover:text-foreground" title="Open risk workspace">
+        <Link to="." href={`/clusters/${clusterId}/risk/asset/${encodeURIComponent(f.asset_id)}`} className="text-mono text-micro text-muted-foreground hover:text-foreground" title="Open risk workspace">
           {f.asset_id.slice(0, 14)}
         </Link>
       ),
@@ -268,7 +273,7 @@ export function FindingsPage() {
     {
       id: "kind", kind: "status",
       header: "Kind",
-      cell: (f) => <span className="text-[10px] text-mono text-muted-foreground">{f.kind}</span>,
+      cell: (f) => <span className="text-micro text-mono text-muted-foreground">{f.kind}</span>,
       exportValue: (f) => f.kind,
       sort: (a, b) => a.kind.localeCompare(b.kind),
     },
@@ -276,7 +281,7 @@ export function FindingsPage() {
     {
       id: "age", kind: "age", size: 144, minSize: 128,
       header: "Age",
-      cell: (f) => <span className="text-[10px] text-muted-foreground">{fmtRelative(f.last_seen_at)}</span>,
+      cell: (f) => <span className="text-micro text-muted-foreground">{fmtRelative(f.last_seen_at)}</span>,
       exportValue: (f) => f.last_seen_at,
       sort: (a, b) => +new Date(a.last_seen_at) - +new Date(b.last_seen_at),
     },
@@ -307,15 +312,88 @@ export function FindingsPage() {
 
   const resetBulk = bulkAction.reset;
   useEffect(() => { resetBulk(); }, [selectionScope, resetBulk]);
+  const lifecycleCount = (value: Lifecycle) => scopeReady && querySettled && q.isSuccess && !q.isFetching && !q.isPlaceholderData ? q.data.lifecycle_counts?.[value] : undefined;
+  const lifecycleHref = (value: Lifecycle) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("lifecycle", value);
+    next.delete("page");
+    return `${location?.pathname ?? ""}?${next}`;
+  };
+  const systemTotal = q.isSuccess && !q.isFetching && !q.isPlaceholderData && typeof q.data.system_total === "number" ? q.data.system_total : undefined;
+  const moreFilterCount = [lifecycleValue && lifecycleValue !== "open" ? "1" : "", kind, groupMode, idScope, targetType, fixableOnly ? "1" : "", groupBy !== "none" ? groupBy : ""].filter(Boolean).length;
+  const exportMatching = () => exportCSV.mutate({ shouldDownload: captureExport(), request: { ...request, q: activeView === "cve" && !allIds ? [serverQuery, "cve:CVE-"].filter(Boolean).join(" ") : request.q, limit: 100000, offset: 0 } });
+  const exportOptions = [{ label: "Matching instances", description: "Up to 100,000 matching instances, across all pages", onSelect: exportMatching, disabled: !ready || exportCSV.isPending }];
+  const toolbar = (
+    <>
+      <QueryInput
+        value={query}
+        placeholder="Search findings"
+        aria-label="Search findings"
+        onChange={(e) => setQuery(e.target.value)}
+        onClear={() => setQuery("")}
+        className="min-w-60 flex-1"
+        suggestions={QUERY_HINTS.map((hint) => ({ label: hint.label, value: hint.example }))}
+        onSuggestion={(hint) => setQuery((current) => current ? `${current} ${hint.value}` : hint.value)}
+      />
+      <FilterSelect label="Severity" value={severity} onChange={(value) => setUrlFilter("severity", value)}
+        options={[["", "Any severity"], ["critical", "Critical"], ["high", "High"], ["medium", "Medium"], ["low", "Low"], ["info", "Info"]]} />
+      <MoreFilters count={moreFilterCount}>
+        <FilterField label="Lifecycle"><FilterSelect label="Lifecycle" value={lifecycleValue === "all" ? "all" : lifecycle} onChange={(value) => setFilters({ lifecycle: value || "all" })}
+        wide options={[["open", "Open"], ["triaged", "Triaged"], ["in_progress", "In progress"], ["accepted", "Accepted"], ["suppressed", "Suppressed"], ["resolved", "Resolved"], ["all", "Any lifecycle"]]} /></FilterField>
+        <FilterField label="Kind"><FilterSelect label="Kind" value={kind} onChange={(v) => setFilters({ kind: v, ...(v && v !== "vulnerability" ? { view: "instances" } : {}) })}
+        wide options={[["", "Any kind"], ["vulnerability", "Vulnerability"], ["iac", "IaC"], ["license", "License"], ["cloud-config", "Cloud config"], ["drift", "Drift"], ["signature", "Signature"], ["ml-model", "ML model"], ["compliance", "Compliance"], ["runtime", "Runtime"]]} /></FilterField>
+        <FilterField label="Strongest group mode"><FilterSelect label="Strongest group mode" value={groupMode} onChange={(value) => setUrlFilter("group_mode", value)} wide options={[["", "Any group mode"], ["discover", "Discover"], ["monitor", "Monitor"], ["protect", "Protect"], ...(!["", "discover", "monitor", "protect"].includes(groupMode) ? [[groupMode, `Invalid mode: ${groupMode}`] as [string, string]] : [])]} /></FilterField>
+        <FilterField label="Vulnerability IDs"><FilterSelect label="Vulnerability IDs" value={idScope} onChange={(value) => setUrlFilter("id_scope", value)} wide options={[["", "CVE-only rollups"], ["all", "All non-null IDs"], ...(!["", "all"].includes(idScope) ? [[idScope, `Invalid scope: ${idScope}`] as [string, string]] : [])]} /></FilterField>
+        <FilterField label="Target type"><FilterSelect label="Target type" value={targetType} onChange={(value) => setUrlFilter("target_type", value)} wide options={[["", "Any target"], ["image-workload", "Image workload"], ["host", "Host"], ["platform", "Platform"], ["image", "Image"], ["registry", "Registry"], ["repository", "Repository"], ["serverless", "Serverless"], ["workload", "Workload"], ...(!["", "image-workload", "host", "platform", "image", "registry", "repository", "serverless", "workload"].includes(targetType) ? [[targetType, `Invalid target: ${targetType}`] as [string, string]] : [])]} /></FilterField>
+        {activeView === "instances" && <FilterField label="Group rows"><FilterSelect label="Group rows" value={groupBy} onChange={(value) => setUrlFilter("group", value === "none" ? "" : value)} wide options={[["none", "No grouping"], ["severity", "By severity"], ["kind", "By kind"], ["asset", "By asset"]]} /></FilterField>}
+        <label className="flex items-center gap-2 text-sm">
+          <Checkbox checked={fixableOnly} aria-label="Fixable only" onChange={() => setUrlFilter("fixable", fixableOnly ? "" : "true")} />
+          Fixable only
+        </label>
+      </MoreFilters>
+      <div className="inline-flex h-9 items-center rounded-md border border-border p-0.5" role="group" aria-label="Rows">
+        {([["instances", "Instances"], ["cve", allIds ? "By vulnerability ID" : "By CVE"]] as Array<["instances" | "cve", string]>).map(([v, l]) => (
+          <button
+            key={v}
+            type="button"
+            onClick={() => setUrlFilter("view", v)}
+            disabled={v === "cve" && Boolean(kind && kind !== "vulnerability")}
+            title={v === "cve" && kind && kind !== "vulnerability" ? "By CVE is available for vulnerabilities" : v === "cve" ? "One row per CVE with its blast radius" : "One row per finding instance"}
+            aria-pressed={activeView === v}
+            data-testid={`findings-view-${v}`}
+            className={cn(
+              "inline-flex h-7 items-center rounded-sm px-3 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
+              activeView === v ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:text-foreground",
+            )}
+          >{l}</button>
+        ))}
+      </div>
+    </>
+  );
+  const chips = activeChips.length > 0 ? (
+    <div className="flex flex-wrap items-center gap-1.5" data-testid="findings-active-filters">
+      {activeChips.map((c, i) => <FilterChip key={i} label={c.label} value={c.value} onRemove={c.onRemove} active />)}
+      <button type="button" className="h-7 rounded-md px-2 text-meta text-muted-foreground hover:text-foreground" onClick={() => setFilters({ q: "", kind: "", group_mode: "", id_scope: "", target_type: "", severity: "", lifecycle: "open", fixable: "", group: "" })}>Clear all</button>
+    </div>
+  ) : null;
+  const verdictDetail = (
+    <div className="space-y-1.5">
+      <p>{activeView === "cve" ? `Rollups are ordered by highest risk across all matching ${idLabel}; the CVE table export contains the rollups on this page.` : "Search and ordering apply to the complete matching inventory; the table export and selections cover this page."}</p>
+      <p data-testid="findings-system-scope">{systemTotal !== undefined ? `${systemTotal.toLocaleString()} Constellation findings ${includeSystem ? "included" : "hidden"} by the System workloads switch.` : "Constellation finding count unavailable."}</p>
+      {groupMode && <p data-testid="findings-mode-scope">Image-workload vulnerabilities linked by image digest to workloads whose strongest configured group mode is {groupMode}. Unmatched workloads are excluded; an ID may appear in more than one mode through different workloads. This describes cached group membership, not applied protection.</p>}
+      {allIds && <p>All non-null vulnerability IDs, including advisories without a CVE prefix.</p>}
+      {activeView === "cve" && fixableOnly && <p>Fixable rollups count all matching instances of an ID with an available fix.</p>}
+    </div>
+  );
+
   return (
     <div className="space-y-4" data-testid="findings-page" data-cluster-id={clusterId ?? ""}>
       <PageHeader
         title="Findings"
-        description="Search matching security findings across the active scope, then review or update individual instances."
         actions={
           <>
             <SavedViewsMenu views={views} onApply={applyView} onDelete={deleteView} summary={view => [view.lifecycle, view.kind, view.query].filter(Boolean).join(" · ") || "all"} />
-            <Button size="sm" variant="outline" disabled={!scopeReady} onClick={() => { if (clusterId) void navigate({ href: inventoryViewHref(clusterId, "findings", searchParams, locationHash, true) }); }}>
+            <Button size="sm" disabled={!scopeReady} onClick={() => { if (clusterId) void navigate({ href: inventoryViewHref(clusterId, "findings", searchParams, locationHash, true) }); }}>
               <Save className="h-3.5 w-3.5" /> Save view
             </Button>
           </>
@@ -323,185 +401,40 @@ export function FindingsPage() {
       />
 
       {persistenceError && <ErrorState title={persistenceError} />}
-      <VerdictBanner status={activeQ.isError || !scopeReady ? "degraded" : "info"} title={ready ? `${total?.toLocaleString()} matching ${activeView === "cve" ? idLabel : "finding instances"}` : "Finding results are unavailable or updating"} detail={activeView === "cve" ? `Rollups are ordered by highest risk across all matching ${idLabel}.` : "Search and ordering apply to the complete matching inventory."} />
-      <StatGrid className="gap-3">
-        <StatCard label={activeView === "cve" ? allIds ? "Matching vulnerability IDs" : "Matching CVEs" : "Matching instances"} value={total?.toLocaleString() ?? "—"} />
-        <StatCard label="Rows on this page" value={ready ? activeView === "cve" ? cveRows.length : rows.length : "—"} />
-        <StatCard label="Selected on this page" value={totalSelected} />
-      </StatGrid>
-      {/* Query input + hints */}
-      <div className="space-y-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <QueryInput
-            value={query}
-            placeholder="severity:critical kev:true cve:CVE-2024- !status:resolved"
-            aria-label="Search findings"
-            onChange={(e) => setQuery(e.target.value)}
-            onClear={() => setQuery("")}
-          />
-          <label className="flex items-center gap-2 text-xs">
-            <input type="checkbox" aria-label="Include Constellation system workloads" checked={includeSystem} disabled={instanceChooser} onChange={(event) => setUrlFilter("include_system", event.target.checked ? "true" : "")} />
-            Include Constellation system workloads
-          </label>
-          <span className="text-xs text-muted-foreground" role="status">{q.isSuccess && !q.isFetching && !q.isPlaceholderData && typeof q.data.system_total === "number" ? `${q.data.system_total.toLocaleString()} Constellation findings ${includeSystem ? "included" : "hidden"}` : "Constellation finding count unavailable"}</span>
-          <Select label="Kind" value={kind} onChange={(v) => setFilters({ kind: v, ...(v && v !== "vulnerability" ? { view: "instances" } : {}) })}
-            options={[["", "any kind"], ["vulnerability","vulnerability"], ["iac","iac"], ["license","license"],
-                      ["cloud-config","cloud-config"], ["drift","drift"], ["signature","signature"],
-                      ["ml-model","ml-model"], ["compliance","compliance"], ["runtime","runtime"]]} />
-          <Select label="Strongest group mode" value={groupMode} onChange={(value) => setUrlFilter("group_mode", value)} options={[["", "any group mode"], ["discover", "discover"], ["monitor", "monitor"], ["protect", "protect"], ...(!["", "discover", "monitor", "protect"].includes(groupMode) ? [[groupMode, `invalid mode: ${groupMode}`] as [string, string]] : [])]} />
-          <Select label="Vulnerability IDs" value={idScope} onChange={(value) => setUrlFilter("id_scope", value)} options={[["", "CVE-only rollups"], ["all", "All non-null IDs"], ...(!["", "all"].includes(idScope) ? [[idScope, `invalid scope: ${idScope}`] as [string, string]] : [])]} />
-          <Select label="Target type" value={targetType} onChange={(value) => setUrlFilter("target_type", value)} options={[["", "any target"], ["image-workload", "image workload"], ["host", "host"], ["platform", "platform"], ["image", "image"], ["registry", "registry"], ["repository", "repository"], ["serverless", "serverless"], ["workload", "workload"], ...(!["", "image-workload", "host", "platform", "image", "registry", "repository", "serverless", "workload"].includes(targetType) ? [[targetType, `invalid target: ${targetType}`] as [string, string]] : [])]} />
-          <Select label="Severity" value={severity} onChange={(value) => setUrlFilter("severity", value)}
-            options={[["", "any severity"], ["critical", "critical"], ["high", "high"], ["medium", "medium"], ["low", "low"], ["info", "info"]]} />
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Try</span>
-          {QUERY_HINTS.map((h) => (
-            <FilterChip
-              key={h.value}
-              label={h.label}
-              value={h.example.split(":")[1]}
-              onClick={() => setQuery((cur) => cur ? `${cur} ${h.example}` : h.example)}
-            />
-          ))}
-          {activeChips.length > 0 && (
-            <>
-              <span className="mx-1 h-3 w-px bg-border" aria-hidden />
-              <span className="text-[10px] uppercase tracking-wider text-muted-foreground">Active</span>
-              {activeChips.map((c, i) => (
-                <FilterChip key={i} label={c.label} value={c.value} onRemove={c.onRemove} active />
-              ))}
-            </>
-          )}
-        </div>
-      </div>
-
-      {groupMode && <p className="text-xs text-muted-foreground" data-testid="findings-mode-scope">Image-workload vulnerabilities linked by image digest to workloads whose strongest configured group mode is {groupMode}. Unmatched workloads are excluded; an ID may appear in more than one mode through different workloads. This describes cached group membership, not applied protection.</p>}
-      {allIds && <p className="text-xs text-muted-foreground">All non-null vulnerability IDs, including advisories without a CVE prefix. Instances without an ID are excluded from this cohort.</p>}
-      {/* State tabs */}
-      <section className="grid grid-cols-1 gap-2 md:grid-cols-3" data-testid="finding-state-tabs">
-        {STATE_TABS.map((tab) => {
-          const count = scopeReady && querySettled && q.isSuccess && !q.isFetching && !q.isPlaceholderData ? q.data.lifecycle_counts?.[tab.lifecycle] ?? "—" : "—";
-          const active = lifecycle === tab.lifecycle;
-          return (
-            <button
-              key={tab.lifecycle}
-              type="button"
-              onClick={() => setUrlFilter("lifecycle", tab.lifecycle)}
-              className={cn(
-                "rounded-md border bg-card px-3 py-2.5 text-left transition-all duration-100",
-                active
-                  ? "border-[color:var(--color-primary)] ring-1 ring-[color:var(--color-primary)]"
-                  : "border-border hover:border-[color-mix(in_oklab,var(--color-primary)_30%,var(--color-border))]",
-              )}
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-display text-sm font-semibold">{tab.label}</span>
-                <span className={cn(
-                  "rounded h-5 px-1.5 text-[11px] text-mono",
-                  active ? "bg-[color:var(--color-primary)] text-[color:var(--color-primary-foreground)]" : "bg-muted text-muted-foreground",
-                )}>{count}</span>
-              </div>
-              <div className="mt-0.5 text-[10px] text-muted-foreground">{tab.description}</div>
-            </button>
-          );
-        })}
-      </section>
-
-      {/* View: per-instance rows vs NeuVector-style CVE rollup */}
-      <div className="flex items-center gap-1.5">
-        <span className="text-[10px] uppercase tracking-wider text-muted-foreground">View</span>
-        {([["instances", "Instances"], ["cve", allIds ? "By vulnerability ID" : "By CVE"]] as Array<["instances" | "cve", string]>).map(([v, l]) => (
-          <button
-            key={v}
-            type="button"
-            onClick={() => setUrlFilter("view", v)}
-            disabled={v === "cve" && Boolean(kind && kind !== "vulnerability")}
-            title={v === "cve" && kind && kind !== "vulnerability" ? "By CVE is available for vulnerabilities" : undefined}
-            data-testid={`findings-view-${v}`}
-            className={cn(
-              "rounded h-6 px-2 text-[11px] border transition-colors",
-              activeView === v
-                ? "bg-[color-mix(in_oklab,var(--color-primary)_18%,transparent)] border-[color-mix(in_oklab,var(--color-primary)_36%,transparent)] text-[color:var(--color-primary)]"
-                : "bg-card border-border hover:bg-accent",
-              v === "cve" && kind && kind !== "vulnerability" && "cursor-not-allowed opacity-50",
-            )}
-          >{l}</button>
-        ))}
-        <span className="ml-2 text-[10px] text-muted-foreground">
-          {activeView === "cve" ? `one row per ${allIds ? "vulnerability ID" : "CVE"} with its blast radius` : "one row per finding instance"}
-        </span>
-        <button
-          type="button"
-          onClick={() => setUrlFilter("fixable", fixableOnly ? "" : "true")}
-          className={cn(
-            "ml-auto rounded h-6 px-2 text-[11px] border transition-colors",
-            fixableOnly
-              ? "bg-[color-mix(in_oklab,var(--color-severity-low)_18%,transparent)] border-[color-mix(in_oklab,var(--color-severity-low)_36%,transparent)] text-[color:var(--color-severity-low)]"
-              : "bg-card border-border hover:bg-accent",
-          )}
-          title="Hide vulnerabilities with no available fix (won't-fix / not-fixed)"
-        >{fixableOnly ? "✓ " : ""}Fixable only</button>
-        {activeView === "cve" && (
-          <span className="rounded h-6 px-2 text-[11px] border border-border bg-card text-muted-foreground">
-            {ready ? cveRows.length : "—"} of {total ?? "—"} {idLabel}
-          </span>
-        )}
-      </div>
-
-      {/* Group by (instance view only) */}
-      {activeView === "instances" && (
-      <div className="flex items-center gap-1.5">
-        <span className="text-[10px] uppercase tracking-wider text-muted-foreground"><ListFilter className="h-3 w-3 inline" /> Group</span>
-        {([
-          ["none", "None"], ["severity", "Severity"], ["kind", "Kind"], ["asset", "Asset"],
-        ] as Array<[GroupBy, string]>).map(([v, l]) => (
-          <button
-            key={v}
-            type="button"
-            onClick={() => setUrlFilter("group", v)}
-            className={cn(
-              "rounded h-6 px-2 text-[11px] border transition-colors",
-              groupBy === v
-                ? "bg-[color-mix(in_oklab,var(--color-primary)_18%,transparent)] border-[color-mix(in_oklab,var(--color-primary)_36%,transparent)] text-[color:var(--color-primary)]"
-                : "bg-card border-border hover:bg-accent",
-            )}
-          >{l}</button>
-        ))}
-        <span className="ml-auto text-[11px] text-muted-foreground text-mono">{ready ? rows.length : "—"} on this page · {total ?? "—"} matching instances</span>
-      </div>
-      )}
-
-      <div className="flex flex-wrap items-center gap-3">
-        <Button variant="outline" disabled={!ready || exportCSV.isPending} onClick={() => exportCSV.mutate({ shouldDownload: captureExport(), request: { ...request, q: activeView === "cve" && !allIds ? [serverQuery, "cve:CVE-"].filter(Boolean).join(" ") : request.q, limit: 100000, offset: 0 } })}>{exportCSV.isPending ? "Exporting…" : "Export filtered instances CSV"}</Button>
-        <span className="text-xs text-muted-foreground">Up to 100,000 matching instances, across all pages.{activeView === "cve" ? ` ${allIds ? "Vulnerability ID" : "CVE"} table exports contain only the rollups on this page.` : " Table exports and selections contain only this page."}</span>
-      </div>
-      {activeView === "cve" && fixableOnly && <p className="text-xs text-muted-foreground">Fixable {allIds ? "vulnerability ID" : "CVE"} rollups count all matching instances of an ID with an available fix. The filtered instance CSV includes only instances with an available fix.</p>}
+      <div data-testid="finding-state-tabs"><VerdictBanner
+        status={activeQ.isError || !scopeReady ? "degraded" : "info"}
+        title={ready ? `${total?.toLocaleString()} matching ${activeView === "cve" ? idLabel : "finding instances"}` : "Finding results are updating"}
+        numbers={STATE_TABS.map((tab) => ({ label: tab.label, value: lifecycleCount(tab.lifecycle)?.toLocaleString() ?? "—", href: lifecycleHref(tab.lifecycle), tone: tab.lifecycle === lifecycle ? "default" as const : "muted" as const, testId: `finding-state-${tab.lifecycle}` }))}
+        detail={verdictDetail}
+      /></div>
+      {chips}
       {exportCSV.isError && exportCSV.variables?.shouldDownload() && <ErrorState title="Could not export matching instances. Try again." />}
       {bulkAction.isError && <ErrorState title="Some selected findings could not be updated. Refresh and review their current states before retrying." />}
       {activeView === "cve" && q.isError && <ErrorState title="Lifecycle counts could not be loaded." action={<Button onClick={() => void q.refetch()}>Retry counts</Button>} />}
-      {!scopeReady ? <ErrorState title="The active cluster could not be resolved. Findings are unavailable until its scope recovers." />
-        : activeView === "instances" && !validInstances ? <ErrorState title="Finding observations could not be identified safely." action={<Button onClick={() => void q.refetch()}>Retry</Button>} /> : activeQ.isError ? <ErrorState title="Could not load findings. Review your query and retry." action={<Button onClick={() => void activeQ.refetch()}>Retry</Button>} />
-        : !ready ? <LoadingState label={activeQ.isPending ? "Loading findings…" : "Updating findings…"} />
-        : outOfRange ? <EmptyState title="This page is outside the current results" hint="The inventory may have changed. Return to the first page to review matching results." action={<Button onClick={() => setPage(0)}>First page</Button>} />
+      {!scopeReady ? <><ToolbarRow toolbar={toolbar} exportOptions={exportOptions} /><ErrorState title="The active cluster could not be resolved. Findings are unavailable until its scope recovers." /></>
+        : activeView === "instances" && !validInstances ? <ErrorState title="Finding observations could not be identified safely." action={<Button onClick={() => void q.refetch()}>Retry</Button>} /> : activeQ.isError ? <><ToolbarRow toolbar={toolbar} exportOptions={exportOptions} /><ErrorState title="Could not load findings. Review your query and retry." correlationId={apiRequestId(activeQ.error)} action={<Button onClick={() => void activeQ.refetch()}>Retry</Button>} /></>
+        : !ready ? <><ToolbarRow toolbar={toolbar} exportOptions={exportOptions} /><LoadingState label={activeQ.isPending ? "Loading findings" : "Updating findings"} /></>
+        : outOfRange ? <EmptyState title="This page is outside the current results" hint="The inventory may have changed." action={<Button onClick={() => setPage(0)}>First page</Button>} />
         : <>
-          {activeView === "cve" ? <CVETable rows={cveRows} clusterId={clusterId} allIds={allIds} targetType={targetType} />
+          {activeView === "cve" ? <CVETable rows={cveRows} clusterId={clusterId} allIds={allIds} targetType={targetType} toolbar={toolbar} exportOptions={exportOptions} />
             : groupBy === "none" ? <DataTable
                 rows={rows} columns={columns} rowKey={findingRowKey}
                 density={density} onDensityChange={setDensity} selectable selected={selected} onSelectedChange={setSelected}
                 onRowClick={openFinding} sort={{ id: sort === "last_seen" ? "age" : sort, dir: order }} onSortChange={onSortChange} manualSorting pagination={false}
-                preferencesKey={INSTANCE_TABLE_KEY} preferenceMigration={OBSERVATION_COLUMNS_MIGRATION} defaultHiddenColumnIds={["package", "fixed", "platform-role", "instance", "first-seen"]}
+                preferencesKey={INSTANCE_TABLE_KEY} preferenceMigration={OBSERVATION_COLUMNS_MIGRATION} defaultHiddenColumnIds={["cvss_vector", "package", "fixed", "platform-role", "instance", "first-seen", "kind"]}
+                toolbar={toolbar} exportOptions={exportOptions}
                 canExport={() => !!clusterId && clusterCacheReady(qc, clusterId) && exportQueryReady(qc, instanceKey, q.data)} exportFileName="constellation-findings-page" exportLabel="Export this page CSV" testId="findings-table"
-                emptyState={<EmptyState title="No findings match" hint="Adjust your filters or clear the query." icon={<Tag className="h-8 w-8" />} action={<Button variant="outline" onClick={() => setFilters({ q: "", kind: "", group_mode: "", id_scope: "", target_type: "", severity: "", lifecycle: "open", fixable: "", page: "" })}>Reset filters</Button>} />}
+                emptyState={<EmptyState title="No findings match" hint="Adjust your filters or clear the query." icon={<Tag />} action={<Button onClick={() => setFilters({ q: "", kind: "", group_mode: "", id_scope: "", target_type: "", severity: "", lifecycle: "open", fixable: "", page: "" })}>Reset filters</Button>} />}
               />
             : <div className="space-y-3">
-                <p className="text-xs text-muted-foreground" data-testid="findings-group-scope">{grouped.length} groups from {rows.length} instances on this server page. Group counts, selection, and table CSV cover this page only.</p>
-                {grouped.map((group) => <details key={group.label} open className="rounded-md border border-border bg-card">
-                  <summary className="flex cursor-pointer items-center justify-between gap-2 border-b border-border px-3 py-2 list-none"><span className="flex items-center gap-2"><ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /><span className="text-sm font-semibold">{group.label}</span><span className="text-xs text-muted-foreground">{group.items.length} on this page</span></span></summary>
+                <ToolbarRow toolbar={toolbar} exportOptions={exportOptions} />
+                <p className="text-meta text-muted-foreground" data-testid="findings-group-scope">{grouped.length} groups from {rows.length} instances on this server page</p>
+                {grouped.map((group) => <details key={group.label} open className="rounded-lg border border-border bg-card">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-2 border-b border-border px-3 py-2"><span className="flex items-center gap-2"><ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /><span className="text-sm font-semibold">{sentenceValue(group.label)}</span><span className="text-meta text-muted-foreground">{group.items.length} on this page</span></span></summary>
                   <DataTable rows={group.items} columns={columns} rowKey={findingRowKey} density={density} onDensityChange={setDensity}
                     selectable selected={selected} onSelectedChange={(ids) => { const merged = new Set(selected); for (const item of group.items) merged.delete(findingRowKey(item)); for (const id of ids) if (group.items.some((item) => findingRowKey(item) === id)) merged.add(id); setSelected(merged); }} onRowClick={openFinding}
                     sort={{ id: sort === "last_seen" ? "age" : sort, dir: order }} onSortChange={onSortChange} manualSorting pagination={false}
-                    showDensityToggle={false} showColumnChooser={false} preferencesKey={INSTANCE_TABLE_KEY} preferenceMigration={OBSERVATION_COLUMNS_MIGRATION} defaultHiddenColumnIds={["package", "fixed", "platform-role", "instance", "first-seen"]}
+                    showDensityToggle={false} showColumnChooser={false} preferencesKey={INSTANCE_TABLE_KEY} preferenceMigration={OBSERVATION_COLUMNS_MIGRATION} defaultHiddenColumnIds={["cvss_vector", "package", "fixed", "platform-role", "instance", "first-seen", "kind"]}
                     canExport={() => !!clusterId && clusterCacheReady(qc, clusterId) && exportQueryReady(qc, instanceKey, q.data)} exportFileName={`constellation-findings-page-${safeFilename(group.label)}`} exportLabel="Export this group on this page CSV" className="rounded-none border-0" />
                 </details>)}
                 {!rows.length && <EmptyState title="No findings match" hint="Adjust your filters or clear the query." />}
@@ -509,9 +442,9 @@ export function FindingsPage() {
           <Pager page={page} pageSize={PAGE_SIZE} total={total} rowsOnPage={activeView === "cve" ? cveRows.length : rows.length} onPage={setPage} />
         </>}
       <ActionBar count={totalSelected} onClear={() => setSelected(new Set())}>
-        <Button size="sm" variant="outline" disabled={!ready || bulkAction.isPending} onClick={() => bulkAction.mutate({ action: "triage", scope: selectionScope, isCurrent: captureBulk() })}>Triage</Button>
-        <Button size="sm" variant="outline" disabled={!ready || bulkAction.isPending} onClick={() => bulkAction.mutate({ action: "suppress", scope: selectionScope, isCurrent: captureBulk() })}>Suppress</Button>
-        <Button size="sm" variant="outline" disabled={!ready || bulkAction.isPending} onClick={() => bulkAction.mutate({ action: "accept", scope: selectionScope, isCurrent: captureBulk() })}>Accept risk · 30d</Button>
+        <Button size="sm" disabled={!ready || bulkAction.isPending} onClick={() => bulkAction.mutate({ action: "triage", scope: selectionScope, isCurrent: captureBulk() })}>Triage</Button>
+        <Button size="sm" disabled={!ready || bulkAction.isPending} onClick={() => bulkAction.mutate({ action: "suppress", scope: selectionScope, isCurrent: captureBulk() })}>Suppress</Button>
+        <Button size="sm" disabled={!ready || bulkAction.isPending} onClick={() => bulkAction.mutate({ action: "accept", scope: selectionScope, isCurrent: captureBulk() })}>Accept risk · 30 days</Button>
       </ActionBar>
     </div>
   );
@@ -519,17 +452,16 @@ export function FindingsPage() {
 
 // CVETable — the NeuVector-style rollup: one row per CVE with its blast radius
 // (how many images / clusters it hits and total instances), sorted by risk.
-function CVETable({ rows, clusterId, allIds = false, targetType }: { rows: CVERollup[]; clusterId?: string; allIds?: boolean; targetType?: string }) {
+function CVETable({ rows, clusterId, allIds = false, targetType, toolbar, exportOptions }: { rows: CVERollup[]; clusterId?: string; allIds?: boolean; targetType?: string; toolbar?: React.ReactNode; exportOptions?: ExportOption[] }) {
   const referenceLabel = targetType === "host" ? "host reference" : targetType === "platform" ? "platform reference" : "image";
   const columns: Column<CVERollup>[] = [
     { id: "severity", kind: "badge", size: 120, minSize: 112, header: "Severity",
-      cell: (c) => <SeverityBadge severity={c.severity} />,
+      cell: (c) => <SeverityBadge severity={c.severity} kev={Boolean(c.kev)} />,
       exportValue: (c) => c.severity },
     { id: "cve", kind: "id", size: 176, minSize: 160, header: allIds ? "Vulnerability ID" : "CVE",
       cell: (c) => (
         <span className="flex items-center gap-1.5">
-          <span className="text-mono text-xs">{c.cve.startsWith("CVE-") ? <a href={clusterId ? `/clusters/${clusterId}/cve/${encodeURIComponent(c.cve)}` : `/cve/${encodeURIComponent(c.cve)}`} className="hover:text-[color:var(--color-primary)]">{c.cve}</a> : c.cve || "(empty external ID)"}</span>
-          {c.kev && <span className="rounded px-1 py-px text-[9px] font-semibold text-white" style={{ background: "var(--color-severity-critical)" }} title="CISA Known-Exploited">KEV</span>}
+          <span className="text-mono text-xs">{c.cve.startsWith("CVE-") ? <a href={clusterId ? `/clusters/${clusterId}/cve/${encodeURIComponent(c.cve)}` : `/cve/${encodeURIComponent(c.cve)}`} className="hover:underline">{c.cve}</a> : c.cve || "(empty external ID)"}</span>
         </span>
       ),
       exportValue: (c) => c.kev ? `${c.cve} KEV` : c.cve },
@@ -541,7 +473,7 @@ function CVETable({ rows, clusterId, allIds = false, targetType }: { rows: CVERo
       exportValue: (c) => cvssScore(c) ?? "" },
     { id: "cvss_vector", kind: "id", size: 208, minSize: 176, header: "Vector",
       cell: (c) => (
-        <span className="block truncate text-mono text-[10px] text-muted-foreground" title={c.cvss_vector || undefined}>
+        <span className="block truncate text-mono text-micro text-muted-foreground" title={c.cvss_vector || undefined}>
           {c.cvss_vector || "—"}
         </span>
       ),
@@ -567,7 +499,7 @@ function CVETable({ rows, clusterId, allIds = false, targetType }: { rows: CVERo
       cell: (c) => <RiskScore score={c.risk_score} />,
       exportValue: (c) => c.risk_score },
     { id: "age", kind: "age", size: 144, minSize: 128, header: "Age",
-      cell: (c) => <span className="text-[10px] text-muted-foreground">{fmtRelative(c.last_seen_at)}</span>,
+      cell: (c) => <span className="text-micro text-muted-foreground">{fmtRelative(c.last_seen_at)}</span>,
       exportValue: (c) => c.last_seen_at },
   ];
   return (
@@ -580,29 +512,42 @@ function CVETable({ rows, clusterId, allIds = false, targetType }: { rows: CVERo
       exportFileName={allIds ? "constellation-vulnerability-ids-page" : "constellation-cves-page"}
       exportLabel={allIds ? "Export this vulnerability ID page CSV" : "Export this CVE page CSV"}
       testId="findings-cve-table"
+      toolbar={toolbar}
+      exportOptions={exportOptions}
+      defaultHiddenColumnIds={["cvss_vector"]}
       emptyState={<EmptyState title={allIds ? "No vulnerability IDs match" : "No CVEs match"} hint="Adjust your filters or clear the query." icon={<Tag className="h-8 w-8" />} />}
     />
   );
 }
 
-function Select({
-  label, value, onChange, options,
+function FilterSelect({
+  label, value, onChange, options, wide = false,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   options: [string, string][];
+  wide?: boolean;
 }) {
   return (
-    <select
-      aria-label={label}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="h-9 rounded-md border border-input bg-card px-2.5 text-xs text-mono outline-none focus:border-[color:var(--color-primary)]"
-    >
+    <Select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} className={wide ? "w-full" : "h-9"}>
       {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-    </select>
+    </Select>
   );
+}
+
+/** The table toolbar outside a table (loading, error and grouped views). */
+function ToolbarRow({ toolbar, exportOptions }: { toolbar: React.ReactNode; exportOptions: ExportOption[] }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2" data-slot="table-toolbar">
+      {toolbar}
+      <span className="ml-auto" data-testid="findings-table-export-menu"><ExportMenu options={exportOptions} /></span>
+    </div>
+  );
+}
+
+function FilterField({ label, children }: { label: string; children: React.ReactNode }) {
+  return <div className="space-y-1.5"><p className="text-meta font-medium text-muted-foreground">{label}</p>{children}</div>;
 }
 
 function groupRows(rows: Finding[], by: GroupBy): Array<{ label: string; items: Finding[] }> {

@@ -7,6 +7,15 @@ import { TablePreferencesProvider } from "@/contexts/TablePreferencesContext";
 import { AdmissionSettingsPage } from "./AdmissionSettingsPage";
 import { AdmissionRuleFormPage } from "./AdmissionRuleFormPage";
 
+/** Kit Select keeps a hidden native mirror right before its trigger. */
+function nativeSelect(root: ParentNode, selector: string): HTMLSelectElement | null {
+  const element = root.querySelector(selector);
+  if (!element) return null;
+  if (element.tagName === "SELECT") return element as HTMLSelectElement;
+  // The kit Select keeps a hidden native mirror tagged with the trigger id.
+  return element.id ? root.querySelector<HTMLSelectElement>(`select[data-mirror-for="${element.id}"]`) : null;
+}
+
 const route = vi.hoisted(() => ({ navigate: vi.fn(), clusterId: "cluster" }));
 vi.mock("@/api/client", () => ({ policies: { admissionState: vi.fn(), updateAdmissionState: vi.fn(), admissionOptions: vi.fn(), createAdmissionRule: vi.fn(), admissionRules: vi.fn().mockResolvedValue({ rules: [] }), admissionProfiles: vi.fn(), admissionDryRunHistory: vi.fn().mockResolvedValue({ history: [] }), importAdmissionProfile: vi.fn() }, componentsInventory: { list: vi.fn().mockResolvedValue({ components: [] }) } }));
 vi.mock("@/hooks/useCluster", () => ({ useCluster: () => ({ clusterId: route.clusterId }) }));
@@ -28,8 +37,8 @@ async function renderPage(page: ReactNode) {
 }
 async function rerenderPage(page: ReactNode = <AdmissionSettingsPage />) { await act(async () => root.render(<QueryClientProvider client={client}><TablePreferencesProvider identity={{ ...owner }}>{page}</TablePreferencesProvider></QueryClientProvider>)); }
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
-async function change(selector: string, value: string) { await act(async () => { const input = host.querySelector<HTMLInputElement | HTMLSelectElement>(selector)!; Object.getOwnPropertyDescriptor(input instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event(input instanceof HTMLSelectElement ? "change" : "input", { bubbles: true })); }); }
-async function click(label: string) { await act(async () => { [...host.querySelectorAll("button")].find((button) => button.textContent?.trim() === label)!.click(); }); }
+async function change(selector: string, value: string) { await act(async () => { const input = (nativeSelect(host, selector) ?? host.querySelector<HTMLInputElement | HTMLSelectElement>(selector))!; Object.getOwnPropertyDescriptor(input instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event(input instanceof HTMLSelectElement ? "change" : "input", { bubbles: true })); }); }
+async function click(label: string) { await act(async () => { [...host.querySelectorAll("button")].find((button) => button.textContent?.trim() === label || button.getAttribute("aria-label") === label || button.getAttribute("data-export-label") === label)!.click(); }); }
 it.each(["failed", "foreign"])("does not edit %s admission settings", async (scenario) => {
   if (scenario === "failed") vi.mocked(policies.admissionState).mockRejectedValue(new Error("private"));
   else vi.mocked(policies.admissionState).mockResolvedValue({ ...state, cluster_id: "other" });
@@ -41,7 +50,7 @@ it("stages settings without autosaving and preserves them through refresh/save f
   await renderPage(<AdmissionSettingsPage />); await settled(() => expect(host.querySelector("form")).not.toBeNull());
   await change("#admission-mode", "protect"); expect(policies.updateAdmissionState).not.toHaveBeenCalled();
   await act(async () => { client.setQueryData(["admission-settings-editor", "cluster"], state); });
-  expect(host.querySelector<HTMLSelectElement>("#admission-mode")?.value).toBe("protect");
+  expect(nativeSelect(host, "#admission-mode")?.value).toBe("protect");
   await click("Save changes"); await settled(() => expect(host.textContent).toContain("Your draft is preserved"));
   expect(policies.updateAdmissionState).toHaveBeenCalledWith({ enabled: true, mode: "protect", default_action: "allow", failure_policy: "ignore" }, { cluster_id: "cluster" });
   expect(host.textContent).not.toContain("private");
@@ -78,31 +87,31 @@ async function finishAdmissionWrite(complete: () => void) {
   await settled(() => expect(client.isMutating()).toBe(0));
 }
 async function laterAdmissionDraft() {
-  await settled(() => expect(host.querySelector<HTMLSelectElement>("#admission-mode")?.value).toBe("monitor"));
+  await settled(() => expect(nativeSelect(host, "#admission-mode")?.value).toBe("monitor"));
   await change("#admission-default", "deny");
-  expect(host.querySelector<HTMLSelectElement>("#admission-default")?.value).toBe("deny");
+  expect(nativeSelect(host, "#admission-default")?.value).toBe("deny");
 }
 
 it("keeps a later admission settings draft after a held write completes across a cluster roundtrip", async () => {
   const complete = await beginHeldAdmissionWrite();
   route.clusterId = "other"; await rerenderPage();
   await settled(() => expect(policies.admissionState).toHaveBeenCalledWith({ cluster_id: "other" }));
-  await settled(() => expect(host.querySelector<HTMLSelectElement>("#admission-mode")?.value).toBe("monitor"));
+  await settled(() => expect(nativeSelect(host, "#admission-mode")?.value).toBe("monitor"));
   route.clusterId = "cluster"; await rerenderPage(); await laterAdmissionDraft();
   await finishAdmissionWrite(complete);
   expect(route.navigate).not.toHaveBeenCalled();
-  expect(host.querySelector<HTMLSelectElement>("#admission-default")?.value).toBe("deny");
+  expect(nativeSelect(host, "#admission-default")?.value).toBe("deny");
   expect(policies.updateAdmissionState).toHaveBeenCalledTimes(1);
 });
 
 it("keeps a later admission settings draft after a held write completes across an owner roundtrip", async () => {
   const complete = await beginHeldAdmissionWrite();
   owner = { org_id: "other-org", user_id: "other-user" }; await rerenderPage();
-  await settled(() => expect(host.querySelector<HTMLSelectElement>("#admission-mode")?.value).toBe("monitor"));
+  await settled(() => expect(nativeSelect(host, "#admission-mode")?.value).toBe("monitor"));
   owner = { org_id: "org", user_id: "user" }; await rerenderPage(); await laterAdmissionDraft();
   await finishAdmissionWrite(complete);
   expect(route.navigate).not.toHaveBeenCalled();
-  expect(host.querySelector<HTMLSelectElement>("#admission-default")?.value).toBe("deny");
+  expect(nativeSelect(host, "#admission-default")?.value).toBe("deny");
   expect(policies.updateAdmissionState).toHaveBeenCalledTimes(1);
 });
 

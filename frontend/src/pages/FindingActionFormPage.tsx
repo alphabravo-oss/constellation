@@ -1,4 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { sentenceValue } from "@/components/ui/status-pill";
+import { useCrumbLabel } from "@/lib/page-title";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useIsFetching, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
@@ -14,6 +16,7 @@ import { Collapse } from "@/components/ui/collapse";
 import { Field, TextInput, Textarea } from "@/components/ui/form";
 import { PageHeader } from "@/components/ui/page";
 import { ErrorState, LoadingState } from "@/components/ui/states";
+import { apiRequestId } from "@/lib/api-error";
 
 type Action = "accept-risk" | "suppress" | "comment";
 const ACTIONS = {
@@ -86,7 +89,7 @@ export function FindingScope({ clusterId, findingId, resolvedClusterId, clusterL
     if (!validSelector) return <ErrorState title="Select one valid observation timestamp to continue." />;
     if (ambiguousFinding(q.error)) return <ErrorState title="This finding has multiple retained observations." action={<a href={findingChooserHref(clusterId, findingId)}>Choose an observation</a>} />;
     if (clusterLoading || registryFetching || detailFetching || (clusterReady && (q.isPending || q.isFetching))) return <LoadingState label="Loading finding and cluster scope…" />;
-    return <ErrorState title={!clusterReady ? "The selected cluster could not be resolved." : "This finding could not be loaded in the selected cluster."} action={<Button onClick={retry}>Retry</Button>} />;
+    return <ErrorState title={!clusterReady ? "The selected cluster could not be resolved." : "This finding could not be loaded in the selected cluster."} correlationId={apiRequestId(q.error)} action={<Button onClick={retry}>Retry</Button>} />;
   }
   const recheck = () => {
     const current = qc.getQueryState<Finding>(key);
@@ -104,6 +107,7 @@ export function FindingScope({ clusterId, findingId, resolvedClusterId, clusterL
 }
 
 function FindingActionEditor({ action, finding, detailPath, clusterId, unavailable, recheck, refresh }: { action: Action; finding: Finding; detailPath: string; clusterId: string; unavailable: boolean; recheck: () => boolean; refresh: () => Promise<boolean> }) {
+  useCrumbLabel(finding.external_id || finding.title, `/clusters/${clusterId}/findings/${finding.id}`);
   const navigate = useNavigate();
   const qc = useQueryClient();
   const identity = useTablePreferencesIdentity();
@@ -138,7 +142,7 @@ function FindingActionEditor({ action, finding, detailPath, clusterId, unavailab
     },
     onError: error => { if ((error as { response?: { status?: number } }).response?.status === 409) setReviewRequired(true); },
   });
-  return <Card title={finding.title} description={<span>{finding.external_id || finding.id} · {finding.lifecycle} · cluster {finding.cluster_id}</span>}>
+  return <Card title={finding.title} description={<span>{finding.external_id || "Finding"} · {sentenceValue(finding.lifecycle)}</span>}>
     <form className="space-y-6" onSubmit={(event) => { event.preventDefault(); if (valid && !unavailable && !uncertain && !reviewRequired && !save.isPending) save.mutate(); }}>
       <fieldset disabled={save.isPending} className="space-y-6">
         <Field label={action === "comment" ? "Comment" : "Reason"} htmlFor="finding-action-text" required

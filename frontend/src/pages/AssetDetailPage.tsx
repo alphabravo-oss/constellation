@@ -1,12 +1,12 @@
 import { AssetFindingsInventory, useAssetFindingsInventory } from "./AssetFindingsInventory";
+import { useCrumbLabel } from "@/lib/page-title";
+import { sentenceValue as sentenceCase } from "@/components/ui/status-pill";
 import { assetDisplayName } from "@/lib/asset-identity";
 import { DigestDisclosure } from "@/components/ui/digest-disclosure";
 import { useRef, useState } from "react";
-import { Boxes, FileJson, ShieldAlert } from "lucide-react";
 import { sbom, type AssetDetail, type AssetSBOM, type ImageAcceptance } from "@/api/client";
 import { PageHeader, PageContainer } from "@/components/ui/page";
 import { DataTable, type Column } from "@/components/ui/data-table";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { Collapse } from "@/components/ui/collapse";
@@ -21,9 +21,10 @@ export function AssetDetailPage() {
   const inventory = useAssetFindingsInventory(scope);
   const { clusterId, aid, resolved, clusterLoading, clusterError, q } = scope;
   const [requestedTab, setTab] = useTabParam("tab", "findings");
+  useCrumbLabel(q.data ? assetDisplayName(q.data.asset, q.data.image) : null);
   const tab = WORKSPACES.includes(requestedTab) ? requestedTab : "findings";
   const listPath = clusterId ? `/clusters/${encodeURIComponent(clusterId)}/assets` : "/clusters";
-  const header = <PageHeader title="Asset evidence" description="Inspect findings, image metadata, software inventories and digest-scoped risk decisions for this asset." backLink={<a href={listPath}>Assets</a>} />;
+  const header = <PageHeader title="Asset" />;
   if (!resolved) return <PageContainer>{header}{clusterLoading ? <LoadingState label="Resolving asset cluster…" /> : <ErrorState title="The requested cluster could not be resolved." error={clusterError} action={<Button onClick={scope.retryCluster}>Retry cluster</Button>} />}</PageContainer>;
   if (!aid) return <PageContainer>{header}<ErrorState title="An exact asset ID is required." /></PageContainer>;
   if (q.isError) return <PageContainer>{header}<VerdictBanner status="degraded" title="Asset evidence is unavailable" detail="The asset could not be loaded or refreshed. Previous evidence is hidden until a successful retry." /><ErrorState title="Asset evidence could not be loaded or refreshed." error={assetErrorMessage(q.error)} action={<Button onClick={() => void q.refetch()}>Retry asset</Button>} /></PageContainer>;
@@ -48,9 +49,14 @@ export function AssetDetailPage() {
   </> : <p className="text-sm text-muted-foreground">No image metadata reported for this asset type.</p>}</section>;
   const acceptanceView = <section className="space-y-3" data-testid="image-acceptance-card"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-sm font-semibold">Image risk acceptance</h2><p className="text-xs text-muted-foreground">{active.length} active acceptance records returned. Decisions apply organization-wide to the exact image digest, including other assets using it; they are audited and expire automatically. Findings remain visible.</p></div>{image?.digest && active.length === 0 && <a href={q.isFetching ? undefined : `${basePath}/image-acceptance/new`} aria-disabled={q.isFetching} className="rounded-md border border-border px-3 py-2 text-sm hover:bg-accent">Accept image risk</a>}</div>{!image && <p className="text-sm text-muted-foreground">Image metadata is required to accept image risk.</p>}<DataTable rows={acceptances} columns={acceptanceColumns} rowKey={(item) => item.id} preferencesKey="asset-image-acceptances" exportFileName={`asset-${asset.id}-image-acceptances`} emptyState={<p className="p-6 text-sm text-muted-foreground">No image acceptance history returned.</p>} /></section>;
   return <PageContainer>
-    <PageHeader title={assetDisplayName(asset, image)} backLink={<a href={listPath}>Assets</a>} description={`${asset.kind} · ${asset.criticality} criticality — reported evidence for this exact cluster asset.`} actions={<Button onClick={() => { void q.refetch(); void inventory.q.refetch(); }} disabled={q.isFetching || inventory.q.isFetching}>{q.isFetching ? "Refreshing…" : "Refresh evidence"}</Button>} />
-    <VerdictBanner status={highSeverity ? "degraded" : "info"} title={highSeverity === undefined ? "Finding evidence is unavailable" : highSeverity ? `${highSeverity} high or critical matching findings` : "No high or critical matching findings"} detail="Counts cover every finding matching the active filters, across pages. Asset records and the latest shared digest scan are separate evidence sources. A zero count does not establish complete scan coverage." />
-    <StatGrid data-testid="asset-stats"><StatCard label="Matching findings" value={total ?? "—"} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={total ? "high" : "neutral"} /><StatCard label="High / critical matching" value={highSeverity ?? "—"} tone={highSeverity ? "high" : "neutral"} /><StatCard label="SBOM formats returned" value={sboms.length} icon={<FileJson className="h-3.5 w-3.5" />} /><StatCard label="Image layers reported" value={image?.layers.length ?? "Not reported"} icon={<Boxes className="h-3.5 w-3.5" />} /></StatGrid>
+    <PageHeader title={assetDisplayName(asset, image)} description={`${sentenceCase(asset.kind)} · ${asset.criticality} criticality`} actions={<Button onClick={() => { void q.refetch(); void inventory.q.refetch(); }} disabled={q.isFetching || inventory.q.isFetching}>{q.isFetching ? "Refreshing…" : "Refresh"}</Button>} />
+    <div data-testid="asset-stats"><VerdictBanner status={highSeverity ? "degraded" : "info"} title={highSeverity === undefined ? "Finding evidence is unavailable" : highSeverity ? `${highSeverity} high or critical matching findings` : "No high or critical matching findings"} numbers={[
+      { label: "matching findings", value: total ?? "—" },
+      { label: "high or critical", value: highSeverity ?? "—", tone: highSeverity ? "high" : "default" },
+      { label: "SBOM formats", value: sboms.length },
+      { label: "image layers", value: image?.layers.length ?? "Not reported" },
+    ]}
+    detail="Counts cover every finding matching the active filters, across pages. Asset records and the latest shared digest scan are separate evidence sources. A zero count does not establish complete scan coverage." /></div>
     {q.isFetching && <p role="status" className="text-xs text-muted-foreground">Refreshing asset evidence. Finding counts and exports are paused until this request settles.</p>}
     <Tabs value={tab} onValueChange={setTab} items={[
       { value: "findings", label: "Findings", content: findingsView },

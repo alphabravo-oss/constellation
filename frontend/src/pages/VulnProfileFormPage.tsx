@@ -50,7 +50,7 @@ function ProfileScope({ clusterId, profileId, listPath, resolvedClusterId, isLoa
     void qc.invalidateQueries({ queryKey: ["cluster", clusterId] });
   };
   if (!scopeReady && !wasReady) return isLoading ? <LoadingState label="Loading cluster…" />
-    : <ErrorState title="The selected cluster could not be resolved. Review its registration and retry." action={<Button onClick={retryScope}>Retry cluster</Button>} />;
+    : <ErrorState title="The selected cluster could not be resolved. review its registration and retry." action={<Button onClick={retryScope}>Retry cluster</Button>} />;
   return <>
     {!scopeReady && <ErrorState title="Current cluster scope is unavailable. Your draft is preserved; saving is paused until the cluster resolves." action={<Button onClick={retryScope}>Retry cluster</Button>} />}
     <ProfileLoader clusterId={clusterId} profileId={profileId} listPath={listPath} scopeReady={scopeReady} />

@@ -50,7 +50,7 @@ import { DigestDisclosure } from "@/components/ui/digest-disclosure";
 import { Pager } from "@/components/ui/pager";
 import { useInventoryRoute, ScanInventoryExport } from "./inventory-workspace";
 import { Drawer } from "@/components/ui/drawer";
-import { Field, TextInput } from "@/components/ui/form";
+import { Field, TextInput, Select } from "@/components/ui/form";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { StatusPill } from "@/components/ui/status-pill";
@@ -196,7 +196,7 @@ export function ScannerSourcesPage() {
           return <div className="min-w-0">
             <div className="font-mono text-xs text-foreground" title={name}>{name}</div>
             <DigestDisclosure digest={digest} />
-            <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-muted-foreground"><span>{job.target_type}</span>{job.source_type ? <span>· {job.source_type}</span> : null}{job.registry_id ? <span>· registry</span> : null}</div>
+            <div className="mt-0.5 flex items-center gap-1.5 text-micro text-muted-foreground"><span>{job.target_type}</span>{job.source_type ? <span>· {job.source_type}</span> : null}{job.registry_id ? <span>· registry</span> : null}</div>
           </div>;
         },
         sort: () => 0,
@@ -286,7 +286,7 @@ export function ScannerSourcesPage() {
         cell: (scanner) => (
           <div className="min-w-0">
             <div className="font-mono text-xs text-foreground" title={scanner.id}>{scanner.id}</div>
-            <div className="mt-0.5 text-[10px] text-muted-foreground" title={scanner.server}>{scanner.server || "unknown host"}</div>
+            <div className="mt-0.5 text-micro text-muted-foreground" title={scanner.server}>{scanner.server || "unknown host"}</div>
           </div>
         ),
         sort: (a, b) => a.id.localeCompare(b.id),
@@ -307,7 +307,7 @@ export function ScannerSourcesPage() {
         cell: (scanner) => (
           <div className="min-w-0">
             <div className="font-mono text-xs">{scanner.cvedb_version || "-"}</div>
-            <div className="mt-0.5 text-[10px] text-muted-foreground">{formatDate(scanner.cvedb_create_time)}</div>
+            <div className="mt-0.5 text-micro text-muted-foreground">{formatDate(scanner.cvedb_create_time)}</div>
           </div>
         ),
         sort: (a, b) => (a.cvedb_version ?? "").localeCompare(b.cvedb_version ?? ""),
@@ -362,7 +362,7 @@ export function ScannerSourcesPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Scanner & CVE Sources"
+        title="Scanner & CVE sources"
         description="Vulnerability data health — the Trivy/Grype databases and CVE feeds that power image and host scanning."
         actions={
           <Button type="button" variant="outline" size="sm" onClick={refreshOperatorState}>
@@ -382,7 +382,7 @@ export function ScannerSourcesPage() {
         ].filter(Boolean).join(" · ")}
       />
 
-      {unavailable && <ErrorState title="Some scanner evidence is unavailable. Failed sources are hidden." action={<Button onClick={refreshOperatorState}>Retry scanner evidence</Button>} />}
+      {unavailable && <ErrorState title="Some scanner evidence is unavailable. failed sources are hidden." action={<Button onClick={refreshOperatorState}>Retry scanner evidence</Button>} />}
       {[systemConfig, scanStatus, scanJobList, scannerWorkers, scannerHealth].some(query => query.isFetching && query.isSuccess) && <p role="status" className="text-sm text-muted-foreground">Refreshing scanner evidence…</p>}
       {refreshNow.isError && <p role="alert" className="text-sm text-destructive">Could not request a database refresh. Try again after refreshing scanner configuration.</p>}
       {jobAction.isError && jobAction.variables?.context === jobContext && <p role="alert" className="text-sm text-destructive">Could not update scan job {jobAction.variables?.reviewed.id}. Refresh the job and try again.</p>}
@@ -436,7 +436,7 @@ export function ScannerSourcesPage() {
 
               <div className="flex flex-wrap items-center gap-2">
                 <TextInput aria-label="Search scan jobs" placeholder="Search target, source, worker or error" value={route.query} onChange={event => route.setQuery(event.target.value)} />
-                <select aria-label="Scan target type" value={targetType} onChange={event => route.update({ target_type: event.target.value })} className="rounded-md border border-border bg-background p-2 text-sm"><option value="">All target types</option>{JOB_TARGET_TYPES.map(type => <option key={type}>{type}</option>)}</select>
+                <Select aria-label="Scan target type" value={targetType} onChange={event => route.update({ target_type: event.target.value })} className="rounded-md border border-border bg-background p-2 text-sm"><option value="">All target types</option>{JOB_TARGET_TYPES.map(type => <option key={type}>{type}</option>)}</Select>
                 <Button variant="outline" onClick={() => route.update({ q: null, status: null, target_type: null, cluster_id: null, registry_id: null, sort: null, order: null })}>Reset job filters</Button>
               </div>
               <ResourceSavedViewsControl inventory="scanner" ready={jobsAvailable}/>
@@ -555,7 +555,7 @@ export function ScannerSourcesPage() {
                   <div className="text-xs text-muted-foreground">Databases are pre-loaded; no upstream network pulls. Set at deploy time.</div>
                 </div>
                 <span
-                  className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium ${
+                  className={`shrink-0 rounded-full px-2.5 py-1 text-micro font-medium ${
                     offlineDb ? "bg-[color:var(--color-brand)]/10 text-[color:var(--color-brand)]" : "bg-muted text-muted-foreground"
                   }`}
                   data-testid="scanner-offline-db"
@@ -624,7 +624,7 @@ function SourceRow({ name, desc, status, action }: { name: string; desc: string;
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-3">
-        <span className="text-[11px] font-medium text-muted-foreground">{status}</span>
+        <span className="text-micro font-medium text-muted-foreground">{status}</span>
         {action}
       </div>
     </div>
@@ -668,7 +668,7 @@ function ScanJobActions({
   const canRetry = job.status === "failed" || job.status === "canceled";
   const canCancel = job.status === "pending" || job.status === "paused" || job.status === "running";
   if (!canPause && !canResume && !canRetry && !canCancel) {
-    return <span className="text-[10px] text-muted-foreground">No action</span>;
+    return <span className="text-micro text-muted-foreground">No action</span>;
   }
   return (
     <div className="flex justify-end gap-1">
@@ -794,9 +794,9 @@ function AttemptHistory({ jobID, attempts, loading, refreshing, error, retry }: 
 function DetailMetric({ label, value, hint }: { label: string; value: React.ReactNode; hint?: string }) {
   return (
     <div className="rounded-md border border-border bg-muted/20 px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="text-micro  text-muted-foreground">{label}</div>
       <div className="mt-1 text-sm font-medium text-foreground">{value}</div>
-      {hint ? <div className="mt-1 truncate text-[10px] text-muted-foreground" title={hint}>{hint}</div> : null}
+      {hint ? <div className="mt-1 truncate text-micro text-muted-foreground" title={hint}>{hint}</div> : null}
     </div>
   );
 }
@@ -813,7 +813,7 @@ function DetailSection({ title, rows, mono, dateValues }: { title: string; rows:
             <div key={`${title}-${row.label}`} className="grid gap-2 border-b border-border px-3 py-2 text-xs last:border-b-0 sm:grid-cols-[150px_minmax(0,1fr)]">
               <div className="text-muted-foreground">{row.label}</div>
               <div
-                className={cn("min-w-0 break-words text-foreground", mono && "font-mono text-[11px]")}
+                className={cn("min-w-0 break-words text-foreground", mono && "font-mono text-micro")}
                 title={dateValues ? formatDate(row.value) : row.value}
               >
                 {dateValues ? formatDate(row.value) : row.value}
@@ -827,7 +827,7 @@ function DetailSection({ title, rows, mono, dateValues }: { title: string; rows:
 }
 
 function SectionTitle({ title }: { title: string }) {
-  return <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{title}</h2>;
+  return <h2 className="text-xs font-semibold  text-muted-foreground">{title}</h2>;
 }
 
 function formatRetryDetail(value: string) {
@@ -888,7 +888,7 @@ function ScannerCacheSummary({ stat }: { stat: ScannerCacheStat }) {
 function CacheInfo({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-md border border-border bg-card px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div className="text-micro  text-muted-foreground">{label}</div>
       <div className="mt-1 truncate font-mono text-xs text-foreground" title={value}>{value}</div>
     </div>
   );
@@ -900,16 +900,16 @@ function CacheEntry({ cache }: { cache: ScannerCacheHealthEntry & { name: string
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <div className="font-medium text-foreground">{cache.name}</div>
-          <div className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground" title={cache.path}>{cache.path || "-"}</div>
+          <div className="mt-0.5 truncate font-mono text-micro text-muted-foreground" title={cache.path}>{cache.path || "-"}</div>
         </div>
         <StatusPill label={cache.status || "unknown"} tone={cacheStatusTone(cache.status)} />
       </div>
-      <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] text-muted-foreground">
+      <div className="mt-2 grid grid-cols-3 gap-2 text-micro text-muted-foreground">
         <span>{cache.record_count ?? 0} records</span>
         <span>{formatBytes(cache.record_size_bytes ?? 0)}</span>
         <span>{cache.writable ? "writable" : "read-only"}</span>
       </div>
-      {cache.error ? <div className="mt-2 text-[10px] text-[color:var(--color-status-error)]">{cache.error}</div> : null}
+      {cache.error ? <div className="mt-2 text-micro text-[color:var(--color-status-error)]">{cache.error}</div> : null}
     </div>
   );
 }
@@ -1021,7 +1021,7 @@ function ScannerDatabaseSettingsScope({ owner }: { owner: string }) {
     <PageHeader title="Edit scanner database refresh" description="Set the organization-wide interval used by connected scanners to refresh vulnerability databases. Saving the interval does not request an immediate refresh."
       backLink={<a href={backTo} className="inline-flex items-center gap-2 hover:text-foreground"><ArrowLeft className="h-4 w-4" /> Scanner database settings</a>} />
     {!owner ? <ErrorState title="An available organization and user session are required to edit scanner settings." /> : !initial ? q.isPending || q.isFetching ? <LoadingState label="Loading scanner database settings…" /> : <ErrorState title="Scanner database settings are unavailable." action={<Button onClick={() => void q.refetch()}>Retry settings</Button>} /> : <>
-      {q.isError && <ErrorState title="Could not refresh scanner settings. Your draft is preserved." action={<Button onClick={() => void q.refetch()}>Retry settings</Button>} />}
+      {q.isError && <ErrorState title="Could not refresh scanner settings. your draft is preserved." action={<Button onClick={() => void q.refetch()}>Retry settings</Button>} />}
       {q.isFetching && <p role="status" className="text-sm text-muted-foreground">Refreshing scanner settings. Your draft is preserved; saving is paused.</p>}
       {conflict && <p role="alert" className="text-sm text-destructive">System configuration changed elsewhere. Your draft is preserved. Cancel and reopen the latest settings before saving.</p>}
       <ScannerIntervalEditor initial={initial} backTo={backTo} canSave={q.isSuccess && !q.isFetching && !conflict} />

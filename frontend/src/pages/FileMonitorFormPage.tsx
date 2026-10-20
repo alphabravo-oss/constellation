@@ -13,6 +13,7 @@ import { Card } from "@/components/ui/card";
 import { Collapse } from "@/components/ui/collapse";
 import { clusterCacheReady } from "@/lib/cluster-evidence";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
+import { Select, Checkbox } from "@/components/ui/form";
 
 export function FileMonitorFormPage() {
   const { clusterId, cluster, isLoading: clusterLoading, error: clusterError } = useCluster();
@@ -126,14 +127,14 @@ function FileMonitorRuleEditor({ owner, initialProfile, clusterId, workload, rul
       <form className="space-y-6" onSubmit={(e) => { e.preventDefault(); if(canSave && !changed && !uncertain && filter.trim() && reason.trim() && !save.isPending) save.mutate(); }}>
         <fieldset disabled={save.isPending} className="space-y-5">
           <label className="block space-y-2 text-sm"><span className="font-medium">Path filter</span><input required value={filter} onChange={(e) => setFilter(e.target.value)} className="h-10 w-full rounded-md border border-border bg-background px-3 font-mono text-sm" placeholder="/etc/ or /bin/*" /><span className="block text-xs text-muted-foreground">Enter the file or directory path to watch, for example /etc/.</span></label>
-          <label className="flex items-center gap-3 text-sm"><input type="checkbox" className="h-4 w-4" checked={recursive} onChange={(e) => setRecursive(e.target.checked)} /> Include subdirectories</label>
+          <label className="flex items-center gap-3 text-sm"><Checkbox checked={recursive} onChange={(e) => setRecursive(e.target.checked)} /> Include subdirectories</label>
           <label className="block space-y-2 text-sm"><span className="font-medium">Reason</span><input required value={reason} onChange={(event) => setReason(event.target.value)} className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm" /></label>
           <p className="text-sm text-muted-foreground">Current behavior: {behavior === "block_access" ? "block access" : "observe changes"}. Rule is {enabled ? "enabled" : "disabled"}.</p>
           <Collapse label="Advanced">
             <div className="space-y-5 rounded-md border border-border p-4">
-              <label className="block space-y-2 text-sm"><span className="font-medium">Behavior</span><select value={behavior} onChange={(e) => setBehavior(e.target.value as FileProfileRuleBehavior)} className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"><option value="monitor_change">Observe changes</option><option value="block_access">Block access</option></select></label>
+              <label className="block space-y-2 text-sm"><span className="font-medium">Behavior</span><Select value={behavior} onChange={(e) => setBehavior(e.target.value as FileProfileRuleBehavior)} className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm"><option value="monitor_change">Observe changes</option><option value="block_access">Block access</option></Select></label>
               {behavior === "block_access" && <p className="text-sm text-status-warning">Blocking can prevent file access when the workload profile is enforcing. Check the path before saving.</p>}
-              <label className="flex items-center gap-3 text-sm"><input type="checkbox" className="h-4 w-4" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> Enable rule</label>
+              <label className="flex items-center gap-3 text-sm"><Checkbox checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> Enable rule</label>
               <label className="block space-y-2 text-sm"><span className="font-medium">Applications, comma separated</span><input value={applications} onChange={(event) => setApplications(event.target.value)} className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm" /></label>
               <label className="block space-y-2 text-sm"><span className="font-medium">Description</span><input value={description} onChange={(e) => setDescription(e.target.value)} className="h-10 w-full rounded-md border border-border bg-background px-3 text-sm" /></label>
             </div>

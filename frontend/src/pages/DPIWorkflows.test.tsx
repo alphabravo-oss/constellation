@@ -34,7 +34,7 @@ async function renderPage(node: ReactNode) {
 async function settled(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
 async function submit() { await act(async () => { host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); }); }
 async function click(label: string) {
-  const button = [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === label);
+  const button = [...host.querySelectorAll("button")].find((b) => b.textContent?.trim() === label || b.getAttribute("aria-label") === label || b.getAttribute("data-export-label") === label);
   expect(button).toBeDefined(); await act(async () => button!.click());
 }
 async function edit(selector: string, value: string) {

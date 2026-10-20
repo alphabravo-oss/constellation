@@ -8,7 +8,8 @@ import { customRoles } from "@/api/client";
 import { PageHeader } from "@/components/ui/page";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Field, TextInput } from "@/components/ui/form";
+import { Field, TextInput, Checkbox } from "@/components/ui/form";
+import { apiErrorMessage } from "@/lib/api-error";
 
 const BACK_TO = "/settings/access?tab=roles";
 
@@ -68,7 +69,7 @@ export function CustomRoleFormPage() {
       toast.success("Custom role created");
       navigate({ href: BACK_TO });
     },
-    onError: (e: unknown) => toast.error((e as { response?: { data?: { error?: string } } })?.response?.data?.error || "Failed to create role"),
+    onError: (e: unknown) => toast.error(apiErrorMessage(e) || "Failed to create role"),
   });
 
   return (
@@ -103,15 +104,15 @@ export function CustomRoleFormPage() {
                     <div key={domain} className="rounded-md border border-border">
                       <div className="flex items-center justify-between border-b border-border bg-muted/40 px-3 py-1.5">
                         <span className="text-xs font-semibold capitalize">{domain}</span>
-                        <button type="button" onClick={() => toggleDomain(domainVerbs)} className="text-[11px] text-[color:var(--color-primary)] hover:underline">
+                        <button type="button" onClick={() => toggleDomain(domainVerbs)} className="text-micro text-link">
                           {allOn ? "Clear all" : "Select all"}
                         </button>
                       </div>
                       <div className="flex flex-wrap gap-x-4 gap-y-1.5 p-3">
                         {domainVerbs.map((v) => (
                           <label key={v} className="inline-flex items-center gap-1.5 text-xs">
-                            <input type="checkbox" checked={selected.has(v)} onChange={() => toggle(v)} className="h-3.5 w-3.5 rounded border-border" />
-                            <span className="font-mono text-[11px]">{v}</span>
+                            <Checkbox  checked={selected.has(v)} onChange={() => toggle(v)} />
+                            <span className="font-mono text-micro">{v}</span>
                           </label>
                         ))}
                       </div>

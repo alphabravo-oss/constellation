@@ -11,7 +11,6 @@ vi.mock("./components/AppShell", () => ({ AppShell: () => <Outlet /> }));
 vi.mock("./pages/ClusterRouter", () => ({ ClusterRouter: () => <Outlet /> }));
 vi.mock("./pages/LoginPage", () => ({ LoginPage: () => <div>Sign in</div> }));
 vi.mock("./pages/ClustersLandingPage", () => ({ ClustersLandingPage: () => <div>Clusters</div> }));
-vi.mock("./pages/SettingsLanding", () => ({ SettingsLanding: () => <div>Settings</div> }));
 vi.mock("./components/SettingsShell", () => ({ SettingsShell: () => <Outlet /> }));
 vi.mock("./api/client", () => ({ clusters: { list: async () => ({ clusters: [{ id: "cluster-1", name: "Cluster", last_seen: "2026-10-11T00:00:00Z" }] }) } }));
 
@@ -58,15 +57,15 @@ describe("route contract", () => {
   });
   it("does not redirect or render protected content while identity is loading", async () => {
     identity.loading = true;
-    const router = await render("/settings");
-    expect(router.state.location.pathname).toBe("/settings");
+    const router = await render("/settings/access");
+    expect(router.state.location.pathname).toBe("/settings/access");
     expect(host.textContent).toContain("Loading");
     expect(host.textContent).not.toContain("Settings");
   });
   it("preserves push, replace, back and forward semantics", async () => {
     const router = await render("/clusters");
-    await act(async () => { await router.navigate({ to: "/settings", search: { tab: "first" } }); });
-    await act(async () => { await router.navigate({ to: "/settings", search: { tab: "second" }, replace: true }); });
+    await act(async () => { await router.navigate({ to: "/settings/access", search: { tab: "first" } }); });
+    await act(async () => { await router.navigate({ to: "/settings/access", search: { tab: "second" }, replace: true }); });
     expect(router.history.length).toBe(2);
     await act(async () => { router.history.back(); });
     expect(router.state.location.pathname).toBe("/clusters");

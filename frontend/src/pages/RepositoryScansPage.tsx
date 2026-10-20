@@ -1,19 +1,20 @@
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Clock, Download, Fingerprint, GitBranch, PackageSearch, Search, ShieldAlert } from "lucide-react";
+import { Download } from "lucide-react";
 import { toast } from "sonner";
 
 import { repositoryScanAttestations, repositoryScans, type RepositoryScan } from "@/api/client";
-import { INVENTORY_PAGE_SIZE, scanInventoryResponseValid, ScanInventoryExport, useInventoryScope, useInventoryRoute, InventoryScopeState, InventoryLoadState, ScanInventoryContinuation } from "./inventory-workspace";
+import { INVENTORY_PAGE_SIZE, scanInventoryResponseValid, InventorySearch, useScanInventoryExport, useInventoryScope, useInventoryRoute, InventoryScopeState, InventoryLoadState, ScanInventoryContinuation } from "./inventory-workspace";
 import { Button } from "@/components/ui/button";
 import { ErrorState, LoadingState } from "@/components/ui/states";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
 import { Collapse } from "@/components/ui/collapse";
 import { PageHeader } from "@/components/ui/page";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { DataTable, type Column } from "@/components/ui/data-table";
 import { cn } from "@/lib/cn";
 import { useTablePreferencesIdentity } from "@/contexts/TablePreferencesContext";
+import { Select, TextInput } from "@/components/ui/form";
+import { sentenceValue } from "@/components/ui/status-pill";
 
 const scanStatuses = ["all", "pending", "running", "completed", "failed", "paused", "canceled", "not-queued"];
 
@@ -30,7 +31,7 @@ const repositoryColumns: Column<RepositoryScan>[] = [
           {item.critical_findings > 0 ? <Pill tone="danger">critical {item.critical_findings}</Pill> : null}
         </div>
         <div className="mt-2 break-all font-mono text-xs font-medium">{item.repository_ref}</div>
-        <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{item.repository_url || item.id}</div>
+        <div className="mt-1 break-all font-mono text-micro text-muted-foreground">{item.repository_url || item.id}</div>
       </>
     ),
   },
@@ -41,7 +42,7 @@ const repositoryColumns: Column<RepositoryScan>[] = [
     cell: (item) => (
       <>
         <div className="font-medium">{item.branch || "branch unknown"}</div>
-        <div className="mt-1 break-all font-mono text-[11px] text-muted-foreground">{shortCommit(item.commit_sha || item.source_ref)}</div>
+        <div className="mt-1 break-all font-mono text-micro text-muted-foreground">{shortCommit(item.commit_sha || item.source_ref)}</div>
         <div className="mt-1 text-muted-foreground">{item.workflow || "workflow unknown"}</div>
       </>
     ),
@@ -54,7 +55,7 @@ const repositoryColumns: Column<RepositoryScan>[] = [
       <>
         <div className="font-medium">{item.package_count} packages</div>
         <div className="mt-1 text-muted-foreground">{item.open_findings} open findings</div>
-        <div className="mt-1 truncate font-mono text-[10px] text-muted-foreground">{item.inventory_hash || "hash pending"}</div>
+        <div className="mt-1 truncate font-mono text-micro text-muted-foreground">{item.inventory_hash || "hash pending"}</div>
       </>
     ),
   },
@@ -66,7 +67,7 @@ const repositoryColumns: Column<RepositoryScan>[] = [
       <>
         <ScanStatus status={item.latest_job_status} />
         <div className="mt-1 text-muted-foreground">{formatDate(item.latest_observed_at || item.last_seen_at)}</div>
-        <div className="mt-1 break-all font-mono text-[10px] text-muted-foreground">{item.latest_job_id || "job not queued"}</div>
+        <div className="mt-1 break-all font-mono text-micro text-muted-foreground">{item.latest_job_id || "job not queued"}</div>
       </>
     ),
   },
@@ -97,80 +98,60 @@ export function RepositoryScansPage() {
   const summary = available ? q.data!.summary! : {};
   const scans = filtered;
 
+  const matching = useScanInventoryExport({ context: JSON.stringify([scope.owner, clusterId, request]), disabled: !available || q.isFetching, download: shouldDownload => repositoryScans.exportCSV(request, shouldDownload) });
   if (!scope.ready) return <div className="space-y-4"><PageHeader title="Repositories" description="Organization-wide repository evidence; the selected cluster provides navigation context only." /><InventoryScopeState scope={scope} /></div>;
 
   return (
     <div className="space-y-4" data-testid="repository-scans-page" data-cluster-id={clusterId ?? ""}>
       <PageHeader
         title="Repositories"
-        description="Source-repository scans — package inventory, scan jobs, findings, and provenance attestations."
+        description="Source-repository scans: packages, scan jobs, findings and provenance attestations."
+        actions={<Button disabled={q.isFetching || route.debouncing || !scope.ready || !validFilters} onClick={() => void q.refetch()}>Refresh</Button>}
       />
 
-      <VerdictBanner status={q.isError || invalid || !validFilters ? "degraded" : "info"} title={q.isError || invalid || !validFilters ? "Repository scans are unavailable" : !available ? "Loading repository scans" : summary.total ? "Review matching repository scans" : "No matching repository scans"} detail="Metrics cover all organization-wide records matching the server filters." />
-      {available && <StatGrid data-testid="repository-summary">
-        <StatCard label="Matching repositories" value={summary.total.toLocaleString()} icon={<GitBranch className="h-3.5 w-3.5" />} hint={`${summary.branches} branches · ${summary.workflows} workflows`} />
-        <StatCard label="Packages" value={summary.packages.toLocaleString()} icon={<PackageSearch className="h-3.5 w-3.5" />} hint={`${summary.with_evidence} with evidence`} />
-        <StatCard label="Open Findings" value={summary.findings.toLocaleString()} icon={<ShieldAlert className="h-3.5 w-3.5" />} tone={summary.critical_high > 0 ? "high" : "neutral"} hint={`${summary.critical_high} critical/high`} />
-        <StatCard label="Active Jobs" value={summary.active_jobs.toLocaleString()} icon={<Clock className="h-3.5 w-3.5" />} hint={`${summary.stale_evidence} stale evidence`} />
-        <StatCard label="Attestations" value={summary.attestations.toLocaleString()} icon={<Fingerprint className="h-3.5 w-3.5" />} hint={`${summary.trusted_attestations} trusted · ${summary.unverified_attestations} unverified`} />
-      </StatGrid>}
-
-      <div className="flex flex-wrap gap-3"><Button disabled={q.isFetching || route.debouncing || !scope.ready || !validFilters} onClick={() => void q.refetch()}>Refresh</Button><ScanInventoryExport context={JSON.stringify([scope.owner, clusterId, request])} disabled={!available || q.isFetching} download={shouldDownload => repositoryScans.exportCSV(request, shouldDownload)} /></div>
+      <VerdictBanner status={q.isError || invalid || !validFilters ? "degraded" : "info"} title={q.isError || invalid || !validFilters ? "Repository scans are unavailable" : !available ? "Loading repository scans" : summary.total ? `${summary.total.toLocaleString()} matching repositories` : "No matching repository scans"}
+        numbers={available ? [
+          { label: "repositories", value: summary.total.toLocaleString(), title: `${summary.branches} branches · ${summary.workflows} workflows` },
+          { label: "open findings", value: summary.findings.toLocaleString(), tone: summary.critical_high > 0 ? "high" : "default", title: `${summary.critical_high} critical or high` },
+          { label: "active jobs", value: summary.active_jobs.toLocaleString() },
+          { label: "attestations", value: summary.attestations.toLocaleString(), title: `${summary.trusted_attestations} trusted · ${summary.unverified_attestations} unverified` },
+        ] : undefined}
+        detail={<div className="space-y-1">
+          {available && <p data-testid="repository-summary">Matching repositories {summary.total.toLocaleString()} ({summary.branches} branches · {summary.workflows} workflows) · packages {summary.packages.toLocaleString()} ({summary.with_evidence} with evidence) · open findings {summary.findings.toLocaleString()} ({summary.critical_high} critical/high) · active jobs {summary.active_jobs.toLocaleString()} ({summary.stale_evidence} stale evidence) · attestations {summary.attestations.toLocaleString()} ({summary.trusted_attestations} trusted · {summary.unverified_attestations} unverified)</p>}
+          <p>Organization-wide repository evidence; the selected cluster provides navigation context only. Matching CSV includes fixed inventory columns across all pages (up to 100,000 records).</p>
+        </div>} />
       {q.isFetching && q.isSuccess && <p role="status" className="text-sm text-muted-foreground">Refreshing scan inventory…</p>}
-      <p className="text-xs text-muted-foreground">Matching CSV includes fixed inventory columns across all matching pages (up to 100,000 records). The table’s page CSV follows visible columns.</p>
-      <section className="rounded-lg border border-border bg-card p-3">
-        <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_170px]">
-          <label className="relative block">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search repository, URL or commit"
-              className="w-full rounded-md border border-border bg-background py-2 pl-9 pr-3 text-sm"
-              data-testid="repository-search"
-            />
-          </label>
-          <select
-            value={status}
-            onChange={(event) => setStatus(event.target.value)}
-            className="rounded-md border border-border bg-background p-2 text-sm"
-            data-testid="repository-status-filter"
-          >
-            {scanStatuses.map((item) => (
-              <option key={item} value={item}>{item === "all" ? "All jobs on this page" : item}</option>
-            ))}
-          </select>
-        </div>
-      </section>
-
-      <div className="flex flex-wrap gap-3"><label className="text-xs">Branch<input aria-label="Branch filter" className="ml-2 rounded border border-input bg-background px-2 py-1" value={route.params.get("branch") ?? ""} onChange={event => route.update({ branch: event.target.value }, true, true)} /></label><label className="text-xs">Workflow<input aria-label="Workflow filter" className="ml-2 rounded border border-input bg-background px-2 py-1" value={route.params.get("workflow") ?? ""} onChange={event => route.update({ workflow: event.target.value }, true, true)} /></label></div>
-      <p className="text-xs text-muted-foreground">Organization-wide repository evidence; the selected cluster provides navigation context only. Search runs on the server. Job status and sorting run on the server before pagination.</p>
+      {matching.status}
       {!validFilters && <ErrorState title="The requested server filter or sort is invalid. Choose a listed value to recover." action={<Button onClick={() => route.update({ sort: null, order: null, status: null })}>Reset filters and sort</Button>} />}
-      {available && <ScanInventoryContinuation total={q.data?.total} page={route.page} rows={scans.length} matching={filtered.length} hasMore={hasMore} onPage={route.setPage} />}
       {available && selectedID && !selected && <ErrorState title="The selected record is unavailable on this page or hidden by its filters." action={<Button onClick={() => setSelectedID(null)}>Clear selection</Button>} />}
       <section className="flex flex-col gap-4">
-        <div data-testid="repository-table">
-          {!available ? validFilters ? <InventoryLoadState label="Repository scans" query={q} invalid={invalid} debouncing={route.debouncing} /> : null : <DataTable
+        <div data-testid={available ? "repository-table" : "repository-table-loading"}>
+          {validFilters && (q.isError || invalid) ? <InventoryLoadState label="Repository scans" query={q} invalid={invalid} debouncing={route.debouncing} /> : validFilters ? <DataTable
             rows={filtered}
             pagination={false}
             manualSorting
             sort={{ id: sort, dir: order as "asc" | "desc" }}
             onSortChange={next => route.update({ sort: next?.id ?? null, order: next?.dir ?? null })}
             preferencesKey="repository-scans-inventory"
+            toolbar={<>
+              <InventorySearch value={query} onChange={setQuery} label="Search repositories" placeholder="Search repository, URL or commit" testId="repository-search" />
+              <Select value={status} onChange={(event) => setStatus(event.target.value)} className="h-9" data-testid="repository-status-filter" aria-label="Scan job status filter">
+                {scanStatuses.map((item) => <option key={item} value={item}>{item === "all" ? "Any job status" : sentenceValue(item)}</option>)}
+              </Select>
+              <TextInput aria-label="Branch filter" placeholder="Branch" className="h-9 w-32" value={route.params.get("branch") ?? ""} onChange={event => route.update({ branch: event.target.value }, true, true)} />
+              <TextInput aria-label="Workflow filter" placeholder="Workflow" className="h-9 w-32" value={route.params.get("workflow") ?? ""} onChange={event => route.update({ workflow: event.target.value }, true, true)} />
+            </>}
+            exportOptions={[matching.option]}
             exportFileName="constellation-repository-scans-server-page"
-            exportLabel="Export this page CSV"
+            exportLabel="This page"
             columns={repositoryColumns}
             rowKey={(item) => item.id}
             onRowClick={(item) => setSelectedID(item.id)}
             selected={selected ? new Set([selected.id]) : new Set<string>()}
-            emptyState={
-              <div className="px-3 py-8 text-center text-xs text-muted-foreground">
-                {q.isPending ? "Loading repository scans..." : "No repository scans match the current filters."}
-              </div>
-            }
-          />}
+            emptyState={!available ? <InventoryLoadState label="Repository scans" query={q} invalid={invalid} debouncing={route.debouncing} /> : <div className="px-3 py-8 text-center text-sm text-muted-foreground">No repository scans match the current filters.</div>}
+          /> : null}
         </div>
-
+        {available && <ScanInventoryContinuation total={q.data?.total} page={route.page} rows={scans.length} matching={filtered.length} hasMore={hasMore} onPage={route.setPage} />}
         {selected && <Collapse label="Selected record summary"><RepositoryPreview item={selected} /></Collapse>}
       </section>
     </div>
@@ -271,7 +252,7 @@ function AttestationHistoryPanel({ item }: { item: RepositoryScan }) {
     <div className="mt-4 space-y-3 border-t border-border pt-4" data-testid="repository-attestation-history">
       <div className="flex items-center justify-between gap-2">
         <h4 className="text-xs font-semibold">Attestation history</h4>
-        {attestationsQ.isFetching ? <span className="text-[10px] text-muted-foreground">Loading...</span> : null}
+        {attestationsQ.isFetching ? <span className="text-micro text-muted-foreground">Loading...</span> : null}
       </div>
       {attestationsQ.isError || attestationMismatch ? <ErrorState title="Attestation history is unavailable." action={<Button onClick={() => void attestationsQ.refetch()}>Retry attestations</Button>} /> : attestationsQ.isFetching || attestationsQ.isPending ? <LoadingState label="Loading attestation history…" /> : attestations.length > 0 ? (
         <div className="space-y-2">
@@ -355,7 +336,7 @@ function AttestationStatus({ status, trusted }: { status: string; trusted: boole
 function MiniMetric({ label, value, tone }: { label: string; value: number; tone: "normal" | "warn" | "danger" }) {
   return (
     <div className={cn("rounded-md border border-border p-2", tone === "danger" && "border-destructive/40 bg-destructive/10", tone === "warn" && "border-status-warning/40 bg-status-warning/10")}>
-      <div className="text-[10px] text-muted-foreground">{label}</div>
+      <div className="text-micro text-muted-foreground">{label}</div>
       <div className="mt-1 text-lg font-semibold">{value}</div>
     </div>
   );
@@ -374,7 +355,7 @@ function Pill({ children, tone }: { children: ReactNode; tone: "neutral" | "acce
   return (
     <span
       className={cn(
-        "inline-flex h-5 items-center rounded px-1.5 text-[10px] font-medium",
+        "inline-flex h-5 items-center rounded px-1.5 text-micro font-medium",
         tone === "neutral" && "bg-muted text-muted-foreground",
         tone === "accent" && "bg-primary/10 text-primary",
         tone === "warn" && "bg-status-warning/10 text-status-warning",

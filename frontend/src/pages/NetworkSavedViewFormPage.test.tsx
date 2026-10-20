@@ -24,7 +24,7 @@ async function rerender(mode: Mode) { await act(async () => root.render(<QueryCl
 async function field(selector: string, value: string) { await act(async () => { const input = host.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector)!; Object.getOwnPropertyDescriptor(input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, "value")!.set!.call(input, value); input.dispatchEvent(new Event("input", { bubbles: true })); }); }
 async function draft(mode: Mode) { await field(mode === "new" ? "#network-view-name" : "#network-view-json", mode === "new" ? "Exact network view" : JSON.stringify(buildNetworkSavedViewsExport("source", [view()]))); }
 async function submit() { await act(async () => host.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }))); }
-const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find(item => item.textContent === label)!;
+const button = (label: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent === label || item.getAttribute("aria-label") === label || item.getAttribute("data-export-label") === label)!;
 async function settle(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check(); }); }
 it.each(["new", "import"] as const)("%s writes only on explicit Save and returns exact context and snapshot", async mode => {
   await render(mode); await draft(mode); expect(localStorage.length).toBe(0); expect(host.querySelector("details")!.open).toBe(false); if (mode === "import") { expect(host.textContent).toContain("1 valid view; 0 rejected"); expect(host.textContent).toContain("source"); }

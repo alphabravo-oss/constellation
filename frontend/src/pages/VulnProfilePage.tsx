@@ -11,7 +11,6 @@ import { Card } from "@/components/ui/card";
 import { DataTable } from "@/components/ui/data-table";
 import { TextInput } from "@/components/ui/form";
 import { PageHeader } from "@/components/ui/page";
-import { StatCard, StatGrid } from "@/components/ui/stat-card";
 import { EmptyState, ErrorState, LoadingState } from "@/components/ui/states";
 import { Tabs, useTabParam } from "@/components/ui/tabs";
 import { VerdictBanner } from "@/components/ui/verdict-banner";
@@ -35,15 +34,15 @@ export function VulnProfilePage() {
   const entries = profiles.flatMap((profile) => profile.entries ?? []);
   const filtered = profiles.filter((profile) => [profile.name, profile.description, profile.active ? "active" : "inactive", JSON.stringify(profile.entries), JSON.stringify(profile.domain_scope)].join(" ").toLowerCase().includes(search.trim().toLowerCase()));
   return <div className="space-y-6" data-testid="vuln-profiles-page" data-cluster-id={clusterId ?? ""}>
-    <PageHeader title="Vulnerability Profiles" description="Choose which vulnerabilities are acknowledged, deferred for a grace period, or escalated when scans complete."
+    <PageHeader title="Vulnerability profiles" description="Choose which vulnerabilities are acknowledged, deferred for a grace period, or escalated when scans complete."
       actions={<div className="flex gap-2"><Button variant="outline" disabled={!clusterId || q.isFetching} onClick={() => void q.refetch()}><RefreshCw className="h-4 w-4" /> Refresh</Button>{clusterId && <Button asChild variant="primary"><Link to="." href={`${listPath}/new`}><Plus className="h-4 w-4" /> Add profile</Link></Button>}</div>} />
     {isLoading ? <LoadingState label="Loading cluster…" /> : !clusterId || (error && !cluster) ? <ErrorState title="Select an available cluster to manage vulnerability profiles." />
       : q.isPending ? <LoadingState label="Loading vulnerability profiles…" /> : q.isError ? <ErrorState title="Vulnerability profiles could not be loaded. Existing configuration has not changed." action={<Button onClick={() => void q.refetch()}>Retry</Button>} />
       : <>
         <VerdictBanner status={activeWithoutRules ? "degraded" : active.length ? "ok" : "info"}
           title={activeWithoutRules ? `${activeWithoutRules} active profile${activeWithoutRules === 1 ? " has" : "s have"} no rules` : active.length ? `${active.length} active vulnerability profile${active.length === 1 ? "" : "s"}` : "No vulnerability profiles are active"}
-          detail="Active profiles evaluate ordered matching rules on future scan completion. The list includes profiles for this cluster and shared organization profiles." />
-        <StatGrid><StatCard label="Visible profiles" value={profiles.length} /><StatCard label="Active profiles" value={active.length} /><StatCard label="Suppression rules" value={entries.filter((entry) => entry.action === "suppress").length} /><StatCard label="Escalation rules" value={entries.filter((entry) => entry.action === "escalate").length} /></StatGrid>
+          detail="Active profiles evaluate ordered matching rules on future scan completion. The list includes profiles for this cluster and shared organization profiles." numbers={[{ label: "Visible profiles", value: profiles.length }, { label: "Active profiles", value: active.length }, { label: "Suppression rules", value: entries.filter((entry) => entry.action === "suppress").length }, { label: "Escalation rules", value: entries.filter((entry) => entry.action === "escalate").length }]} />
+        
         <Tabs value={tab === "transfer" ? "transfer" : "profiles"} onValueChange={setTab} items={[
           { value: "profiles", label: "Profiles", count: profiles.length, content: <Card title="Vulnerability profiles" description="Search profiles, vulnerability expressions, images, and scope. Open a profile to edit its ordered rules.">
             <TextInput aria-label="Search vulnerability profiles" className="mb-4" value={search} placeholder="Search profiles, rules, or scope…" onChange={(event) => setParams((current) => { if (event.target.value) current.set("q", event.target.value); else current.delete("q"); return current; }, { replace: true })} />
