@@ -135,6 +135,7 @@ func main() {
 				"listen_addr":                       *listenAddr,
 				"admin_listen_addr":                 cfg.AdminListenAddr,
 				"oidc_enabled":                      cfg.OIDC != nil,
+				"break_glass_enabled":               cfg.BreakGlass.Enabled,
 				"vulndb_ready_required":             cfg.VulnDBReadyRequired,
 				"vulndb_rescan_interval_s":          cfg.VulnDBRescanInterval.Seconds(),
 				"repository_scan_retention_enabled": cfg.RepositoryScanRetentionEnabled,

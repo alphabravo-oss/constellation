@@ -5,6 +5,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Identity (breaking)
+- One generic OIDC relying party with a configurable roles claim, exact role mapping,
+  bounded verification memoization and last-good JWKS caching. Tokens last at most ten minutes.
+- Secret-enabled emergency administrator with Argon2id, mandatory one-use TOTP,
+  a cross-replica rate limit, a short session, critical audit events and an operator alert.
+- Remove SAML, LDAP, provider-type CRUD, ordinary local passwords, password policy,
+  local refresh tokens, the Astronomer adapter and the unused password-bootstrap image.
+  Take a CNPG backup before forward-only migration 187; roll API and UI together.
+- Replace old authentication chart settings with `auth.oidc.*` and `auth.breakGlass.*`.
+  The shared-kit settings page displays configuration without exposing secrets.
+- Preserve lazy route dependencies and enforce initial JavaScript ≤250 KB gzip in `make check`.
+
+
 ## 0.3.0 - 2026-10-20
 
 Re-alignment with the AlphaBravo Technology Selection Guide (Phase 0 mechanical clean-up,

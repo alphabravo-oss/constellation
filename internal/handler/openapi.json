@@ -34047,7 +34047,7 @@
     "/api/v1/settings/identity": {
       "get": {
         "summary": "Inspect the single sign-on provider and emergency access status",
-        "description": "Requires manage-auth-servers. Returns deployment-managed OIDC issuer, client ID, audience, role-claim name, exact role mapping and break-glass status. Never returns client secrets, password hashes or TOTP seeds.",
+        "description": "Requires manage-identity. Returns deployment-managed OIDC issuer, client ID, audience, role-claim name, exact role mapping and break-glass status. Never returns client secrets, password hashes or TOTP seeds.",
         "responses": {
           "200": {
             "description": "Provider configuration and break-glass status"

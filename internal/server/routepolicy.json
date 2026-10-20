@@ -290,7 +290,7 @@
   "GET /api/v1/serverless-functions": "read-findings",
   "GET /api/v1/serverless-functions/export.csv": "read-findings",
   "GET /api/v1/serverless-functions/{id}": "read-findings",
-  "GET /api/v1/settings/identity": "manage-auth-servers",
+  "GET /api/v1/settings/identity": "manage-identity",
   "GET /api/v1/settings/org": "read-findings",
   "GET /api/v1/settings/user": "read-findings",
   "GET /api/v1/sigstore-roots": "read-findings",

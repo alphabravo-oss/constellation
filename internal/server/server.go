@@ -64,10 +64,6 @@ type Config struct {
 	// EnablePprof mounts net/http/pprof on the admin listener.
 	EnablePprof bool
 	DatabaseURL string
-	// SessionIdleTimeout is the inactivity window (A7). A JWT session whose
-	// last authenticated request is older than this is rejected even though the
-	// JWT itself is unexpired (it sits inside the absolute JWTTTL). Zero disables
-	// idle expiry, leaving only the absolute TTL.
 	// PATMaxLifetime caps how far in the future a minted PAT's expires_at may be,
 	// and forbids unbounded (never-expiring) PATs (A7). Zero disables the cap
 	// (back-compat: any expiry, including none, is accepted).
@@ -860,7 +856,7 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/support/bundle/jobs/{id}", s.requireVerb(rbac.VerbManageSystemConfig, s.supportBundleJobs.GetJob))
 			r.Get("/support/bundle/jobs/{id}/download", s.requireVerb(rbac.VerbManageSystemConfig, s.supportBundleJobs.DownloadJob))
 
-			r.Get("/settings/identity", s.requireVerb(rbac.VerbManageAuthServers, s.identity.Settings))
+			r.Get("/settings/identity", s.requireVerb(rbac.VerbManageIdentity, s.identity.Settings))
 
 			settings := handler.NewSettings(s.db, s.auditLog)
 			r.Get("/settings/org", s.requireVerb(rbac.VerbReadFindings, settings.GetOrg))

@@ -17,13 +17,13 @@ import { createRootRoute, createRoute, createRouter, Navigate, Outlet, redirect,
 import { SuspenseRoute, LegacyClusterRedirect } from "./components/RouteLayouts";
 import { RouteErrorPage } from "./components/RouteErrorPage";
 
-import { AppShell } from "./components/AppShell";
+const AppShell = lazy(() => import("./components/AppShell").then(m=>({default:m.AppShell})));
 import { PoliciesHub, AgentsHub, SignaturesHub } from "./components/shell/hubs";
 import { NotFoundState } from "./ui";
 import { RequireAuth } from "./components/RequireAuth";
 import { LoginPage } from "./pages/LoginPage";
-import { ClustersLandingPage } from "./pages/ClustersLandingPage";
-import { ClusterRouter } from "./pages/ClusterRouter";
+const ClustersLandingPage = lazy(() => import("./pages/ClustersLandingPage").then(m=>({default:m.ClustersLandingPage})));
+const ClusterRouter = lazy(() => import("./pages/ClusterRouter").then(m=>({default:m.ClusterRouter})));
 
 // Org-level and settings pages are lazy-loaded so heavyweight surfaces such as
 // Monaco-backed editors are not part of the first authenticated route.
@@ -161,7 +161,7 @@ function aliasRedirect({ to, cluster = false, from }: { to: string; cluster?: bo
   };
 }
 
-const rootRoute = createRootRoute({ component: Outlet, validateSearch: (search: Record<string, unknown>) => search, notFoundComponent: () => <RequireAuth><AppShell><ShellNotFound /></AppShell></RequireAuth> });
+const rootRoute = createRootRoute({ component: Outlet, validateSearch: (search: Record<string, unknown>) => search, notFoundComponent: () => <RequireAuth><SuspenseRoute><AppShell><ShellNotFound /></AppShell></SuspenseRoute></RequireAuth> });
 const public__loginRoute = createRoute({ getParentRoute: () => rootRoute, path: "/login", beforeLoad: aliasRedirect({ to: "/auth/login" }) });
 const public__auth_loginRoute = createRoute({ getParentRoute: () => rootRoute, path: "/auth/login", component: () => (<LoginPage />) });
 function ShellNotFound() {
@@ -169,7 +169,7 @@ function ShellNotFound() {
 }
 
 const authenticatedRoute = createRoute({ getParentRoute: () => rootRoute, id: "_authenticated", notFoundComponent: ShellNotFound, component: () => (<RequireAuth>
-            <AppShell />
+            <SuspenseRoute><AppShell /></SuspenseRoute>
           </RequireAuth>) });
 const app_indexRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: "/", component: () => (<Navigate to="/clusters" replace />) });
 const app_dashboardRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: "dashboard", component: () => (<LegacyClusterRedirect />) });
@@ -223,8 +223,8 @@ const app_agentsRoute = createRoute({ getParentRoute: () => authenticatedRoute, 
 const app_scannersRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: "scanners", component: () => (<LegacyClusterRedirect />) });
 const app_risk_splatRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: "risk/$", component: () => (<LegacyClusterRedirect />) });
 const app_healthRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: "health", beforeLoad: aliasRedirect({ to: "/settings/health" }) });
-const app_clustersRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: "clusters", component: () => (<ClustersLandingPage />) });
-const app_clusters_idRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: "clusters/$id", notFoundComponent: ShellNotFound, component: () => (<ClusterRouter />) });
+const app_clustersRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: "clusters", component: () => (<SuspenseRoute><ClustersLandingPage /></SuspenseRoute>) });
+const app_clusters_idRoute = createRoute({ getParentRoute: () => authenticatedRoute, path: "clusters/$id", notFoundComponent: ShellNotFound, component: () => (<SuspenseRoute><ClusterRouter /></SuspenseRoute>) });
 const cluster_indexRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "/", component: () => (<Navigate to="/clusters/$id/dashboard" params={(prev) => ({ id: prev.id! })} replace />) });
 const cluster_dashboardRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "dashboard", component: () => (<SuspenseRoute><DashboardPage /></SuspenseRoute>) });
 const cluster_neuvectorRoute = createRoute({ getParentRoute: () => app_clusters_idRoute, path: "neuvector", component: () => (<SuspenseRoute><NeuVectorSwitchboardPage /></SuspenseRoute>) });

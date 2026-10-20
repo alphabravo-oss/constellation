@@ -87,7 +87,7 @@ var featureCoverage = []coverageItem{
 		Reference: []string{"StackRox: Clusters, init bundles, sensor upgrade", "Astronomer: managed clusters"},
 		Decision:  "implement", Status: "partial",
 		UXSurface:       "/settings",
-		Evidence:        "Operator, Helm chart, Astronomer JWKS-backed security route mount, cluster list API.",
+		Evidence:        "Operator, Helm chart, OIDC relying-party sign-in, cluster list API.",
 		NextMilestone:   "Add cluster onboarding UI with Helm commands, registration secrets, health panels, upgrade status, and any future Astronomer tunnel protocol wiring.",
 		EnterpriseNotes: "This is required before multi-cluster enterprise pilots.",
 	},

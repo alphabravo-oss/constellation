@@ -115,6 +115,3 @@ VALUES ($1, 'tok', $2, '["read-findings"]'::jsonb, 'active')`,
 		t.Fatalf("expected role_assignments removed, %d remain", assignments)
 	}
 }
-
-// A4 (review fix): an admin force-password-reset sets must_change_password, bumps session_epoch
-// (live JWTs rejected), and revokes the user's PATs (so the reset cannot be sidestepped).

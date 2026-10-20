@@ -126,7 +126,7 @@ frontend-build: ## Production bundle
 generate: ## Regenerate code (controller-gen deepcopy for the operator CRDs); sqlc/buf join in Phase 2
 	$(GO) generate ./...
 
-check: lint vet fmt lint-shell frontend-lint test ## Composite quality gate
+check: lint vet fmt lint-shell frontend-lint frontend-build test ## Composite quality gate
 
 security: ## gosec + govulncheck + gitleaks (SARIF under artifacts/)
 	bash scripts/security-scan.sh gosec
