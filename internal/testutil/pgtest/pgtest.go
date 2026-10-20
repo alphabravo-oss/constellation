@@ -56,16 +56,20 @@ func Main(m *testing.M) {
 	os.Exit(code)
 }
 
-// TestAgeKey is the column-encryption identity integration tests run under
-// when the process has none configured (the same throwaway key as .env.dev).
-const TestAgeKey = "AGE-SECRET-KEY-14LRZKKVJ2PN7LU6DZ9R8DVY3S75337VLXYDJQ9TN5R3R4EL3Q6YSZTK2ML"
+var cryptoKeyOnce sync.Once
 
 // EnsureCryptoKey makes internal/crypto.Default usable for tests that seal
-// registry credentials, PATs or federation keys; an operator-set key wins.
+// registry credentials, PATs or federation keys: a fresh age identity per test
+// process (never a committed key); an operator-set key wins.
 func EnsureCryptoKey() {
-	if os.Getenv(colcrypto.EnvKey) == "" && os.Getenv(colcrypto.EnvKeyFile) == "" {
-		_ = os.Setenv(colcrypto.EnvKey, TestAgeKey)
-	}
+	cryptoKeyOnce.Do(func() {
+		if os.Getenv(colcrypto.EnvKey) != "" || os.Getenv(colcrypto.EnvKeyFile) != "" {
+			return
+		}
+		if secret, _, err := colcrypto.GenerateKey(); err == nil {
+			_ = os.Setenv(colcrypto.EnvKey, secret)
+		}
+	})
 }
 
 // Pool returns a pgx pool on a fresh, fully migrated database owned by this
