@@ -101,16 +101,8 @@ jobs:
           IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
           BUILD_METADATA: ${{ steps.build.outputs.metadata }}
         run: |
-          python3 - <<'PY'
-          import json, os, pathlib
-          evidence = {
-              'sourceCommit': os.environ['SOURCE_COMMIT'],
-              'role': os.environ['IMAGE_ROLE'],
-              'digest': os.environ['IMAGE_DIGEST'],
-              'metadata': json.loads(os.environ['BUILD_METADATA']),
-          }
-          pathlib.Path(os.environ['RUNNER_TEMP'], 'identity.json').write_text(json.dumps(evidence, indent=2)+'\n')
-          PY
+          jq -n --arg c "$SOURCE_COMMIT" --arg r "$IMAGE_ROLE" --arg d "$IMAGE_DIGEST" --argjson m "$BUILD_METADATA" \
+            '{sourceCommit: $c, role: $r, digest: $d, metadata: $m}' > "$RUNNER_TEMP/identity.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: scanner-lease-${{ matrix.role }}-${{ github.sha }}

@@ -35484,20 +35484,6 @@
         "security": []
       }
     },
-    "/metrics": {
-      "get": {
-        "summary": "Prometheus metrics",
-        "responses": {
-          "200": {
-            "description": "ok"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": []
-      }
-    },
     "/openapi.json": {
       "get": {
         "responses": {

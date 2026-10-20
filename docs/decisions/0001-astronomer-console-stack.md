@@ -1,5 +1,8 @@
 # ADR 0001: Astronomer-aligned console stack
 
+> **Status: superseded** by [ADR 0002](0002-adopt-guide-stack.md) on 2026-10-20. TanStack Router is
+> retained; the REST/axios client and TanStack Form decisions are reversed.
+
 Recorded: 2026-10-12. Status: accepted product direction; implementation remains
 subject to the parity acceptance gates. Approval source: the user's explicit
 instruction, “Converge on Astronomer’s stack, including Router and Form,” followed

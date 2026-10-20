@@ -7,7 +7,7 @@ on:
       - .github/workflows/scanner-tool-validation.yml
       - deploy/docker/scanner-tools/grype/**
       - deploy/docker/scanner-tools/sources.json
-      - scripts/build-scanner-tools.py
+      - cmd/tools/scanner-tools/**
 permissions:
   contents: read
 concurrency:
@@ -28,7 +28,7 @@ jobs:
           go-version-file: go.mod
       - name: Prepare checksum-verified patched Grype source
         run: |
-          python3 scripts/build-scanner-tools.py --tool grype --prepare-only --work "$RUNNER_TEMP/grype-source" --output "$RUNNER_TEMP/tool-output"
+          go run ./cmd/tools/scanner-tools --tool grype --prepare-only --work "$RUNNER_TEMP/grype-source" --output "$RUNNER_TEMP/tool-output"
           cp deploy/docker/scanner-tools/grype/completion_security_test.go "$RUNNER_TEMP/grype-source/grype/cmd/grype/cli/commands/constellation_completion_test.go"
       - name: Validate runtime dependency graph and completion behavior
         run: |
