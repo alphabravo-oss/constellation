@@ -34,7 +34,7 @@ export const SETTINGS_SECTIONS: Array<{ label: string; items: SettingsLink[] }> 
     items: [
       { to: "/settings/access", label: "Access control", icon: UsersRound },
       { to: "/settings/api-tokens", label: "API tokens", icon: KeyRound },
-      { to: "/settings/security-policy", label: "Security policy", icon: Lock },
+      { to: "/settings/identity", label: "Single sign-on", icon: Lock },
       { to: "/federation", label: "Federation", icon: Earth },
     ],
   },

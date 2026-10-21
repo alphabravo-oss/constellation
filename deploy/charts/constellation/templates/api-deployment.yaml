@@ -1,7 +1,4 @@
 {{- if .Values.api.enabled }}
-{{- if and .Values.astronomer.enabled (not .Values.astronomer.jwksURL) }}
-{{- fail "astronomer.jwksURL is required when astronomer.enabled=true" }}
-{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -75,19 +72,6 @@ spec:
                 secretKeyRef:
                   name: {{ include "constellation.dsnSecret" . }}
                   key: {{ include "constellation.dsnSecretKey" . }}
-{{- if .Values.api.jwtKeysSecret }}
-            # A5: an operator-supplied JWT_KEYS overrides the default DB-backed RS256
-            # session keypair. Only injected when api.jwtKeysSecret names a pre-existing
-            # Secret; otherwise the api signs sessions RS256 with the shared keypair
-            # persisted in session_signing_keys (see internal/auth/sessionkeys.go).
-            - name: JWT_KEYS
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "constellation.jwtKeysSecretName" . }}
-                  key: keys
-{{- end }}
-            - name: CONSTELLATION_REQUIRE_JWT_KEYS
-              value: {{ .Values.api.requireJWTKeys | quote }}
             - name: PARTITION_STATISTICS_MAINTENANCE_ENABLED
               value: {{ .Values.api.partitionStatisticsMaintenanceEnabled | quote }}
 {{- if .Values.api.supportBundleSigningKeySecret }}
@@ -148,17 +132,48 @@ spec:
               value: "{{ $v }}"
 {{- end }}
 {{- end }}
-{{- if .Values.astronomer.enabled }}
-            - name: ASTRONOMER_JWKS_URL
-              value: "{{ .Values.astronomer.jwksURL }}"
-{{- if .Values.astronomer.jwtIssuer }}
-            - name: ASTRONOMER_JWT_ISSUER
-              value: "{{ .Values.astronomer.jwtIssuer }}"
+{{- if .Values.auth.oidc.enabled }}
+            - name: OIDC_ISSUER_URL
+              value: {{ required "auth.oidc.issuerURL is required" .Values.auth.oidc.issuerURL | quote }}
+            - name: OIDC_CLIENT_ID
+              value: {{ required "auth.oidc.clientID is required" .Values.auth.oidc.clientID | quote }}
+            - name: OIDC_AUDIENCE
+              value: {{ .Values.auth.oidc.audience | default .Values.auth.oidc.clientID | quote }}
+            - name: OIDC_REDIRECT_URL
+              value: {{ required "auth.oidc.redirectURL is required" .Values.auth.oidc.redirectURL | quote }}
+            - name: OIDC_ROLES_CLAIM
+              value: {{ .Values.auth.oidc.rolesClaim | quote }}
+            - name: OIDC_ROLE_MAPPING
+              value: {{ .Values.auth.oidc.roleMapping | toJson | quote }}
+            - name: OIDC_SCOPES
+              value: {{ join " " .Values.auth.oidc.scopes | quote }}
+            - name: OIDC_ORG
+              value: {{ .Values.auth.oidc.orgName | quote }}
+{{- if .Values.auth.oidc.clientSecretName }}
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.oidc.clientSecretName | quote }}
+                  key: client-secret
 {{- end }}
-{{- if .Values.astronomer.jwtAudience }}
-            - name: ASTRONOMER_JWT_AUDIENCE
-              value: "{{ .Values.astronomer.jwtAudience }}"
 {{- end }}
+            - name: BREAK_GLASS_ENABLED
+              value: {{ .Values.auth.breakGlass.enabled | quote }}
+{{- if .Values.auth.breakGlass.enabled }}
+            - name: BREAK_GLASS_ORG
+              value: {{ .Values.auth.breakGlass.orgName | quote }}
+            - name: BREAK_GLASS_SESSION_TTL
+              value: {{ .Values.auth.breakGlass.sessionTTL | quote }}
+            - name: BREAK_GLASS_PASSWORD_HASH
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "auth.breakGlass.existingSecret is required" .Values.auth.breakGlass.existingSecret | quote }}
+                  key: password-hash
+            - name: BREAK_GLASS_TOTP_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.breakGlass.existingSecret | quote }}
+                  key: totp-secret
 {{- end }}
             - name: CONSTELLATION_REPOSITORY_SCAN_RETENTION_ENABLED
               value: {{ .Values.repositoryScans.retention.enabled | quote }}

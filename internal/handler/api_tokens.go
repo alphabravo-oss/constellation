@@ -704,10 +704,7 @@ SELECT t.id, t.user_id, t.service_account_id, COALESCE(t.scopes, '[]'::jsonb),
    -- A1: a disabled user's PATs must stop working immediately. Service-account-
    -- attached tokens (u.id IS NULL) are unaffected by this clause.
    AND (u.id IS NULL OR u.disabled = FALSE)
-   -- A4: a user under forced password reset (must_change_password) must not be able to
-   -- sidestep the reset gate via a PAT — the JWT path 403s such users, so the PAT path
-   -- must reject them too. Service-account-attached tokens are exempt by design.
-   AND (u.id IS NULL OR u.must_change_password = FALSE)
+
    -- A7: a disabled service account's tokens stop working too.
    AND (sa.id IS NULL OR COALESCE(sa.status, 'active') = 'active')`,
 		hash, capSeconds).Scan(&tokenID, &userID, &saID, &scopesJSON, &orgID, &email, &saRolesJSON, &saStatus)

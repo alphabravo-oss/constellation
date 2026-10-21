@@ -17,14 +17,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/alphabravocompany/constellation/internal/auth"
 	"github.com/alphabravocompany/constellation/internal/obslog"
 	auditlog "github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/risk"
 )
 
 func main() {
-	password := flag.String("password", "Constellation!1", "Local admin password to provision")
 	flag.Parse()
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
@@ -82,26 +80,18 @@ RETURNING id`).Scan(&orgID); err != nil {
  WHERE service_account_id IN (SELECT id FROM service_accounts WHERE org_id = $1)
     OR user_id IN (SELECT id FROM users WHERE org_id = $1)`},
 		{"service_accounts", `DELETE FROM service_accounts WHERE org_id = $1`},
-		{"auth_servers", `DELETE FROM auth_servers WHERE org_id = $1 AND name = 'Okta Workforce'`},
 	} {
 		if _, err := pool.Exec(ctx, cleanup.stmt, orgID); err != nil {
 			logger.Warn("reset access-control seed", slog.String("table", cleanup.name), slog.String("err", err.Error()))
 		}
 	}
 
-	hash, _ := auth.HashPassword(*password)
 	var userID uuid.UUID
 	if err := pool.QueryRow(ctx, `
-INSERT INTO users (org_id, email, display_name, password_hash)
-VALUES ($1, 'admin@demo.test', 'Demo Admin', $2)
-ON CONFLICT (org_id, email) DO UPDATE
-   SET password_hash = EXCLUDED.password_hash,
-       disabled = FALSE,
-       must_change_password = FALSE,
-       failed_login_count = 0,
-       block_login_since = NULL,
-       password_changed_at = NOW()
-RETURNING id`, orgID, hash).Scan(&userID); err != nil {
+INSERT INTO users (org_id, email, display_name)
+VALUES ($1, 'admin@demo.test', 'Demo Admin')
+ON CONFLICT (org_id, email) DO UPDATE SET disabled=FALSE
+RETURNING id`, orgID).Scan(&userID); err != nil {
 		logger.Error("user", slog.String("err", err.Error()))
 		os.Exit(1)
 	}
@@ -391,21 +381,6 @@ INSERT INTO role_assignments (user_id, role, scope_org_id, binding_id)
 VALUES ($1, 'GlobalAdmin', $2, $3)
 ON CONFLICT DO NOTHING`, analystID, orgID, bindingID); err != nil {
 		logger.Warn("access assignment seed", slog.String("err", err.Error()))
-	}
-
-	if _, err := pool.Exec(ctx, `
-INSERT INTO auth_servers (org_id, type, name, enabled, auth_order, config, role_mapping)
-VALUES ($1, 'oidc', 'Okta Workforce', TRUE, 10,
-        '{"issuer_url":"https://okta.example.com/oauth2/default","client_id":"constellation-demo","scopes":["openid","email","profile"]}'::jsonb,
-        '{"rules":{"group:platform-security":"GlobalAdmin","group:security-analysts":"Analyst"},"default":"Auditor"}'::jsonb)
-ON CONFLICT (org_id, name) DO UPDATE
-   SET enabled = EXCLUDED.enabled,
-       auth_order = EXCLUDED.auth_order,
-       config = EXCLUDED.config,
-       role_mapping = EXCLUDED.role_mapping,
-       revision = auth_servers.revision + 1,
-       updated_at = NOW()`, orgID); err != nil {
-		logger.Warn("auth server seed", slog.String("err", err.Error()))
 	}
 
 	var serviceAccountID uuid.UUID

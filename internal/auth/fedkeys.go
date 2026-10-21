@@ -26,7 +26,7 @@ const fedSigningKeyAdvisoryLock int64 = 0x436f6e73746c4664 // "ConstlFd"
 //
 // On first use it generates + persists one RS256 keypair so a master mints signed join
 // tokens without any operator-provided secret, and every replica shares the same key.
-func LoadFedSigningKeysPEM(ctx context.Context, store sessionKeyStore) ([][]byte, error) {
+func LoadFedSigningKeysPEM(ctx context.Context, store keyStore) ([][]byte, error) {
 	rows, err := store.Query(ctx,
 		`SELECT private_pem FROM fed_signing_keys ORDER BY active DESC, created_at DESC LIMIT 2`)
 	if err != nil {
@@ -60,7 +60,7 @@ func LoadFedSigningKeysPEM(ctx context.Context, store sessionKeyStore) ([][]byte
 // serializes concurrent first-boot callers; once the lock is held we re-check for an
 // existing active key so the second caller adopts the first's key. Mirrors
 // generateAndStoreSessionKey.
-func generateAndStoreFedSigningKey(ctx context.Context, store sessionKeyStore) ([]byte, error) {
+func generateAndStoreFedSigningKey(ctx context.Context, store keyStore) ([]byte, error) {
 	tx, err := store.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("auth: begin fed key tx: %w", err)

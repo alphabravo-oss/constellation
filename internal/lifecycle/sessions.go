@@ -35,19 +35,8 @@ func ReapSessions(ctx context.Context, pool *pgxpool.Pool, batch int) (SessionCl
 		name, sql string
 		count     *int64
 	}{
-		{"refresh tokens", `WITH expired AS (
- SELECT token_hash FROM browser_refresh_tokens
- WHERE expires_at < statement_timestamp() - interval '1 minute'
- ORDER BY expires_at, token_hash LIMIT $1 FOR UPDATE SKIP LOCKED
-)
-DELETE FROM browser_refresh_tokens t USING expired e WHERE t.token_hash=e.token_hash`, &result.RefreshTokens},
-		{"user sessions", `WITH expired AS (
- SELECT session_id FROM user_sessions s
- WHERE expires_at < statement_timestamp() - interval '1 minute'
- AND NOT EXISTS (SELECT 1 FROM browser_refresh_tokens t WHERE t.session_id=s.session_id)
- ORDER BY expires_at, session_id LIMIT $1 FOR UPDATE SKIP LOCKED
-)
-DELETE FROM user_sessions s USING expired e WHERE s.session_id=e.session_id`, &result.UserSessions},
+		{"login attempts", `WITH expired AS (SELECT state_hash FROM oidc_login_attempts WHERE expires_at<now() LIMIT $1 FOR UPDATE SKIP LOCKED) DELETE FROM oidc_login_attempts t USING expired e WHERE t.state_hash=e.state_hash`, &result.RefreshTokens},
+		{"identity sessions", `WITH expired AS (SELECT token_hash FROM identity_sessions WHERE expires_at<now() ORDER BY expires_at LIMIT $1 FOR UPDATE SKIP LOCKED) DELETE FROM identity_sessions s USING expired e WHERE s.token_hash=e.token_hash`, &result.UserSessions},
 		{"network sessions", `WITH expired AS (
  SELECT org_id, cluster_id, node, id FROM network_sessions
  WHERE updated_at < statement_timestamp() - interval '5 minutes'

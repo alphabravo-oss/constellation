@@ -37,7 +37,7 @@ func TestFileProfileFullInventoryAndConditionalDelete(t *testing.T) {
 		}
 	}
 	exec(`INSERT INTO orgs(id,name,display_name) VALUES($1,$2,'File inventory'),($3,$4,'Other inventory')`, org, "file-inv-"+org.String(), otherOrg, "file-other-"+otherOrg.String())
-	exec(`INSERT INTO users(id,org_id,email,display_name,password_hash) VALUES($1,$2,$3,'Reviewer','x')`, user, org, user.String()+"@example.test")
+	exec(`INSERT INTO users(id,org_id,email,display_name) VALUES($1,$2,$3,'Reviewer')`, user, org, user.String()+"@example.test")
 	exec(`INSERT INTO clusters(id,org_id,name,distro,state) VALUES($1,$2,'File inventory','k3s','connected'),($3,$4,'Other inventory','k3s','connected')`, cluster, org, otherCluster, otherOrg)
 	exec(`INSERT INTO deployments(org_id,cluster_id,namespace,name,kind,labels) SELECT $1,$2,'prod','workload-'||lpad(n::text,3,'0'),'Deployment','{}'::jsonb FROM generate_series(0,204) n`, org, cluster)
 	exec(`INSERT INTO deployments(org_id,cluster_id,namespace,name,kind,labels) VALUES($1,$2,'operations','scanner','Deployment','{"app.kubernetes.io/part-of":"constellation"}'),($1,$2,'prod','shared','Deployment','{"app.kubernetes.io/part-of":"constellation"}'),($1,$2,'prod','shared','DaemonSet','{}'),($3,$4,'prod','foreign','Deployment','{}'),($1,$4,'prod','inconsistent-cluster','Deployment','{}')`, org, cluster, otherOrg, otherCluster)

@@ -23,7 +23,7 @@ GO_LDFLAGS := -s -w \
 
 # Every production binary under cmd/. Adding a binary is a one-line edit here.
 BINARIES := constellation-api constellation-scanner constellation-operator constellation-discoverer \
-  constellation-runtime-agent constellation-admission constellation-bootstrap constellation-backup \
+  constellation-runtime-agent constellation-admission constellation-backup \
   constellation-restore constellation-seed constellation-compliance-scheduler constellation-github-app \
   constellation-k8s-compliance-collector constellation-kube-bench-runner constellation-netpolicy-applier \
   constellation-registry-walker constellation-support-bundle-verify constellationctl audit-archiver \
@@ -39,7 +39,7 @@ DOCKER_BUILD ?= docker buildx build --platform $(PLATFORMS) \
   --build-arg COMMIT=$(COMMIT) --build-arg BUILD_TIME=$(DATE) --build-arg FIPS=$(FIPS)
 
 IMAGES := api scanner operator discoverer audit-archiver frontend runtime-agent admission \
-  bootstrap postgres compliance-scheduler kube-bench-runner toolbox
+  postgres compliance-scheduler kube-bench-runner toolbox
 # Dockerfile name differs from the image name for these roles.
 dockerfile_audit-archiver := archiver
 
@@ -114,19 +114,22 @@ fmt-fix: ## Rewrite files with gofmt + goimports
 lint-shell: ## shellcheck every tracked shell script
 	bash scripts/lint-shell.sh
 
-frontend-lint: ## eslint + tsc for the frontend
+frontend-lint: frontend/node_modules/.package-lock.json ## eslint + tsc for the frontend
 	cd frontend && npm run lint && npm run type-check
 
-frontend-test: ## vitest
+frontend-test: frontend/node_modules/.package-lock.json ## vitest
 	cd frontend && npm test --silent
 
-frontend-build: ## Production bundle
-	cd frontend && npm ci && npm run build
+frontend/node_modules/.package-lock.json: frontend/package.json frontend/package-lock.json
+	cd frontend && npm ci --no-audit --no-fund
+
+frontend-build: frontend/node_modules/.package-lock.json ## Production bundle and initial JavaScript budget
+	cd frontend && npm run build
 
 generate: ## Regenerate code (controller-gen deepcopy for the operator CRDs); sqlc/buf join in Phase 2
 	$(GO) generate ./...
 
-check: lint vet fmt lint-shell frontend-lint test ## Composite quality gate
+check: lint vet fmt lint-shell frontend-lint frontend-build test ## Composite quality gate
 
 security: ## gosec + govulncheck + gitleaks (SARIF under artifacts/)
 	bash scripts/security-scan.sh gosec

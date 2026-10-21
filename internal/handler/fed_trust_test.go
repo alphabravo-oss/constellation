@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -246,11 +247,11 @@ func TestFedTrust_ReadFindingsJWTRejectedOnSync(t *testing.T) {
 
 	// A real user session JWT carrying read-findings, signed by a SEPARATE session key.
 	sessKey := genRSAPEM(t)
-	sessSigner, err := auth.NewSigner("constellation", "constellation", time.Hour, sessKey)
+	key, err := jwt.ParseRSAPrivateKeyFromPEM(sessKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	userJWT, _, err := sessSigner.Issue(userID, orgID, "u@example.com", []string{"read-findings"}, 0)
+	userJWT, err := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{"sub": userID.String(), "aud": "constellation", "iss": "https://issuer.test", "org": orgID.String(), "exp": time.Now().Add(time.Minute).Unix()}).SignedString(key)
 	if err != nil {
 		t.Fatal(err)
 	}

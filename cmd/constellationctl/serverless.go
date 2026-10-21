@@ -18,28 +18,26 @@ import (
 func serverlessCmd() *cobra.Command {
 	var (
 		serverFlag string
-		email      string
 	)
 	c := &cobra.Command{
 		Use:   "serverless",
 		Short: "Discover and report serverless package evidence",
 	}
 	c.PersistentFlags().StringVar(&serverFlag, "server", "", "Override Constellation server URL")
-	c.PersistentFlags().StringVar(&email, "email", "", "Email to log into if not already authenticated")
-	c.AddCommand(serverlessAWSLambdaCmd(&serverFlag, &email))
+	c.AddCommand(serverlessAWSLambdaCmd(&serverFlag))
 	return c
 }
 
-func serverlessAWSLambdaCmd(serverFlag *string, email *string) *cobra.Command {
+func serverlessAWSLambdaCmd(serverFlag *string) *cobra.Command {
 	c := &cobra.Command{
 		Use:   "aws-lambda",
 		Short: "Discover AWS Lambda functions and report package evidence",
 	}
-	c.AddCommand(serverlessAWSLambdaSyncCmd(serverFlag, email))
+	c.AddCommand(serverlessAWSLambdaSyncCmd(serverFlag))
 	return c
 }
 
-func serverlessAWSLambdaSyncCmd(serverFlag *string, email *string) *cobra.Command {
+func serverlessAWSLambdaSyncCmd(serverFlag *string) *cobra.Command {
 	var (
 		region                 string
 		functionName           string
@@ -63,7 +61,7 @@ func serverlessAWSLambdaSyncCmd(serverFlag *string, email *string) *cobra.Comman
 downloads ZIP deployment packages and layers, catalogs packages with Syft, and
 posts package evidence to /api/v1/serverless-packages:report.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cli, err := resolveClient(cmd.Context(), *serverFlag, *email)
+			cli, err := resolveClient(cmd.Context(), *serverFlag)
 			if err != nil {
 				return err
 			}

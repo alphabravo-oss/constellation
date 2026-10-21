@@ -3098,6 +3098,7 @@ function NodeLabel({ workload, kind }: { workload: NetworkWorkload; kind?: Netwo
       {workload.finding_count > 0 && (
         <span
           className="absolute -right-2 -top-2 inline-flex items-center gap-0.5 rounded-full border border-border bg-card px-2 py-0.5 text-micro font-mono shadow-[var(--elev-1)]"
+          role="img"
           aria-label={`${criticalCount} critical, ${highCount} high findings`}
         >
           {criticalCount > 0 && (

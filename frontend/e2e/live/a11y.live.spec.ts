@@ -13,6 +13,7 @@ const PAGES: Array<[string, (id: string) => string]> = [
   ["compliance", (id) => `/clusters/${id}/compliance`],
   ["cve-database", () => "/cve"],
   ["settings-access", () => "/settings/access"],
+  ["settings-identity", () => "/settings/identity"],
 ];
 
 for (const theme of ["dark", "light"] as const) {

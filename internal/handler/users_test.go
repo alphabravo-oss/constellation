@@ -58,8 +58,8 @@ func TestUsers_DisableCascade(t *testing.T) {
 		email string
 	}{{adminID, "admin"}, {targetID, "target"}} {
 		if _, err := pool.Exec(ctx, `
-INSERT INTO users (id, org_id, email, display_name, password_hash, session_epoch)
-VALUES ($1, $2, $3, 'U', 'x', 0)`, u.id, orgID, u.email+"-"+u.id.String()+"@example.test"); err != nil {
+INSERT INTO users (id, org_id, email, display_name, session_epoch)
+VALUES ($1, $2, $3, 'U', 0)`, u.id, orgID, u.email+"-"+u.id.String()+"@example.test"); err != nil {
 			t.Fatalf("insert user %s: %v", u.email, err)
 		}
 	}
@@ -113,98 +113,5 @@ VALUES ($1, 'tok', $2, '["read-findings"]'::jsonb, 'active')`,
 	}
 	if assignments != 0 {
 		t.Fatalf("expected role_assignments removed, %d remain", assignments)
-	}
-}
-
-// A4 (review fix): an admin force-password-reset sets must_change_password, bumps session_epoch
-// (live JWTs rejected), and revokes the user's PATs (so the reset cannot be sidestepped).
-func TestUsers_ForcePasswordReset(t *testing.T) {
-	d := openTestDB(t)
-	defer d.Close()
-
-	ctx := context.Background()
-	pool := d.Pool()
-	orgID := uuid.New()
-	adminID := uuid.New()
-	targetID := uuid.New()
-
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM api_tokens WHERE user_id = ANY($1)`, []uuid.UUID{adminID, targetID})
-		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id = ANY($1)`, []uuid.UUID{adminID, targetID})
-		_, _ = pool.Exec(context.Background(), `DELETE FROM orgs WHERE id = $1`, orgID)
-	})
-	if _, err := pool.Exec(ctx,
-		`INSERT INTO orgs (id, name, display_name) VALUES ($1, $2, 'Reset Org')`,
-		orgID, "reset-org-"+orgID.String()); err != nil {
-		t.Fatalf("insert org: %v", err)
-	}
-	if _, err := pool.Exec(ctx, `
-INSERT INTO users (id, org_id, email, display_name, password_hash, session_epoch, must_change_password)
-VALUES ($1, $2, $3, 'A', 'x', 0, FALSE),
-       ($4, $2, $5, 'T', 'x', 0, FALSE)`,
-		adminID, orgID, "admin-"+adminID.String()+"@x.test", targetID, "target-"+targetID.String()+"@x.test"); err != nil {
-		t.Fatalf("insert users: %v", err)
-	}
-	raw := "cst_" + uuid.NewString()
-	sum := sha256.Sum256([]byte(raw))
-	if _, err := pool.Exec(ctx, `
-INSERT INTO api_tokens (user_id, name, token_hash, scopes, status)
-VALUES ($1, 'tok', $2, '["read-findings"]'::jsonb, 'active')`,
-		targetID, hex.EncodeToString(sum[:])); err != nil {
-		t.Fatalf("insert token: %v", err)
-	}
-
-	h := NewUsers(d, audit.New(pool))
-	admin := Subject{UserID: adminID, OrgID: orgID}
-
-	if rec := usersReq(t, http.MethodPost, "/api/v1/users/x/force-password-reset", targetID.String(), NewUsers(d, nil).ForcePasswordReset, admin); rec.Code != http.StatusInternalServerError {
-		t.Fatalf("reset without audit: status=%d body=%s, want 500", rec.Code, rec.Body.String())
-	}
-	var mustChange bool
-	var epoch int64
-	var liveTokens int
-	if err := pool.QueryRow(ctx, `SELECT must_change_password, session_epoch FROM users WHERE id = $1`, targetID).Scan(&mustChange, &epoch); err != nil {
-		t.Fatalf("read failed reset state: %v", err)
-	}
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM api_tokens WHERE user_id = $1 AND revoked_at IS NULL`, targetID).Scan(&liveTokens); err != nil {
-		t.Fatalf("count live tokens after failed reset: %v", err)
-	}
-	if mustChange || epoch != 0 || liveTokens != 1 {
-		t.Fatalf("reset committed without audit: mustChange=%t epoch=%d liveTokens=%d", mustChange, epoch, liveTokens)
-	}
-
-	if rec := usersReq(t, http.MethodPost, "/api/v1/users/x/force-password-reset", targetID.String(), h.ForcePasswordReset, admin); rec.Code != http.StatusOK {
-		t.Fatalf("force reset: status=%d body=%s, want 200", rec.Code, rec.Body.String())
-	}
-	if err := pool.QueryRow(ctx, `SELECT must_change_password, session_epoch FROM users WHERE id = $1`, targetID).Scan(&mustChange, &epoch); err != nil {
-		t.Fatalf("read user: %v", err)
-	}
-	if !mustChange {
-		t.Fatalf("must_change_password not set")
-	}
-	if epoch == 0 {
-		t.Fatalf("session_epoch not bumped")
-	}
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM api_tokens WHERE user_id = $1 AND revoked_at IS NULL`, targetID).Scan(&liveTokens); err != nil {
-		t.Fatalf("count tokens: %v", err)
-	}
-	if liveTokens != 0 {
-		t.Fatalf("expected PATs revoked on forced reset, %d still live", liveTokens)
-	}
-	var auditRows int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE org_id=$1 AND actor_id=$2 AND target_id=$3 AND action='user.force_password_reset'`, orgID, adminID, targetID.String()).Scan(&auditRows); err != nil {
-		t.Fatalf("count reset audit rows: %v", err)
-	}
-	if auditRows != 1 {
-		t.Fatalf("force reset audit rows=%d, want 1", auditRows)
-	}
-	if rec := usersReq(t, http.MethodPost, "/api/v1/users/x/force-password-reset", targetID.String(), h.ForcePasswordReset, Subject{UserID: adminID, OrgID: uuid.New()}); rec.Code != http.StatusNotFound {
-		t.Fatalf("cross-org reset: status=%d, want 404", rec.Code)
-	}
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE action='user.force_password_reset' AND target_id=$1`, targetID.String()).Scan(&auditRows); err != nil {
-		t.Fatalf("count reset audit rows after rejected request: %v", err)
-	}
-	if auditRows != 1 {
-		t.Fatalf("rejected reset created audit row: %d", auditRows)
 	}
 }

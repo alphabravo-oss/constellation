@@ -252,7 +252,7 @@ func TestBaselineInventoryReadOnlyFullCohortAndBundle(t *testing.T) {
 	}
 
 	actor := uuid.New()
-	exec(`INSERT INTO users(id,org_id,email,display_name,password_hash) VALUES($1,$2,$3,'reviewer','x')`, actor, org, actor.String()+"@baseline.test")
+	exec(`INSERT INTO users(id,org_id,email,display_name) VALUES($1,$2,$3,'reviewer')`, actor, org, actor.String()+"@baseline.test")
 	modeResponse := httptest.NewRecorder()
 	h.SetMode(modeResponse, baselineRequest(t.Context(), "POST", "/runtime/baselines/apps%2Fapp-0001/mode?cluster_id="+cluster.String(), "apps/app-0001", bytes.NewReader([]byte(`{"mode":"enforce","expected_mode":"monitor","reason":"reviewed full retained identities"}`)), org, actor))
 	if modeResponse.Code != 200 {

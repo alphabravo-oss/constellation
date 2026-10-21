@@ -11,6 +11,7 @@ import (
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler"
+	"github.com/alphabravocompany/constellation/internal/identity"
 	"github.com/alphabravocompany/constellation/internal/syscfg"
 	"github.com/alphabravocompany/constellation/internal/telemetry"
 	"github.com/alphabravocompany/constellation/pkg/audit"
@@ -81,15 +82,18 @@ func newSpecServer() (*Server, error) {
 	dbHandle := db.NewFromPool(pool)
 	s := &Server{
 		cfg: Config{
-			ListenAddr:        ":0",
-			CORSOrigins:       []string{"http://localhost:5173"},
-			AstronomerJWKSURL: "https://astronomer.example.com/.well-known/jwks.json",
+			ListenAddr:  ":0",
+			CORSOrigins: []string{"http://localhost:5173"},
 		},
 		tel:         tel,
 		db:          dbHandle,
 		auditLog:    audit.New(pool),
 		syscfg:      syscfg.NewProvider(pool),
 		customRoles: handler.NewCustomRoles(pool),
+	}
+	s.identity, err = identity.New(ctx, identity.Store{Pool: pool}, nil, identity.BreakGlassConfig{}, s.auditLog, tel.Registry)
+	if err != nil {
+		return nil, err
 	}
 	s.router = s.buildRouter()
 	return s, nil

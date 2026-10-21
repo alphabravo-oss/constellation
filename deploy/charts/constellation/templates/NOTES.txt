@@ -10,9 +10,10 @@ on listener {{ .Values.gateway.sectionName }}.
 URL: {{ ternary "https" "http" .Values.ingress.tls.enabled }}://{{ .Values.ingress.host }}
 {{- end }}
 
-Retrieve the auto-generated admin password:
-  kubectl -n {{ .Release.Namespace }} get secret {{ include "constellation.fullname" . }}-admin-credentials \
-    -o jsonpath='{.data.password}' | base64 -d ; echo
+Human sign-in: configure auth.oidc with your single sign-on provider.
+Provider and emergency status: Settings → Single sign-on.
+Emergency access is disabled by default; enabling auth.breakGlass requires an
+existing Secret with an Argon2id password hash and a TOTP seed.
 
 {{- if include "constellation.postgresIsCNPG" . | eq "true" }}
 
