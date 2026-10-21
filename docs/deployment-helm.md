@@ -1133,3 +1133,6 @@ ID-token authorized-party checks, last-good JWKS and bounded memoization. The
 existing product code flow preserves PKCE, nonce and one-use database state;
 client authentication follows the provider's discovery document. Browser
 sessions remain opaque product sessions with no token refresh.
+
+The identity chart is pinned at 0.1.3 (restricted Pod Security defaults); the
+shared relying-party module and qualified runtime images are 0.1.2.

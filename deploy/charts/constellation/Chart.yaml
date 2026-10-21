@@ -20,6 +20,6 @@ keywords:
 
 dependencies:
   - name: identity
-    version: 0.1.2
+    version: 0.1.3
     repository: oci://ghcr.io/alphabravo-oss/charts
     condition: identity.enabled

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
+import { randomBytes, createHash } from "node:crypto";
 import { LIVE_EMAIL, LIVE_PASSWORD } from "./env";
 import { totp } from "./totp";
 
@@ -69,10 +70,23 @@ test("bundled SSO, local-only and SSO-only policies work with independent recove
   expect((await user.request.get("/api/v1/auth/me")).status()).toBe(200);
   await up.goto("/auth/login");await up.getByRole("button",{name:"Continue with SSO"}).click();await expect(up).toHaveURL(/\/clusters(?:[/?#]|$)/);
   expect((await(await user.request.get("/api/v1/auth/me")).json()).roles).toEqual(["SecurityAdmin"]);
+  // First bearer verification happens after the issuer is completely down.
+  const bearerContext=await browser.newContext({baseURL,storageState:await user.storageState()});
+  let bearer:string;
+  try{
+   const verifier=randomBytes(32).toString("base64url");const callback=baseURL+"/api/v1/auth/oidc/callback";
+   const authURL=new URL(baseURL+"/oauth/v2/authorize");authURL.search=new URLSearchParams({client_id:process.env.BUNDLED_IDENTITY_CLIENT_ID!,redirect_uri:callback,response_type:"code",scope:"openid email profile",nonce:randomBytes(24).toString("base64url"),state:"unbound-proof-flow",code_challenge:createHash("sha256").update(verifier).digest("base64url"),code_challenge_method:"S256"}).toString();
+   const capture=await bearerContext.newPage();await capture.goto(authURL.toString());await expect(capture).toHaveURL(/\/api\/v1\/auth\/oidc\/callback\?/);
+   const code=new URL(capture.url()).searchParams.get("code");expect(code).toBeTruthy();
+   const tokens=await bearerContext.request.post("/oauth/v2/token",{headers:{Authorization:"Basic "+Buffer.from(encodeURIComponent(process.env.BUNDLED_IDENTITY_CLIENT_ID!)+":"+encodeURIComponent(process.env.BUNDLED_IDENTITY_CLIENT_SECRET!)).toString("base64")},form:{grant_type:"authorization_code",code:code!,redirect_uri:callback,code_verifier:verifier}});expect(tokens.ok()).toBeTruthy();
+   const response=await tokens.json();bearer=response.access_token;
+   for(const token of [response.id_token,bearer])expect(Buffer.from(token.split(".")[1],"base64url").toString()).not.toMatch(/zitadel/i);
+  }finally{await bearerContext.close();}
   const fixture=JSON.parse(execFileSync("kubectl",["-n",namespace,"get","deployment",deployment,"-o","json"],{encoding:"utf8"}));replicas=fixture.spec.replicas;
   execFileSync("kubectl",["-n",namespace,"scale",`deployment/${deployment}`,"--replicas=0"]);
   const selector=Object.entries(fixture.spec.selector.matchLabels).map(([k,v])=>`${k}=${v}`).join(",");execFileSync("kubectl",["-n",namespace,"wait","--for=delete","pod","-l",selector,"--timeout=60s"]);
   expect((await user.request.get("/api/v1/auth/me")).status()).toBe(200);
+  const unseen=await user.request.get("/api/v1/auth/me",{headers:{Authorization:`Bearer ${bearer!}`}});expect(unseen.status()).toBe(200);expect((await unseen.json()).roles).toEqual(["SecurityAdmin"]);
   const rp=await recovery.newPage();await rp.goto("/auth/login");await rp.getByRole("button",{name:"Emergency access",exact:true}).click();await rp.getByLabel("Password",{exact:true}).fill(process.env.BREAK_GLASS_PASSWORD!);await rp.getByLabel("Authenticator code").fill(totp(process.env.BREAK_GLASS_TOTP_SECRET!));await rp.getByRole("button",{name:"Sign in",exact:true}).click();await expect(rp).toHaveURL(/\/clusters(?:[/?#]|$)/);
   expect((await(await recovery.request.get("/api/v1/auth/me")).json()).email).toBe("break-glass@constellation.local");
   await rp.screenshot({path:test.info().outputPath("sso-only-recovery-engine-down.png"),fullPage:true});
