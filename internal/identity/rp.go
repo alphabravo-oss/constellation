@@ -13,20 +13,19 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
-	"sync"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
+	sharedrp "github.com/alphabravo-oss/identity/pkg/rp"
 
-	"github.com/alphabravocompany/constellation/internal/identity/jwks"
 	"github.com/alphabravocompany/constellation/pkg/rbac"
 )
 
 const MaxTokenLifetime = 10 * time.Minute
-const memoLimit = 10000
 
 type OIDCConfig struct {
+	Bundled      bool              `json:"-"`
 	IssuerURL    string            `json:"issuer_url"`
 	ClientID     string            `json:"client_id"`
 	ClientSecret string            `json:"-"`
@@ -80,77 +79,53 @@ type Principal struct {
 	Expires time.Time
 }
 
+// Verifier maps verified shared-identity roles to Constellation authorization.
+// Signature validation, JWKS refresh and bounded memoization belong to pkg/rp.
 type Verifier struct {
-	keys     *jwks.Cache
-	parser   *jwt.Parser
-	claim    string
-	mapping  map[string]string
-	clientID string
-	idToken  bool
-	mu       sync.Mutex
-	memo     map[string]*Principal
+	shared  *sharedrp.Verifier
+	mapping map[string]string
 }
 
-func newVerifier(keys *jwks.Cache, cfg OIDCConfig, audience string, idToken bool) *Verifier {
-	return &Verifier{keys: keys, parser: jwt.NewParser(jwt.WithIssuer(cfg.IssuerURL), jwt.WithAudience(audience), jwt.WithExpirationRequired(), jwt.WithIssuedAt(), jwt.WithValidMethods([]string{"RS256", "RS384", "RS512", "PS256", "ES256"})), claim: cfg.RolesClaim, mapping: cfg.RoleMapping, clientID: cfg.ClientID, idToken: idToken, memo: make(map[string]*Principal)}
+func newVerifier(ctx context.Context, client *http.Client, jwksURL string, cfg OIDCConfig, audience string, idToken bool) (*Verifier, error) {
+	c := sharedrp.Config{Issuer: cfg.IssuerURL, Audience: audience, JWKSURL: jwksURL, Product: "constellation", RolesClaim: cfg.RolesClaim, HTTPClient: client, MaxTokenLifetime: MaxTokenLifetime, Algorithms: []string{"RS256", "RS384", "RS512", "PS256", "ES256"}}
+	if idToken {
+		c.AuthorizedParty = cfg.ClientID
+	}
+	verifier, err := sharedrp.New(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	return &Verifier{shared: verifier, mapping: cfg.RoleMapping}, nil
 }
 
-// Verify memoizes successful signatures only. Expiry is checked on every cache hit.
-// Memory is bounded to 10k tokens; no request waits for discovery or a JWKS fetch.
 func (v *Verifier) Verify(raw string) (*Principal, error) {
-	if len(raw) > 16*1024 {
-		return nil, errors.New("token too large")
-	}
-	now := time.Now()
-	v.mu.Lock()
-	p := v.memo[raw]
-	v.mu.Unlock()
-	if p != nil && now.Before(p.Expires) {
-		return p, nil
-	}
-	claims := jwt.MapClaims{}
-	tok, err := v.parser.ParseWithClaims(raw, claims, v.keys.Keyfunc)
-	if err != nil || !tok.Valid {
+	i, err := v.shared.Verify(raw)
+	if err != nil {
 		return nil, errors.New("invalid OIDC token")
 	}
-	sub, _ := claims["sub"].(string)
-	exp, _ := claims.GetExpirationTime()
-	iat, _ := claims.GetIssuedAt()
-	if sub == "" || exp == nil || iat == nil || exp.Sub(iat.Time) > MaxTokenLifetime || !exp.After(now) {
-		return nil, errors.New("missing subject or invalid token lifetime (maximum 10 minutes)")
-	}
-	if v.idToken {
-		aud, _ := claims.GetAudience()
-		if len(aud) > 1 && claims["azp"] != v.clientID {
-			return nil, errors.New("invalid authorized party")
+	p := &Principal{Subject: i.Subject(), Email: i.Email(), Name: i.Name(), Nonce: i.Nonce(), Expires: i.Expires()}
+	seen := make(map[string]bool)
+	for _, source := range i.Roles() {
+		if role := v.mapping[source]; role != "" && !seen[role] {
+			seen[role] = true
+			p.Roles = append(p.Roles, role)
 		}
 	}
-	p = &Principal{Subject: sub, Expires: exp.Time}
-	p.Email, _ = claims["email"].(string)
-	p.Name, _ = claims["name"].(string)
-	p.Nonce, _ = claims["nonce"].(string)
-	p.Roles = v.mapRoles(claims[v.claim])
-	v.mu.Lock()
-	if len(v.memo) >= memoLimit {
-		clear(v.memo)
-	}
-	v.memo[raw] = p
-	v.mu.Unlock()
 	return p, nil
 }
 
 type metadata struct {
-	Issuer        string `json:"issuer"`
-	Authorization string `json:"authorization_endpoint"`
-	Token         string `json:"token_endpoint"`
-	JWKS          string `json:"jwks_uri"`
+	Issuer           string   `json:"issuer"`
+	Authorization    string   `json:"authorization_endpoint"`
+	Token            string   `json:"token_endpoint"`
+	JWKS             string   `json:"jwks_uri"`
+	TokenAuthMethods []string `json:"token_endpoint_auth_methods_supported"`
 }
 
 type RP struct {
 	cfg    OIDCConfig
 	meta   metadata
 	client *http.Client
-	Keys   *jwks.Cache
 	Access *Verifier
 	ID     *Verifier
 }
@@ -162,6 +137,7 @@ func NewRP(ctx context.Context, cfg OIDCConfig) (*RP, error) {
 	}
 	client := &http.Client{Timeout: 5 * time.Second}
 	r := &RP{cfg: cfg, client: client}
+	var err error
 	if err := r.request(ctx, http.MethodGet, strings.TrimRight(cfg.IssuerURL, "/")+"/.well-known/openid-configuration", nil, &r.meta); err != nil {
 		return nil, err
 	}
@@ -174,16 +150,23 @@ func NewRP(ctx context.Context, cfg OIDCConfig) (*RP, error) {
 			return nil, errors.New("OIDC discovery requires HTTPS endpoints")
 		}
 	}
-	r.Keys = jwks.New(r.meta.JWKS, client)
-	if err := r.Keys.Refresh(ctx); err != nil {
+	r.Access, err = newVerifier(ctx, client, r.meta.JWKS, cfg, cfg.Audience, false)
+	if err != nil {
 		return nil, errors.New("OIDC signing keys unavailable")
 	}
-	r.Access = newVerifier(r.Keys, cfg, cfg.Audience, false)
-	r.ID = newVerifier(r.Keys, cfg, cfg.ClientID, true)
+	r.ID, err = newVerifier(ctx, client, r.meta.JWKS, cfg, cfg.ClientID, true)
+	if err != nil {
+		return nil, errors.New("OIDC signing keys unavailable")
+	}
+
 	return r, nil
 }
 
 func (r *RP) request(ctx context.Context, method, endpoint string, form url.Values, out any) error {
+	basic := endpoint == r.meta.Token && r.cfg.ClientSecret != "" && slices.Contains(r.meta.TokenAuthMethods, "client_secret_basic")
+	if basic {
+		form.Del("client_secret")
+	}
 	var body io.Reader
 	if form != nil {
 		body = strings.NewReader(form.Encode())
@@ -191,6 +174,9 @@ func (r *RP) request(ctx context.Context, method, endpoint string, form url.Valu
 	req, err := http.NewRequestWithContext(ctx, method, endpoint, body)
 	if err != nil {
 		return errors.New("invalid OIDC request")
+	}
+	if basic {
+		req.SetBasicAuth(url.QueryEscape(r.cfg.ClientID), url.QueryEscape(r.cfg.ClientSecret))
 	}
 	if form != nil {
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -244,33 +230,4 @@ func (r *RP) Exchange(ctx context.Context, code, verifier, nonce string) (*Princ
 		return nil, errors.New("OIDC nonce mismatch")
 	}
 	return p, nil
-}
-
-func (v *Verifier) mapRoles(value any) []string {
-	var roles []string
-	values := value
-	// The platform emits {"constellation":[...]}; external providers may emit a flat array.
-	if projects, ok := values.(map[string]any); ok {
-		values = projects["constellation"]
-	}
-	var groups []string
-	switch a := values.(type) {
-	case string:
-		groups = []string{a}
-	case []any:
-		for _, x := range a {
-			if s, ok := x.(string); ok {
-				groups = append(groups, s)
-			}
-		}
-	}
-	seen := map[string]bool{}
-	for _, g := range groups {
-		if role := v.mapping[g]; role != "" && !seen[role] {
-			seen[role] = true
-			roles = append(roles, role)
-		}
-	}
-
-	return roles
 }

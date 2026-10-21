@@ -5279,6 +5279,7 @@ export interface LocalAuthPolicy {
 export interface IdentitySettings {
  local: LocalAuthPolicy;
  oidc: {issuer_url:string;client_id:string;audience:string;redirect_url:string;roles_claim:string;role_mapping:Record<string,string>;org_name:string;scopes:string[]} | null;
+ bundled_oidc?: IdentitySettings["oidc"];
  ready:boolean; revision:number;
  break_glass:{enabled:boolean;totp_required:boolean;session_seconds:number};
 }

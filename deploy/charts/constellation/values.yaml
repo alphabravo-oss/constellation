@@ -1142,6 +1142,34 @@ auditArchiver:
   # - name: AWS_ENDPOINT_URL_S3
   #   value: https://s3.us-gov-west-1.amazonaws.com
 
+# Optional shared identity layer. Local accounts remain enabled independently.
+# Set identity.zitadel.zitadel.configmapConfig.ExternalDomain and ingress TLS for
+# this install. Registry URLs are rendered by the identity chart from that host.
+identity:
+  enabled: false
+  secretPrefix: constellation-identity-product-
+  ingress:
+    className: nginx
+    tlsSecretName: constellation-tls
+  networkPolicy:
+    ingressPeers:
+      - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: ingress-nginx}}
+        podSelector: {matchLabels: {app.kubernetes.io/name: ingress-nginx}}
+    ingressPorts: [{port: 443}, {port: 80}]
+  products:
+    - slug: constellation
+      displayName: Constellation
+      branding:
+        Accent: '#0d9488'
+        AccentDark: '#2dd4bf'
+        Logo: 'https://{{ .Values.zitadel.zitadel.configmapConfig.ExternalDomain }}/icon.svg'
+      roles: [security-admin, analyst]
+      redirectURIs:
+        - 'https://{{ .Values.zitadel.zitadel.configmapConfig.ExternalDomain }}/api/v1/auth/oidc/callback'
+      groupRoles:
+        security-admin: [security-admin]
+        analyst: [analyst]
+
 # Human authentication. Local and OIDC can be enabled independently.
 # Values seed settings; later changes to these values replace the saved policy.
 auth:

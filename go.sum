@@ -18,6 +18,8 @@ github.com/Microsoft/go-winio v0.6.3 h1:M/52tsoyTfwaxajLnXZm7PqkbMGRH8iSWP+8fcg9
 github.com/Microsoft/go-winio v0.6.3/go.mod h1:ma0QpxizD4fyyzJ1C7MIblymTD2Nxz5Mho/3CepwIZg=
 github.com/agnivade/levenshtein v1.2.2 h1:fI8RgiztYX1Nn5pBHHqQ9EMCCklhrmXqPRIedFmx5M4=
 github.com/agnivade/levenshtein v1.2.2/go.mod h1:QVVI16kDrtSuwcpd0p1+xMC6Z/VfhtCyDIjcwga4/DU=
+github.com/alphabravo-oss/identity v0.1.2 h1:AEda5sFpYSgt+IwRsSFEz1ewUCPYnY4HdZVQLt+3r78=
+github.com/alphabravo-oss/identity v0.1.2/go.mod h1:gwM/g2KEoVfDq6WXy+UoNz7WcIF4qwSUHYxxvJQYHJg=
 github.com/anchore/go-rpmdb v0.2.2 h1:44VC7mvFAxV9t5JUZYg3S9sqG+E94iZvyWACMDq9hSk=
 github.com/anchore/go-rpmdb v0.2.2/go.mod h1:Y64EbetdqhryMjtk8IzXkdCQw/aNDx+feZCT9aj6rjs=
 github.com/antlr4-go/antlr/v4 v4.13.1 h1:SqQKkuVZ+zWkMMNkjy5FZe5mr5WURWnlpmOuzYWrPrQ=

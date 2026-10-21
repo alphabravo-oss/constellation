@@ -25,6 +25,12 @@ function IdentityForm({initial}:{initial:IdentitySettings}){
   try{const roleMapping:Record<string,string>=JSON.parse(mapping);await identitySettings.put({local,oidc:oidc?{...oidc,role_mapping:roleMapping}:null,revision:initial.revision,...(secret?{client_secret:secret}:{})});await cache.invalidateQueries({queryKey:["identity-settings"]});toast.success("Sign-in methods saved");}
   catch(err){setError(apiErrorText(err,"Unable to save sign-in methods"));}finally{setBusy(false);}
  }
+ const bundled=initial.bundled_oidc;
+ const bundledSelected=!!(oidc&&bundled&&oidc.issuer_url===bundled.issuer_url&&oidc.client_id===bundled.client_id);
+ function selectProvider(mode:string){
+  const next=mode==="off"?null:mode==="bundled"?bundled:{issuer_url:"",client_id:"",audience:"",redirect_url:window.location.origin+"/api/v1/auth/oidc/callback",roles_claim:"alphabravo_roles",role_mapping:{},org_name:"default",scopes:["openid","email","profile"]};
+  setOIDC(next??null);setSecret("");setMapping(JSON.stringify(next?.role_mapping??{},null,2));
+ }
  function provider(field:string,value:string){setOIDC(old=>old?{...old,[field]:value}:old);}
  return <PageContainer><PageHeader title="Sign-in methods" description="Choose local accounts, single sign-on, or both."/>
  <form onSubmit={save} className="space-y-6">
@@ -38,9 +44,11 @@ function IdentityForm({initial}:{initial:IdentitySettings}){
  {([ ["password_min_length","Minimum password length",12,128], ["session_seconds","Session lifetime (seconds)",60,86400], ["ip_rate","Attempts per IP per minute",1,100], ["account_rate","Failures before account backoff",1,20] ] as const).map(([field,label,min,max])=><Form.Field key={field} label={label}>{ids=><Form.Input {...ids} type="number" min={min} max={max} required value={local[field]} onChange={e=>setLocal({...local,[field]:Number(e.target.value)})}/>}</Form.Field>)}
  </div></div></Card>
  <Card title="Single sign-on provider (OIDC)"><div className="space-y-4">
- <Form.Field label="Single sign-on">{ids=><Form.Select {...ids} options={[{value:"off",label:"Unconfigured"},{value:"on",label:"Configured"}]} value={oidc?"on":"off"} onValueChange={v=>setOIDC(v==="off"?null:{issuer_url:"",client_id:"",audience:"",redirect_url:window.location.origin+"/api/v1/auth/oidc/callback",roles_claim:"alphabravo_roles",role_mapping:{},org_name:"default",scopes:["openid","email","profile"]})}/>}</Form.Field>
+ <Form.Field label="Single sign-on">{ids=><Form.Select {...ids} options={[{value:"off",label:"Disabled"},...(bundled?[{value:"bundled",label:"Bundled single sign-on"}]:[]),{value:"external",label:"External OIDC provider"}]} value={!oidc?"off":bundledSelected?"bundled":"external"} onValueChange={selectProvider}/>}</Form.Field>
+ {bundled&&<p className="text-sm text-muted-foreground">Bundled single sign-on is included with this installation. Users sign in on your branded page.</p>}
+ {bundledSelected&&<p className="text-sm">Issuer: {bundled?.issuer_url}</p>}
  <p className="text-sm text-muted-foreground">Status: {initial.oidc?(initial.ready?"Ready":"Provider unavailable"):"Unconfigured"}</p>
- {oidc&&<><div className="grid gap-4 sm:grid-cols-2">{([ ["issuer_url","Issuer URL"], ["client_id","Client ID"], ["audience","Audience"], ["redirect_url","Redirect URL"], ["roles_claim","Roles claim"] ] as const).map(([field,label])=><Form.Field label={label} key={field}>{ids=><Form.Input {...ids} required={field!=="audience"} value={oidc[field]} onChange={e=>provider(field,e.target.value)}/>}</Form.Field>)}<Form.Field label="Client secret" helper="Leave empty to keep the current secret.">{ids=><Form.Input {...ids} type="password" autoComplete="new-password" value={secret} onChange={e=>setSecret(e.target.value)}/>}</Form.Field></div>
+ {oidc&&!bundledSelected&&<><div className="grid gap-4 sm:grid-cols-2">{([ ["issuer_url","Issuer URL"], ["client_id","Client ID"], ["audience","Audience"], ["redirect_url","Redirect URL"], ["roles_claim","Roles claim"] ] as const).map(([field,label])=><Form.Field label={label} key={field}>{ids=><Form.Input {...ids} required={field!=="audience"} value={oidc[field]} onChange={e=>provider(field,e.target.value)}/>}</Form.Field>)}<Form.Field label="Client secret" helper="Leave empty to keep the current secret.">{ids=><Form.Input {...ids} type="password" autoComplete="new-password" value={secret} onChange={e=>setSecret(e.target.value)}/>}</Form.Field></div>
  <Form.Field label="Role mapping" helper="JSON object mapping exact claim values to product roles. Unmapped users have no access.">{ids=><Form.Textarea {...ids} value={mapping} onChange={e=>setMapping(e.target.value)}/>}</Form.Field></>}
  </div></Card>
  <Card title="Recovery administrator"><p className="text-sm">TOTP required. Session lifetime: {initial.break_glass.session_seconds/60} minutes.</p><p className="mt-2 text-sm text-muted-foreground">Every recovery sign-in emits a critical audit event and an operator alert.</p></Card>

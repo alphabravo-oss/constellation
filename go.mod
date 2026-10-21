@@ -4,6 +4,7 @@ go 1.27.3
 
 require (
 	filippo.io/age v1.3.2
+	github.com/alphabravo-oss/identity v0.1.2
 	github.com/anchore/go-rpmdb v0.2.2
 	github.com/aws/aws-sdk-go-v2 v1.47.3
 	github.com/aws/aws-sdk-go-v2/config v1.33.9

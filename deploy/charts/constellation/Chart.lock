@@ -1,0 +1,6 @@
+dependencies:
+- name: identity
+  repository: oci://ghcr.io/alphabravo-oss/charts
+  version: 0.1.2
+digest: sha256:d28fddde6656b60a9957721ccbb82d802f7a67511fc97de84e5ea8ef29897a5b
+generated: "2026-10-21T04:57:01.424596726Z"

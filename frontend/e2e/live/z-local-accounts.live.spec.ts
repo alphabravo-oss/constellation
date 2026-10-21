@@ -56,6 +56,7 @@ test("local off refuses normal login; recovery works without SSO and the critica
  try{
   await page.goto("/settings/identity");
   await page.getByLabel("Local sign-in",{exact:true}).click();await page.getByRole("option",{name:"Disabled",exact:true}).click();
+  await page.getByLabel("Single sign-on",{exact:true}).click();await page.getByRole("option",{name:"Disabled",exact:true}).click();
   const saved=page.waitForResponse(r=>r.url().endsWith("/api/v1/settings/identity")&&r.request().method()==="PUT");
   await page.getByRole("button",{name:"Save sign-in methods"}).click();expect((await saved).status()).toBe(200);
   const denied=await recovery.request.post("/api/v1/auth/local",{headers,data:{email:LIVE_EMAIL,password:LIVE_PASSWORD,totp:totp(process.env.LIVE_TOTP_SECRET!)}});expect(denied.status()).toBe(401);

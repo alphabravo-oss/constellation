@@ -209,6 +209,10 @@ spec:
      Without API-server egress no leader is elected, which silently stops flow
      rollups, auto-scans, learned groups, retention, and scheduled work. */}}
 {{ include "constellation.networkPolicyKubeAPIEgress" . | nindent 4 }}
+{{ if .Values.identity.enabled }}
+    - to: {{- toYaml .Values.identity.networkPolicy.ingressPeers | nindent 8 }}
+      ports: {{- toYaml .Values.identity.networkPolicy.ingressPorts | nindent 8 }}
+{{ end }}
 {{ end }}
 {{ if .Values.scanner.enabled }}
 ---
