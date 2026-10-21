@@ -267,6 +267,59 @@ func TestFreshSSOOnlyInstallStillBootstrapsRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+func TestChartDisablePermanentlyRevokesNormalSessions(t *testing.T) {
+	t.Parallel()
+	s, admin, c := testLocalService(t)
+	ctx := t.Context()
+	out, err := s.createUser(ctx, admin, "chart-policy@example.test", "Chart policy", "chart-policy-password-188!", rbac.RoleAnalyst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _, _, err := s.loginLocal(ctx, "chart-policy@example.test", out.Password, testCode(out.TOTPSecret, 0), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Enabled = false
+	if err = s.store.writeSettings(ctx, settingsRecord{Local: c}, columncrypto.Sealed{}, nil, s.audit); err != nil {
+		t.Fatal(err)
+	}
+	c.Enabled = true
+	if err = s.store.writeSettings(ctx, settingsRecord{Local: c}, columncrypto.Sealed{}, nil, s.audit); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.RefreshSessions(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Authenticate(ctx, raw); err == nil {
+		t.Fatal("re-enabling chart local policy resurrected a revoked cookie")
+	}
+	// Unchanged deployment defaults must still preserve a later UI policy edit.
+	c.Enabled = false
+	if err = s.store.writeSettings(ctx, settingsRecord{Local: c}, columncrypto.Sealed{}, nil, s.audit); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := s.store.readSettings(ctx, s.enc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved.Local.Enabled = true
+	if err = s.store.writeSettings(ctx, saved, columncrypto.Sealed{}, &admin, s.audit); err != nil {
+		t.Fatal(err)
+	}
+	raw, _, _, err = s.loginLocal(ctx, "chart-policy@example.test", out.Password, testCode(out.TOTPSecret, 1), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.store.writeSettings(ctx, settingsRecord{Local: c}, columncrypto.Sealed{}, nil, s.audit); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.RefreshSessions(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Authenticate(ctx, raw); err != nil {
+		t.Fatal("unchanged chart defaults overrode the saved UI policy", err)
+	}
+}
 func BenchmarkLocalSessionCheck(b *testing.B) {
 	s, admin, _ := testLocalService(b)
 	ctx := context.Background()

@@ -208,7 +208,10 @@ func (s Store) writeSettings(ctx context.Context, v settingsRecord, secret colum
 			if v.OIDC != nil {
 				fingerprint = tokenHash(fingerprint + v.OIDC.ClientSecret)
 			}
-			_, err := tx.Exec(ctx, `INSERT INTO identity_settings(local_config,oidc_config,client_secret,key_id,algorithm,deployment_hash) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(singleton) DO UPDATE SET local_config=EXCLUDED.local_config,oidc_config=EXCLUDED.oidc_config,client_secret=EXCLUDED.client_secret,key_id=EXCLUDED.key_id,algorithm=EXCLUDED.algorithm,deployment_hash=EXCLUDED.deployment_hash,revision=identity_settings.revision+1,updated_at=now() WHERE identity_settings.deployment_hash<>EXCLUDED.deployment_hash`, local, oidc, secret.Ciphertext, secret.KeyID, secret.Algorithm, fingerprint)
+			tag, err := tx.Exec(ctx, `INSERT INTO identity_settings(local_config,oidc_config,client_secret,key_id,algorithm,deployment_hash) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(singleton) DO UPDATE SET local_config=EXCLUDED.local_config,oidc_config=EXCLUDED.oidc_config,client_secret=EXCLUDED.client_secret,key_id=EXCLUDED.key_id,algorithm=EXCLUDED.algorithm,deployment_hash=EXCLUDED.deployment_hash,revision=identity_settings.revision+1,updated_at=now() WHERE identity_settings.deployment_hash<>EXCLUDED.deployment_hash`, local, oidc, secret.Ciphertext, secret.KeyID, secret.Algorithm, fingerprint)
+			if err == nil && tag.RowsAffected() > 0 && !v.Local.Enabled {
+				_, err = tx.Exec(ctx, `DELETE FROM identity_sessions WHERE kind='local'`)
+			}
 			return err
 		}
 		tag, err := tx.Exec(ctx, `UPDATE identity_settings SET local_config=$1,oidc_config=$2,client_secret=$3,key_id=$4,algorithm=$5,revision=revision+1,updated_at=now() WHERE singleton AND revision=$6`, local, oidc, secret.Ciphertext, secret.KeyID, secret.Algorithm, v.Revision)
