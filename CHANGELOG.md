@@ -15,6 +15,8 @@ All notable changes to this project are documented here. The format follows
 - Bounded session snapshots remove request-time SQL, check expiry per request and
   fail closed after one second without database freshness (250ms revocation polling).
   Migration 189 adds notifications and a replica acknowledgement barrier for new cookies.
+- Align API Go concurrency with its CPU quota to bound password-check latency
+  without lowering Argon2id cost. Explicit api.env.GOMAXPROCS remains supported.
 
 ### Identity (breaking)
 - One generic OIDC relying party with a configurable roles claim, exact role mapping,

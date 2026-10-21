@@ -126,6 +126,16 @@ spec:
 {{- end }}
             - name: CONSTELLATION_PCAP_RETENTION_ENABLED
               value: {{ ternary "true" "false" (and .Values.api.pcapStorage.enabled .Values.api.pcapStorage.retentionEnabled) | quote }}
+{{- if not (hasKey .Values.api.env "GOMAXPROCS") }}
+            # Go's automatic cgroup setting has a two-thread floor. Matching the
+            # CPU limit avoids quota throttling during bounded Argon2 work.
+            - name: GOMAXPROCS
+              valueFrom:
+                resourceFieldRef:
+                  containerName: api
+                  resource: limits.cpu
+                  divisor: "1"
+{{- end }}
 {{- range $k, $v := .Values.api.env }}
 {{- if and (ne $k "CONSTELLATION_PCAP_RETENTION_ENABLED") (not (and $.Values.complianceScheduler.enabled (eq $k "REPORT_OUT_DIR"))) (not (and $.Values.api.pcapStorage.enabled (eq $k "CONSTELLATION_DATA_DIR"))) }}
             - name: {{ $k }}

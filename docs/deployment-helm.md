@@ -942,7 +942,10 @@ is no email-delivery dependency. Settings → Sign-in methods controls local log
 OIDC, the visible choices, password length, session lifetime and TOTP policy.
 TOTP is required for everyone by default; `admins` always requires it for the
 three administrator roles and recovery. The offline NCSC top-100k list is embedded
-in the API; password checks make no network request. The default minimum is 16
+in the API; password checks make no network request. The API defaults GOMAXPROCS to the CPU limit (rounded up), avoiding the runtime’s
+two-thread floor and quota throttling during password verification. An explicit
+`api.env.GOMAXPROCS` overrides it. Argon2 parameters remain 64 MiB / three passes /
+four lanes. The default minimum is 16
 characters (configurable 12–128), with a 4096-byte input bound.
 
 Normal local sessions default to one hour (configurable 60–86400 seconds).
