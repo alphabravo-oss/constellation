@@ -1,0 +1,31 @@
+# Measured single-node constellation-dev profile, 2026-10-21.
+# See docs/efficiency.md for workload, units, evidence and conservative headroom.
+# Merge after this installation's normal values, never as a universal sizing rule.
+api:
+  resources:
+    requests: {cpu: 200m, memory: 128Mi}
+    limits: {cpu: '1', memory: 768Mi}
+admission:
+  resources:
+    requests: {cpu: 25m, memory: 64Mi}
+    limits: {cpu: 500m, memory: 256Mi}
+discoverer:
+  resources:
+    requests: {cpu: 25m, memory: 48Mi}
+    limits: {cpu: 300m, memory: 192Mi}
+operator:
+  resources:
+    requests: {cpu: 10m, memory: 48Mi}
+    limits: {cpu: 500m, memory: 256Mi}
+runtimeAgent:
+  resources:
+    requests: {cpu: 600m, memory: 256Mi}
+    limits: {cpu: '1', memory: 1Gi}
+scanner:
+  resources:
+    requests: {cpu: 250m, memory: 2Gi}
+    limits: {cpu: '2', memory: 6Gi}
+complianceScheduler:
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {cpu: '1', memory: 256Mi}

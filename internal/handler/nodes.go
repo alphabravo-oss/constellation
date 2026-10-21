@@ -13,6 +13,7 @@ import (
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler/inventorylist"
+	"github.com/alphabravocompany/constellation/internal/nodeinventory"
 )
 
 // Nodes aggregates NeuVector-style host posture around a Kubernetes node:
@@ -163,114 +164,7 @@ func (h *Nodes) clusterIDFromRoute(w http.ResponseWriter, r *http.Request, orgID
 	return clusterID, true
 }
 
-const nodeSummarySQL = `
-WITH node_names AS (
-    SELECT node FROM host_facts WHERE org_id = $1 AND cluster_id = $2
-    UNION SELECT node FROM host_packages WHERE org_id = $1 AND cluster_id = $2
-    UNION SELECT node FROM host_cis WHERE org_id = $1 AND cluster_id = $2
-    UNION SELECT node FROM host_containers WHERE org_id = $1 AND cluster_id = $2
-    UNION SELECT node FROM host_processes WHERE org_id = $1 AND cluster_id = $2
-    UNION SELECT ref AS node FROM scan_targets WHERE org_id = $1 AND cluster_id = $2 AND type = 'host'
-    UNION SELECT target_ref AS node FROM findings WHERE org_id = $1 AND cluster_id = $2 AND target_type = 'host'
-    UNION SELECT target_ref AS node FROM findings WHERE org_id = $1 AND COALESCE(target_cluster_id, cluster_id) = $2 AND target_type = 'host'
-)
-SELECT n.node,
-       COALESCE(hf.os_id, ''), COALESCE(hf.os_version_id, ''), COALESCE(hf.kernel_release, ''),
-       COALESCE(hf.arch, ''), COALESCE(hf.cni_name, ''), COALESCE(hf.cri_runtime, ''),
-       hf.btf_present, hf.nfqueue_capable,
-       COALESCE(hf.cpu_count, 0), COALESCE(hf.memory_bytes, 0),
-       COALESCE(hp.package_count, 0), COALESCE(hp.source, ''),
-       COALESCE(hc.container_count, 0), COALESCE(hpr.process_count, 0),
-       COALESCE(cis.profile, ''), COALESCE(cis.passed, 0), COALESCE(cis.failed, 0),
-       COALESCE(cis.warned, 0), COALESCE(cis.skipped, 0),
-       COALESCE(v.critical, 0), COALESCE(v.high, 0), COALESCE(v.medium, 0), COALESCE(v.low, 0), COALESCE(v.total, 0),
-       COALESCE(hb.version, ''), hb.last_seen_at,
-       st.id, COALESCE(st.inventory_hash, ''), COALESCE(sj.status, ''), sj.finished_at,
-       hf.observed_at, hp.observed_at, hc.observed_at, hpr.observed_at, cis.observed_at,
-       GREATEST(
-           COALESCE(hf.observed_at, 'epoch'::timestamptz),
-           COALESCE(hp.observed_at, 'epoch'::timestamptz),
-           COALESCE(hc.observed_at, 'epoch'::timestamptz),
-           COALESCE(hpr.observed_at, 'epoch'::timestamptz),
-           COALESCE(cis.observed_at, 'epoch'::timestamptz),
-           COALESCE(hb.last_seen_at, 'epoch'::timestamptz),
-           COALESCE(sj.finished_at, 'epoch'::timestamptz)
-       ) AS node_last_seen_at
-  FROM node_names n
-  LEFT JOIN LATERAL (
-      SELECT os_id, os_version_id, kernel_release, arch, btf_present, nfqueue_capable,
-             cni_name, cri_runtime, observed_at,
-             (facts->'hardware'->>'cpu_count')::int      AS cpu_count,
-             (facts->'hardware'->>'memory_bytes')::bigint AS memory_bytes
-        FROM host_facts
-       WHERE org_id = $1 AND cluster_id = $2 AND node = n.node
-       ORDER BY observed_at DESC LIMIT 1
-  ) hf ON true
-  LEFT JOIN LATERAL (
-      SELECT package_count, source, observed_at
-        FROM host_packages
-       WHERE org_id = $1 AND cluster_id = $2 AND node = n.node
-       ORDER BY observed_at DESC LIMIT 1
-  ) hp ON true
-  LEFT JOIN LATERAL (
-      SELECT container_count, observed_at
-        FROM host_containers
-       WHERE org_id = $1 AND cluster_id = $2 AND node = n.node
-       ORDER BY observed_at DESC LIMIT 1
-  ) hc ON true
-  LEFT JOIN LATERAL (
-      SELECT process_count, observed_at
-        FROM host_processes
-       WHERE org_id = $1 AND cluster_id = $2 AND node = n.node
-       ORDER BY observed_at DESC LIMIT 1
-  ) hpr ON true
-  LEFT JOIN LATERAL (
-      SELECT profile, passed, failed, warned, skipped, observed_at
-        FROM host_cis
-       WHERE org_id = $1 AND cluster_id = $2 AND node = n.node
-       ORDER BY observed_at DESC LIMIT 1
-  ) cis ON true
-  LEFT JOIN LATERAL (
-      SELECT COUNT(*)::int AS total,
-             COUNT(*) FILTER (WHERE severity = 'critical')::int AS critical,
-             COUNT(*) FILTER (WHERE severity = 'high')::int AS high,
-             COUNT(*) FILTER (WHERE severity = 'medium')::int AS medium,
-             COUNT(*) FILTER (WHERE severity = 'low')::int AS low
-        FROM findings
-       WHERE org_id = $1
-         AND target_type = 'host'
-         AND target_ref = n.node
-         AND kind = 'vulnerability'
-         AND lifecycle = 'open'
-         AND (cluster_id = $2 OR (NOT $4 AND COALESCE(target_cluster_id, cluster_id) = $2))
-  ) v ON true
-  LEFT JOIN LATERAL (
-      SELECT version, last_seen_at
-        FROM component_heartbeats
-       WHERE org_id = $1
-         AND cluster_id = $2
-         AND component = 'runtime-agent'
-         AND hostname = n.node
-       ORDER BY last_seen_at DESC LIMIT 1
-  ) hb ON true
-  LEFT JOIN LATERAL (
-      SELECT id, inventory_hash
-        FROM scan_targets
-       WHERE org_id = $1 AND cluster_id = $2 AND type = 'host' AND ref = n.node
-       ORDER BY last_seen_at DESC LIMIT 1
-  ) st ON true
-  LEFT JOIN LATERAL (
-      SELECT status, finished_at
-        FROM scan_jobs
-       WHERE org_id = $1 AND target_id = st.id
-       ORDER BY requested_at DESC LIMIT 1
-  ) sj ON true
- WHERE NULLIF(BTRIM(n.node),'') IS NOT NULL AND ($3 = '' OR n.node = $3)
-   AND (NOT $4 OR (NULLIF(BTRIM(n.node), '') IS NOT NULL AND EXISTS (
-       SELECT 1 FROM findings f
-        WHERE f.org_id = $1 AND f.cluster_id = $2 AND f.target_type = 'host'
-          AND f.target_ref = n.node AND f.kind = 'vulnerability' AND f.lifecycle = 'open'
-   )))`
+const nodeSummarySQL = nodeinventory.SummarySQL
 
 func (h *Nodes) nodeSummaries(r *http.Request, orgID, clusterID uuid.UUID, nodeFilter string, hostCVEs bool, limit, offset int) ([]NodeSummary, error) {
 	rows, err := h.db.Pool().Query(r.Context(), nodeSummarySQL+` ORDER BY node_last_seen_at DESC, n.node LIMIT $5 OFFSET $6`, orgID, clusterID, nodeFilter, hostCVEs, limit, offset)

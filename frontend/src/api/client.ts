@@ -1747,8 +1747,22 @@ export interface PlatformFactsResponse {
   }>;
 }
 
+// Pickers and existing client-side tables need the complete set. Fetch bounded
+// server pages so no individual request or response grows with the organization.
+async function readAllPages<T>(path: string, key: string, params: Record<string, unknown> = {}): Promise<T[]> {
+  const all: T[] = [];
+  let hasMore = true;
+  while (hasMore) {
+    const { data } = await api.get<Record<string, unknown>>(path, { params: { ...params, limit: 500, offset: all.length } });
+    const items = data[key] as T[];
+    all.push(...items);
+    hasMore = Boolean(data.has_more) && items.length > 0;
+  }
+  return all;
+}
+
 export const clusters = {
-  list: (params?: { workload_scope?: "application" | "all" | "constellation" }) => api.get<{ clusters: ClusterSummary[] }>("/clusters", { params }).then((r) => r.data),
+  list: async (params?: { workload_scope?: "application" | "all" | "constellation" }) => ({ clusters: await readAllPages<ClusterSummary>("/clusters", "clusters", params) }),
   getOne: (id: string) => api.get<ClusterDetail>(`/clusters/${id}`).then((r) => r.data),
   health: (id: string) => api.get<ClusterHealth>(`/clusters/${id}/health`).then((r) => r.data),
   platformFacts: (id: string) => api.get<PlatformFactsResponse>(`/clusters/${id}/platform-facts`).then((r) => r.data),
@@ -3071,8 +3085,7 @@ export const runtimePolicies = {
   disableReviewed: (id: string, body: RuntimePolicyReview) => api.post<RuntimePolicy>(`/runtime-policies/${encodeURIComponent(id)}/reviewed/disable`, body).then(r => r.data),
   removeReviewed: (id: string, body: RuntimePolicyReview) => api.delete<RuntimePolicyDeleteReceipt>(`/runtime-policies/${encodeURIComponent(id)}/reviewed`, { data: body }).then(r => r.data),
   list: (cluster_id: string) =>
-    api.get<{ policies: RuntimePolicy[] }>("/runtime-policies", { params: { cluster_id } })
-      .then((r) => r.data.policies),
+    readAllPages<RuntimePolicy>("/runtime-policies", "policies", { cluster_id }),
   get: (id: string) =>
     api.get<RuntimePolicy>(`/runtime-policies/${encodeURIComponent(id)}`).then((r) => r.data),
   create: (body: {
@@ -5058,7 +5071,7 @@ export interface PolicySimulation {
 
 export const policies = {
   list:   (params: { cluster_id?: string } = {}) =>
-    api.get<{ policies: Policy[] }>("/policies", { params }).then((r) => r.data),
+    readAllPages<Policy>("/policies", "policies", params).then((policies) => ({ policies })),
   admissionProfiles: () =>
     api.get<{ profiles: AdmissionProfile[] }>("/policies/admission-profiles").then((r) => r.data),
   exportAdmissionProfile: (profile: string) =>
@@ -5810,7 +5823,7 @@ export interface GroupUsage {
 
 export const groupsApi = {
   list:   (params: { cluster_id?: string } = {}) =>
-    api.get<{ groups: Group[] }>("/groups", { params }).then((r) => r.data),
+    readAllPages<Group>("/groups", "groups", params).then((groups) => ({ groups })),
   usage: (id: string, params: { cluster_id?: string } = {}) =>
     api.get<GroupUsage>(`/groups/${id}/usage`, { params }).then((r) => r.data),
   create: (body: Omit<Group, "id"|"created_at"|"updated_at">, params: { cluster_id?: string } = {}) =>

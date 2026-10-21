@@ -81,6 +81,8 @@ scripts/check-chart-images.sh "$published_chart"
 mapfile -t refs < <(CHECK_IMAGES_LIST_ONLY=1 scripts/check-chart-images.sh "$published_chart")
 refs+=("$registry/kube-bench-runner:$release_tag")
 for ref in "${refs[@]}"; do
+  role="${ref##*/}"; role="${role%%[:@]*}"
+  scripts/check-image-size.sh "$role" "$ref"
   verify_sig "$ref"
   if [[ -n "${COSIGN_KEY:-}" ]]; then
     docker buildx imagetools inspect "$ref" --format '{{json .Provenance}}' \

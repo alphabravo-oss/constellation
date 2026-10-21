@@ -124,7 +124,7 @@ func networkRuleInventoryDefinition(org, cluster uuid.UUID, f networkRuleInvento
  WHERE w.from_ep IS NOT NULL OR a.cfg_type='user_created'
  ) SELECT jsonb_build_array(m.from_ep,m.to_ep)::text,network_rule_display_id(m.from_ep,m.to_ep),m.*,
  ` + handler.EvidencePlatformRoleSQL("$1::uuid", "$2::uuid", "m.from_ep", "''") + `,` + handler.EvidencePlatformRoleSQL("$1::uuid", "$2::uuid", "m.to_ep", "''") + ` FROM merged m`
-	d := inventorylist.Definition{SQL: sql, Columns: "id,display_id,from_ep,to_ep,ports,applications,action,disable,comment,priority,learned,cfg_type,match_counter,last_match_timestamp,from_platform_role,to_platform_role", Args: []any{org, cluster}, Summary: `jsonb_build_object('total',count(*),'allow',count(*) FILTER(WHERE action='allow'),'deny',count(*) FILTER(WHERE action='deny'),'learned',count(*) FILTER(WHERE learned),'disabled',count(*) FILTER(WHERE disable))`}
+	d := inventorylist.Definition{SinglePass: true, SQL: sql, Columns: "id,display_id,from_ep,to_ep,ports,applications,action,disable,comment,priority,learned,cfg_type,match_counter,last_match_timestamp,from_platform_role,to_platform_role", Args: []any{org, cluster}, Summary: `jsonb_build_object('total',count(*),'allow',count(*) FILTER(WHERE action='allow'),'deny',count(*) FILTER(WHERE action='deny'),'learned',count(*) FILTER(WHERE learned),'disabled',count(*) FILTER(WHERE disable))`}
 	predicates := []string{"true"}
 	bind := func(value any) string { d.Args = append(d.Args, value); return fmt.Sprintf("$%d", len(d.Args)) }
 	if f.Q != "" {

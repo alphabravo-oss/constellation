@@ -50,7 +50,16 @@ func (f *Findings) ByCVE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	args = append(args, limit, offset)
+	// Choose the CVE page using cheap grouping before collecting package/detail
+	// arrays. Aggregating every occurrence for every CVE wasted most of this query.
 	rows, err := f.db.Pool().Query(r.Context(), `
+WITH candidates AS MATERIALIZED (
+ SELECT external_id,max(risk_score) AS sort_risk FROM findings WHERE `+where+`
+ GROUP BY external_id`+having+` ORDER BY max(risk_score) DESC,external_id
+ LIMIT $`+strconv.Itoa(len(args)-1)+` OFFSET $`+strconv.Itoa(len(args))+`
+), page_findings AS MATERIALIZED (
+ SELECT findings.* FROM findings JOIN candidates USING(external_id) WHERE `+where+`
+)
 SELECT external_id,
        (array_agg(severity ORDER BY risk_score DESC))[1]                              AS severity,
        max(risk_score)                                                                AS risk_score,
@@ -75,10 +84,9 @@ SELECT external_id,
           FILTER (WHERE COALESCE(detail_json->>'cvss_vector','') <> ''))[1]            AS cvss_vector,
        bool_or(lower(COALESCE(detail_json->>'kev','')) IN ('true','t','1','yes'))      AS kev,
        bool_or(`+findingFixableSQL+`) AS has_fix
-  FROM findings WHERE `+where+`
- GROUP BY external_id`+having+`
- ORDER BY max(risk_score) DESC, external_id
- LIMIT $`+strconv.Itoa(len(args)-1)+` OFFSET $`+strconv.Itoa(len(args)), args...)
+  FROM page_findings
+ GROUP BY external_id
+ ORDER BY max(risk_score) DESC, external_id`, args...)
 	if err != nil {
 		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return

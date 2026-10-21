@@ -112,11 +112,20 @@ func ReadAllScoped(ctx context.Context, pool *pgxpool.Pool, org uuid.UUID, scope
 }
 
 func read(ctx context.Context, pool *pgxpool.Pool, org uuid.UUID, cluster *uuid.UUID, scope string) (map[uuid.UUID]Counts, error) {
+	return readSelected(ctx, pool, org, cluster, scope, nil)
+}
+func readSelected(ctx context.Context, pool *pgxpool.Pool, org uuid.UUID, cluster *uuid.UUID, scope string, clusters []uuid.UUID) (map[uuid.UUID]Counts, error) {
 	predicate, err := platformrole.ScopeSQL(scope, platformrole.ConstellationFindingSQL("f"))
 	if err != nil {
 		return nil, err
 	}
-	rows, err := pool.Query(ctx, strings.Replace(countsSQL, "/* finding_scope */", "AND ("+predicate+")", 1), org, cluster)
+	query := strings.Replace(countsSQL, "/* finding_scope */", "AND ("+predicate+")", 1)
+	args := []any{org, cluster}
+	if clusters != nil {
+		query = strings.Replace(query, "WHERE c.org_id=$1 AND", "WHERE c.org_id=$1 AND c.id=ANY($3::uuid[]) AND", 1)
+		args = append(args, clusters)
+	}
+	rows, err := pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -135,4 +144,9 @@ func read(ctx context.Context, pool *pgxpool.Pool, org uuid.UUID, cluster *uuid.
 		out[id] = c
 	}
 	return out, rows.Err()
+}
+
+// ReadClustersScoped confines exposure aggregation to the returned cluster page.
+func ReadClustersScoped(ctx context.Context, pool *pgxpool.Pool, org uuid.UUID, clusters []uuid.UUID, scope string) (map[uuid.UUID]Counts, error) {
+	return readSelected(ctx, pool, org, nil, scope, clusters)
 }

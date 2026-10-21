@@ -19,6 +19,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/alphabravocompany/constellation/internal/api/page"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 
@@ -63,6 +65,11 @@ type UpdatePolicyRequest struct {
 
 // List handles GET /api/v1/runtime-policies?cluster_id=...&namespace=...
 func (h *RuntimePoliciesHTTP) List(w http.ResponseWriter, r *http.Request) {
+	pagination, err := page.Parse(r.URL.Query())
+	if err != nil {
+		jsonError(w, 400, err.Error())
+		return
+	}
 	sub, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
 		jsonError(w, http.StatusUnauthorized, "auth required")
@@ -82,12 +89,16 @@ func (h *RuntimePoliciesHTTP) List(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, 404, "cluster not found")
 		return
 	}
-	rows, err := h.store.ListInventoryForCluster(r.Context(), sub.OrgID, clusterID)
+	rows, err := h.store.ListInventoryPage(r.Context(), sub.OrgID, clusterID, pagination.Limit+1, pagination.Offset)
 	if err != nil {
 		jsonError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"policies": rows})
+	hasMore := len(rows) > pagination.Limit
+	if hasMore {
+		rows = rows[:pagination.Limit]
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"policies": rows, "has_more": hasMore, "limit": pagination.Limit, "offset": pagination.Offset})
 }
 
 // Get handles GET /api/v1/runtime-policies/{id}.

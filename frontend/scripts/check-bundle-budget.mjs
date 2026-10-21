@@ -1,5 +1,5 @@
 import { log } from "node:console";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { gzipSync } from "node:zlib";
 
@@ -21,3 +21,6 @@ for (const file of files) total += gzipSync(await readFile(resolve(root, file)))
 const budget = 250_000;
 log(`Initial JavaScript: ${total} bytes gzip / ${budget} bytes (${files.size} static chunks)`);
 if (total > budget) throw new Error("Initial JavaScript exceeds the 250 KB gzip budget");
+
+const chunks = await Promise.all(Object.entries(manifest).filter(([, chunk]) => chunk.file.endsWith(".js")).map(async ([source, chunk]) => ({ source, file: chunk.file, initial: files.has(chunk.file), gzip_bytes: gzipSync(await readFile(resolve(root, chunk.file))).length })));
+await writeFile(resolve(root, "bundle-report.json"), JSON.stringify({ initial_gzip_bytes: total, budget_bytes: budget, chunks }, null, 2));
