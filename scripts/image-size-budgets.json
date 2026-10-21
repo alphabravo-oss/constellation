@@ -9,7 +9,7 @@
   "toolbox": {"bytes":65000000,"reason":"Required age, kubectl, rclone and archive utilities"},
   "runtime-agent": {"bytes":90000000,"reason":"Native dataplane, BPF object, crictl and required networking libraries/tools"},
   "compliance-scheduler": {"bytes":60000000,"reason":"Static worker plus required offline cosign signing tool"},
-  "audit-archiver": {"bytes":70000000,"reason":"Archiver plus required cosign and runtime certificates"},
+  "audit-archiver": {"bytes":45000000,"reason":"Archiver plus required cosign and runtime certificates"},
   "kube-bench-runner": {"bytes":60000000,"reason":"Worker, kube-bench and benchmark definitions"},
   "postgres": {"bytes":280000000,"reason":"CNPG PostgreSQL operand and vector extension"}
 }
