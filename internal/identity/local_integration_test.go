@@ -77,7 +77,8 @@ func TestLocalLifecycleAndRevocation(t *testing.T) {
 	if err != nil || string(plain) != out.TOTPSecret {
 		t.Fatal("TOTP triple cannot be opened", err)
 	}
-	analyst, _, _, err := s.loginLocal(ctx, "analyst@example.test", out.Password, testCode(out.TOTPSecret, 0), false)
+	loginCode := testCode(out.TOTPSecret, 0)
+	analyst, _, _, err := s.loginLocal(ctx, "analyst@example.test", out.Password, loginCode, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +92,7 @@ func TestLocalLifecycleAndRevocation(t *testing.T) {
 	if err = rbac.Authorize(subj.Assignments, rbac.VerbManageUsers, rbac.Resource{OrgID: subj.OrgID}); err == nil {
 		t.Fatal("analyst acquired administrator access")
 	}
-	if _, _, _, err = s.loginLocal(ctx, "analyst@example.test", out.Password, testCode(out.TOTPSecret, 0), false); err == nil {
+	if _, _, _, err = s.loginLocal(ctx, "analyst@example.test", out.Password, loginCode, false); err == nil {
 		t.Fatal("TOTP replay accepted")
 	}
 	if _, err = s.mutateUser(ctx, admin, out.ID, "disable", ""); err != nil {
