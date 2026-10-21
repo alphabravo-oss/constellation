@@ -47,7 +47,8 @@ graph dependencies out of the initial graph.
 `scripts/check-image-size.sh ROLE IMAGE` checks compressed registry layer bytes
 for linux/amd64. Release promotion and published-release verification both call
 it. `scripts/image-size-budgets.json` caps static Go services at 40,000,000 bytes
-and documents bounded tooling exceptions. Compliance scheduling requires cosign;
+and documents bounded tooling exceptions. The audit archiver runtime is also
+distroless; its required signing CLI remains present. Compliance scheduling requires cosign;
 scanner, toolbox, native runtime agent, benchmark runner and PostgreSQL retain
 their required tools/libraries. This is a registry transfer budget, not a claim
 that extracted filesystems or mapped executable pages are below 40 MB.
