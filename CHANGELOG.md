@@ -5,15 +5,27 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Local accounts
+- First-class local accounts by default, independent OIDC, or both; editable sign-in
+  policy, Users administration and operator CLI. Generated retained bootstrap Secret.
+- Reuse Argon2id, one-use TOTP, age encryption and existing roles; embedded offline
+  NCSC breached-password rejection, shared IP limits and exponential account backoff.
+- Migration 188 preserves the current recovery credentials and enforces one protected
+  recovery administrator. Normal local access can be disabled without losing recovery.
+- Bounded session snapshots remove request-time SQL, check expiry per request and
+  fail closed after one second without database freshness (250ms revocation polling).
+  Migration 189 adds notifications and a replica acknowledgement barrier for new cookies.
+- Align API Go concurrency with its CPU quota to bound password-check latency
+  without lowering Argon2id cost. Explicit api.env.GOMAXPROCS remains supported.
+
 ### Identity (breaking)
 - One generic OIDC relying party with a configurable roles claim, exact role mapping,
   bounded verification memoization and last-good JWKS caching. Tokens last at most ten minutes.
 - Secret-enabled emergency administrator with Argon2id, mandatory one-use TOTP,
   a cross-replica rate limit, a short session, critical audit events and an operator alert.
-- Remove SAML, LDAP, provider-type CRUD, ordinary local passwords, password policy,
-  local refresh tokens, the Astronomer adapter and the unused password-bootstrap image.
+- Remove SAML, LDAP, provider-type CRUD, legacy local refresh tokens, the Astronomer adapter and the unused password-bootstrap image.
   Take a CNPG backup before forward-only migration 187; roll API and UI together.
-- Replace old authentication chart settings with `auth.oidc.*` and `auth.breakGlass.*`.
+- Replace old authentication chart settings with `auth.local.*`, `auth.oidc.*` and `auth.breakGlass.*`.
   The shared-kit settings page displays configuration without exposing secrets.
 - Preserve lazy route dependencies and enforce initial JavaScript ≤250 KB gzip in `make check`.
 

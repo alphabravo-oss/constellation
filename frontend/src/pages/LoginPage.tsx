@@ -27,6 +27,7 @@ export function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useRouteSearchParams();
+  const [email, setEmail] = useState("");
   const [totp, setTOTP] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -43,12 +44,12 @@ export function LoginPage() {
     e.preventDefault();
     setSubmitting(true);
     try {
-      await login(password, totp);
+      await login(email, password, totp, emergency);
       const returnTo = searchParams.get("returnTo");
       const nextPath = loginReturnPath(returnTo);
       navigate({ href: nextPath, replace: true });
     } catch (err) {
-      toast.error("Login failed");
+      toast.error("Sign-in failed. Check your credentials or try again after the cooldown.");
       console.error(err);
     } finally {
       setSubmitting(false);
@@ -109,14 +110,15 @@ export function LoginPage() {
 
           <div className="space-y-2 text-center lg:text-left">
             <h2 className="text-2xl font-semibold tracking-tight text-foreground">Sign in to Constellation</h2>
-            <p className="text-sm text-muted-foreground">{"Use your organization’s single sign-on to continue."}</p>
+            <p className="text-sm text-muted-foreground">Use your local account or your organization’s single sign-on.</p>
           </div>
 
           {hasSSO && <Button type="button" intent="primary" className="w-full" onClick={onOIDC}>Continue with SSO</Button>}
-          {providers?.break_glass && <Button type="button" intent="ghost" className="w-full" onClick={() => setEmergency(!emergency)}>Emergency access</Button>}
-          {emergency && providers?.break_glass && <>
-          <p className="text-sm text-muted-foreground">Break-glass administrator. Every use is audited and alerts your operators.</p>
+          {providers?.break_glass && <Button type="button" intent="ghost" className="w-full" onClick={() => setEmergency(!emergency)}>{emergency ? "Use normal sign-in" : "Emergency access"}</Button>}
+          {(providers?.local || (emergency && providers?.break_glass)) && <>
+          {emergency && <p className="text-sm text-muted-foreground">Recovery administrator. Every use is audited and alerts your operators.</p>}
           <form onSubmit={onSubmit} className="space-y-4">
+            {!emergency && <Form.Field label="Email" id="login-email" required>{ids => <Form.Input {...ids} type="email" autoComplete="username" required value={email} onChange={e=>setEmail(e.target.value)} />}</Form.Field>}
             <div className="space-y-1.5">
               <label htmlFor="login-password" className="text-sm font-medium text-foreground">Password</label>
               <div className="relative">
@@ -143,7 +145,7 @@ export function LoginPage() {
 
             <div className="space-y-1.5">
               <label htmlFor="login-totp" className="text-sm font-medium">Authenticator code</label>
-              <Form.Input id="login-totp" value={totp} onChange={e=>setTOTP(e.target.value)} inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" required />
+              <Form.Input id="login-totp" value={totp} onChange={e=>setTOTP(e.target.value)} inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" required={emergency || providers?.totp_policy === "everyone"} />
             </div>
             <Button type="submit" intent="primary" disabled={submitting} className="h-10 w-full">
               {submitting ? "Signing in…" : "Sign in"}

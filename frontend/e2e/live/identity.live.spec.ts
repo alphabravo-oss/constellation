@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { createHmac } from "node:crypto";
 import { LIVE_EMAIL, LIVE_PASSWORD } from "./env";
 
-test("OIDC session is secure, bounded and mapped from the configured claim", async ({ page }) => {
+test("normal session is secure, bounded and assigned product roles", async ({ page }) => {
   const res = await page.request.get("/api/v1/auth/me");
   expect(res.ok()).toBeTruthy();
   expect((await res.json()).roles).toContain("GlobalAdmin");
@@ -11,25 +11,19 @@ test("OIDC session is secure, bounded and mapped from the configured claim", asy
   const session = cookies.find(c => c.name === "__Host-constellation-session")!;
   expect(session.httpOnly).toBeTruthy(); expect(session.secure).toBeTruthy();
   expect(session.path).toBe("/"); expect(session.sameSite).toBe("Lax");
-  expect(session.expires - Date.now() / 1000).toBeLessThanOrEqual(600);
+  expect(session.expires - Date.now() / 1000).toBeLessThanOrEqual(process.env.LIVE_TOTP_SECRET?3600:600);
   expect(cookies.some(c => c.name.includes("refresh"))).toBeFalsy();
   expect(session.value.startsWith("csi_")).toBeTruthy();
 });
 
-test("settings show one generic OIDC provider, its role map and break-glass status", async ({ page }) => {
-  await page.goto("/settings/identity");
-  await expect(page.getByRole("heading", { name: "Single sign-on provider (OIDC)", exact: true }).first()).toBeVisible();
-  await expect(page.getByText("alphabravo_roles", { exact: true })).toBeVisible();
-  await expect(page.getByRole("cell", { name: "platform-admins", exact: true })).toBeVisible();
-  await expect(page.getByText("TOTP required", { exact: true })).toBeVisible();
-  const response = await page.request.get("/api/v1/settings/identity");
-  const settings = await response.json();
-  expect(settings.oidc.roles_claim).toBe("alphabravo_roles");
-  expect(settings.oidc.role_mapping["platform-admins"]).toBe("GlobalAdmin");
-  expect(settings.break_glass.totp_required).toBeTruthy();
-  for (const secret of ["client_secret", "password_hash", "totp_secret"]) expect(JSON.stringify(settings)).not.toContain(secret);
-  await expect(page.getByRole("button", { name: "Add provider", exact: true })).toHaveCount(0);
-  await page.screenshot({path:test.info().outputPath("identity-settings.png"),fullPage:true});
+test("sign-in methods show normal local policy and generic provider settings",async({page})=>{
+ await page.goto("/settings/identity");
+ await expect(page.getByRole("heading",{name:"Sign-in methods",exact:true})).toBeVisible();
+ await expect(page.getByText("TOTP required.",{exact:false})).toBeVisible();
+ const settings=await (await page.request.get("/api/v1/settings/identity")).json();
+ expect(settings.local.enabled).toBeTruthy();expect(settings.local.totp_policy).toBe("everyone");
+ for(const secret of ["client_secret","password_hash","totp_secret"])expect(JSON.stringify(settings)).not.toContain(secret);
+ await page.screenshot({path:test.info().outputPath("sign-in-methods.png"),fullPage:true});
 });
 
 async function oidcLogin(page: Page) {

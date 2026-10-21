@@ -34,6 +34,7 @@ const IntegrationsPage    = lazy(() => import("./pages/IntegrationsPage").then((
 const ConnectorCoveragePage = lazy(() => import("./pages/ConnectorCoveragePage").then((m) => ({ default: m.ConnectorCoveragePage })));
 const CoveragePage        = lazy(() => import("./pages/CoveragePage").then((m) => ({ default: m.CoveragePage })));
 const SystemHealthPage    = lazy(() => import("./pages/SystemHealthPage").then((m) => ({ default: m.SystemHealthPage })));
+const UsersPage = lazy(() => import("./pages/UsersPage").then(m=>({default:m.UsersPage})));
 const IdentitySettingsPage = lazy(() => import("./pages/IdentitySettingsPage").then(m=>({default:m.IdentitySettingsPage})));
 const AccessControlPage   = lazy(() => import("./pages/AccessControlPage").then((m) => ({ default: m.AccessControlPage })));
 const FederationPage      = lazy(() => import("./pages/FederationPage").then((m) => ({ default: m.FederationPage })));
@@ -369,6 +370,7 @@ const settings_indexRoute = createRoute({ getParentRoute: () => app_settingsRout
 const settings_system_healthRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "system-health", beforeLoad: aliasRedirect({ to: "/settings/health" }) });
 const settings_tokens_splatRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "tokens/$", beforeLoad: aliasRedirect({ to: "/settings/api-tokens", from: "settings/tokens" }) });
 const settings_attestation_splatRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "attestation/$", beforeLoad: aliasRedirect({ to: "/settings/attestation-trust", from: "settings/attestation" }) });
+const settings_usersRoute=createRoute({getParentRoute:()=>app_settingsRoute,path:"users",component:()=>(<SuspenseRoute><UsersPage /></SuspenseRoute>)});
 const settings_identityRoute=createRoute({getParentRoute:()=>app_settingsRoute,path:"identity",component:()=>(<SuspenseRoute><IdentitySettingsPage /></SuspenseRoute>)});
 const settings_access_control_splatRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "access-control/$", beforeLoad: aliasRedirect({ to: "/settings/access", from: "settings/access-control" }) });
 const settings_notifications_splatRoute = createRoute({ getParentRoute: () => app_settingsRoute, path: "notifications/$", beforeLoad: aliasRedirect({ to: "/settings/integrations", from: "settings/notifications" }) });
@@ -607,7 +609,7 @@ authenticatedRoute.addChildren([
   app_tokens_splatRoute,
   app_attestation_trust_splatRoute,
   app_attestation_splatRoute,
-  app_settingsRoute.addChildren([settings_identityRoute,
+  app_settingsRoute.addChildren([settings_identityRoute,settings_usersRoute,
   settings_indexRoute,
   settings_system_healthRoute,
   settings_tokens_splatRoute,

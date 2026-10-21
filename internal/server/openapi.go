@@ -91,10 +91,7 @@ func newSpecServer() (*Server, error) {
 		syscfg:      syscfg.NewProvider(pool),
 		customRoles: handler.NewCustomRoles(pool),
 	}
-	s.identity, err = identity.New(ctx, identity.Store{Pool: pool}, nil, identity.BreakGlassConfig{}, s.auditLog, tel.Registry)
-	if err != nil {
-		return nil, err
-	}
+	s.identity = &identity.Service{} // Route introspection never executes handlers or accesses the database.
 	s.router = s.buildRouter()
 	return s, nil
 }

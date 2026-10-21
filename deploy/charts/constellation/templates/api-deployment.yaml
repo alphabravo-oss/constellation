@@ -126,11 +126,51 @@ spec:
 {{- end }}
             - name: CONSTELLATION_PCAP_RETENTION_ENABLED
               value: {{ ternary "true" "false" (and .Values.api.pcapStorage.enabled .Values.api.pcapStorage.retentionEnabled) | quote }}
+{{- if not (hasKey .Values.api.env "GOMAXPROCS") }}
+            # Go's automatic cgroup setting has a two-thread floor. Matching the
+            # CPU limit avoids quota throttling during bounded Argon2 work.
+            - name: GOMAXPROCS
+              valueFrom:
+                resourceFieldRef:
+                  containerName: api
+                  resource: limits.cpu
+                  divisor: "1"
+{{- end }}
 {{- range $k, $v := .Values.api.env }}
 {{- if and (ne $k "CONSTELLATION_PCAP_RETENTION_ENABLED") (not (and $.Values.complianceScheduler.enabled (eq $k "REPORT_OUT_DIR"))) (not (and $.Values.api.pcapStorage.enabled (eq $k "CONSTELLATION_DATA_DIR"))) }}
             - name: {{ $k }}
               value: "{{ $v }}"
 {{- end }}
+{{- end }}
+            - name: LOCAL_AUTH_ENABLED
+              value: {{ .Values.auth.local.enabled | quote }}
+            - name: LOCAL_AUTH_DISPLAY
+              value: {{ .Values.auth.local.display | quote }}
+            - name: LOCAL_AUTH_TOTP_POLICY
+              value: {{ .Values.auth.local.totpPolicy | quote }}
+            - name: LOCAL_AUTH_PASSWORD_MIN_LENGTH
+              value: {{ .Values.auth.local.passwordMinLength | quote }}
+            - name: LOCAL_AUTH_SESSION_SECONDS
+              value: {{ .Values.auth.local.sessionSeconds | quote }}
+            - name: LOCAL_AUTH_IP_RATE
+              value: {{ .Values.auth.local.ipRate | quote }}
+            - name: LOCAL_AUTH_ACCOUNT_RATE
+              value: {{ .Values.auth.local.accountRate | quote }}
+            - name: LOCAL_AUTH_ORG
+              value: {{ .Values.auth.local.orgName | quote }}
+{{- if .Values.auth.local.bootstrap.enabled }}
+            - name: LOCAL_BOOTSTRAP_EMAIL
+              value: {{ .Values.auth.local.bootstrap.email | quote }}
+            - name: LOCAL_BOOTSTRAP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.local.bootstrap.existingSecret | default (printf "%s-local-admin" (include "constellation.fullname" .)) | quote }}
+                  key: password
+            - name: LOCAL_BOOTSTRAP_TOTP
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.local.bootstrap.existingSecret | default (printf "%s-local-admin" (include "constellation.fullname" .)) | quote }}
+                  key: totp-secret
 {{- end }}
 {{- if .Values.auth.oidc.enabled }}
             - name: OIDC_ISSUER_URL

@@ -16,7 +16,7 @@ func (s *Server) browserCSRF(next http.Handler) http.Handler {
 		}
 		_, accessErr := request.Cookie(identity.AccessCookie)
 		cookieAuth := request.Header.Get("Authorization") == "" && accessErr == nil
-		browserLogin := request.URL.Path == "/api/v1/auth/break-glass"
+		browserLogin := (request.URL.Path == "/api/v1/auth/break-glass" || request.URL.Path == "/api/v1/auth/local")
 		if cookieAuth || browserLogin {
 			if request.Header.Get(identity.BrowserHeader) != "browser" || !s.browserOriginAllowed(request) {
 				writeError(writer, http.StatusForbidden, "browser request origin rejected")

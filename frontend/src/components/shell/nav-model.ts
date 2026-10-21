@@ -191,7 +191,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   organization: "Organization",
   access: "Access control",
   "api-tokens": "API tokens",
-  "identity": "Single sign-on",
+  "identity": "Sign-in methods",
   "attestation-trust": "Attestation trust",
   health: "System health",
   scanner: "Scanner and CVE sources",

@@ -112,6 +112,8 @@ func main() {
 			Audience:     os.Getenv("OIDC_AUDIENCE"), RolesClaim: env("OIDC_ROLES_CLAIM", "alphabravo_roles"), OrgName: env("OIDC_ORG", "default"), Scopes: strings.Fields(env("OIDC_SCOPES", "openid email profile")),
 		}
 	}
+	cfg.Local = identity.LocalConfig{Enabled: envBool("LOCAL_AUTH_ENABLED", true), Display: env("LOCAL_AUTH_DISPLAY", "all"), TOTPPolicy: env("LOCAL_AUTH_TOTP_POLICY", "everyone"), PasswordMinLength: envInt("LOCAL_AUTH_PASSWORD_MIN_LENGTH", 16), SessionSeconds: envInt("LOCAL_AUTH_SESSION_SECONDS", 3600), IPRate: envInt("LOCAL_AUTH_IP_RATE", 20), AccountRate: envInt("LOCAL_AUTH_ACCOUNT_RATE", 5), OrgName: env("LOCAL_AUTH_ORG", "default"), BootstrapEmail: env("LOCAL_BOOTSTRAP_EMAIL", "admin@constellation.local"), BootstrapPassword: os.Getenv("LOCAL_BOOTSTRAP_PASSWORD"), BootstrapTOTP: os.Getenv("LOCAL_BOOTSTRAP_TOTP")}
+
 	cfg.BreakGlass = identity.BreakGlassConfig{Enabled: envBool("BREAK_GLASS_ENABLED", false), PasswordHash: os.Getenv("BREAK_GLASS_PASSWORD_HASH"), TOTPSecret: os.Getenv("BREAK_GLASS_TOTP_SECRET"), OrgName: env("BREAK_GLASS_ORG", "default"), SessionTTL: envDuration("BREAK_GLASS_SESSION_TTL", 5*time.Minute)}
 
 	if cfg.OIDC != nil {
