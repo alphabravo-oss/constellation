@@ -10,6 +10,8 @@ test("bootstrap administrator creates an analyst who signs in, is restricted, an
  test.setTimeout(120_000);
  await page.goto("/settings/users");
  await expect(page.getByRole("heading",{name:"Users",exact:true})).toBeVisible();
+ const own=page.getByRole("row").filter({has:page.getByText(LIVE_EMAIL,{exact:true})});
+ await expect(own.getByRole("button",{name:"Reset TOTP",exact:true})).toBeDisabled();
  await page.getByRole("textbox",{name:"Email",exact:true}).fill(userEmail);
  await page.getByLabel("Display name",{exact:true}).fill("Local proof analyst");
  await page.getByLabel("Password",{exact:true}).fill("password");

@@ -938,7 +938,9 @@ subsequent credential changes use Users or the CLI, not chart env rotation.
 Settings → Users creates accounts (supplied or generated passwords), assigns a
 product role, disables access and resets passwords or TOTP. Creation and resets
 show enrollment material once for private delivery to the account owner. There
-is no email-delivery dependency. Settings → Sign-in methods controls local login,
+is no email-delivery dependency. Use another administrator or the operator CLI to
+reset your own credentials; the UI prevents losing one-time enrollment material
+when the current session is revoked. Settings → Sign-in methods controls local login,
 OIDC, the visible choices, password length, session lifetime and TOTP policy.
 TOTP is required for everyone by default; `admins` always requires it for the
 three administrator roles and recovery. The offline NCSC top-100k list is embedded

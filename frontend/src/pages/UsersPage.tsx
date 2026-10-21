@@ -34,7 +34,7 @@ export function UsersPage() {
   {id:"status",header:"Status",cell:u=>u.status},
   {id:"role",header:"Role",cell:u=><Form.Select aria-label={`Role for ${u.email}`} options={roles} value={u.roles[0]} disabled={busy||u.break_glass||u.id===me?.user_id} onValueChange={role=>void change(u,"role",{role})}/>},
   {id:"last",header:"Last sign-in",cell:u=>u.last_login?new Date(u.last_login).toLocaleString():"Never"},
-  {id:"actions",header:"Actions",cell:u=><div className="flex flex-wrap gap-2"><Button size="sm" intent="default" disabled={busy||u.status==="disabled"||u.break_glass||u.id===me?.user_id} onClick={()=>void change(u,"disable")}>Disable</Button><Button size="sm" intent="default" disabled={busy} onClick={()=>{setReset(u);setSetup(null);}}>Reset password</Button><Button size="sm" intent="default" disabled={busy} onClick={()=>void change(u,"reset-totp")}>Reset TOTP</Button></div>},
+  {id:"actions",header:"Actions",cell:u=><div className="flex flex-wrap gap-2"><Button size="sm" intent="default" disabled={busy||u.status==="disabled"||u.break_glass||u.id===me?.user_id} onClick={()=>void change(u,"disable")}>Disable</Button><Button size="sm" intent="default" disabled={busy||u.id===me?.user_id} onClick={()=>{setReset(u);setSetup(null);}}>Reset password</Button><Button size="sm" intent="default" disabled={busy||u.id===me?.user_id} onClick={()=>void change(u,"reset-totp")}>Reset TOTP</Button></div>},
  ];
  return <PageContainer><PageHeader title="Users" description="Create local accounts, assign roles and manage access." />
  {error&&<p role="alert" className="text-sm text-status-error">{error}</p>}
@@ -46,6 +46,7 @@ export function UsersPage() {
  <Form.Field label="Password" helper="Leave empty to generate. Breached passwords are refused offline.">{ids=><Form.Input {...ids} type="password" autoComplete="new-password" value={password} onChange={e=>setPassword(e.target.value)}/>}</Form.Field>
  <Form.Field label="Role">{ids=><Form.Select {...ids} options={roles} value={role} onValueChange={setRole}/>}</Form.Field>
  </div><Button type="submit" disabled={busy}>{busy?"Saving…":"Create user"}</Button></form></Card>
+ <p className="text-sm text-muted-foreground">Use another administrator or the operator CLI to reset your own credentials. Resetting credentials ends existing sessions.</p>
  <Card title="Local accounts">{q.isPending?<LoadingState/>:q.isError?<ErrorState error={q.error} action={<Button onClick={()=>void q.refetch()}>Retry</Button>}/>:<DataTable preferencesKey="local-users" rows={q.data.users} columns={columns} rowKey={u=>u.id}/>}</Card>
  </PageContainer>;
 }

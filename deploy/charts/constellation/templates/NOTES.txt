@@ -81,8 +81,8 @@ Retrieve privately (these commands print credentials):
   kubectl -n {{ .Release.Namespace }} get secret {{ .Values.auth.local.bootstrap.existingSecret | default (printf "%s-local-admin" (include "constellation.fullname" .)) }} -o jsonpath='{.data.password}' | base64 -d
   kubectl -n {{ .Release.Namespace }} get secret {{ .Values.auth.local.bootstrap.existingSecret | default (printf "%s-local-admin" (include "constellation.fullname" .)) }} -o jsonpath='{.data.totp-secret}' | base64 -d
 Enroll the seed in an authenticator (TOTP, SHA1, 6 digits, 30 seconds) before signing
-in. Use Settings > Users to reset enrollment/password after securely handing them
-to the administrator. On a new install this administrator is also the one recovery
+in. Use another administrator in Settings > Users, or constellationctl users, to
+reset enrollment/password after securely handing them to the administrator. On a new install this administrator is also the one recovery
 account. Upgrades preserve the existing recovery administrator and its credentials.
 The generated Secret is retained across upgrades; it never resets database users.
 {{- end }}
