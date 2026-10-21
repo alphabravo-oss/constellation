@@ -39,6 +39,11 @@ All notable changes to this project are documented here. The format follows
 
 ## 0.3.0 - 2026-10-20
 
+### Shared identity adoption
+- Optional bundled single sign-on registers Constellation with teal branding and exact security-admin/analyst role mappings; local accounts remain enabled by default.
+- Replaced copied token verification and JWKS with the shared identity v0.1.2 relying-party library while retaining opaque sessions, PKCE, nonce, external OIDC and independent recovery.
+- Sign-in methods can select bundled SSO, an external provider, or local accounts, including both normal methods side by side.
+
 Re-alignment with the AlphaBravo Technology Selection Guide (Phase 0 mechanical clean-up,
 Phase 1 backend foundations) and the C1 "Triage Desk" UI on the shared AlphaBravo UI kit.
 

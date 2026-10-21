@@ -172,7 +172,38 @@ spec:
                   name: {{ .Values.auth.local.bootstrap.existingSecret | default (printf "%s-local-admin" (include "constellation.fullname" .)) | quote }}
                   key: totp-secret
 {{- end }}
-{{- if .Values.auth.oidc.enabled }}
+{{- if .Values.identity.enabled }}
+{{- $product := dict }}
+{{- range .Values.identity.products }}
+{{- if eq .slug "constellation" }}{{- $product = . }}{{- end }}
+{{- end }}
+{{- if not $product }}{{- fail "identity.products must register constellation" }}{{- end }}
+            - name: OIDC_BUNDLED
+              value: "true"
+            - name: OIDC_ISSUER_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ printf "%sconstellation" .Values.identity.secretPrefix | quote }}
+                  key: issuer
+            - name: OIDC_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ printf "%sconstellation" .Values.identity.secretPrefix | quote }}
+                  key: client-id
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ printf "%sconstellation" .Values.identity.secretPrefix | quote }}
+                  key: client-secret
+            - name: OIDC_REDIRECT_URL
+              value: {{ tpl (first $product.redirectURIs) .Subcharts.identity | quote }}
+            - name: OIDC_ROLES_CLAIM
+              value: alphabravo_roles
+            - name: OIDC_ROLE_MAPPING
+              value: {{ dict "security-admin" "SecurityAdmin" "analyst" "Analyst" | toJson | quote }}
+            - name: OIDC_ORG
+              value: {{ .Values.auth.oidc.orgName | quote }}
+{{- else if .Values.auth.oidc.enabled }}
             - name: OIDC_ISSUER_URL
               value: {{ required "auth.oidc.issuerURL is required" .Values.auth.oidc.issuerURL | quote }}
             - name: OIDC_CLIENT_ID

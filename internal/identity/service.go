@@ -24,6 +24,7 @@ type Service struct {
 	sessions      sessionCache
 	store         Store
 	emergency     BreakGlassConfig
+	bundled       *OIDCConfig
 	org           string
 	current       atomic.Pointer[runtimeConfig]
 	enc           *columncrypto.Encryptor
@@ -56,6 +57,10 @@ func New(ctx context.Context, store Store, oidc *OIDCConfig, emergency BreakGlas
 	}
 	enc, _ := columncrypto.Default()
 	s := &Service{store: store, emergency: emergency, org: local.OrgName, enc: enc, audit: log, counter: counter, passwordSlots: make(chan struct{}, 1)}
+	if oidc != nil && oidc.Bundled {
+		bundled := *oidc
+		s.bundled = &bundled
+	}
 	var err error
 	s.dummyHash, err = HashPassword(randomToken())
 	if err != nil {
@@ -128,7 +133,7 @@ func (s *Service) Run(ctx context.Context) {
 			}
 			cfg := s.current.Load()
 			if cfg.RP != nil && time.Now().After(nextRefresh) {
-				if cfg.RP.Keys.Refresh(ctx) == nil {
+				if cfg.RP.Access.shared.Refresh(ctx) == nil && cfg.RP.ID.shared.Refresh(ctx) == nil {
 					nextRefresh = time.Now().Add(15 * time.Minute)
 				}
 			}

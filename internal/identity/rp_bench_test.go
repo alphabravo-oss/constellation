@@ -11,10 +11,9 @@ import (
 	"testing"
 	"time"
 
+	sharedrp "github.com/alphabravo-oss/identity/pkg/rp"
 	jose "github.com/go-jose/go-jose/v4"
 	"github.com/golang-jwt/jwt/v5"
-
-	"github.com/alphabravocompany/constellation/internal/identity/jwks"
 )
 
 // Benchmark the actual verifier, including its bounded memo and claim mapping.
@@ -30,16 +29,28 @@ func BenchmarkOIDC(b *testing.B) {
 		_ = json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &key.PublicKey, KeyID: "bench", Use: "sig", Algorithm: "RS256"}}})
 	}))
 	defer server.Close()
-	keys := jwks.New(server.URL, server.Client())
-	if err := keys.Refresh(context.Background()); err != nil {
+	cfg := OIDCConfig{IssuerURL: "https://issuer.example", ClientID: "constellation", Audience: "constellation", RolesClaim: "alphabravo_roles", RoleMapping: map[string]string{"admins": "GlobalAdmin"}}
+	v, err := newVerifier(context.Background(), server.Client(), server.URL, cfg, cfg.Audience, false)
+	if err != nil {
 		b.Fatal(err)
 	}
-	cfg := OIDCConfig{IssuerURL: "https://issuer.example", ClientID: "constellation", Audience: "constellation", RolesClaim: "alphabravo_roles", RoleMapping: map[string]string{"admins": "GlobalAdmin"}}
-	v := newVerifier(keys, cfg, cfg.Audience, false)
 	now := time.Now()
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{"iss": cfg.IssuerURL, "aud": cfg.Audience, "sub": "benchmark", "iat": now.Unix(), "exp": now.Add(10 * time.Minute).Unix(), "alphabravo_roles": map[string]any{"constellation": []string{"admins"}}})
 	token.Header["kid"] = "bench"
 	raw, err := token.SignedString(key)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	// Alternating distinct signed tokens with a one-entry shared memo measures actual
+	// first sightings without accessing library internals or timing RSA signing.
+	cold, err := sharedrp.New(context.Background(), sharedrp.Config{Issuer: cfg.IssuerURL, Audience: cfg.Audience, JWKSURL: server.URL, Product: "constellation", HTTPClient: server.Client(), MaxTokens: 1, MaxTokenLifetime: MaxTokenLifetime})
+	if err != nil {
+		b.Fatal(err)
+	}
+	coldMapped := &Verifier{shared: cold, mapping: cfg.RoleMapping}
+	token.Claims.(jwt.MapClaims)["jti"] = "second"
+	second, err := token.SignedString(key)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -51,19 +62,24 @@ func BenchmarkOIDC(b *testing.B) {
 			before := calls.Load()
 			b.ReportAllocs()
 			b.ResetTimer()
+			n := 0
 			for b.Loop() {
 				if kind == "first_sighting" {
-					v.mu.Lock()
-					delete(v.memo, raw)
-					v.mu.Unlock()
-				}
-				if _, err := v.Verify(raw); err != nil {
+					current := raw
+					if n%2 != 0 {
+						current = second
+					}
+					n++
+					if _, err := coldMapped.Verify(current); err != nil {
+						b.Fatal(err)
+					}
+				} else if _, err := v.Verify(raw); err != nil {
 					b.Fatal(err)
 				}
 			}
 			b.StopTimer()
-			if n := calls.Load() - before; n != 0 {
-				b.Fatalf("%d network calls in request loop", n)
+			if calls.Load() != before {
+				b.Fatal("network in verification loop")
 			}
 			budget := 50 * time.Microsecond
 			if kind == "first_sighting" {

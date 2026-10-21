@@ -33,7 +33,7 @@ func (s *Service) Settings(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, 503, "sign-in settings unavailable")
 		return
 	}
-	respond(w, map[string]any{"local": cfg.Local, "oidc": cfg.OIDC, "revision": cfg.Revision, "ready": s.current.Load().RP != nil, "break_glass": map[string]any{"enabled": s.hasRecovery(r), "totp_required": true, "session_seconds": int(s.emergency.SessionTTL.Seconds())}})
+	respond(w, map[string]any{"local": cfg.Local, "oidc": cfg.OIDC, "bundled_oidc": s.bundled, "revision": cfg.Revision, "ready": s.current.Load().RP != nil, "break_glass": map[string]any{"enabled": s.hasRecovery(r), "totp_required": true, "session_seconds": int(s.emergency.SessionTTL.Seconds())}})
 }
 func (s *Service) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
@@ -66,9 +66,12 @@ func (s *Service) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 			fail(w, r, 400, err.Error())
 			return
 		}
-		if body.ClientSecret != nil {
+		switch {
+		case s.bundled != nil && body.OIDC.IssuerURL == s.bundled.IssuerURL && body.OIDC.ClientID == s.bundled.ClientID:
+			body.OIDC.ClientSecret = s.bundled.ClientSecret
+		case body.ClientSecret != nil:
 			body.OIDC.ClientSecret = *body.ClientSecret
-		} else if previous.OIDC != nil && previous.OIDC.IssuerURL == body.OIDC.IssuerURL && previous.OIDC.ClientID == body.OIDC.ClientID {
+		case previous.OIDC != nil && previous.OIDC.IssuerURL == body.OIDC.IssuerURL && previous.OIDC.ClientID == body.OIDC.ClientID:
 			body.OIDC.ClientSecret = previous.OIDC.ClientSecret
 		}
 	}

@@ -106,6 +106,7 @@ func main() {
 	if iss := os.Getenv("OIDC_ISSUER_URL"); iss != "" {
 		cfg.OIDC = &identity.OIDCConfig{
 			IssuerURL:    iss,
+			Bundled:      envBool("OIDC_BUNDLED", false),
 			ClientID:     os.Getenv("OIDC_CLIENT_ID"),
 			ClientSecret: os.Getenv("OIDC_CLIENT_SECRET"),
 			RedirectURL:  os.Getenv("OIDC_REDIRECT_URL"),

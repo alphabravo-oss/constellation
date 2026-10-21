@@ -175,6 +175,7 @@ helm-template-smoke: ## Render the chart against common value combinations
 	@echo ">> cert-manager TLS"; helm template constellation deploy/charts/constellation/ --set tls.certManager.enabled=true --set tls.certManager.issuer=letsencrypt-prod > /dev/null
 	@echo ">> object-store backups"; helm template constellation deploy/charts/constellation/ --set backup.objectStore.enabled=true > /dev/null
 	@echo ">> three-node k3s HA profile"; ./scripts/test-helm-ha.sh
+	@./scripts/test-helm-identity.sh
 	@echo "helm-template-smoke: ok"
 
 CLUSTER ?=

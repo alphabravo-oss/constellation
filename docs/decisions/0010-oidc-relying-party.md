@@ -31,3 +31,12 @@ policies and ordinary local-password management. Keep machine-token authenticati
 federation trust, which are independent of human sign-in. Forward-only migration 187
 drops the replaced tables, credentials and browser refresh tokens. Settings show the
 configured OIDC provider and emergency status; deployment Secrets are never returned.
+
+
+## Shared layer adoption (2026-10-21)
+
+Use `github.com/alphabravo-oss/identity/pkg/rp` v0.1.2 for signature verification,
+last-good JWKS and bounded verification memoization. The copied verifier/cache is
+deleted. Product role mapping and opaque database sessions stay in this domain.
+The optional shared chart registers the product and wires its durable Secret;
+external OIDC and first-class local accounts remain independent choices.

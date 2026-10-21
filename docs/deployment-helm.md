@@ -1077,3 +1077,62 @@ The scanner defaults to one concurrent job, a 2 GiB memory request and a 6 GiB
 limit: each image job runs Syft, Trivy and Grype as concurrent child processes.
 Size the limit from container memory measurements over complete scan cycles;
 the worker's Go heap alone does not include its tools or charged file cache.
+
+
+## Optional bundled single sign-on
+
+Local accounts remain the default and work independently. Enable the shared
+identity layer with `identity.enabled: true`; Constellation never requires an
+Astronomer installation. The dependency registers a teal Constellation product,
+with `security-admin` → `SecurityAdmin` and `analyst` → `Analyst`. Unmapped roles
+receive no access. The API reads the issuer, client ID and create-only client
+secret from the provisioner's durable product Secret. No client secret belongs
+in Helm values.
+
+For a shared public hostname and existing TLS Secret:
+
+```yaml
+identity:
+  enabled: true
+  ingress:
+    className: nginx
+    tlsSecretName: constellation-tls
+  zitadel:
+    zitadel:
+      configmapConfig:
+        ExternalDomain: constellation.example.com
+```
+
+The shared chart's internal `zitadel` keys are operator configuration; public
+pages, cookies and token claims use product-neutral names. The registered
+callback and logo default to that hostname. For a separate issuer hostname,
+set `identity.products` to the Constellation registration with an exact product
+callback URL and logo URL. The optional database requires the CNPG operator, or
+set `identity.database.create: false` and configure the dependency's existing
+Postgres host/database/role and password Secret. Back up that database and all
+identity Secrets together, including the master key, product credentials and
+runtime signing/cookie capabilities. The identity namespace policy selects only
+identity Pods. Set `identity.networkPolicy.ingressPeers` and `ingressPorts` for
+another ingress controller, plus explicit private upstream allowances as needed.
+Registry mirrors may use `identity.imagePullSecrets` and
+`identity.zitadel.imagePullSecrets`.
+
+While bundled identity is enabled, it supplies the initial OIDC configuration.
+An administrator can select Bundled single sign-on, External OIDC provider, or
+Disabled on **Settings → Sign-in methods**, and choose local accounts, SSO, or
+both. The bundled option remains available after SSO is disabled; re-enabling it
+restores the provisioned credentials without rotating them. Saved settings
+survive restarts with unchanged deployment policy. Changing deployment auth
+values deliberately replaces saved policy. Disabling normal local accounts
+retains the protected recovery administrator and its mandatory TOTP/audit path.
+
+For a customer-managed provider, leave `identity.enabled: false` and configure
+`auth.oidc.*` exactly as before. The shared `identity/pkg/rp` verifier performs
+local signature/issuer/audience/time checks, ten-minute token-lifetime limits,
+ID-token authorized-party checks, last-good JWKS and bounded memoization. The
+existing product code flow preserves PKCE, nonce and one-use database state;
+client authentication follows the provider's discovery document. Browser
+sessions remain opaque product sessions with no token refresh.
+
+The identity chart is pinned at 0.1.3 (restricted Pod Security defaults); the
+shared relying-party module and qualified runtime images are 0.1.2.
