@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { apiErrorText } from "@/lib/api-error";
 import { identitySettings, type IdentitySettings } from "@/api/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { PageContainer, PageHeader } from "@/components/ui/page";
@@ -22,7 +23,7 @@ function IdentityForm({initial}:{initial:IdentitySettings}){
  async function save(e:React.FormEvent){
   e.preventDefault();setBusy(true);setError("");
   try{const roleMapping:Record<string,string>=JSON.parse(mapping);await identitySettings.put({local,oidc:oidc?{...oidc,role_mapping:roleMapping}:null,revision:initial.revision,...(secret?{client_secret:secret}:{})});await cache.invalidateQueries({queryKey:["identity-settings"]});toast.success("Sign-in methods saved");}
-  catch(err){setError(err instanceof Error?err.message:"Unable to save sign-in methods");}finally{setBusy(false);}
+  catch(err){setError(apiErrorText(err,"Unable to save sign-in methods"));}finally{setBusy(false);}
  }
  function provider(field:string,value:string){setOIDC(old=>old?{...old,[field]:value}:old);}
  return <PageContainer><PageHeader title="Sign-in methods" description="Choose local accounts, single sign-on, or both."/>

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { apiErrorText } from "@/lib/api-error";
 import { localUsers, type LocalEnrollment, type LocalUser } from "@/api/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { PageContainer, PageHeader } from "@/components/ui/page";
@@ -9,7 +10,7 @@ import { DataTable, type Column } from "@/components/ui/data-table";
 import { LoadingState, ErrorState } from "@/components/ui/states";
 import { Button, Form } from "@/ui";
 
-const roles = ["Analyst", "Auditor", "ClusterAdmin", "SecurityAdmin", "GlobalAdmin"].map(value=>({value,label:value.replace(/([a-z])([A-Z])/g,"$1 $2")}));
+const roles = ["Analyst", "Auditor", "ClusterAdmin", "SecurityAdmin", "GlobalAdmin"].map(value=>({value,label:value.replace("Admin"," admin")}));
 export function UsersPage() {
  const { me } = useAuth();
  const cache = useQueryClient();
@@ -21,12 +22,12 @@ export function UsersPage() {
  async function change(user:LocalUser,action:string,body:{password?:string;role?:string}={}){
   setBusy(true);setError("");setSetup(null);
   try{const out=await localUsers.change(user.id,action,body);if(out.password||out.totp_secret)setSetup(out);await cache.invalidateQueries({queryKey:["local-users"]});setReset(null);setNewPassword("");toast.success("User updated");}
-  catch(err){setError(err instanceof Error?err.message:"Unable to update user");}finally{setBusy(false);}
+  catch(err){setError(apiErrorText(err,"Unable to update user"));}finally{setBusy(false);}
  }
  async function create(e:React.FormEvent){
   e.preventDefault();setBusy(true);setError("");setSetup(null);
   try{setSetup(await localUsers.create({email,display_name:name,password,role}));setEmail("");setName("");setPassword("");await cache.invalidateQueries({queryKey:["local-users"]});toast.success("User created");}
-  catch(err){setError(err instanceof Error?err.message:"Unable to create user");}finally{setBusy(false);}
+  catch(err){setError(apiErrorText(err,"Unable to create user"));}finally{setBusy(false);}
  }
  const columns:Column<LocalUser>[]=[
   {id:"email",header:"Email",cell:u=><div><span>{u.email}</span><p className="text-meta text-muted-foreground">{u.display_name}{u.break_glass?" · Recovery administrator":""}</p></div>},
