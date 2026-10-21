@@ -57,10 +57,13 @@ test("local off refuses normal login; recovery works without SSO and the critica
   const saved=page.waitForResponse(r=>r.url().endsWith("/api/v1/settings/identity")&&r.request().method()==="PUT");
   await page.getByRole("button",{name:"Save sign-in methods"}).click();expect((await saved).status()).toBe(200);
   const denied=await recovery.request.post("/api/v1/auth/local",{headers,data:{email:LIVE_EMAIL,password:LIVE_PASSWORD,totp:totp(process.env.LIVE_TOTP_SECRET!)}});expect(denied.status()).toBe(401);
+  expect((await recovery.request.post("/api/v1/auth/break-glass",{headers,data:{password:process.env.BREAK_GLASS_PASSWORD!,totp:""}})).status()).toBe(401);
+  expect((await recovery.request.post("/api/v1/auth/break-glass",{headers,data:{password:"wrong",totp:totp(process.env.BREAK_GLASS_TOTP_SECRET!)}})).status()).toBe(401);
   const rp=await recovery.newPage();await rp.goto("/auth/login");await expect(rp.getByRole("textbox",{name:"Email",exact:true})).toHaveCount(0);await expect(rp.getByRole("button",{name:"Continue with SSO"})).toHaveCount(0);
   await rp.getByRole("button",{name:"Emergency access",exact:true}).click();await rp.getByLabel("Password",{exact:true}).fill(process.env.BREAK_GLASS_PASSWORD!);await rp.getByLabel("Authenticator code").fill(totp(process.env.BREAK_GLASS_TOTP_SECRET!));
   await rp.getByRole("button",{name:"Sign in",exact:true}).click();await expect(rp).toHaveURL(/\/clusters(?:[/?#]|$)/);
   expect((await(await recovery.request.get("/api/v1/auth/me")).json()).email).toBe("break-glass@constellation.local");
+  const cookie=(await recovery.cookies()).find(c=>c.name==="__Host-constellation-session")!;expect(cookie.httpOnly).toBeTruthy();expect(cookie.secure).toBeTruthy();expect(cookie.expires-Date.now()/1000).toBeLessThanOrEqual(300);
   await rp.screenshot({path:test.info().outputPath("recovery-local-disabled.png"),fullPage:true});
   const prometheus=process.env.IDENTITY_PROOF_PROMETHEUS;
   if(prometheus)await expect.poll(async()=>{
