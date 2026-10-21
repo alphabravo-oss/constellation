@@ -7,7 +7,7 @@ test("signs in using the configured normal login and saves the session", async (
   await page.goto("/auth/login");
   await expect(page.getByRole("heading", { name: "Sign in to Constellation" })).toBeVisible();
   if(process.env.LIVE_TOTP_SECRET){
-   await page.getByLabel("Email",{exact:true}).fill(LIVE_EMAIL);
+   await page.getByRole("textbox",{name:"Email",exact:true}).fill(LIVE_EMAIL);
    await page.getByLabel("Password",{exact:true}).fill(LIVE_PASSWORD);
    await page.getByLabel("Authenticator code").fill(totp(process.env.LIVE_TOTP_SECRET));
    await page.getByRole("button",{name:"Sign in",exact:true}).click();

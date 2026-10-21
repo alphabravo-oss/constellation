@@ -10,7 +10,7 @@ test("bootstrap administrator creates an analyst who signs in, is restricted, an
  test.setTimeout(120_000);
  await page.goto("/settings/users");
  await expect(page.getByRole("heading",{name:"Users",exact:true})).toBeVisible();
- await page.getByLabel("Email",{exact:true}).fill(userEmail);
+ await page.getByRole("textbox",{name:"Email",exact:true}).fill(userEmail);
  await page.getByLabel("Display name",{exact:true}).fill("Local proof analyst");
  await page.getByLabel("Password",{exact:true}).fill(userPassword);
  await page.getByRole("button",{name:"Create user",exact:true}).click();
@@ -29,7 +29,7 @@ test("bootstrap administrator creates an analyst who signs in, is restricted, an
  const context=await browser.newContext({baseURL,storageState:{cookies:[],origins:[]}});
  try{
   const analyst=await context.newPage();await analyst.goto("/auth/login");
-  await analyst.getByLabel("Email",{exact:true}).fill(userEmail);await analyst.getByLabel("Password",{exact:true}).fill(userPassword);await analyst.getByLabel("Authenticator code").fill(totp(seed));
+  await analyst.getByRole("textbox",{name:"Email",exact:true}).fill(userEmail);await analyst.getByLabel("Password",{exact:true}).fill(userPassword);await analyst.getByLabel("Authenticator code").fill(totp(seed));
   const axe=await new AxeBuilder({page:analyst}).withTags(["wcag2a","wcag2aa","wcag21aa"]).analyze();expect(axe.violations.filter(v=>v.impact==="serious"||v.impact==="critical")).toEqual([]);
   await analyst.getByRole("button",{name:"Sign in",exact:true}).click();await expect(analyst).toHaveURL(/\/clusters(?:[/?#]|$)/);
   expect((await(await context.request.get("/api/v1/auth/me")).json()).roles).toEqual(["Analyst"]);
@@ -54,7 +54,7 @@ test("local off refuses normal login; recovery works without SSO and the critica
   const saved=page.waitForResponse(r=>r.url().endsWith("/api/v1/settings/identity")&&r.request().method()==="PUT");
   await page.getByRole("button",{name:"Save sign-in methods"}).click();expect((await saved).status()).toBe(200);
   const denied=await recovery.request.post("/api/v1/auth/local",{headers,data:{email:LIVE_EMAIL,password:LIVE_PASSWORD,totp:totp(process.env.LIVE_TOTP_SECRET!)}});expect(denied.status()).toBe(401);
-  const rp=await recovery.newPage();await rp.goto("/auth/login");await expect(rp.getByLabel("Email",{exact:true})).toHaveCount(0);await expect(rp.getByRole("button",{name:"Continue with SSO"})).toHaveCount(0);
+  const rp=await recovery.newPage();await rp.goto("/auth/login");await expect(rp.getByRole("textbox",{name:"Email",exact:true})).toHaveCount(0);await expect(rp.getByRole("button",{name:"Continue with SSO"})).toHaveCount(0);
   await rp.getByRole("button",{name:"Emergency access",exact:true}).click();await rp.getByLabel("Password",{exact:true}).fill(process.env.BREAK_GLASS_PASSWORD!);await rp.getByLabel("Authenticator code").fill(totp(process.env.BREAK_GLASS_TOTP_SECRET!));
   await rp.getByRole("button",{name:"Sign in",exact:true}).click();await expect(rp).toHaveURL(/\/clusters(?:[/?#]|$)/);
   expect((await(await recovery.request.get("/api/v1/auth/me")).json()).email).toBe("break-glass@constellation.local");
