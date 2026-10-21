@@ -233,20 +233,13 @@ func TestSessionSnapshotsObserveOtherReplicaRevocations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(time.Second)
-	for {
-		if _, err = q.session(raw); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("new session did not reach second replica", err)
-		}
-		time.Sleep(10 * time.Millisecond)
+	if _, err = q.session(raw); err != nil {
+		t.Fatal("new cookie was returned before it was usable on the second replica", err)
 	}
 	if _, err = s.mutateUser(ctx, actor, out.ID, "disable", ""); err != nil {
 		t.Fatal(err)
 	}
-	deadline = time.Now().Add(time.Second)
+	deadline := time.Now().Add(time.Second)
 	for {
 		if _, err = q.session(raw); err != nil {
 			break

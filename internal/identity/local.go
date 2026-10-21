@@ -91,7 +91,7 @@ func (s *Service) loginLocal(ctx context.Context, email, password, code string, 
 	expires := time.Now().Add(ttl)
 	raw, err := s.store.startSession(ctx, c.subject, c.epoch, c.roles, kind, expires, s.audit)
 	if err == nil {
-		err = s.RefreshSessions(ctx)
+		err = s.publishSession(ctx)
 	}
 	return raw, expires, kind, err
 }

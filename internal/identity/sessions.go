@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/pkg/rbac"
 )
@@ -24,6 +26,7 @@ type sessionSnapshot struct {
 	Entries  map[string]cachedSession
 }
 type sessionCache struct {
+	id      uuid.UUID
 	mu      sync.Mutex
 	current atomic.Pointer[sessionSnapshot]
 }
@@ -37,6 +40,9 @@ type sessionCache struct {
 func (s *Service) RefreshSessions(ctx context.Context) error {
 	s.sessions.mu.Lock()
 	defer s.sessions.mu.Unlock()
+	if s.sessions.id == uuid.Nil {
+		s.sessions.id = uuid.New()
+	}
 	old := s.sessions.current.Load()
 	var revision int64
 	if err := s.store.Pool.QueryRow(ctx, `SELECT revision FROM identity_session_revision WHERE singleton`).Scan(&revision); err != nil {
@@ -44,7 +50,7 @@ func (s *Service) RefreshSessions(ctx context.Context) error {
 	}
 	if old != nil && old.Revision == revision {
 		s.sessions.current.Store(&sessionSnapshot{Revision: revision, Checked: time.Now(), Entries: old.Entries})
-		return nil
+		return s.store.acknowledgeSessionRevision(ctx, s.sessions.id, revision)
 	}
 	rows, err := s.store.Pool.Query(ctx, `SELECT s.token_hash,u.id,u.org_id,u.email,s.roles,s.expires_at FROM identity_sessions s JOIN users u ON u.id=s.user_id WHERE s.expires_at>now() AND NOT u.disabled AND s.session_epoch=u.session_epoch AND (s.kind<>'local' OR (SELECT (local_config->>'enabled')::boolean FROM identity_settings WHERE singleton)) LIMIT 10001`)
 	if err != nil {
@@ -71,7 +77,7 @@ func (s *Service) RefreshSessions(ctx context.Context) error {
 	// Reading the revision before rows makes concurrent changes cause another
 	// refresh on the next poll, rather than marking an older snapshot current.
 	s.sessions.current.Store(&sessionSnapshot{Revision: revision, Checked: time.Now(), Entries: entries})
-	return nil
+	return s.store.acknowledgeSessionRevision(ctx, s.sessions.id, revision)
 }
 func (s *Service) session(raw string) (authctx.Subject, error) {
 	if len(raw) != 47 {

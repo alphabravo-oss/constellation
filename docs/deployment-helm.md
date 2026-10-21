@@ -956,7 +956,11 @@ minutes. `Retry-After` reports the actual cooldown. Counters are shared in Postg
 
 Sessions have no refresh. The bounded session index checks expiry on every
 request; cross-replica revocations normally propagate within 250ms, and a failed
-database freshness check closes access within one second. No per-request network
+database freshness check closes access within one second. Database notifications
+wake refreshes immediately; a login response waits until all live replicas have
+acknowledged its session, so the next request can land on any replica. Migration
+189 adds this acknowledgement barrier and one dedicated notification connection
+per API replica. No per-request network
 or database call is needed for opaque-session verification. OIDC discovery runs
 independently, so an issuer outage cannot starve session synchronization.
 

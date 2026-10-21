@@ -84,7 +84,7 @@ func (s *Service) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		fail(w, r, 500, "create session")
 		return
 	}
-	if err = s.RefreshSessions(r.Context()); err != nil {
+	if err = s.publishSession(r.Context()); err != nil {
 		fail(w, r, 503, "refresh session state")
 		return
 	}

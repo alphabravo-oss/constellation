@@ -14,6 +14,7 @@ All notable changes to this project are documented here. The format follows
   recovery administrator. Normal local access can be disabled without losing recovery.
 - Bounded session snapshots remove request-time SQL, check expiry per request and
   fail closed after one second without database freshness (250ms revocation polling).
+  Migration 189 adds notifications and a replica acknowledgement barrier for new cookies.
 
 ### Identity (breaking)
 - One generic OIDC relying party with a configurable roles claim, exact role mapping,

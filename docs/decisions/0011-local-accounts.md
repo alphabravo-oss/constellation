@@ -38,7 +38,10 @@ within two seconds; discovery does not run in the session-refresh worker.
 
 Session checks use a bounded immutable index of at most 10,000 active sessions.
 A database revision (triggers on sessions, users and policy) is polled every 250ms;
-full snapshots are transferred only after changes. Expiry is checked on every
+full snapshots are transferred only after changes. Database notifications wake refreshes
+immediately, and successful login waits for acknowledgements from all live replicas
+before returning the cookie (migration 189). Each replica uses one dedicated
+notification connection; polling remains the fallback. Expiry is checked on every
 request. Local identity mutations synchronize the serving replica before returning;
 other replicas normally observe revocation within 250ms. Requests fail closed if
 the last successful database freshness check is older than one second. This bounded

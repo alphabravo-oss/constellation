@@ -137,19 +137,27 @@ func (s *Service) Run(ctx context.Context) {
 	}
 }
 func (s *Service) runSessions(ctx context.Context) {
+	wake := make(chan struct{}, 1)
+	go s.listenSessions(ctx, wake)
 	tick := time.NewTicker(250 * time.Millisecond)
 	defer tick.Stop()
+	defer func() {
+		bounded, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+		defer cancel()
+		_ = s.store.forgetSessionReplica(bounded, s.sessions.id)
+	}()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
-			bounded, cancel := context.WithTimeout(ctx, 750*time.Millisecond)
-			if err := s.RefreshSessions(bounded); err != nil {
-				slog.ErrorContext(ctx, "refresh session snapshot", "error", err)
-			}
-			cancel()
+		case <-wake:
 		}
+		bounded, cancel := context.WithTimeout(ctx, 750*time.Millisecond)
+		if err := s.RefreshSessions(bounded); err != nil {
+			slog.ErrorContext(ctx, "refresh session snapshot", "error", err)
+		}
+		cancel()
 	}
 }
 func (s *Service) Authenticate(ctx context.Context, raw string) (authctx.Subject, error) {
