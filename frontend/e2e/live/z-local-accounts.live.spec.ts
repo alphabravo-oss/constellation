@@ -12,6 +12,9 @@ test("bootstrap administrator creates an analyst who signs in, is restricted, an
  await expect(page.getByRole("heading",{name:"Users",exact:true})).toBeVisible();
  await page.getByRole("textbox",{name:"Email",exact:true}).fill(userEmail);
  await page.getByLabel("Display name",{exact:true}).fill("Local proof analyst");
+ await page.getByLabel("Password",{exact:true}).fill("password");
+ await page.getByRole("button",{name:"Create user",exact:true}).click();
+ await expect(page.getByRole("alert")).toContainText("offline breached-password list");
  await page.getByLabel("Password",{exact:true}).fill(userPassword);
  await page.getByRole("button",{name:"Create user",exact:true}).click();
  await expect(page.getByRole("heading",{name:"Account setup"})).toBeVisible();
@@ -94,5 +97,6 @@ test("offline breached passwords, exponential account backoff and shared IP limi
    expect(r.status()).toBe(401);
   }
   expect(ipLimited).toBeTruthy();
+  expect((await context.request.post(`/api/v1/local-users/${(await created.json()).id}/disable`,{headers,data:{}})).status()).toBe(200);
  }finally{await context.close();}
 });
