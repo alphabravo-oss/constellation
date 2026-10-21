@@ -27,7 +27,7 @@ agent) follows. It derives from the AlphaBravo Technology Selection Guide, chapt
 
 | Task | Command | Notes |
 |---|---|---|
-| Full local stack | `make dev` | Postgres + Prometheus/Tempo/Loki/Grafana (compose), api/operator/scanner under Air, Vite. Seeds demo data. Configure OIDC or explicit TOTP break-glass for sign-in. |
+| Full local stack | `make dev` | Postgres + Prometheus/Tempo/Loki/Grafana (compose), api/operator/scanner under Air, Vite. Seeds demo data. Local accounts are the default; OIDC and both modes are supported. |
 | Stop / status / logs | `make dev-down` / `make dev-status` / `make dev-logs` | `scripts/dev.sh logs api` for one process. |
 | Build every binary | `make build` | `bin/<name>`; add binaries to `BINARIES` in the Makefile. |
 | Unit tests | `make test` | gotestsum, `-race -shuffle=on`, JUnit under `artifacts/`; no Docker. |

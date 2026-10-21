@@ -1142,8 +1142,22 @@ auditArchiver:
   # - name: AWS_ENDPOINT_URL_S3
   #   value: https://s3.us-gov-west-1.amazonaws.com
 
-# Human authentication. Secrets are created separately and never rendered in values.
+# Human authentication. Local and OIDC can be enabled independently.
+# Values seed settings; later changes to these values replace the saved policy.
 auth:
+  local:
+    enabled: true
+    display: all # all, local, or sso; controls the normal login choices
+    totpPolicy: everyone # everyone or admins
+    passwordMinLength: 16
+    sessionSeconds: 3600
+    ipRate: 20 # attempts per minute, shared across replicas
+    accountRate: 5 # failures before exponential backoff (1 second to 5 minutes)
+    orgName: default
+    bootstrap:
+      enabled: true
+      email: admin@constellation.local
+      existingSecret: "" # password and totp-secret; generated if empty
   oidc:
     enabled: false
     issuerURL: ""

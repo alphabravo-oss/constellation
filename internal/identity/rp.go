@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -216,7 +217,10 @@ func randBytes(n int) []byte {
 	}
 	return b
 }
-func tokenHash(raw string) string { sum := sha256.Sum256([]byte(raw)); return fmt.Sprintf("%x", sum) }
+func tokenHash(raw string) string {
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:])
+}
 
 func (r *RP) Start(state, verifier, nonce string) string {
 	h := sha256.Sum256([]byte(verifier))

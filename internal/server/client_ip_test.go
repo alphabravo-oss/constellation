@@ -118,9 +118,9 @@ func TestForwardedSpoofCannotRotateAuthRateBucket(t *testing.T) {
 func TestAuthLoginRateLimitRejectsForwardedSpoof(t *testing.T) {
 	t.Setenv("CONSTELLATION_TRUSTED_PROXIES", "127.0.0.1/32")
 	ts, _, _, _, _ := newAuthTestServer(t)
-	for i := 0; i <= authIPRateLimit; i++ {
+	for i := 0; i <= 20; i++ {
 		body := bytes.NewBufferString(`{"email":"forwarded-spoof@example.test","password":"invalid"}`)
-		r, err := http.NewRequestWithContext(t.Context(), http.MethodPost, ts.URL+"/api/v1/auth/break-glass", body)
+		r, err := http.NewRequestWithContext(t.Context(), http.MethodPost, ts.URL+"/api/v1/auth/local", body)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -138,8 +138,8 @@ func TestAuthLoginRateLimitRejectsForwardedSpoof(t *testing.T) {
 		if err := response.Body.Close(); err != nil {
 			t.Fatal(err)
 		}
-		want := http.StatusNotFound
-		if i == authIPRateLimit {
+		want := http.StatusUnauthorized
+		if i == 20 {
 			want = http.StatusTooManyRequests
 		}
 		if response.StatusCode != want {

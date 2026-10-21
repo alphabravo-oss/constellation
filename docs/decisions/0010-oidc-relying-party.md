@@ -1,6 +1,8 @@
 # 0010: One OIDC relying party and emergency administrator
 
-Constellation delegates human authentication to one deployment-configured OIDC provider.
+Local-account decisions below are superseded by [ADR 0011](0011-local-accounts.md).
+
+Constellation delegates OIDC authentication to one deployment-configured OIDC provider.
 The issuer, client, API audience, roles claim (default `alphabravo_roles`) and exact
 claim-value to product-role mapping are configured under `auth.oidc`. Compact platform
 claims use the `constellation` member; external providers can use a flat claim.

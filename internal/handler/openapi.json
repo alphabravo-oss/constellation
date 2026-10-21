@@ -11496,7 +11496,7 @@
     "/api/v1/auth/break-glass": {
       "post": {
         "summary": "Sign in as the emergency administrator",
-        "description": "Disabled by default. Requires the Secret-configured password and a fresh six-digit TOTP. Cross-replica rate limit: five attempts per five minutes. Sets a Secure HttpOnly host session cookie, at most ten minutes, without refresh. Success commits a critical audit event and increments the emergency-login metric. Requires browser origin and X-Constellation-Client: browser.",
+        "description": "Signs in as the one protected local recovery administrator, including when normal local sign-in is disabled and OIDC is unconfigured or unreachable. Requires password and fresh mandatory six-digit TOTP. Uses the shared per-IP rate limit and per-account exponential backoff. Sets an opaque Secure HttpOnly host session cookie, at most ten minutes, without refresh. Success commits a critical audit event and increments the emergency-login metric. Requires browser origin and X-Constellation-Client: browser.",
         "security": [],
         "requestBody": {
           "required": true,
@@ -11542,6 +11542,66 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      }
+    },
+    "/api/v1/auth/local": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Invalid input or offline breached-password rejection"
+          },
+          "401": {
+            "description": "Authentication failed or session revoked"
+          },
+          "403": {
+            "description": "Role or browser-origin policy denied"
+          },
+          "429": {
+            "description": "Account backoff or shared per-IP rate limit. Retry-After contains seconds."
+          },
+          "503": {
+            "description": "Database or cryptographic key unavailable"
+          }
+        },
+        "summary": "Sign in with a first-class local account",
+        "tags": [
+          "Identity"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "password"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "password": {
+                    "type": "string",
+                    "maxLength": 4096
+                  },
+                  "totp": {
+                    "type": "string",
+                    "pattern": "^[0-9]{6}$",
+                    "description": "Required by the installation policy (always for administrators and recovery)."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "description": "Issues an opaque Secure HttpOnly host session cookie. Local sign-in must be enabled, except for the single recovery administrator. TOTP steps are consumed once across replicas. No network password check is made.",
+        "security": []
       }
     },
     "/api/v1/auth/logout": {
@@ -22639,6 +22699,177 @@
           }
         },
         "summary": "Create k8s-audit:bulk"
+      }
+    },
+    "/api/v1/local-users": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Profiles, status, roles, last sign-in and backoff counters. Password hashes and TOTP seeds are never returned."
+          },
+          "400": {
+            "description": "Invalid input or offline breached-password rejection"
+          },
+          "401": {
+            "description": "Authentication failed or session revoked"
+          },
+          "403": {
+            "description": "Role or browser-origin policy denied"
+          },
+          "429": {
+            "description": "Account backoff or shared per-IP rate limit. Retry-After contains seconds."
+          },
+          "503": {
+            "description": "Database or cryptographic key unavailable"
+          }
+        },
+        "summary": "List local accounts in the administrator\u2019s organization",
+        "tags": [
+          "Identity"
+        ]
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "New user id, password, TOTP seed and enrollment URI. Shown only in this response; store privately."
+          },
+          "400": {
+            "description": "Invalid input or offline breached-password rejection"
+          },
+          "401": {
+            "description": "Authentication failed or session revoked"
+          },
+          "403": {
+            "description": "Role or browser-origin policy denied"
+          },
+          "429": {
+            "description": "Account backoff or shared per-IP rate limit. Retry-After contains seconds."
+          },
+          "503": {
+            "description": "Database or cryptographic key unavailable"
+          }
+        },
+        "summary": "Create a local account and return one-time setup material",
+        "tags": [
+          "Identity"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "role"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "display_name": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "role": {
+                    "enum": [
+                      "Analyst",
+                      "Auditor",
+                      "ClusterAdmin",
+                      "SecurityAdmin",
+                      "GlobalAdmin"
+                    ]
+                  },
+                  "password": {
+                    "type": "string",
+                    "maxLength": 4096,
+                    "description": "Omit or leave empty to generate. Checked against the embedded offline NCSC corpus."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/local-users/{id}/{action}": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Invalid input or offline breached-password rejection"
+          },
+          "401": {
+            "description": "Authentication failed or session revoked"
+          },
+          "403": {
+            "description": "Role or browser-origin policy denied"
+          },
+          "429": {
+            "description": "Account backoff or shared per-IP rate limit. Retry-After contains seconds."
+          },
+          "503": {
+            "description": "Database or cryptographic key unavailable"
+          }
+        },
+        "summary": "Disable, reset credentials or assign a local account role",
+        "tags": [
+          "Identity"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "password": {
+                    "type": "string",
+                    "maxLength": 4096
+                  },
+                  "role": {
+                    "enum": [
+                      "Analyst",
+                      "Auditor",
+                      "ClusterAdmin",
+                      "SecurityAdmin",
+                      "GlobalAdmin"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "action",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "disable",
+                "reset-password",
+                "reset-totp",
+                "role"
+              ]
+            }
+          }
+        ],
+        "description": "Scoped to the calling administrator\u2019s organization. Access changes increment the revocation epoch and remove sessions. Credential resets return one-time enrollment material. Recovery access cannot be disabled or downgraded."
       }
     },
     "/api/v1/me/preferences": {
@@ -34047,7 +34278,7 @@
     "/api/v1/settings/identity": {
       "get": {
         "summary": "Inspect the single sign-on provider and emergency access status",
-        "description": "Requires manage-identity. Returns deployment-managed OIDC issuer, client ID, audience, role-claim name, exact role mapping and break-glass status. Never returns client secrets, password hashes or TOTP seeds.",
+        "description": "Returns local policy, generic OIDC provider, readiness and recovery session policy. Credentials are never returned.",
         "responses": {
           "200": {
             "description": "Provider configuration and break-glass status"
@@ -34060,6 +34291,116 @@
           },
           "default": {
             "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Invalid input or offline breached-password rejection"
+          },
+          "401": {
+            "description": "Authentication failed or session revoked"
+          },
+          "403": {
+            "description": "Role or browser-origin policy denied"
+          },
+          "429": {
+            "description": "Account backoff or shared per-IP rate limit. Retry-After contains seconds."
+          },
+          "503": {
+            "description": "Database or cryptographic key unavailable"
+          },
+          "409": {
+            "description": "Revision changed; reload before saving"
+          }
+        },
+        "summary": "Update local policy and the generic OIDC provider",
+        "tags": [
+          "Identity"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "local",
+                  "oidc",
+                  "revision"
+                ],
+                "properties": {
+                  "local": {
+                    "type": "object",
+                    "required": [
+                      "enabled",
+                      "display",
+                      "totp_policy",
+                      "password_min_length",
+                      "session_seconds",
+                      "ip_rate",
+                      "account_rate"
+                    ],
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "display": {
+                        "enum": [
+                          "all",
+                          "local",
+                          "sso"
+                        ]
+                      },
+                      "totp_policy": {
+                        "enum": [
+                          "everyone",
+                          "admins"
+                        ]
+                      },
+                      "password_min_length": {
+                        "type": "integer",
+                        "minimum": 12,
+                        "maximum": 128
+                      },
+                      "session_seconds": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 86400
+                      },
+                      "ip_rate": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100
+                      },
+                      "account_rate": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 20
+                      }
+                    }
+                  },
+                  "oidc": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "description": "Generic OIDC configuration; HTTPS issuer and callback, exact roles claim mapping. Never auto-link by email."
+                  },
+                  "revision": {
+                    "type": "integer"
+                  },
+                  "client_secret": {
+                    "type": "string",
+                    "description": "Optional replacement, age encrypted at rest and never returned."
+                  }
+                }
+              }
+            }
           }
         }
       }

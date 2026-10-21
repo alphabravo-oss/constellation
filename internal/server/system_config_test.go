@@ -107,7 +107,15 @@ VALUES ($1, $2, $3, $4, 0)`, u.id, orgID, u.role+"-"+u.id.String()+"@example.tes
 		t.Fatalf("New: %v", err)
 	}
 	signer := &testSessionIssuer{pool: pool}
-	ts := httptest.NewServer(srv.Handler())
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Domain fixtures insert sessions and mutate users with SQL. Synchronize the
+		// same production snapshot before each request; identity tests cover its
+		// background propagation, expiry and fail-closed freshness separately.
+		if err := srv.identity.RefreshSessions(r.Context()); err != nil {
+			t.Error(err)
+		}
+		srv.Handler().ServeHTTP(w, r)
+	}))
 	t.Cleanup(ts.Close)
 	return srv, ts, pool, signer, adminID, auditorID, orgID
 }

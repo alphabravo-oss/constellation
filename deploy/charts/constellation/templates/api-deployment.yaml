@@ -132,6 +132,36 @@ spec:
               value: "{{ $v }}"
 {{- end }}
 {{- end }}
+            - name: LOCAL_AUTH_ENABLED
+              value: {{ .Values.auth.local.enabled | quote }}
+            - name: LOCAL_AUTH_DISPLAY
+              value: {{ .Values.auth.local.display | quote }}
+            - name: LOCAL_AUTH_TOTP_POLICY
+              value: {{ .Values.auth.local.totpPolicy | quote }}
+            - name: LOCAL_AUTH_PASSWORD_MIN_LENGTH
+              value: {{ .Values.auth.local.passwordMinLength | quote }}
+            - name: LOCAL_AUTH_SESSION_SECONDS
+              value: {{ .Values.auth.local.sessionSeconds | quote }}
+            - name: LOCAL_AUTH_IP_RATE
+              value: {{ .Values.auth.local.ipRate | quote }}
+            - name: LOCAL_AUTH_ACCOUNT_RATE
+              value: {{ .Values.auth.local.accountRate | quote }}
+            - name: LOCAL_AUTH_ORG
+              value: {{ .Values.auth.local.orgName | quote }}
+{{- if .Values.auth.local.bootstrap.enabled }}
+            - name: LOCAL_BOOTSTRAP_EMAIL
+              value: {{ .Values.auth.local.bootstrap.email | quote }}
+            - name: LOCAL_BOOTSTRAP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.local.bootstrap.existingSecret | default (printf "%s-local-admin" (include "constellation.fullname" .)) | quote }}
+                  key: password
+            - name: LOCAL_BOOTSTRAP_TOTP
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.auth.local.bootstrap.existingSecret | default (printf "%s-local-admin" (include "constellation.fullname" .)) | quote }}
+                  key: totp-secret
+{{- end }}
 {{- if .Values.auth.oidc.enabled }}
             - name: OIDC_ISSUER_URL
               value: {{ required "auth.oidc.issuerURL is required" .Values.auth.oidc.issuerURL | quote }}

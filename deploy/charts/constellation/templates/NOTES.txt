@@ -71,3 +71,21 @@ name, you can ignore this warning.)
 pgvector check: operand image {{ include "constellation.cnpgImage" . }} — OK.
 {{- end }}
 {{- end }}
+
+{{- if .Values.auth.local.bootstrap.enabled }}
+Local accounts are enabled by default. On first boot, an initial administrator is
+created only when no normal local accounts exist. Email: {{ .Values.auth.local.bootstrap.email }}.
+Password and TOTP enrollment seed are stored in Secret
+{{ .Values.auth.local.bootstrap.existingSecret | default (printf "%s-local-admin" (include "constellation.fullname" .)) }}.
+Retrieve privately (these commands print credentials):
+  kubectl -n {{ .Release.Namespace }} get secret {{ .Values.auth.local.bootstrap.existingSecret | default (printf "%s-local-admin" (include "constellation.fullname" .)) }} -o jsonpath='{.data.password}' | base64 -d
+  kubectl -n {{ .Release.Namespace }} get secret {{ .Values.auth.local.bootstrap.existingSecret | default (printf "%s-local-admin" (include "constellation.fullname" .)) }} -o jsonpath='{.data.totp-secret}' | base64 -d
+Enroll the seed in an authenticator (TOTP, SHA1, 6 digits, 30 seconds) before signing
+in. Use Settings > Users to reset enrollment/password after securely handing them
+to the administrator. On a new install this administrator is also the one recovery
+account. Upgrades preserve the existing recovery administrator and its credentials.
+The generated Secret is retained across upgrades; it never resets database users.
+{{- end }}
+Sign-in policy is editable in Settings > Sign-in methods. Changing auth.local or
+auth.oidc chart values replaces the saved policy on API startup; unchanged values
+preserve admin edits. Disabling local sign-in revokes normal local sessions.

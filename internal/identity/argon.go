@@ -1,4 +1,4 @@
-// Argon2id is used exclusively for the break-glass credential.
+// Argon2id protects local account passwords, including the recovery administrator.
 package identity
 
 import (

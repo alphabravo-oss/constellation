@@ -68,6 +68,7 @@ type Config struct {
 	// and forbids unbounded (never-expiring) PATs (A7). Zero disables the cap
 	// (back-compat: any expiry, including none, is accepted).
 	PATMaxLifetime       time.Duration
+	Local                identity.LocalConfig
 	BreakGlass           identity.BreakGlassConfig
 	OIDC                 *identity.OIDCConfig // nil to disable OIDC login
 	CORSOrigins          []string
@@ -199,7 +200,7 @@ func New(ctx context.Context, cfg Config, tel *telemetry.Telemetry, database *db
 		tel.Logger.Warn("system config seed failed", slog.String("err", err.Error()))
 	}
 	var identityErr error
-	s.identity, identityErr = identity.New(ctx, identity.Store{Pool: database.Pool()}, cfg.OIDC, cfg.BreakGlass, s.auditLog, tel.Registry)
+	s.identity, identityErr = identity.New(ctx, identity.Store{Pool: database.Pool()}, cfg.OIDC, cfg.BreakGlass, cfg.Local, s.auditLog, tel.Registry)
 	if identityErr != nil {
 		return nil, identityErr
 	}
@@ -429,13 +430,14 @@ func (s *Server) buildRouter() chi.Router {
 		// Anonymous identity and enrollment endpoints share a per-IP limit.
 		// Break-glass additionally enforces a global, cross-replica database limit.
 		auth := s.identity
+		r.Post("/auth/break-glass", auth.BreakGlass)
+		r.Post("/auth/local", auth.LocalLogin)
 		r.Group(func(r chi.Router) {
 			r.Use(httprate.Limit(
 				authIPRateLimit, time.Minute,
 				httprate.WithKeyByIP(),
 				httprate.WithLimitHandler(rateLimited),
 			))
-			r.Post("/auth/break-glass", auth.BreakGlass)
 			r.Get("/auth/providers", auth.Providers)
 			r.Get("/auth/oidc/start", auth.OIDCStart)
 			r.Get("/auth/oidc/callback", auth.OIDCCallback)
@@ -854,6 +856,10 @@ func (s *Server) buildRouter() chi.Router {
 			r.Get("/support/bundle/jobs/{id}/download", s.requireVerb(rbac.VerbManageSystemConfig, s.supportBundleJobs.DownloadJob))
 
 			r.Get("/settings/identity", s.requireVerb(rbac.VerbManageIdentity, s.identity.Settings))
+			r.Put("/settings/identity", s.requireVerb(rbac.VerbManageIdentity, s.identity.UpdateSettings))
+			r.Get("/local-users", s.requireVerb(rbac.VerbManageUsers, s.identity.ListUsers))
+			r.Post("/local-users", s.requireVerb(rbac.VerbManageUsers, s.identity.CreateUser))
+			r.Post("/local-users/{id}/{action}", s.requireVerb(rbac.VerbManageUsers, s.identity.MutateUser))
 
 			settings := handler.NewSettings(s.db, s.auditLog)
 			r.Get("/settings/org", s.requireVerb(rbac.VerbReadFindings, settings.GetOrg))

@@ -469,8 +469,9 @@ role. Other claim names (for example `groups`) work directly against an existing
 external provider. Request the client’s own audience; no cross-project audience
 scopes are required. Configure ID and access token lifetimes to **ten minutes or
 less**, with `iat`, `exp` and a stable `sub`. HTTPS discovery and endpoints are
-mandatory. Settings → Single sign-on displays the configuration and role map;
-secrets remain in Kubernetes Secrets. Changes take effect on the API rollout.
+mandatory. Settings → Sign-in methods edits local policy and the provider role map. Provider
+secrets edited there are age encrypted in Postgres. Replicas reload within two seconds.
+Changed chart values replace the saved policy on rollout; unchanged values preserve UI edits.
 
 The browser uses authorization code + PKCE and a one-use, cookie-bound nonce/state
 record. It receives an opaque, HttpOnly, Secure host cookie that expires with the
@@ -912,35 +913,75 @@ grants owned by migration 186) for an optional exporter. With
 `networkPolicies.enabled`, `networkPolicies.monitoring.namespace` is admitted
 to every metrics port.
 
-## Emergency administrator (break-glass)
+## Local accounts and recovery administrator
 
-Disabled by default. Provision an Argon2id hash and a random, base32 TOTP seed of
-at least 20 bytes in an existing Secret with keys `password-hash` and `totp-secret`.
-`constellationctl break-glass-hash` reads the password from stdin and writes the
-PHC hash (64 MiB / three passes / four lanes). Use a password of at least 16 bytes.
-Enroll the seed in an authenticator under your own organization’s label.
+Local accounts are a normal sign-in method, enabled by default. Set
+`auth.local.enabled`, `auth.oidc.enabled`, or both. Configure presentation with
+`auth.local.display: all|local|sso`. When the preferred method is unavailable,
+the login page retains the other enabled method and a recovery link.
 
-```yaml
-auth:
-  breakGlass:
-    enabled: true
-    existingSecret: constellation-break-glass
-    orgName: default
-    sessionTTL: 5m
+The chart creates a retained `<release>-local-admin` Secret containing a generated
+40-character password and a base32 `totp-secret`. Set
+`auth.local.bootstrap.existingSecret` to supply those keys yourself. The initial
+email defaults to `admin@constellation.local`; set `auth.local.bootstrap.email` to
+change it. Retrieve both values privately using the commands in the chart's NOTES,
+and enroll the seed in an authenticator (SHA1, six digits, 30 seconds). They are
+never logged by the API or returned by user-list/settings endpoints. This Secret
+only creates the initial administrator; it never resets an existing account.
+
+On a new installation the initial administrator is also the one recovery account.
+On an upgrade, migration 188 preserves the previous break-glass administrator and
+its password/TOTP; the bootstrap administrator is then a separate normal account.
+Existing `auth.breakGlass.*` Secret values are used only to import that identity;
+subsequent credential changes use Users or the CLI, not chart env rotation.
+
+Settings → Users creates accounts (supplied or generated passwords), assigns a
+product role, disables access and resets passwords or TOTP. Creation and resets
+show enrollment material once for private delivery to the account owner. There
+is no email-delivery dependency. Settings → Sign-in methods controls local login,
+OIDC, the visible choices, password length, session lifetime and TOTP policy.
+TOTP is required for everyone by default; `admins` always requires it for the
+three administrator roles and recovery. The offline NCSC top-100k list is embedded
+in the API; password checks make no network request. The default minimum is 16
+characters (configurable 12–128), with a 4096-byte input bound.
+
+Normal local sessions default to one hour (configurable 60–86400 seconds).
+Disabling local sign-in immediately prevents new normal local logins and revokes
+normal local sessions; the recovery administrator continues to work when SSO is
+unconfigured or unavailable. Recovery always requires TOTP and lasts five minutes
+by default (at most ten, `auth.breakGlass.sessionTTL`). Every accepted TOTP step
+is consumed once across replicas. Default limits are 20 attempts per IP per minute
+and exponential account backoff after five failures, from one second to five
+minutes. `Retry-After` reports the actual cooldown. Counters are shared in Postgres.
+
+Sessions have no refresh. The bounded session index checks expiry on every
+request; cross-replica revocations normally propagate within 250ms, and a failed
+database freshness check closes access within one second. No per-request network
+or database call is needed for opaque-session verification. OIDC discovery runs
+independently, so an issuer outage cannot starve session synchronization.
+
+Recovery success and critical `auth.login.break-glass` audit commit together.
+`constellation_break_glass_logins_total` records outcomes and
+`ConstellationBreakGlassUsed` alerts on use (`metrics.prometheusRule.enabled`).
+Investigate each use and rotate the recovery credentials through Users or CLI.
+The recovery identity cannot be disabled, deleted or downgraded.
+
+Operators use an administrator API token or opaque session in the existing CLI
+configuration (`constellationctl login --server …` reads the token from stdin):
+
+```sh
+constellationctl users list
+constellationctl users create --email analyst@example.com --name Analyst --role Analyst
+constellationctl users create --email analyst@example.com --role Analyst --password-stdin
+constellationctl users disable <user-id>
+constellationctl users reset-password <user-id> --password-stdin
+constellationctl users reset-totp <user-id>
 ```
 
-Select **Emergency access** on the sign-in page, enter the password and the
-six-digit authenticator code. Postgres must be available; the OIDC provider need
-not be. Every TOTP step can be used once across all replicas. A global database
-limit permits five attempts per five minutes, in addition to the public IP limit.
-Sessions last at most ten minutes, have no refresh, and are revoked on logout.
-Success and its critical `auth.login.break-glass` audit event commit atomically.
-`constellation_break_glass_logins_total` records outcomes and
-`ConstellationBreakGlassUsed` alerts on successful use (enable
-`metrics.prometheusRule.enabled`). Investigate the audit event and rotate the
-Secret after recovery. Disable the chart value and roll the API when emergency
-access is no longer needed. Delete the retired `*-admin-credentials` Secret after
-confirming OIDC and emergency login; it cannot authenticate after migration 187.
+Creation and resets print setup credentials once; redirect them to protected files.
+A missing password generates a strong one. Disabling access, resetting credentials
+and assigning a role revoke existing sessions and emit audit events. Take a CNPG
+backup before applying forward-only migration 188; deploy the API and UI together.
 
 ## Pod Security Admission and the k3s host profile
 

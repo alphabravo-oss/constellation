@@ -169,6 +169,7 @@
   "GET /api/v1/integrations/receivers": "read-findings",
   "GET /api/v1/integrations/receivers/{id}/deliveries": "read-findings",
   "GET /api/v1/k8s-audit": "read-findings",
+  "GET /api/v1/local-users": "manage-users",
   "GET /api/v1/me/preferences": "read-findings",
   "GET /api/v1/migration/imports": "manage-policies",
   "GET /api/v1/migration/imports/export": "manage-policies",
@@ -341,6 +342,7 @@
   "POST /api/v1/assets/{id}/image-acceptances/{acceptanceID}/revoke": "accept-risk",
   "POST /api/v1/audit/verify": "read-audit",
   "POST /api/v1/auth/break-glass": "public",
+  "POST /api/v1/auth/local": "public",
   "POST /api/v1/auth/logout": "authn",
   "POST /api/v1/backups": "manage-org",
   "POST /api/v1/backups/restore": "manage-org",
@@ -403,6 +405,8 @@
   "POST /api/v1/integrations/receivers/{id}/test-fire": "manage-policies",
   "POST /api/v1/integrations/receivers/{id}/unpause": "manage-policies",
   "POST /api/v1/k8s-audit:bulk": "authn",
+  "POST /api/v1/local-users": "manage-users",
+  "POST /api/v1/local-users/{id}/{action}": "manage-users",
   "POST /api/v1/migration/imports/{id}:apply": "manage-policies",
   "POST /api/v1/migration/imports/{id}:rollback": "manage-policies",
   "POST /api/v1/migration/preview": "manage-policies",
@@ -507,6 +511,7 @@
   "PUT /api/v1/runtime/baselines/{workload_id}/rules/{rule_id}": "manage-runtime-rules",
   "PUT /api/v1/runtime/file-profiles/{workload_id}/exceptions/{exception_id}": "manage-runtime-rules",
   "PUT /api/v1/runtime/file-profiles/{workload_id}/rules/{rule_id}": "manage-runtime-rules",
+  "PUT /api/v1/settings/identity": "manage-identity",
   "PUT /api/v1/users/{id}": "manage-users",
   "PUT /api/v1/vuln-profiles/{id}": "manage-policies"
 }

@@ -108,7 +108,15 @@ VALUES ($1, $2, $3, 'Revoke Admin', 0)`, userID, orgID, email); err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	signer := &testSessionIssuer{pool: pool}
-	ts := httptest.NewServer(srv.Handler())
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Domain fixtures insert sessions and mutate users with SQL. Synchronize the
+		// same production snapshot before each request; identity tests cover its
+		// background propagation, expiry and fail-closed freshness separately.
+		if err := srv.identity.RefreshSessions(r.Context()); err != nil {
+			t.Error(err)
+		}
+		srv.Handler().ServeHTTP(w, r)
+	}))
 	t.Cleanup(ts.Close)
 	return ts, pool, signer, userID, orgID
 }

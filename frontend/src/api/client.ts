@@ -5272,12 +5272,30 @@ export const systemConfigApi = {
     api.post<{ refresh_now: number; revision: number }>("/scanner/refresh", {}).then((r) => r.data),
 };
 
+export interface LocalAuthPolicy {
+ enabled: boolean; display: "all" | "local" | "sso"; totp_policy: "everyone" | "admins";
+ password_min_length: number; session_seconds: number; ip_rate: number; account_rate: number;
+}
 export interface IdentitySettings {
+ local: LocalAuthPolicy;
  oidc: {issuer_url:string;client_id:string;audience:string;redirect_url:string;roles_claim:string;role_mapping:Record<string,string>;org_name:string;scopes:string[]} | null;
- ready:boolean;
+ ready:boolean; revision:number;
  break_glass:{enabled:boolean;totp_required:boolean;session_seconds:number};
 }
-export const identitySettings = {get:()=>api.get<IdentitySettings>("/settings/identity").then(r=>r.data)};
+export const identitySettings = {
+ get:()=>api.get<IdentitySettings>("/settings/identity").then(r=>r.data),
+ put:(body:Pick<IdentitySettings,"local"|"oidc"|"revision"> & {client_secret?:string})=>api.put("/settings/identity",body).then(r=>r.data),
+};
+export interface LocalUser {
+ id:string;email:string;display_name:string;status:"active"|"disabled";break_glass:boolean;roles:string[];
+ last_login:string|null;failed_attempts:number;created_at:string;updated_at:string;
+}
+export interface LocalEnrollment {id:string;password?:string;totp_secret?:string;totp_uri?:string}
+export const localUsers = {
+ list:()=>api.get<{users:LocalUser[]}>("/local-users").then(r=>r.data),
+ create:(body:{email:string;display_name:string;password:string;role:string})=>api.post<LocalEnrollment>("/local-users",body).then(r=>r.data),
+ change:(id:string,action:string,body:{password?:string;role?:string}={})=>api.post<LocalEnrollment>(`/local-users/${encodeURIComponent(id)}/${action}`,body).then(r=>r.data),
+};
 
 export interface Receiver {
   id: string;
@@ -5882,9 +5900,9 @@ export const runtimeEvents = {
 };
 
 export const auth = {
-  providers: () => api.get<{ oidc: boolean; break_glass: boolean }>("/auth/providers").then((r) => r.data),
-  login: (password: string, totp: string) =>
-    api.post<{ expires_at: string }>(`/auth/break-glass`, { password, totp }).then((r) => r.data),
+  providers: () => api.get<{ local: boolean; oidc: boolean; break_glass: boolean; totp_policy: "everyone" | "admins" }>("/auth/providers").then((r) => r.data),
+  login: (email: string, password: string, totp: string, emergency = false) =>
+    api.post<{ expires_at: string }>(emergency ? `/auth/break-glass` : `/auth/local`, { email, password, totp }).then((r) => r.data),
   me:    () => api.get<{ user_id: string; org_id: string; email: string; roles: string[] }>("/auth/me").then((r) => r.data),
   logout: () => api.post(`/auth/logout`).then((r) => r.data),
   oidcStart: () => api.get<{ authorize_url: string }>(`/auth/oidc/start`).then((r) => r.data),

@@ -38,17 +38,6 @@ func (s Store) resolve(ctx context.Context, org, issuer string, p *Principal) (a
 	return subj, epoch, nil
 }
 
-func (s Store) session(ctx context.Context, raw string) (authctx.Subject, error) {
-	var subj authctx.Subject
-	var grants []rbac.RoleAssignment
-	err := s.Pool.QueryRow(ctx, `SELECT u.id,u.org_id,u.email,s.roles FROM identity_sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>now() AND NOT u.disabled AND s.session_epoch=u.session_epoch`, tokenHash(raw)).Scan(&subj.UserID, &subj.OrgID, &subj.Email, &grants)
-	if err != nil {
-		return subj, err
-	}
-	subj.Assignments = grants
-	return subj, nil
-}
-
 func (s Store) startSession(ctx context.Context, subj authctx.Subject, epoch int64, roles []string, kind string, expires time.Time, log *audit.Logger) (string, error) {
 	raw := "csi_" + randomToken()
 	roleJSON, _ := json.Marshal(subj.Assignments)
@@ -58,18 +47,30 @@ func (s Store) startSession(ctx context.Context, subj authctx.Subject, epoch int
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	// Login reconciles persisted grants for PATs and the access-control overview.
-	if _, err = tx.Exec(ctx, `SELECT id FROM users WHERE id=$1 FOR UPDATE`, subj.UserID); err != nil {
+	var currentEpoch int64
+	if err = tx.QueryRow(ctx, `SELECT session_epoch FROM users WHERE id=$1 AND NOT disabled FOR UPDATE`, subj.UserID).Scan(&currentEpoch); err != nil {
 		return "", err
+	}
+	if currentEpoch != epoch {
+		return "", errors.New("account access changed during login")
+	}
+	if kind == "local" {
+		var enabled bool
+		if err = tx.QueryRow(ctx, `SELECT (local_config->>'enabled')::boolean FROM identity_settings WHERE singleton FOR SHARE`).Scan(&enabled); err != nil || !enabled {
+			return "", errors.New("local login disabled")
+		}
 	}
 	if _, err = tx.Exec(ctx, `UPDATE users SET last_login_at=now() WHERE id=$1`, subj.UserID); err != nil {
 		return "", err
 	}
-	if _, err = tx.Exec(ctx, `DELETE FROM role_assignments WHERE user_id=$1`, subj.UserID); err != nil {
-		return "", err
-	}
-	for _, role := range roles {
-		if _, err = tx.Exec(ctx, `INSERT INTO role_assignments(user_id,role,scope_org_id) VALUES($1,$2,$3)`, subj.UserID, role, subj.OrgID); err != nil {
+	if kind == "oidc" {
+		if _, err = tx.Exec(ctx, `DELETE FROM role_assignments WHERE user_id=$1`, subj.UserID); err != nil {
 			return "", err
+		}
+		for _, role := range roles {
+			if _, err = tx.Exec(ctx, `INSERT INTO role_assignments(user_id,role,scope_org_id) VALUES($1,$2,$3)`, subj.UserID, role, subj.OrgID); err != nil {
+				return "", err
+			}
 		}
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO identity_sessions(token_hash,user_id,roles,session_epoch,kind,expires_at) VALUES($1,$2,$3,$4,$5,$6)`, tokenHash(raw), subj.UserID, roleJSON, epoch, kind, expires); err != nil {
@@ -100,13 +101,4 @@ func (s Store) consumeAttempt(ctx context.Context, state, binding string) (strin
 func (s Store) logout(ctx context.Context, user uuid.UUID) error {
 	_, err := s.Pool.Exec(ctx, `DELETE FROM identity_sessions WHERE user_id=$1`, user)
 	return err
-}
-func (s Store) reserveBreakGlass(ctx context.Context) (bool, error) {
-	var attempts int
-	err := s.Pool.QueryRow(ctx, `UPDATE break_glass_guard SET attempts=CASE WHEN window_start<now()-interval '5 minutes' THEN 1 ELSE attempts+1 END,window_start=CASE WHEN window_start<now()-interval '5 minutes' THEN now() ELSE window_start END WHERE singleton RETURNING attempts`).Scan(&attempts)
-	return attempts <= 5, err
-}
-func (s Store) consumeTOTP(ctx context.Context, step int64) (bool, error) {
-	tag, err := s.Pool.Exec(ctx, `UPDATE break_glass_guard SET last_totp_step=$1 WHERE singleton AND last_totp_step<$1`, step)
-	return tag.RowsAffected() == 1, err
 }
