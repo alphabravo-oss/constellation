@@ -70,6 +70,7 @@ test("local off refuses normal login; recovery works without SSO and the critica
   const current=await recovery.request.get("/api/v1/settings/identity");
   if(current.ok()){
    const v=await current.json();const restored=await recovery.request.put("/api/v1/settings/identity",{headers,data:{local:original.local,oidc:original.oidc,revision:v.revision}});expect(restored.status()).toBe(200);
+   expect((await recovery.request.post("/api/v1/auth/logout",{headers})).status()).toBe(200);
   }
   await recovery.close();
  }
@@ -98,5 +99,5 @@ test("offline breached passwords, exponential account backoff and shared IP limi
   }
   expect(ipLimited).toBeTruthy();
   expect((await context.request.post(`/api/v1/local-users/${(await created.json()).id}/disable`,{headers,data:{}})).status()).toBe(200);
- }finally{await context.close();}
+ }finally{await context.request.post("/api/v1/auth/logout",{headers});await context.close();}
 });
