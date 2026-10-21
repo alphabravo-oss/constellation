@@ -44,7 +44,7 @@ IMAGES := api scanner operator discoverer audit-archiver frontend runtime-agent 
 dockerfile_audit-archiver := archiver
 
 .PHONY: help dev dev-down dev-status dev-logs build tools-build test test-integration lint vet fmt fmt-fix \
-  generate migrate check security updates fips-build fips-test helm-lint helm-template-smoke \
+  generate migrate bench check security updates fips-build fips-test helm-lint helm-template-smoke \
   e2e frontend-build frontend-lint frontend-test lint-shell check-go-version tools images images-push \
   release-images release-check deploy deploy-dryrun undeploy dp dp-clean vendor-neuvector-diff \
   vendor-neuvector-sync clean $(addprefix image-,$(IMAGES)) image-scanner-airgap
@@ -128,6 +128,10 @@ frontend-build: frontend/node_modules/.package-lock.json ## Production bundle an
 
 generate: ## Regenerate code (controller-gen deepcopy for the operator CRDs); sqlc/buf join in Phase 2
 	$(GO) generate ./...
+
+bench: ## Hot HTTP handlers on 10k rows (real disposable Postgres) and shared RP
+	$(GO) test -tags=integration -run='^$$' -bench=BenchmarkEfficiencyHandlers -benchmem ./internal/server
+	$(GO) test -run='^$$' -bench=BenchmarkOIDC -benchmem ./internal/identity
 
 check: lint vet fmt lint-shell frontend-lint frontend-build test ## Composite quality gate
 

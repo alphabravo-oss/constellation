@@ -1,0 +1,15 @@
+{
+  "api": {"bytes":40000000,"reason":"Static Go API"},
+  "admission": {"bytes":40000000,"reason":"Static Go webhook"},
+  "operator": {"bytes":40000000,"reason":"Static Go controller and policy applier"},
+  "discoverer": {"bytes":40000000,"reason":"Static Go discovery worker"},
+  "bootstrap": {"bytes":40000000,"reason":"Static Go bootstrap"},
+  "frontend": {"bytes":40000000,"reason":"nginx and split application assets"},
+  "scanner": {"bytes":190000000,"reason":"Required syft, grype, trivy, cosign and oras; excludes optional airgap databases"},
+  "toolbox": {"bytes":65000000,"reason":"Required age, kubectl, rclone and archive utilities"},
+  "runtime-agent": {"bytes":90000000,"reason":"Native dataplane, BPF object, crictl and required networking libraries/tools"},
+  "compliance-scheduler": {"bytes":60000000,"reason":"Static worker plus required offline cosign signing tool"},
+  "audit-archiver": {"bytes":70000000,"reason":"Archiver plus required cosign and runtime certificates"},
+  "kube-bench-runner": {"bytes":50000000,"reason":"Worker, kube-bench and benchmark definitions"},
+  "postgres": {"bytes":280000000,"reason":"CNPG PostgreSQL operand and vector extension"}
+}
