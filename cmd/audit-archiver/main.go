@@ -1,30 +1,15 @@
-// audit-archiver is a cron-style job that freezes a rolling window of audit rows to S3 and
-// produces a signed manifest.
-//
-// Schedule: run from a Kubernetes CronJob (deploy/charts/constellation/templates/audit-archiver-cronjob.yaml).
-//
-// Window:        configurable via FREEZE_WINDOW env var (default 24h)
-// Output:        s3://<bucket>/<prefix>/<window-start>--<window-end>.jsonl.gz
-// Manifest:      adjacent .manifest.json with sha256 + chain head/tail + count
-// Signature:     adjacent .manifest.json.sig and optional .manifest.json.cert
+// audit-archiver publishes signed audit chain segments and verifies downloaded
+// archives without database access. See docs/audit-archive.md.
 package main
 
 import (
-	"bytes"
-	"compress/gzip"
 	"context"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -32,528 +17,143 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/alphabravocompany/constellation/internal/securefiles"
+	"github.com/alphabravocompany/constellation/internal/auditarchive"
 	"github.com/alphabravocompany/constellation/internal/telemetry"
-	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/backup"
 	"github.com/alphabravocompany/constellation/pkg/version"
 )
 
-const archiveManifestVersion = 1
-
-type archiveKeys struct {
-	Archive   string
-	Manifest  string
-	Signature string
-	Cert      string
-}
-
-type archiveManifest struct {
-	FormatVersion  int               `json:"format_version"`
-	WindowStart    string            `json:"window_start"`
-	WindowEnd      string            `json:"window_end"`
-	RecordCount    int64             `json:"record_count"`
-	ArchiveSHA256  string            `json:"archive_sha256"`
-	JSONLSHA256    string            `json:"jsonl_sha256"`
-	SHA256         string            `json:"sha256"`
-	FirstChain     string            `json:"first_chain"`
-	LastChain      string            `json:"last_chain"`
-	ArchiveKey     string            `json:"archive_key"`
-	ManifestKey    string            `json:"manifest_key"`
-	SignatureKey   string            `json:"signature_key,omitempty"`
-	CertificateKey string            `json:"certificate_key,omitempty"`
-	SignMode       backup.SignMode   `json:"sign_mode"`
-	SignerIdentity string            `json:"signer_identity,omitempty"`
-	CreatedAt      string            `json:"created_at"`
-	Metadata       map[string]string `json:"metadata,omitempty"`
-}
-
-type auditArchiveHeartbeatState struct {
-	Bucket        string
-	Prefix        string
-	Window        time.Duration
-	DryRun        bool
-	SignMode      string
-	Stage         string
-	RecordCount   int64
-	ArchiveKey    string
-	ManifestKey   string
-	Success       bool
-	LastErrorText string
-}
-
-func (s *auditArchiveHeartbeatState) snapshot() any {
-	return map[string]any{
-		"bucket_configured": strings.TrimSpace(s.Bucket) != "",
-		"prefix":            s.Prefix,
-		"window_seconds":    s.Window.Seconds(),
-		"dry_run":           s.DryRun,
-		"sign_mode":         s.SignMode,
-		"stage":             s.Stage,
-		"record_count":      s.RecordCount,
-		"archive_key":       s.ArchiveKey,
-		"manifest_key":      s.ManifestKey,
-		"success":           s.Success,
-	}
-}
-
-func (s *auditArchiveHeartbeatState) lastError() string {
-	return s.LastErrorText
-}
-
 func main() {
-	bucket := flag.String("bucket", env("AUDIT_BUCKET", ""), "S3 bucket (or s3-compatible) for archive")
-	prefix := flag.String("prefix", env("AUDIT_PREFIX", "audit"), "Object key prefix")
-	window := flag.Duration("window", envDuration("FREEZE_WINDOW", 24*time.Hour), "Window size to freeze")
-	dryRun := flag.Bool("dry-run", false, "Write to local files instead of S3")
-	outDir := flag.String("out-dir", env("AUDIT_OUT_DIR", filepath.Join(os.TempDir(), "constellation-audit")), "Local output directory for --dry-run")
-	signMode := flag.String("sign-mode", env("AUDIT_SIGN_MODE", string(backup.SignModeNone)), "Manifest signing mode: none, static-key, keyless")
-	signKey := flag.String("sign-key", env("AUDIT_SIGN_KEY", ""), "PEM ed25519 private key path for --sign-mode=static-key")
-	cosignBin := flag.String("cosign-bin", env("COSIGN_BIN", "cosign"), "cosign binary path for --sign-mode=keyless")
-	flag.Parse()
-
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		fmt.Fprintln(os.Stderr, "DATABASE_URL required")
-		os.Exit(2)
-	}
-	if *bucket == "" && !*dryRun {
-		fmt.Fprintln(os.Stderr, "--bucket required unless --dry-run")
-		os.Exit(2)
-	}
-
-	ctx := context.Background()
-
-	tel, err := telemetry.Init(ctx, telemetry.ConfigFromEnv("audit-archiver"))
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "observability init:", err)
+	if err := run(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	defer func() {
-		shutdownCtx, c := context.WithTimeout(context.Background(), 5*time.Second)
-		defer c()
-		_ = tel.Shutdown(shutdownCtx)
-	}()
-	logger := tel.Logger
-	version.LogStartup(logger, "audit-archiver")
-	hbState := &auditArchiveHeartbeatState{
-		Bucket:   *bucket,
-		Prefix:   *prefix,
-		Window:   *window,
-		DryRun:   *dryRun,
-		SignMode: *signMode,
-		Stage:    "starting",
+}
+
+func run() error {
+	var c auditarchive.Config
+	flag.StringVar(&c.Bucket, "bucket", env("AUDIT_BUCKET", ""), "S3 bucket")
+	flag.StringVar(&c.Prefix, "prefix", env("AUDIT_PREFIX", "audit"), "Object key prefix")
+	flag.StringVar(&c.Endpoint, "endpoint", env("AWS_ENDPOINT_URL_S3", env("AWS_ENDPOINT_URL", "")), "S3-compatible endpoint (also scopes archive progress)")
+	flag.IntVar(&c.BatchSize, "batch-size", 1000, "Maximum rows per run (1-10000)")
+	flag.BoolVar(&c.DryRun, "dry-run", false, "Write local artifacts without changing durable progress")
+	flag.StringVar(&c.OutDir, "out-dir", env("AUDIT_OUT_DIR", filepath.Join(os.TempDir(), "constellation-audit")), "Local dry-run output directory")
+	mode := flag.String("sign-mode", env("AUDIT_SIGN_MODE", "none"), "static-key or keyless; none permitted only for dry-run")
+	flag.StringVar(&c.Signer.KeyPath, "sign-key", env("AUDIT_SIGN_KEY", ""), "Ed25519 private key path")
+	flag.StringVar(&c.Verifier.KeyPath, "verify-key", env("AUDIT_VERIFY_KEY", ""), "Trusted Ed25519 public key path")
+	flag.StringVar(&c.Verifier.Identity, "verify-identity", env("AUDIT_VERIFY_IDENTITY", ""), "Expected keyless certificate identity")
+	flag.StringVar(&c.Signer.CosignBin, "cosign-bin", env("COSIGN_BIN", "cosign"), "cosign executable")
+	manifestPath := flag.String("verify-manifest", "", "Verify downloaded manifest without connecting to a database")
+	archivePath := flag.String("verify-archive", "", "Downloaded .jsonl.gz path")
+	signaturePath := flag.String("signature", "", "Downloaded signature path")
+	certificatePath := flag.String("certificate", "", "Downloaded certificate path for keyless signing")
+	timeout := flag.Duration("timeout", 15*time.Minute, "Maximum run time, including object upload/read-back")
+	flag.Parse()
+	if *timeout <= 0 {
+		return fmt.Errorf("timeout must be positive")
 	}
-	hbCfg := version.HeartbeatConfigFromEnv("audit-archiver", version.HeartbeatEnvOptions{
-		TokenEnv:     []string{"CONSTELLATION_AUDIT_ARCHIVER_TOKEN", "RUNTIME_AGENT_TOKEN", "SCANNER_TOKEN"},
-		TokenFileEnv: []string{"CONSTELLATION_AUDIT_ARCHIVER_TOKEN_FILE", "RUNTIME_AGENT_TOKEN_FILE", "SCANNER_TOKEN_FILE"},
-		Logger:       logger,
-		LastErrorFn:  hbState.lastError,
-		MetadataFn:   hbState.snapshot,
-	})
-	sendHeartbeat := func(success bool, stage string, err error) {
-		hbState.Success = success
-		hbState.Stage = stage
-		hbState.LastErrorText = ""
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+	defer cancel()
+	c.Signer.Mode = backup.SignMode(*mode)
+	c.Verifier.Mode = c.Signer.Mode
+	c.Verifier.CosignBin = c.Signer.CosignBin
+	if *manifestPath != "" {
+		raw, err := readMetadata(*manifestPath)
 		if err != nil {
-			hbState.LastErrorText = err.Error()
+			return err
 		}
-		if version.HeartbeatConfigured(hbCfg) {
-			hctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-			defer cancel()
-			if err := version.SendOnceExternal(hctx, hbCfg); err != nil {
-				logger.Warn("heartbeat failed", slog.String("err", err.Error()))
+		sig, err := readMetadata(*signaturePath)
+		if err != nil {
+			return err
+		}
+		var cert []byte
+		if *certificatePath != "" {
+			cert, err = readMetadata(*certificatePath)
+			if err != nil {
+				return err
 			}
 		}
-	}
-	fatal := func(code int, stage string, err error, attrs ...any) {
-		args := append([]any{}, attrs...)
+		m, err := auditarchive.Verify(ctx, *archivePath, raw, sig, cert, c.Verifier)
 		if err != nil {
-			args = append(args, slog.String("err", err.Error()))
+			return err
 		}
-		logger.Error(stage, args...)
-		sendHeartbeat(false, stage, err)
-		os.Exit(code)
+		return json.NewEncoder(os.Stdout).Encode(m)
 	}
-
+	if err := c.Validate(); err != nil {
+		return err
+	}
+	if err := backup.ValidateS3Endpoint(c.Endpoint); err != nil {
+		return err
+	}
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		return fmt.Errorf("DATABASE_URL required")
+	}
+	tel, err := telemetry.Init(ctx, telemetry.ConfigFromEnv("audit-archiver"))
+	if err != nil {
+		return err
+	}
+	defer func() {
+		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = tel.Shutdown(shutdown)
+	}()
+	version.LogStartup(tel.Logger, "audit-archiver")
+	state := &auditArchiveHeartbeatState{Bucket: c.Bucket, Prefix: c.Prefix, DryRun: c.DryRun, SignMode: *mode, Stage: "starting"}
+	hb := version.HeartbeatConfigFromEnv("audit-archiver", version.HeartbeatEnvOptions{
+		TokenEnv:     []string{"CONSTELLATION_AUDIT_ARCHIVER_TOKEN", "RUNTIME_AGENT_TOKEN", "SCANNER_TOKEN"},
+		TokenFileEnv: []string{"CONSTELLATION_AUDIT_ARCHIVER_TOKEN_FILE", "RUNTIME_AGENT_TOKEN_FILE", "SCANNER_TOKEN_FILE"},
+		Logger:       tel.Logger, LastErrorFn: state.lastError, MetadataFn: state.snapshot})
+	defer func() {
+		if version.HeartbeatConfigured(hb) {
+			hctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			defer cancel()
+			if err := version.SendOnceExternal(hctx, hb); err != nil {
+				tel.Logger.Warn("heartbeat failed", slog.String("err", err.Error()))
+			}
+		}
+	}()
 	pool, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
-		fatal(1, "db connect", err)
+		state.Stage = "db connect"
+		state.LastErrorText = err.Error()
+		return err
 	}
 	defer pool.Close()
-
-	// First, verify the chain to catch tampering before we archive.
-	if cb, err := audit.VerifyChain(ctx, pool); err != nil {
-		fatal(1, "verify chain", err)
-	} else if cb != nil {
-		fatal(1, "chain broken; refusing to archive", errors.New(cb.Reason), slog.Int64("at_id", cb.ID))
-	}
-
-	end := time.Now().UTC()
-	start := end.Add(-*window)
-	rows, err := pool.Query(ctx, `
-SELECT id, org_id, actor_id, actor_ip::text, action, target_kind, target_id, before, after,
-       prev_hash, chain_hash, request_id, at
-  FROM audit_events
- WHERE at >= $1 AND at < $2
- ORDER BY id ASC`, start, end)
-	if err != nil {
-		fatal(1, "query window", err)
-	}
-	defer rows.Close()
-
-	keys := makeArchiveKeys(*prefix, start, end)
-
-	// Write to a temp file (gzip), checksum, then upload or move locally.
-	f, err := os.CreateTemp("", "constellation-audit-*.jsonl.gz")
-	if err != nil {
-		fatal(1, "temp file", err)
-	}
-	tmpPath := f.Name()
-	defer func() { _ = os.Remove(tmpPath) }()
-	gz := gzip.NewWriter(f)
-	enc := json.NewEncoder(gz)
-
-	jsonlHasher := sha256.New()
-	var firstHash, lastHash string
-	var count int64
-
-	for rows.Next() {
-		row := make(map[string]any)
-		var id int64
-		var orgID, actorID *string
-		var actorIP, action, targetKind, targetID, prevHash, chainHash, requestID *string
-		var before, after []byte
-		var at time.Time
-		if err := rows.Scan(&id, &orgID, &actorID, &actorIP, &action, &targetKind, &targetID,
-			&before, &after, &prevHash, &chainHash, &requestID, &at); err != nil {
-			fatal(1, "scan", err)
-		}
-		row["id"] = id
-		row["org_id"] = orgID
-		row["actor_id"] = actorID
-		row["actor_ip"] = actorIP
-		row["action"] = strDeref(action)
-		row["target_kind"] = strDeref(targetKind)
-		row["target_id"] = strDeref(targetID)
-		row["before"] = json.RawMessage(before)
-		row["after"] = json.RawMessage(after)
-		row["prev_hash"] = strDeref(prevHash)
-		row["chain_hash"] = strDeref(chainHash)
-		row["request_id"] = strDeref(requestID)
-		row["at"] = at
-
-		// Stream into the gzip writer and the hash simultaneously.
-		buf, err := json.Marshal(row)
+	var objects auditarchive.ObjectStore
+	if !c.DryRun {
+		cfg, err := config.LoadDefaultConfig(ctx)
 		if err != nil {
-			fatal(1, "marshal", err)
+			state.Stage = "aws config"
+			state.LastErrorText = err.Error()
+			return err
 		}
-		_, _ = jsonlHasher.Write(buf)
-		_, _ = jsonlHasher.Write([]byte("\n"))
-		if err := enc.Encode(row); err != nil {
-			fatal(1, "encode", err)
-		}
-		if firstHash == "" {
-			firstHash = strDeref(chainHash)
-		}
-		lastHash = strDeref(chainHash)
-		count++
+		objects = s3.NewFromConfig(cfg, func(o *s3.Options) {
+			if c.Endpoint != "" {
+				o.BaseEndpoint = aws.String(c.Endpoint)
+			}
+		})
 	}
-	if err := rows.Err(); err != nil {
-		fatal(1, "rows", err)
-	}
-	if err := gz.Close(); err != nil {
-		fatal(1, "gzip close", err)
-	}
-	if err := f.Close(); err != nil {
-		fatal(1, "file close", err)
-	}
-
-	archiveSHA, err := fileSHA256(tmpPath)
+	m, err := auditarchive.Run(ctx, pool, objects, c)
 	if err != nil {
-		fatal(1, "archive sha256", err)
+		state.Stage = "archive failed"
+		state.LastErrorText = err.Error()
+		return err
 	}
-
-	manifest := archiveManifest{
-		FormatVersion: archiveManifestVersion,
-		WindowStart:   start.Format(time.RFC3339),
-		WindowEnd:     end.Format(time.RFC3339),
-		RecordCount:   count,
-		ArchiveSHA256: archiveSHA,
-		JSONLSHA256:   hex.EncodeToString(jsonlHasher.Sum(nil)),
-		SHA256:        archiveSHA,
-		FirstChain:    firstHash,
-		LastChain:     lastHash,
-		ArchiveKey:    keys.Archive,
-		ManifestKey:   keys.Manifest,
-		SignMode:      backup.SignMode(*signMode),
-		CreatedAt:     time.Now().UTC().Format(time.RFC3339),
-		Metadata: map[string]string{
-			"generator": "constellation-audit-archiver",
-		},
+	state.Success = true
+	state.Stage = "verified"
+	if c.DryRun {
+		state.Stage = "dry-run"
 	}
-	if manifest.SignMode != backup.SignModeNone {
-		manifest.SignatureKey = keys.Signature
-	}
-	if manifest.SignMode == backup.SignModeKeyless {
-		manifest.CertificateKey = keys.Cert
-	}
-
-	manifestBytes, sigBytes, certBytes, err := signArchiveManifest(context.Background(), manifest, backup.SignerOptions{
-		Mode:      backup.SignMode(*signMode),
-		KeyPath:   *signKey,
-		CosignBin: *cosignBin,
-	})
-	if err != nil {
-		fatal(1, "sign manifest", err)
-	}
-
-	hbState.RecordCount = count
-	hbState.ArchiveKey = keys.Archive
-	hbState.ManifestKey = keys.Manifest
-	if *dryRun {
-		if err := writeLocalArtifacts(*outDir, keys, tmpPath, manifestBytes, sigBytes, certBytes); err != nil {
-			fatal(1, "dry-run write", err)
-		}
-		logger.Info("dry-run", slog.String("dir", *outDir), slog.Int64("count", count))
-		_, _ = io.Copy(os.Stdout, strings.NewReader(string(manifestBytes)))
-		sendHeartbeat(true, "dry-run", nil)
-		return
-	}
-
-	awsCfg, err := config.LoadDefaultConfig(ctx)
-	if err != nil {
-		fatal(1, "aws config", err)
-	}
-	client := s3.NewFromConfig(awsCfg)
-	if err := uploadArchive(ctx, client, *bucket, keys, tmpPath, manifestBytes, sigBytes, certBytes, manifest); err != nil {
-		fatal(1, "upload", err)
-	}
-	logger.Info("uploaded",
-		slog.String("bucket", *bucket),
-		slog.String("archive_key", keys.Archive),
-		slog.String("manifest_key", keys.Manifest),
-		slog.Int64("count", count),
-	)
-	sendHeartbeat(true, "uploaded", nil)
+	state.RecordCount = m.RecordCount
+	state.ArchiveKey = m.ArchiveKey
+	state.ManifestKey = m.ManifestKey
+	tel.Logger.Info("archive completed", slog.String("stage", state.Stage), slog.Int64("count", m.RecordCount), slog.Int64("last_id", m.LastID))
+	return json.NewEncoder(os.Stdout).Encode(m)
 }
-
-func strDeref(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}
-
-func env(key, def string) string {
+func env(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
-	return def
-}
-
-func envDuration(key string, def time.Duration) time.Duration {
-	v := os.Getenv(key)
-	if v == "" {
-		return def
-	}
-	d, err := time.ParseDuration(v)
-	if err != nil {
-		return def
-	}
-	return d
-}
-
-func makeArchiveKeys(prefix string, start, end time.Time) archiveKeys {
-	base := fmt.Sprintf("%s--%s", start.UTC().Format("20060102T150405Z"), end.UTC().Format("20060102T150405Z"))
-	prefix = strings.Trim(strings.TrimSpace(prefix), "/")
-	if prefix != "" {
-		base = prefix + "/" + base
-	}
-	archive := base + ".jsonl.gz"
-	manifest := base + ".manifest.json"
-	return archiveKeys{
-		Archive:   archive,
-		Manifest:  manifest,
-		Signature: manifest + ".sig",
-		Cert:      manifest + ".cert",
-	}
-}
-
-func signArchiveManifest(ctx context.Context, manifest archiveManifest, opts backup.SignerOptions) ([]byte, []byte, []byte, error) {
-	if opts.Mode == "" {
-		opts.Mode = backup.SignModeNone
-	}
-	if opts.Mode == backup.SignModeNone {
-		manifest.SignMode = backup.SignModeNone
-		manifest.SignatureKey = ""
-		manifest.CertificateKey = ""
-		manifest.SignerIdentity = ""
-		b, err := json.MarshalIndent(manifest, "", "  ")
-		return b, nil, nil, err
-	}
-
-	manifest.SignMode = opts.Mode
-	manifestBytes, err := json.MarshalIndent(manifest, "", "  ")
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	sig, cert, identity, err := backup.Sign(ctx, manifestBytes, opts)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	if identity != "" {
-		manifest.SignerIdentity = identity
-		manifestBytes, err = json.MarshalIndent(manifest, "", "  ")
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		sig, cert, _, err = backup.Sign(ctx, manifestBytes, opts)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-	}
-	return manifestBytes, sig, cert, nil
-}
-
-func fileSHA256(path string) (string, error) {
-	f, err := openArchiveFile(path)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = f.Close() }()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
-
-func writeLocalArtifacts(outDir string, keys archiveKeys, archivePath string, manifest, sig, cert []byte) error {
-	if outDir == "" {
-		outDir = filepath.Join(os.TempDir(), "constellation-audit")
-	}
-	root, err := securefiles.OpenPrivateDir(outDir)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = root.Close() }()
-	source, err := openArchiveFile(archivePath)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = source.Close() }()
-	if err = securefiles.CopyFile(root, filepath.Base(keys.Archive), source, 0o600); err != nil {
-		return err
-	}
-	for name, body := range map[string][]byte{keys.Manifest: manifest, keys.Signature: sig, keys.Cert: cert} {
-		if len(body) == 0 {
-			continue
-		}
-		if err = securefiles.WriteFile(root, filepath.Base(name), body, 0o600); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-type objectUploader interface {
-	PutObject(context.Context, *s3.PutObjectInput, ...func(*s3.Options)) (*s3.PutObjectOutput, error)
-}
-
-func uploadArchive(ctx context.Context, client objectUploader, bucket string, keys archiveKeys, archivePath string, manifest, sig, cert []byte, m archiveManifest) error {
-	if strings.TrimSpace(bucket) == "" {
-		return errors.New("bucket required")
-	}
-	commonMeta := map[string]string{
-		"window-start":   m.WindowStart,
-		"window-end":     m.WindowEnd,
-		"record-count":   fmt.Sprintf("%d", m.RecordCount),
-		"archive-sha256": m.ArchiveSHA256,
-	}
-	if err := putFile(ctx, client, bucket, keys.Archive, archivePath, "application/x-ndjson", "gzip", commonMeta); err != nil {
-		return err
-	}
-	if err := putBytes(ctx, client, bucket, keys.Manifest, manifest, "application/json", "", commonMeta); err != nil {
-		return err
-	}
-	if len(sig) > 0 {
-		if err := putBytes(ctx, client, bucket, keys.Signature, sig, "text/plain", "", commonMeta); err != nil {
-			return err
-		}
-	}
-	if len(cert) > 0 {
-		if err := putBytes(ctx, client, bucket, keys.Cert, cert, "application/x-pem-file", "", commonMeta); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func putFile(ctx context.Context, client objectUploader, bucket, key, path, contentType, contentEncoding string, metadata map[string]string) error {
-	f, err := openArchiveFile(path)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-	return putObject(ctx, client, bucket, key, f, contentType, contentEncoding, metadata)
-}
-
-func putBytes(ctx context.Context, client objectUploader, bucket, key string, body []byte, contentType, contentEncoding string, metadata map[string]string) error {
-	return putObject(ctx, client, bucket, key, bytes.NewReader(body), contentType, contentEncoding, metadata)
-}
-
-func putObject(ctx context.Context, client objectUploader, bucket, key string, body io.Reader, contentType, contentEncoding string, metadata map[string]string) error {
-	input := &s3.PutObjectInput{
-		Bucket:      aws.String(bucket),
-		Key:         aws.String(key),
-		Body:        body,
-		ContentType: aws.String(contentType),
-		Metadata:    metadata,
-	}
-	if contentEncoding != "" {
-		input.ContentEncoding = aws.String(contentEncoding)
-	}
-	sum, err := payloadSHA256(body)
-	if err != nil {
-		return fmt.Errorf("checksum %s: %w", key, err)
-	}
-	if sum != "" {
-		input.ChecksumSHA256 = aws.String(sum)
-	}
-	_, err = client.PutObject(ctx, input)
-	if err != nil {
-		return fmt.Errorf("put s3://%s/%s: %w", bucket, key, err)
-	}
-	return nil
-}
-
-func payloadSHA256(r io.Reader) (string, error) {
-	seeker, ok := r.(io.ReadSeeker)
-	if !ok {
-		return "", nil
-	}
-	pos, err := seeker.Seek(0, io.SeekCurrent)
-	if err != nil {
-		return "", err
-	}
-	h := sha256.New()
-	if _, err := io.Copy(h, seeker); err != nil {
-		return "", err
-	}
-	if _, err := seeker.Seek(pos, io.SeekStart); err != nil {
-		return "", err
-	}
-	return base64.StdEncoding.EncodeToString(h.Sum(nil)), nil
-}
-
-// openArchiveFile pins the source directory and refuses a leaf symlink escaping
-// it; archive paths come from this job's private tempfile or explicit test input.
-func openArchiveFile(path string) (*os.File, error) {
-	root, err := os.OpenRoot(filepath.Dir(path))
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = root.Close() }()
-	return root.Open(filepath.Base(path))
+	return fallback
 }
