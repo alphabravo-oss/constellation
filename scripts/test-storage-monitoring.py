@@ -63,12 +63,13 @@ prefix = 'constellation_storage_'
 
 def series(name, values, extra=None):
     all_labels = dict(labels, **(extra or {}))
-    return {'series': prefix + name + '{' + ','.join(k + '=' + json.dumps(v) for k, v in all_labels.items()) + '}', 'values': values}
+    metric = name if name == 'up' else prefix + name
+    return {'series': metric + '{' + ','.join(k + '=' + json.dumps(v) for k, v in all_labels.items()) + '}', 'values': values}
 
 
 # Evaluate after 2 hours so every rule's hold period and stall window has elapsed.
 # Values have one sample per minute; timestamp baselines keep healthy watermarks current.
-healthy = [series('collector_up', '1+0x180'), series('database_bytes', '1000000+0x180'),
+healthy = [series('up', '1+0x180'), series('collector_up', '1+0x180'), series('database_bytes', '1000000+0x180'),
            series('rollup_watermark_timestamp_seconds', '0+60x180'),
            series('archive_enabled', '0+0x180'), series('archive_pending_id_distance', '0+0x180'),
            series('archive_updated_timestamp_seconds', '0+60x180'),
@@ -125,5 +126,65 @@ tests += [
 ]
 tests.append({'name': 'healthy installation has no storage alerts', 'interval': '1m', 'input_series': healthy,
               'alert_rule_test': [{'eval_time': '120m', 'alertname': alert, 'exp_alerts': []} for alert in alert_rules]})
+
+# Exercise each of the nine data alerts with all target labels preserved.
+# Reuse their existing positive fixtures so warning inputs and expected dimensions
+# remain realistic (including table/kind and WAL rates).
+data_alerts = {
+    'ConstellationDatabaseSizeHigh', 'ConstellationRelationSizeHigh',
+    'ConstellationDeadRowsHigh', 'ConstellationDefaultPartitionLarge',
+    'ConstellationFlowRollupLagging', 'ConstellationAuditArchiveLagging',
+    'ConstellationBackupScheduleOverdue', 'ConstellationBackupScheduleFailed',
+    'ConstellationWALGenerationHigh',
+}
+positive = {}
+for test in tests:
+    check = test['alert_rule_test'][0]
+    if check['alertname'] in data_alerts and check['exp_alerts']:
+        positive.setdefault(check['alertname'], test)
+assert set(positive) == data_alerts
+
+
+def replace_series(test, replacement):
+    test['input_series'] = [old for old in test['input_series'] if old['series'] != replacement['series']] + [replacement]
+
+
+for alert, original in positive.items():
+    for dimension, other in [('cluster', 'other-cluster'), ('prometheus', 'other-prometheus'), ('instance', 'api-2')]:
+        test = copy.deepcopy(original)
+        test['name'] = alert + ' rejects health from another ' + dimension
+        replace_series(test, series('collector_up', '0+0x180'))
+        replace_series(test, series('collector_up', '1+0x180', {dimension: other}))
+        test['alert_rule_test'][0]['exp_alerts'] = []
+        tests.append(test)
+    down = copy.deepcopy(original)
+    down['name'] = alert + ' rejects other-cluster scrape health after local failure'
+    replace_series(down, series('up', '0+0x180'))
+    replace_series(down, series('up', '1+0x180', {'cluster': 'other-cluster'}))
+    down['alert_rule_test'][0]['exp_alerts'] = []
+    tests.append(down)
+    scoped = copy.deepcopy(original)
+    scoped['name'] = alert + ' fires with matching extra target labels'
+    for entry in scoped['input_series']:
+        entry['series'] = entry['series'].replace('{', '{cluster="same-cluster",prometheus="same-prometheus",', 1)
+    scoped['alert_rule_test'][0]['exp_alerts'][0]['exp_labels'].update(cluster='same-cluster', prometheus='same-prometheus')
+    tests.append(scoped)
+
+absent_alert = 'ConstellationStorageMetricsAbsent'
+for name, inputs in [
+    ('failed scrape', [series('up', '0+0x180')]),
+    ('healthy scrape missing exporter', [series('up', '1+0x180')]),
+    ('another replica exporter does not hide missing exporter', [series('up', '1+0x180'), series('up', '1+0x180', {'instance': 'api-2'}), series('collector_up', '1+0x180', {'instance': 'api-2'})]),
+    ('another cluster exporter does not hide missing exporter', [series('up', '1+0x180'), series('collector_up', '1+0x180', {'cluster': 'other-cluster'})]),
+]:
+    test = scenario(name, [], absent_alert)
+    test['input_series'] = inputs
+    tests.append(test)
+# An exporter with a failed DB snapshot is still present; its own failure rule
+# covers that state, rather than misreporting discovery failure.
+tests.append(scenario('failed database snapshot is not missing exporter', [series('collector_up', '0+0x180')], absent_alert, firing=False))
+# Archive control/progress must belong to the same full target too.
+tests.append(scenario('other cluster cannot enable disabled archive', [series('archive_pending_id_distance', '99999+0x180'), series('archive_enabled', '1+0x180', {'cluster': 'other-cluster'})], 'ConstellationAuditArchiveLagging', firing=False))
+tests.append(scenario('other cluster cannot supply stale archive timestamp', [series('archive_enabled', '1+0x180'), series('archive_pending_id_distance', '10+0x180'), series('archive_updated_timestamp_seconds', '0+0x180', {'cluster': 'other-cluster'})], 'ConstellationAuditArchiveLagging', firing=False))
 (root / 'tests.yaml').write_text(yaml.safe_dump({'rule_files': ['rules.yaml'], 'evaluation_interval': '1m', 'tests': tests}))
 print(f'storage chart: wiring and dashboard passed; evaluating {len(tests)} PromQL scenarios')

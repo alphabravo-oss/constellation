@@ -287,7 +287,7 @@ deployment was changed; DB-23 remains open for broader profiling and alarms.
 | DB-20 | **Open — decision** | Keep the current PG `cve_records` API catalog unless a measured reason justifies a new format. Another PG database on the same storage does not save space; first profile wide descriptions/TOAST and index use, then evaluate a rebuildable compact projection (`internal/handler/findings/cve.go`). | Search, detail, CVSS/KEV/EPSS filters, stats, and restore behavior meet a size and latency budget without resurrecting retired VulnDB. |
 | DB-21 | **Cache diagnostics/monitoring implemented; topology/live qualification open** | Choose scanner-cache topology: one 8 GiB PVC-backed replica or multiple replicas with pod-local caches. Today's local cache uses about 5.7 GB; chart default multi-replica topology does not share the RWO cache (`deploy/charts/constellation/templates/scanner-cache-pvc.yaml`). | Cache free-space and DB-freshness alerts, restart/refresh/offline tests, and a capacity margin for both Trivy and Grype. |
 | DB-22 | **Open — decision + fix** | Define backup-artifact retention separately from database PITR. Existing scheduled org-backup pruning is opt-in and only handles succeeded org backups/local files; scheduled S3 destination fields are not consumed by that executor (`pkg/backup/executor.go`). | Minimum recoverable copies, proven offsite upload, object lifecycle, failed/manual artifact cleanup, signature checks, and periodic restore evidence. |
-| DB-23 | **Ten storage-observability items implemented/tested; remaining signals/live qualification open** | Bounded read-only metrics now cover database/relation allocation, dead/live estimates, DEFAULT branches, rollup watermark, active archive ID progress, per-schedule backup health and WAL generation. Failed snapshots invalidate data; release-scoped rules and an optional Grafana dashboard ship with executable PromQL fixtures. See [storage-health contract/runbook](storage-health.md). | Real PostgreSQL and 23 Prometheus scenarios cover failure/recovery, tenant scope, stale progress and alert suppression. Live scrape/notification/Grafana validation, capacity budgets, raw retention/drop lag, retained WAL occupancy and live scanner-cache headroom qualification remain open; existing CNPG/PVC/feed/engine rules are preserved. |
+| DB-23 | **Ten storage-observability items implemented/tested; remaining signals/live qualification open** | Bounded read-only metrics now cover database/relation allocation, dead/live estimates, DEFAULT branches, rollup watermark, active archive ID progress, per-schedule backup health and WAL generation. Failed snapshots invalidate data; release-scoped rules and an optional Grafana dashboard ship with executable PromQL fixtures. See [storage-health contract/runbook](storage-health.md). | Real PostgreSQL and 75 Prometheus scenarios cover failure/recovery, tenant scope, stale progress and alert suppression. Live scrape/notification/Grafana validation, capacity budgets, raw retention/drop lag, retained WAL occupancy and live scanner-cache headroom qualification remain open; existing CNPG/PVC/feed/engine rules are preserved. |
 
 ## Policy decisions to record before deleting more data
 
@@ -363,3 +363,13 @@ configuration, collection and discovery alerts. The chart's existing scanner
 ServiceMonitor discovers the metrics; eight alert rules have executable PromQL
 fixtures. DB-21/23 topology, refresh/offline/restart qualification, capacity budgets
 and live scrape/notification acceptance remain open. No live resources changed.
+
+## October 23 storage-alert isolation continuation
+
+Ten [storage-alert isolation fixes](storage-health.md#ten-storage-alert-isolation-fixes-2026-10-23)
+now retain optional cluster/Prometheus labels across nine data-alert health joins,
+suppress stale data after failed scrapes and expose missing/failed exporters per
+discovered target. The rendered rules pass 75 executable PromQL scenarios; restoring
+the old joins/absence behavior fails all ten selected negative controls. DB-23
+live activation, capacity, profiling and recovery gates remain open. Collector
+queries, retention policies and live deployments were not changed.
