@@ -155,8 +155,8 @@ func firstCVSS(v31, v30 []nvdCVSSMetric) *nvdCVSSMetric {
 
 // ImportNVD persists completed windows, overlapping by two hours for boundary
 // updates. A failed page never advances the watermark; previous pages can safely
-// replay through the conditional writer. Initial sync still covers recent CVEs,
-// not a historical full-catalog bootstrap.
+// replay through the conditional writer. Recent updates run first; an explicit
+// bootstrap option then resumes historical traversal with the remaining budget.
 func ImportNVD(ctx context.Context, pool *pgxpool.Pool, cfg nvdConfig, logger *slog.Logger) (int, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()

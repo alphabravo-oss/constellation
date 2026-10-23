@@ -432,7 +432,7 @@ func TestNVDBootstrapSeparateCursorAndResume(t *testing.T) {
 		t.Fatalf("bootstrap overwrote incremental cursor: %d %v", count, err)
 	}
 	// Once backfill reaches the recent window, current updates alone maintain it.
-	if _, err := conn.Exec(t.Context(), `UPDATE cve_feed_checkpoints SET completed_through=now() WHERE feed='nvd-bootstrap'`); err != nil {
+	if _, err := conn.Exec(t.Context(), `UPDATE cve_feed_checkpoints SET completed_through=now()-interval '1 hour' WHERE feed='nvd-bootstrap'`); err != nil {
 		t.Fatal(err)
 	}
 	pages = 0
@@ -449,5 +449,40 @@ func TestNVDBootstrapSeparateCursorAndResume(t *testing.T) {
 	}
 	if !starts[len(starts)-1].Equal(time.Unix(0, 0)) {
 		t.Fatal("new mirror inherited historical coverage")
+	}
+}
+
+func TestNVDBootstrapFailureDoesNotBlockRecentUpdates(t *testing.T) {
+	t.Parallel()
+	pool := checkpointPool(t)
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start, err := time.Parse(time.RFC3339Nano, r.URL.Query().Get("lastModStartDate"))
+		if err != nil {
+			t.Error(err)
+		}
+		if requests.Add(1) == 1 {
+			if start.Before(time.Now().Add(-121 * 24 * time.Hour)) {
+				t.Error("historical work ran before recent updates")
+			}
+			_, _ = fmt.Fprint(w, `{"resultsPerPage":0,"startIndex":0,"totalResults":0,"vulnerabilities":[]}`)
+			return
+		}
+		if !start.Equal(time.Unix(0, 0)) {
+			t.Error("expected historical bootstrap")
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	_, err := ImportNVD(t.Context(), pool, nvdConfig{Bootstrap: true, BaseURL: server.URL, Client: server.Client(), APIKey: "fixture"}, nil)
+	if err == nil {
+		t.Fatal("bootstrap failure hidden")
+	}
+	var recent, historical int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FILTER (WHERE feed='nvd'),count(*) FILTER (WHERE feed='nvd-bootstrap') FROM cve_feed_checkpoints`).Scan(&recent, &historical); err != nil {
+		t.Fatal(err)
+	}
+	if recent != 1 || historical != 0 {
+		t.Fatalf("failed bootstrap affected recent progress: %d %d", recent, historical)
 	}
 }
