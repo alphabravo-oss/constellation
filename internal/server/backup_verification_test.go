@@ -75,16 +75,25 @@ func TestBackupVerificationEnforcesTrustScopeAndRBAC(t *testing.T) {
 	}
 	_, otherServer, _, otherSigner, otherAdminID, _, otherOrgID := newSysConfigTestServer(t)
 	foreignToken := issueFor(t, otherSigner, otherAdminID, otherOrgID, 0)
-	request, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, otherServer.URL+"/api/v1/backups/verify", bytes.NewReader(signed.Bytes()))
-	request.Header.Set("Authorization", "Bearer "+foreignToken)
-	response, err := otherServer.Client().Do(request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusBadRequest {
-		payload, _ := io.ReadAll(response.Body)
-		t.Fatalf("foreign archive accepted: %d %s", response.StatusCode, payload)
+	for _, endpoint := range []string{"/api/v1/backups/verify", "/api/v1/backups/restore?on_conflict=overwrite"} {
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, otherServer.URL+endpoint, bytes.NewReader(signed.Bytes()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+foreignToken)
+		request.Header.Set("Content-Type", "application/gzip")
+		response, err := otherServer.Client().Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload, err := io.ReadAll(response.Body)
+		response.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode != http.StatusBadRequest {
+			t.Fatalf("foreign archive accepted on %s: %d %s", endpoint, response.StatusCode, payload)
+		}
 	}
 	t.Setenv("CONSTELLATION_BACKUP_ALLOW_UNVERIFIED", "true")
 	status, body = post("/api/v1/backups/verify", admin, unsigned.Bytes())
