@@ -635,13 +635,17 @@ scanner:
   registryConfigSecret: ""
   leaseRenewInterval: 5m
   cache:
-    # Persist the vuln-DB caches (grype/trivy/syft, ~3.3GB) on a PVC so redeploys don't
-    # re-download them and the DB survives pod restarts, decoupled from the image. RWO,
-    # so it activates ONLY with a single, non-autoscaled replica (otherwise emptyDir).
-    # To use it, set scanner.replicas=1 and scanner.autoscaling.enabled=false.
-    persistent: true
+    # Explicit pod-local default. Persistence requires one replica and no HPA;
+    # incompatible configurations fail rather than silently discarding caches.
+    persistent: false
     size: 8Gi
     storageClass: "" # "" = cluster default StorageClass
+    managedClaimName: "" # empty = <release fullname>-scanner-cache; legacy migration override
+    existingClaim: "" # externally managed claim; no PVC is rendered
+    retain: true # managed PVC survives Helm deletion/uninstall; operator owns cleanup
+    emptyDirSizeLimit: "" # optional pod-local cache limit, e.g. 12Gi; not a reservation
+  tmp:
+    sizeLimit: "" # optional /tmp extraction limit, e.g. 8Gi; not a reservation
   service:
     annotations:
       prometheus.io/scrape: "true"

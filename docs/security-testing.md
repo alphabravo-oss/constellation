@@ -3239,3 +3239,50 @@ full smoke suite passed; native and Docker promtool both pass the final 75 stora
 scenarios. Unit JSON/JUnit reports are retained with `check.log`. No database
 integration rerun was needed for this chart/test/documentation-only change.
 Repository Actions permissions were verified disabled.
+
+## Ten scanner-cache topology/lifecycle fixes (2026-10-23)
+
+The [topology and upgrade contract](scanner-cache-topology.md) records ten items:
+explicit pod-local defaults, persistent replica and HPA validation, disabled
+scanner resource suppression, release-scoped managed claim identity, external
+claims, managed retention, cache and tmp size limits, and release-specific scanner
+Service routing. Persistent paths retain `Recreate`; Deployment selectors remain
+unchanged. Schema/editor defaults agree with chart defaults.
+
+The Helm matrix validates 29 render configurations, including custom/legacy/dotted
+claim names, external PVC ownership, retention on/off, storage class/size,
+disabled scanner, HPA, limit configuration and invalid combinations. A copied
+chart with the old Service selector fails the release-routing case as expected;
+the checked-in chart passes. These are manifest-level checks, not live attachment,
+retention, eviction or restart qualification. The initial matrix incorrectly
+expected zero replicas to be allowed; the existing schema minimum of one is
+preserved and the test now checks rejection. Review also corrected a claim-name
+regex escape and added a dotted-name fixture.
+
+Helm 4 lint and the full template smoke suite pass, including the existing 75
+storage and 33 scanner-cache PromQL scenarios. Evidence is retained in
+`/root/constellation-scanner-topology-next10-20261023/` (`helm.log`, `topology.log`,
+`negative-routing.log` and `initial-zero-replicas-test.log`).
+
+The first quality run failed the unchanged signature test
+`TestVerifyAttestationParsesCosignOutput`: executing its newly written temporary
+Cosign fixture returned Linux `text file busy`. The original failure is preserved
+in `check-text-busy-failure.log`; no signature production/test behavior was changed.
+Focused repetition and a fresh full gate are recorded below.
+
+**Upgrade impact:** existing persistent installations must explicitly retain
+`persistent=true`, one replica, disabled HPA and the existing managed claim name.
+The new default is explicit pod-local storage, matching the old two-replica
+behavior. Old claims without a keep policy are not retroactively protected by
+changing ownership or claim names. First preserve identity and establish retention
+in the managed release before planning transitions. The Service-label transition
+can temporarily leave endpoints empty until replacement pods are ready. No live
+claim, cache contents, deployment or namespace was changed here.
+
+Final gate passed: `make check` reports 3,168 tests with 8 opt-in skips; lint,
+vet, formatting, shell and frontend type/build/bundle checks pass. The unchanged
+signature fixture passed 20 consecutive race-enabled runs before the full passing
+rerun. Final Helm lint/smoke includes all 29 topology renders and both monitoring
+suites. Unit JSON/JUnit reports and `signature-fixture.log` accompany `check.log`.
+No SQL or migration changed, so no database integration rerun was required.
+GitHub Actions permissions were verified disabled.

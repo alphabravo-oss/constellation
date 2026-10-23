@@ -48,10 +48,12 @@ uses the file/archive path (b).
 
 The chart mounts caches under `/var/lib/scanner-cache`: Grype at
 `grype/db`, Trivy at `trivy`, and Syft at `syft`. By default
-`scanner.cache.persistent: true` uses a PVC for a single replica with autoscaling
-disabled. Multiple replicas, autoscaling, or disabling persistence switches to
-`emptyDir`; that cache is lost when the pod is replaced (not merely when its
-container restarts). Offline deployments must preserve or reload the database
+`scanner.cache.persistent: false` explicitly uses pod-local `emptyDir`. Persistent
+mode must be selected with exactly one replica and autoscaling disabled;
+incompatible combinations fail rendering. Pod-local cache is lost when the pod is
+replaced (not merely when its container restarts). See the
+[topology and upgrade contract](scanner-cache-topology.md) before changing an
+existing persistent installation. Offline deployments must preserve or reload the database
 for every new pod. See [section 5](#5-getting-dbs-into-the-air-gapped-scanner-pods).
 
 ### Online refresh validation and recovery

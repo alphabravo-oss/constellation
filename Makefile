@@ -185,6 +185,7 @@ helm-template-smoke: ## Render the chart against common value combinations
 	@./scripts/test-helm-audit-archive.sh
 	@./scripts/test-helm-storage.sh
 	@./scripts/test-helm-scanner-cache.sh
+	@./scripts/test-helm-scanner-topology.sh
 	@echo "helm-template-smoke: ok"
 
 CLUSTER ?=

@@ -23,7 +23,8 @@ an earlier documentation statement that ordinary heartbeats skipped enumeration.
 | 10. Collection/discovery alerts | Failed observations, failed target scrapes, missing collectors on healthy targets and completely absent discovery are visible. Another healthy target cannot validate a failed target's data. |
 
 This completes the scoped monitoring implementation, not all DB-21/23 operational
-acceptance. Topology, refresh/offline/restart capacity qualification, live scrape,
+acceptance. The [explicit topology implementation](scanner-cache-topology.md) is available;
+installation selection, refresh/offline/restart capacity qualification, live scrape,
 notification delivery and installation-specific budgets remain open.
 
 ## Metric contract

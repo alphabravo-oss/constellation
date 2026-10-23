@@ -240,7 +240,7 @@
             "persistent": {
               "type": "boolean",
               "title": "Persist scanner caches",
-              "default": true
+              "default": false
             },
             "size": {
               "type": "string",
@@ -252,6 +252,31 @@
               "type": "string",
               "title": "Storage class",
               "default": ""
+            },
+            "managedClaimName": {
+              "type": "string",
+              "title": "Managed cache claim name override",
+              "default": "",
+              "maxLength": 253,
+              "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+            },
+            "existingClaim": {
+              "type": "string",
+              "title": "Externally managed cache claim",
+              "default": "",
+              "maxLength": 253,
+              "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+            },
+            "retain": {
+              "type": "boolean",
+              "title": "Retain managed cache claim on Helm deletion",
+              "default": true
+            },
+            "emptyDirSizeLimit": {
+              "type": "string",
+              "default": "",
+              "pattern": "^$|^[1-9][0-9]*(Mi|Gi|Ti)$",
+              "title": "Pod-local cache size limit"
             }
           }
         },
@@ -281,6 +306,19 @@
           "type": "string",
           "title": "Registry pull configuration Secret for discovered images",
           "default": ""
+        },
+        "tmp": {
+          "type": "object",
+          "title": "Scanner temporary storage",
+          "additionalProperties": false,
+          "properties": {
+            "sizeLimit": {
+              "type": "string",
+              "default": "",
+              "pattern": "^$|^[1-9][0-9]*(Mi|Gi|Ti)$",
+              "title": "Temporary extraction size limit"
+            }
+          }
         }
       }
     },
