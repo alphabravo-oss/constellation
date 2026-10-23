@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/alphabravocompany/constellation/internal/scanretention"
 )
 
 // RunEventsRetentionMonitor prunes rows from the (partitioned) events table older
@@ -57,7 +59,7 @@ func RunEventsRetentionMonitor(ctx context.Context, pool *pgxpool.Pool, retentio
 // RunScanJobsRetentionMonitor prunes TERMINAL scan_jobs (completed / failed / canceled)
 // older than the configured horizon. Mirrors NeuVector's stale-scan-job cleanup: the
 // queue accumulates hundreds of thousands of finished jobs, but only recent history is
-// useful (live jobs and image_scan_results are never touched). scan_jobs is not
+// useful. Live, latest and referenced jobs survive. scan_jobs is not
 // partitioned, so this is a batched DELETE; autovacuum reclaims the (small) space.
 func RunScanJobsRetentionMonitor(ctx context.Context, pool *pgxpool.Pool, retention func(ctx context.Context) time.Duration, logger *slog.Logger) {
 	if pool == nil || retention == nil {
@@ -78,23 +80,14 @@ func RunScanJobsRetentionMonitor(ctx context.Context, pool *pgxpool.Pool, retent
 			if horizon <= 0 {
 				continue
 			}
-			secs := strconv.FormatInt(int64(horizon/time.Second), 10)
-			tag, err := pool.Exec(ctx, `
-DELETE FROM scan_jobs
- WHERE ctid IN (
-     SELECT ctid FROM scan_jobs
-      WHERE status IN ('completed','failed','canceled')
-        AND finished_at IS NOT NULL
-        AND finished_at < now() - ($1::text || ' seconds')::interval
-      LIMIT $2
- )`, secs, batchSize)
+			n, err := scanretention.PruneJobs(ctx, pool, horizon, batchSize)
 			if err != nil {
 				if logger != nil {
 					logger.Warn("scan_jobs retention prune", slog.String("err", err.Error()))
 				}
 				continue
 			}
-			if n := tag.RowsAffected(); n > 0 && logger != nil {
+			if n > 0 && logger != nil {
 				logger.Info("scan_jobs retention prune", slog.Int64("deleted", n), slog.String("horizon", horizon.String()))
 			}
 		}
@@ -122,13 +115,14 @@ DELETE FROM events
 }
 
 // RunOrphanImageScanResultMonitor prunes node-local evidence scan results that are
-// digest-only (no resolved repo:tag) AND no longer back any running workload (absent
+// digest-only (no resolved repo:tag), have a newer result for the same image,
+// and no longer back any running workload (absent
 // from image_workload_links). The evidence path scans each RUNNING container by its
 // image digest and writes one image_scan_result per container; when the container is
 // gone the result orphans, keyed by an unnamed sha256. Left unchecked these pile up
 // and inflate the CVE affected-images list far past what is actually running —
 // NeuVector does not retain scan data for dead containers. Named registry scans keep
-// a repository and are never touched. image_scan_findings cascade-delete with the row.
+// a repository and are never touched. Referenced results and findings survive.
 //
 // The first pass runs immediately on start so a deploy cleans the backlog without
 // waiting a full interval. A short grace window spares a just-scanned image whose
@@ -142,44 +136,11 @@ func RunOrphanImageScanResultMonitor(ctx context.Context, pool *pgxpool.Pool, lo
 		batchSize = 5000
 	)
 	prune := func() {
-		for {
-			tag, err := pool.Exec(ctx, `
-DELETE FROM image_scan_results r
- WHERE r.ctid IN (
-     SELECT r2.ctid FROM image_scan_results r2
-      WHERE (COALESCE(r2.image_repository,'') = '' OR r2.image_ref ~ '^sha256:')
-        AND r2.last_scanned_at < now() - interval '6 hours'
-        AND (
-            -- (a) orphaned: no longer backing any running workload
-            NOT EXISTS (
-                SELECT 1 FROM image_workload_links l
-                 WHERE l.org_id = r2.org_id
-                   AND (l.image_digest = r2.image_digest OR l.image_digest = r2.image_ref))
-            -- (b) superseded: a NAMED result already covers the same image digest, so the
-            -- nameless row is a stale duplicate (older scan under a different platform/
-            -- profile the ingest upsert key didn't collapse). Drops the leftover sha rows
-            -- that would otherwise sit next to the named image on its CVE page.
-            OR EXISTS (
-                SELECT 1 FROM image_scan_results n
-                 WHERE n.org_id = r2.org_id AND n.id <> r2.id
-                   AND COALESCE(n.image_repository,'') <> '' AND n.image_ref !~ '^sha256:'
-                   AND n.image_digest = COALESCE(NULLIF(r2.image_digest,''), r2.image_ref))
-        )
-      LIMIT $1
- )`, batchSize)
-			if err != nil {
-				if logger != nil {
-					logger.Warn("orphan image_scan_results prune", slog.String("err", err.Error()))
-				}
-				return
-			}
-			n := tag.RowsAffected()
-			if n > 0 && logger != nil {
-				logger.Info("orphan image_scan_results prune", slog.Int64("deleted", n))
-			}
-			if n < batchSize {
-				return
-			}
+		n, err := scanretention.PruneOrphanResults(ctx, pool, batchSize)
+		if err != nil && logger != nil {
+			logger.Warn("orphan image_scan_results prune", slog.String("err", err.Error()))
+		} else if n > 0 && logger != nil {
+			logger.Info("orphan image_scan_results prune", slog.Int64("deleted", n))
 		}
 	}
 	prune() // immediate first pass on start

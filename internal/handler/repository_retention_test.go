@@ -10,9 +10,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/alphabravocompany/constellation/internal/scanretention"
 )
 
-func TestRepositoryScanRetentionPrunesOldRepositoryTarget(t *testing.T) {
+func TestRepositoryScanRetentionPreservesFindingsAndInventory(t *testing.T) {
 	d := openTestDB(t)
 	defer d.Close()
 	requireRepositoryRetentionSchema(t, d.Pool())
@@ -28,7 +30,7 @@ func TestRepositoryScanRetentionPrunesOldRepositoryTarget(t *testing.T) {
 	now := time.Date(2000, 1, 4, 12, 0, 0, 0, time.UTC)
 	targetID := createRepositoryRetentionFixture(t, pool, orgID, "github.com/acme/prune", now.Add(-72*time.Hour), "completed")
 
-	out, err := PruneRepositoryScansOnce(ctx, pool, RepositoryScanRetentionConfig{
+	out, err := scanretention.PruneRepositoryScansOnce(ctx, pool, scanretention.RepositoryScanRetentionConfig{
 		Enabled:   true,
 		MaxAge:    24 * time.Hour,
 		BatchSize: 10,
@@ -36,10 +38,10 @@ func TestRepositoryScanRetentionPrunesOldRepositoryTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !out.LockAcquired || out.Candidates != 1 || out.PrunedTargets != 1 || out.DeletedFindings != 1 || out.DeletedAssets != 1 {
+	if !out.LockAcquired || out.Candidates != 0 || out.PrunedTargets != 0 || out.DeletedFindings != 0 || out.DeletedAssets != 0 {
 		t.Fatalf("retention result = %+v", out)
 	}
-	assertRepositoryTargetGone(t, pool, targetID)
+	assertRepositoryTargetExists(t, pool, targetID)
 }
 
 func TestRepositoryScanRetentionSkipsActiveJobs(t *testing.T) {
@@ -58,7 +60,7 @@ func TestRepositoryScanRetentionSkipsActiveJobs(t *testing.T) {
 	now := time.Date(2000, 1, 4, 12, 0, 0, 0, time.UTC)
 	targetID := createRepositoryRetentionFixture(t, pool, orgID, "github.com/acme/active", now.Add(-72*time.Hour), "pending")
 
-	out, err := PruneRepositoryScansOnce(ctx, pool, RepositoryScanRetentionConfig{
+	out, err := scanretention.PruneRepositoryScansOnce(ctx, pool, scanretention.RepositoryScanRetentionConfig{
 		Enabled:   true,
 		MaxAge:    24 * time.Hour,
 		BatchSize: 10,
@@ -113,7 +115,7 @@ INSERT INTO scan_attestation_verifications (
 		t.Fatalf("verification: %v", err)
 	}
 
-	out, err := PruneRepositoryScansOnce(ctx, pool, RepositoryScanRetentionConfig{
+	out, err := scanretention.PruneRepositoryScansOnce(ctx, pool, scanretention.RepositoryScanRetentionConfig{
 		Enabled:   true,
 		MaxAge:    24 * time.Hour,
 		BatchSize: 10,
@@ -280,4 +282,34 @@ func countRepositoryRetentionRows(t *testing.T, pool *pgxpool.Pool, table string
 		t.Fatalf("count %s: %v", table, err)
 	}
 	return count
+}
+
+func TestRepositoryScanRetentionPrunesOnlyEmptyHistory(t *testing.T) {
+	d := openTestDB(t)
+	defer d.Close()
+	pool := d.Pool()
+	ctx := t.Context()
+	resetRepositoryRetentionState(t, pool)
+	org := createRepositoryRetentionOrg(t, pool, "empty")
+	now := time.Date(2000, 1, 4, 12, 0, 0, 0, time.UTC)
+	target := createRepositoryRetentionFixture(t, pool, org, "github.com/acme/empty", now.Add(-72*time.Hour), "completed")
+	// Only a target with no remaining finding or inventory evidence is disposable.
+	if _, err := pool.Exec(ctx, `DELETE FROM findings WHERE scan_target_id=$1`, target); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `DELETE FROM scan_evidence WHERE scan_target_id=$1`, target); err != nil {
+		t.Fatal(err)
+	}
+	cfg := scanretention.RepositoryScanRetentionConfig{Enabled: true, MaxAge: 24 * time.Hour, BatchSize: 10, DryRun: true}
+	dry, err := scanretention.PruneRepositoryScansOnce(ctx, pool, cfg, now)
+	if err != nil || dry.Candidates != 1 || dry.PrunedTargets != 0 {
+		t.Fatalf("dry run: %+v %v", dry, err)
+	}
+	assertRepositoryTargetExists(t, pool, target)
+	cfg.DryRun = false
+	out, err := scanretention.PruneRepositoryScansOnce(ctx, pool, cfg, now)
+	if err != nil || out.Candidates != 1 || out.PrunedTargets != 1 || out.DeletedFindings != 0 || out.DeletedAssets != 1 {
+		t.Fatalf("empty target: %+v %v", out, err)
+	}
+	assertRepositoryTargetGone(t, pool, target)
 }

@@ -22,6 +22,7 @@ import (
 	"github.com/alphabravocompany/constellation/internal/handler/network"
 	"github.com/alphabravocompany/constellation/internal/handler/runtime"
 	"github.com/alphabravocompany/constellation/internal/lifecycle"
+	"github.com/alphabravocompany/constellation/internal/scanretention"
 	"github.com/alphabravocompany/constellation/internal/syscfg"
 	"github.com/alphabravocompany/constellation/pkg/backup"
 )
@@ -217,7 +218,7 @@ func (s *Server) startSingletonLoops(ctx context.Context) {
 	// makes it exactly-once across restarts.
 	go handler.RunAdmissionNotifyDispatcher(ctx, s.db.Pool(), s.dispatcher, 0, s.tel.Logger)
 
-	go handler.RunRepositoryScanRetentionMonitor(ctx, s.db.Pool(), handler.RepositoryScanRetentionConfig{
+	go scanretention.RunRepositoryScanRetentionMonitor(ctx, s.db.Pool(), scanretention.RepositoryScanRetentionConfig{
 		Enabled:   s.cfg.RepositoryScanRetentionEnabled,
 		MaxAge:    s.cfg.RepositoryScanRetentionMaxAge,
 		Interval:  s.cfg.RepositoryScanRetentionInterval,

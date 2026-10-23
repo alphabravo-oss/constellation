@@ -29,7 +29,7 @@ production caller is superseded.
 | DB-11 | Qualify existing PCAP maintenance; add separate threat/payload/forensics retention with preserved case evidence. |
 | DB-12 | Add rollup retention that respects the raw fold boundary and reports unavailable historical ranges. |
 | DB-13 | Preserve open/triaged findings; implement eligible resolved/orphaned archival and bounded storage. |
-| DB-14–15 | Map result/evidence/attestation references, preserve current decisions, and expire only unreferenced eligible history. |
+| DB-14–15 | [Reference protections](scan-evidence-retention.md) now preserve newest/referenced jobs and results, all findings and inventory/attestation evidence; bounded cleanup rechecks references under locks. Named-history and payload archival/restoration remain open. |
 | DB-16 | Qualify current identity cleanup and its deployed alarms/throughput. |
 | DB-17 | Classify operational histories separately from evidence and add bounded, hold-aware maintenance. |
 | DB-18–20 | Real KEV/EPSS replay qualification passed (394,803 rows, no replay rewrites/WAL). Historical source/KEV semantics and opt-in resumable NVD backfill are implemented; measured catalog indexing keeps PostgreSQL. Source deployment and full NVD mirror traversal remain operational gates. See [catalog decision](cve-catalog-capacity.md) and [feed contract](cve-feed-checkpoints.md). |
