@@ -97,15 +97,13 @@ func TestScheduledBackupRealObjectStore(t *testing.T) {
 		}
 	})
 	pool := openConfigTestPool(t)
-	var org uuid.UUID
-	if err = pool.QueryRow(ctx, `INSERT INTO orgs(name,display_name) VALUES('object-qualification','object-qualification') RETURNING id`).Scan(&org); err != nil {
-		t.Fatal(err)
-	}
+	orgText, orgName, cluster := seedScheduledRestoreOrganization(t, pool)
+	org := uuid.MustParse(orgText)
 	private, public := filepath.Join(t.TempDir(), "private"), filepath.Join(t.TempDir(), "public")
 	if err = GenerateEd25519Keypair(private, public); err != nil {
 		t.Fatal(err)
 	}
-	runScheduledBackup(ctx, pool, ScheduleExecutorConfig{BackupDir: t.TempDir(), SignKeyPath: private}, schedule{OrgID: org, OrgName: "object-qualification", CronExpr: "0 3 * * *", SignMode: "static-key", S3Bucket: bucket, S3Prefix: "evidence/", S3Endpoint: endpoint}, time.Now(), nil)
+	runScheduledBackup(ctx, pool, ScheduleExecutorConfig{BackupDir: t.TempDir(), SignKeyPath: private}, schedule{OrgID: org, OrgName: orgName, CronExpr: "0 3 * * *", SignMode: "static-key", S3Bucket: bucket, S3Prefix: "evidence/", S3Endpoint: endpoint}, time.Now(), nil)
 	var status, uri, digest string
 	if err = pool.QueryRow(ctx, `SELECT status,COALESCE(s3_uri,''),COALESCE(sha256,'') FROM backups WHERE org_id=$1`, org).Scan(&status, &uri, &digest); err != nil {
 		t.Fatal(err)
@@ -121,16 +119,19 @@ func TestScheduledBackupRealObjectStore(t *testing.T) {
 			t.Error("remove qualification object failed")
 		}
 	})
+	pool.Close()
+	destination := freshRestorePool(t)
 	object, err := client.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(bucket), Key: aws.String(key)})
 	if err != nil {
 		t.Fatal("independent download failed")
 	}
 	defer object.Body.Close()
-	verified, err := VerifyArchive(ctx, RestoreOptions{In: object.Body, Verify: VerifierOptions{KeyPath: public}})
-	if err != nil || !verified.Verified || verified.Manifest.OrgName != "object-qualification" {
+	verified, err := Restore(ctx, destination, RestoreOptions{In: object.Body, Verify: VerifierOptions{Mode: SignModeStaticKey, KeyPath: public}})
+	if err != nil || !verified.Verified || verified.Manifest.OrgName != orgName {
 		t.Fatalf("remote signed artifact verification failed: %v", err)
 	}
-	t.Log("real object-store upload, exact read-back, and independent signature verification passed")
+	assertRestoredOrganization(t, destination, orgName, orgText, cluster)
+	t.Log("real object-store upload/read-back and independent signed restoration into a separate migrated database passed")
 }
 
 func TestScheduledFailureFinalizesAfterCancellation(t *testing.T) {
