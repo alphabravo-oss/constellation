@@ -21,7 +21,7 @@ func NewMetrics(reg prometheus.Registerer) (*Metrics, error) {
 		lastSuccess: prometheus.NewGauge(prometheus.GaugeOpts{Name: "constellation_session_cleanup_last_success_timestamp_seconds", Help: "Unix time of the last complete successful cleanup pass; zero before first success."}),
 		duration:    prometheus.NewHistogram(prometheus.HistogramOpts{Name: "constellation_session_cleanup_duration_seconds", Help: "Operational session cleanup pass duration.", Buckets: prometheus.DefBuckets}),
 	}
-	for _, family := range []string{"refresh_tokens", "user_sessions", "network_sessions", "kill_requests"} {
+	for _, family := range []string{"oidc_login_attempts", "identity_sessions", "network_sessions", "kill_requests"} {
 		m.deleted.WithLabelValues(family).Add(0)
 	}
 	if reg != nil {
@@ -50,8 +50,8 @@ func (m *Metrics) Record(result SessionCleanup, elapsed time.Duration, err error
 	if m == nil {
 		return
 	}
-	m.deleted.WithLabelValues("refresh_tokens").Add(float64(result.RefreshTokens))
-	m.deleted.WithLabelValues("user_sessions").Add(float64(result.UserSessions))
+	m.deleted.WithLabelValues("oidc_login_attempts").Add(float64(result.LoginAttempts))
+	m.deleted.WithLabelValues("identity_sessions").Add(float64(result.IdentitySessions))
 	m.deleted.WithLabelValues("network_sessions").Add(float64(result.NetworkSessions))
 	m.deleted.WithLabelValues("kill_requests").Add(float64(result.KillRequests))
 	m.duration.Observe(elapsed.Seconds())

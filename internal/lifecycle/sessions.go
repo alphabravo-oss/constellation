@@ -15,17 +15,16 @@ import (
 const SessionKillLifetime = 5 * time.Minute
 
 type SessionCleanup struct {
-	RefreshTokens   int64
-	UserSessions    int64
-	NetworkSessions int64
-	KillRequests    int64
+	LoginAttempts    int64
+	IdentitySessions int64
+	NetworkSessions  int64
+	KillRequests     int64
 }
 
 // ReapSessions performs at most batch deletes per family, skipping locked rows.
-// Expired refresh records are removed before sessions; consumed-but-unexpired
-// records remain available to detect reuse and revoke their entire session.
-// Session deletion requires a recorded expiry and no remaining refresh rows,
-// preventing an unbounded foreign-key cascade or accidental legacy logout.
+// Expired OIDC login attempts and opaque identity sessions are removed using
+// their primary keys. Live identities and audit receipts are retained; network
+// snapshots and kill requests use their full organization/cluster/node keys.
 func ReapSessions(ctx context.Context, pool *pgxpool.Pool, batch int) (SessionCleanup, error) {
 	var result SessionCleanup
 	if batch < 1 || batch > 5000 {
@@ -35,8 +34,8 @@ func ReapSessions(ctx context.Context, pool *pgxpool.Pool, batch int) (SessionCl
 		name, sql string
 		count     *int64
 	}{
-		{"login attempts", `WITH expired AS (SELECT state_hash FROM oidc_login_attempts WHERE expires_at<now() LIMIT $1 FOR UPDATE SKIP LOCKED) DELETE FROM oidc_login_attempts t USING expired e WHERE t.state_hash=e.state_hash`, &result.RefreshTokens},
-		{"identity sessions", `WITH expired AS (SELECT token_hash FROM identity_sessions WHERE expires_at<now() ORDER BY expires_at LIMIT $1 FOR UPDATE SKIP LOCKED) DELETE FROM identity_sessions s USING expired e WHERE s.token_hash=e.token_hash`, &result.UserSessions},
+		{"login attempts", `WITH expired AS (SELECT state_hash FROM oidc_login_attempts WHERE expires_at<now() LIMIT $1 FOR UPDATE SKIP LOCKED) DELETE FROM oidc_login_attempts t USING expired e WHERE t.state_hash=e.state_hash`, &result.LoginAttempts},
+		{"identity sessions", `WITH expired AS (SELECT token_hash FROM identity_sessions WHERE expires_at<now() ORDER BY expires_at LIMIT $1 FOR UPDATE SKIP LOCKED) DELETE FROM identity_sessions s USING expired e WHERE s.token_hash=e.token_hash`, &result.IdentitySessions},
 		{"network sessions", `WITH expired AS (
  SELECT org_id, cluster_id, node, id FROM network_sessions
  WHERE updated_at < statement_timestamp() - interval '5 minutes'
@@ -79,8 +78,8 @@ func RunSessionCleanup(ctx context.Context, pool *pgxpool.Pool, logger *slog.Log
 		if err != nil && logger != nil {
 			logger.Warn("operational session cleanup failed", "error", err)
 		} else if result != (SessionCleanup{}) && logger != nil {
-			logger.Info("operational session cleanup", "refresh_tokens", result.RefreshTokens,
-				"user_sessions", result.UserSessions, "network_sessions", result.NetworkSessions, "kill_requests", result.KillRequests)
+			logger.Info("operational session cleanup", "oidc_login_attempts", result.LoginAttempts,
+				"identity_sessions", result.IdentitySessions, "network_sessions", result.NetworkSessions, "kill_requests", result.KillRequests)
 		}
 		select {
 		case <-ctx.Done():
