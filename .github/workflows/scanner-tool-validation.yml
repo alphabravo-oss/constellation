@@ -1,6 +1,14 @@
 name: Scanner tool validation
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/scanner-tool-validation.yml
+      - deploy/docker/scanner-tools/grype/**
+      - deploy/docker/scanner-tools/sources.json
+      - cmd/tools/scanner-tools/**
+      - go.mod
+      - go.sum
   push:
     branches: [main, 'implement/**']
     paths:
@@ -8,6 +16,8 @@ on:
       - deploy/docker/scanner-tools/grype/**
       - deploy/docker/scanner-tools/sources.json
       - cmd/tools/scanner-tools/**
+      - go.mod
+      - go.sum
 permissions:
   contents: read
 concurrency:
@@ -41,6 +51,13 @@ jobs:
           fi
           grep -qx 'github.com/moby/moby/client' "$GITHUB_WORKSPACE/artifacts/grype-dependencies.txt"
           GOWORK=off go test -mod=readonly -race -shuffle=on -count=2 -json ./cmd/grype/cli/commands ./internal/format | tee "$GITHUB_WORKSPACE/artifacts/grype-tests.json"
+      - name: Validate the release-built Grype executable
+        run: |
+          go run ./cmd/tools/scanner-tools --tool grype --work "$RUNNER_TEMP/grype-source" --output "$RUNNER_TEMP/tool-output"
+          go version -m "$RUNNER_TEMP/tool-output/grype" > artifacts/grype-buildinfo.txt
+          "$RUNNER_TEMP/tool-output/grype" version -o json > artifacts/grype-version.json
+          CONSTELLATION_TEST_GRYPE_BINARY="$RUNNER_TEMP/tool-output/grype" \
+            go test -race -shuffle=on -count=2 -json ./cmd/tools/scanner-tools -run '^TestGrypeBinary$' | tee artifacts/grype-binary-tests.json
       - if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
