@@ -504,6 +504,10 @@ func (h *Backups) PutSchedule(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if err := backup.ValidateScheduleDestination(s.S3Bucket, s.S3Prefix, s.S3Endpoint); err != nil {
+		jsonError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	s.SignMode = string(mode)
 	s.CronExpr = strings.TrimSpace(s.CronExpr)
 	if s.CronExpr == "" {

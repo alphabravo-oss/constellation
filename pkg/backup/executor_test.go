@@ -65,12 +65,11 @@ func TestRetentionVictims(t *testing.T) {
 		}
 	})
 
-	t.Run("count and age union", func(t *testing.T) {
-		// keepLast=4 alone would prune only the oldest (4d). maxAge=2 also prunes 3d & 4d.
-		// Union => {3d, 4d} = 2 victims.
+	t.Run("age preserves keep last floor", func(t *testing.T) {
+		// The age rule cannot delete one of the four protected copies.
 		v := retentionVictims(recs, 4, 2, now)
-		if len(v) != 2 {
-			t.Fatalf("want 2 victims, got %d", len(v))
+		if len(v) != 1 {
+			t.Fatalf("want 1 victim, got %d", len(v))
 		}
 	})
 }
