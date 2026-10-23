@@ -458,6 +458,122 @@
           "legendFormat": "failed attempts"
         }
       ]
+    },
+    {
+      "id": 15,
+      "title": "Retained WAL allocation",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 56,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "constellation_storage_postgres_wal_retained_bytes{namespace=\"$namespace\",service=\"$service\"}",
+          "legendFormat": "{{instance}} {{table}}"
+        }
+      ]
+    },
+    {
+      "id": 16,
+      "title": "WAL occupancy observable",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 56,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "constellation_storage_postgres_wal_occupancy_known{namespace=\"$namespace\",service=\"$service\"}",
+          "legendFormat": "{{instance}} {{table}}"
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "title": "Raw-flow retention boundary lag",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 64,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "clamp_min(constellation_storage_retention_cutoff_timestamp_seconds{namespace=\"$namespace\",service=\"$service\",table=\"network_flows\"} - ignoring(table) group_left constellation_storage_raw_flow_pruned_before_timestamp_seconds{namespace=\"$namespace\",service=\"$service\"},0) and (constellation_storage_retention_enabled{namespace=\"$namespace\",service=\"$service\",table=\"network_flows\"} == 1)",
+          "legendFormat": "{{instance}} {{table}}"
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "title": "Eligible attached partitions",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 64,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "constellation_storage_expired_partitions{namespace=\"$namespace\",service=\"$service\"}",
+          "legendFormat": "{{instance}} {{table}}"
+        }
+      ]
     }
   ]
 }

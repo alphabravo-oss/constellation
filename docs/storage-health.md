@@ -97,6 +97,9 @@ metrics:
       archivePendingIDDistance: 10000
       backupOverdueSeconds: 3600
       walBytesPerSecond: 104857600
+      walRetainedBytes: 4294967296
+      rawRetentionLagSeconds: 3600
+      partitionExpiryLagSeconds: 3600
   storageDashboard:
     enabled: true
     labels: { grafana_dashboard: "1" }
@@ -118,10 +121,10 @@ capacity/progress warnings. The missing-metrics rule reports discovered targets
 with failed scrapes or missing collectors, plus completely absent discovery. Existing DB-health collector query failures now have an alert
 because its cached feed/component ages can otherwise look current during failure.
 
-The optional ConfigMap contains a 14-panel Grafana dashboard, selected by the
+The optional ConfigMap contains a 18-panel Grafana dashboard, selected by the
 usual dashboard-sidecar label. It does not install Grafana. Choose the Prometheus
 data source, namespace and API service. Replica observations of the same database
-are combined with max/min, not summed. The dashboard includes 15 checked PromQL
+are combined with max/min, not summed. The dashboard includes 19 checked PromQL
 expressions; it can also be imported directly from
 `deploy/charts/constellation/files/storage-dashboard.json`.
 
@@ -164,16 +167,17 @@ statistics, least-privilege reads, active/missing/invalid archive progress,
 backup tenant aggregation, uninitialized schedules and the indexed lookup plan,
 concurrent cache hits, failed-query invalidation/recovery, missing tables and
 lock deadlines. `scripts/test-helm-storage.sh` renders chart wiring and evaluates
-75 scenarios with Prometheus `promtool`, including failing and healthy conditions,
+102 scenarios with Prometheus `promtool`, including failing and healthy conditions,
 disabled/idle archives, absence and per-replica joins. It also parses all dashboard
 queries. Set `PROMTOOL` to a local binary or preload the digest-pinned Prometheus
 3.15.0 test image; tests do not pull images or use the network. The CI workflow
 preloads that image when CI is enabled. GitHub Actions remains disabled here.
 
 This closes the ten scoped implementation items, not all of DB-23: live scrape
-and notification delivery, Grafana rendering, capacity qualification, raw
-retention/partition-drop lag, retained WAL occupancy and live scanner-cache filesystem
-headroom qualification still require follow-up. Scanner-local metrics and tested
+and notification delivery, Grafana rendering, capacity qualification, exact raw-row
+expiry backlog measurements and live scanner-cache filesystem headroom qualification
+still require follow-up. Raw-flow progress, actual expired partition bounds and
+retained WAL occupancy now have the signals described below. Scanner-local metrics and tested
 alerts now ship under the [cache monitoring contract](scanner-cache-monitoring.md). Existing volume, scanner-engine and feed alerts
 are retained rather than duplicated. No live cluster, database retention or
 alerting configuration was changed for this work.
@@ -221,3 +225,35 @@ negative control restores the restricted health joins and global absence rule;
 all ten corresponding regression cases fail as expected. This changes monitoring
 correctness, not retention policy, deletion behavior, live alert routing or DB-23
 capacity/recovery acceptance.
+
+## Retained WAL and retention progress
+
+The collector now distinguishes WAL generation from WAL directory allocation.
+`postgres_wal_occupancy_known` is zero when the database role lacks EXECUTE on
+`pg_catalog.pg_ls_waldir()`. In that case `postgres_wal_retained_bytes` is absent,
+not a measured zero; all other snapshot values remain available. An administrator
+can review a narrow EXECUTE grant or use CNPG disk metrics instead. No privilege
+is granted by the collector. Occupancy includes retained and recycled WAL files;
+it is not the replication-slot backlog alone.
+
+`raw_flow_pruned_before_timestamp_seconds` is the committed raw-flow expiry
+boundary. It is a progress signal, not a count of expired rows: a bounded sweep
+can leave eligible rows behind. For the two fixed `table` labels `events` and
+`network_flows`, `retention_enabled` and `retention_cutoff_timestamp_seconds`
+reflect the same conservative organization policy as maintenance. Any tenant
+hold suppresses expiry. The flow cutoff also respects the committed fold
+watermark and one-hour safety boundary.
+
+`expired_partitions` and `oldest_expired_partition_upper_timestamp_seconds`
+inspect actual attached range bounds rather than date-shaped table names. They
+exclude DEFAULT branches, which have separate metrics. Unexpected range bounds
+or unreadable/invalid retention policy fail the snapshot. The reader now also
+requires SELECT on `orgs` and `system_config`; it does not expose those values or
+tenant identities as labels. These catalog/policy queries retain the existing
+read-only transaction and query deadlines.
+
+Four additional alert rules cover retained WAL pressure, unknown occupancy, raw
+expiry progress and overdue attached partitions. Matching preserves all target
+labels, tenant holds suppress expiry alarms, and failed scrapes/snapshots suppress
+data alarms. Four dashboard panels expose the new signals. Thresholds are
+warning budgets, configurable through `metrics.prometheusRule.storage`.

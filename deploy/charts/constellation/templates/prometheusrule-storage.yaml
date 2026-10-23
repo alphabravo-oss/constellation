@@ -84,6 +84,43 @@ spec:
           annotations:
             summary: "Flow rollup progress is stale"
             description: "Investigate failed folds and keep raw flows; existing fold-gated pruning must remain enabled."
+        - alert: ConstellationWALRetainedHigh
+          expr: constellation_storage_postgres_wal_retained_bytes{ {{ $scope }} } > {{ $s.walRetainedBytes }} and (constellation_storage_postgres_wal_occupancy_known{ {{ $scope }} } == 1) and ignoring(table,kind) ({{ $healthy }}) and ignoring(table,kind) ({{ $up }})
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "Retained WAL allocation exceeds its warning budget"
+            description: "Inspect archiving, replication slots and WAL recycling. Generated WAL rate is not disk occupancy; never delete WAL files manually."
+        - alert: ConstellationWALOccupancyUnknown
+          expr: constellation_storage_postgres_wal_occupancy_known{ {{ $scope }} } == 0 and ignoring(table,kind) ({{ $healthy }}) and ignoring(table,kind) ({{ $up }})
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "WAL disk occupancy cannot be observed"
+            description: "The database role lacks access to pg_ls_waldir. Review a narrow EXECUTE grant or use the database operator's disk metrics; other storage values remain available."
+        - alert: ConstellationRawFlowRetentionLagging
+          expr: |
+            (constellation_storage_retention_cutoff_timestamp_seconds{ {{ $scope }},table="network_flows" }
+             - ignoring(table) group_left constellation_storage_raw_flow_pruned_before_timestamp_seconds{ {{ $scope }} } > {{ $s.rawRetentionLagSeconds }})
+             and (constellation_storage_retention_enabled{ {{ $scope }},table="network_flows" } == 1)
+             and ignoring(table,kind) ({{ $healthy }}) and ignoring(table,kind) ({{ $up }})
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "Raw-flow retention progress is behind its safe cutoff"
+            description: "Inspect maintenance failures and locks. The cutoff respects tenant holds and fold progress; the committed boundary is not an exact expired-row backlog."
+        - alert: ConstellationPartitionExpiryLagging
+          expr: |
+            (constellation_storage_retention_cutoff_timestamp_seconds{ {{ $scope }} }
+             - constellation_storage_oldest_expired_partition_upper_timestamp_seconds{ {{ $scope }} } > {{ $s.partitionExpiryLagSeconds }})
+             and (constellation_storage_expired_partitions{ {{ $scope }} } > 0)
+             and (constellation_storage_retention_enabled{ {{ $scope }} } == 1)
+             and ignoring(table,kind) ({{ $healthy }}) and ignoring(table,kind) ({{ $up }})
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "Eligible time partitions remain attached"
+            description: "Actual range bounds are past the safe retention cutoff. Check partition maintenance and locks; do not bypass fold or tenant-hold protections."
         - alert: ConstellationAuditArchiveLagging
           expr: |
             (constellation_storage_archive_pending_id_distance{ {{ $scope }} } > {{ $s.archivePendingIDDistance }}

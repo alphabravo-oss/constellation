@@ -249,6 +249,9 @@ metrics:
       archivePendingIDDistance: 10000
       backupOverdueSeconds: 3600
       walBytesPerSecond: 104857600
+      walRetainedBytes: 4294967296
+      rawRetentionLagSeconds: 3600
+      partitionExpiryLagSeconds: 3600
     scannerCache:
       enabled: true            # requires prometheusRule.enabled and scanner.enabled
       availableBytes: 1073741824
