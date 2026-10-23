@@ -490,3 +490,48 @@ kubectl -n <ns> patch cluster <name> --type merge -p '{"spec":{"imageName":"<reg
 
 Verify `pg_stat_archiver` (`failed_count` not increasing after a `pg_switch_wal()`), the
 Cluster `ContinuousArchiving=True` condition, and a fresh `Backup` reaching `completed`.
+
+## October 23 current-backup recovery and migration qualification
+
+A new chart-rendered `lifecycle-restore-20261023-postgres` cluster restored the
+current live archive into its own 24-GiB volume in `constellation-system`. The
+source remained `constellation-cnpg-postgres`; no application DSN was switched.
+The recovery used the source's pinned PostgreSQL 16.15 image and the existing
+`rustfs-archive` object store, with no archive-writer plugin configured on the test
+cluster. This is same-host recovery, not a node-loss or off-host drill.
+
+The first bootstrap attempts failed because the namespace's default-deny policy
+did not allow the new cluster to reach the Kubernetes API. A policy rendered from
+`networkpolicies-cnpg.yaml`, selected only for the new cluster, supplied DNS,
+API, operator and object-store access. Recovery then completed. Include this
+policy in future isolated rehearsals; database credentials alone are insufficient.
+
+Creation was 17:03:12 UTC; CNPG reported Ready at 17:13:29 UTC: **10 minutes 17
+seconds**, including the policy failure/retry. This measures database readiness,
+not application login or failover RTO. The restored audit stream's latest timestamp
+was 17:11:47 UTC; it is an observed recovered receipt, not a proven RPO guarantee.
+`pgcrypto`, `pg_trgm` and `vector` were present. A freshly compiled API migration
+runner applied migrations 191 and 192 to the restored copy. Exact counts were
+unchanged before and after:
+
+| Family | Rows |
+| --- | ---: |
+| Raw flows | 1,923,052 |
+| Hourly rollups | 174,066 |
+| Events | 4,718,506 |
+| Audit events | 2,015,126 |
+| Findings | 22,185 |
+| CVE catalog | 412,772 |
+| Scan evidence | 1,310 |
+| Organization backup catalog | 0 |
+
+Audit verification reports the same **row-53 `prev_hash` mismatch** before and
+after migration. A SHA256 over the complete first 53 rows matched between the
+live source and restore. Restoration preserved the pre-existing discontinuity;
+no hashes or historical rows were rewritten. DB-07/08 integrity qualification
+must continue to report this limitation.
+
+Evidence and private generated credentials are under
+`/root/constellation-lifecycle-completion-20261023/`. Do not commit the rendered
+Secret manifest. The restored copy remains isolated while subsequent lifecycle
+and query-plan checks use it; its resources must be removed when that work ends.

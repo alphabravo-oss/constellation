@@ -314,7 +314,7 @@ func TestStorageReaderDoesNotRequireSuperuserOrWriteGrants(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	execSQL(t, pool, "GRANT USAGE ON SCHEMA public TO "+ident+"; GRANT SELECT ON network_flow_rollup_state,audit_archive_progress,audit_events,backups,backup_schedules TO "+ident)
+	execSQL(t, pool, "GRANT USAGE ON SCHEMA public TO "+ident+"; GRANT SELECT ON orgs,system_config,network_flow_rollup_state,audit_archive_progress,audit_events,backups,backup_schedules TO "+ident)
 	cfg := pool.Config()
 	cfg.ConnConfig.RuntimeParams["role"] = role
 	reader, err := pgxpool.NewWithConfig(t.Context(), cfg)
@@ -326,6 +326,16 @@ func TestStorageReaderDoesNotRequireSuperuserOrWriteGrants(t *testing.T) {
 	if len(s.Relations) != len(monitoredTables) {
 		t.Fatal("read-only role missing stats")
 	}
+	if s.WALKnown != 0 {
+		t.Fatal("unprivileged WAL occupancy claimed known")
+	}
+	reg := prometheus.NewRegistry()
+	reg.MustRegister(New(reader, Config{}, nil))
+	metrics := gather(t, reg)
+	if gauge(metrics, "postgres_wal_occupancy_known") != 0 || len(metrics["postgres_wal_retained_bytes"]) != 0 {
+		t.Fatal("unknown WAL emitted as a measured zero")
+	}
+
 	if _, err = reader.Exec(t.Context(), `DELETE FROM audit_archive_progress`); err == nil {
 		t.Fatal("reader unexpectedly has write access")
 	}
@@ -353,5 +363,58 @@ func TestArchiveIDDistancePreservesBigintPrecision(t *testing.T) {
 	reg.MustRegister(c)
 	if got := gauge(gather(t, reg), "archive_pending_id_distance"); got != 1 {
 		t.Fatalf("pending evidence vanished through float rounding: %v", got)
+	}
+}
+
+func TestRetentionSignalsUseActualBoundsAndHoldPolicy(t *testing.T) {
+	t.Parallel()
+	pool := pgtest.Pool(t)
+	execSQL(t, pool, `INSERT INTO orgs(name,display_name) VALUES('retention-signals','Retention signals');
+ INSERT INTO system_config(org_id,config) SELECT id,'{"events_retention_days":7,"network_flow_retention_days":7,"scan_job_retention_days":7}'::jsonb FROM orgs WHERE name='retention-signals';
+ CREATE TABLE events_20990101 PARTITION OF events FOR VALUES FROM ('2001-01-01') TO ('2001-01-02');
+ CREATE TABLE events_19990101 PARTITION OF events FOR VALUES FROM ('2099-01-01') TO ('2099-01-02');
+ CREATE TABLE flow_old_observation PARTITION OF network_flows FOR VALUES FROM ('2001-01-01') TO ('2001-01-02')`)
+	s := read(t, pool, "")
+	for _, signal := range s.Retention {
+		if signal.Enabled != 1 {
+			t.Fatalf("retention unexpectedly held: %+v", signal)
+		}
+		if signal.Table == "events" && (signal.ExpiredPartitions != 1 || signal.OldestExpiredUpper != 978393600) {
+			t.Fatalf("actual bounds not counted: %+v", signal)
+		}
+		if signal.Table == "network_flows" && signal.ExpiredPartitions != 0 {
+			t.Fatal("unfolded flow partition treated as eligible")
+		}
+	}
+	execSQL(t, pool, `UPDATE network_flow_rollup_state SET watermark=now(),raw_pruned_before=now()-interval '7 days'`)
+	s = read(t, pool, "")
+	for _, signal := range s.Retention {
+		if signal.Table == "network_flows" && signal.ExpiredPartitions != 1 {
+			t.Fatalf("folded old partition omitted: %+v", signal)
+		}
+	}
+	if s.RawPrunedBefore <= 0 || s.WALKnown != 1 || s.WALRetained <= 0 {
+		t.Fatalf("progress/WAL missing: %+v", s)
+	}
+	execSQL(t, pool, `INSERT INTO orgs(name,display_name) VALUES('retention-hold','Retention hold');
+ INSERT INTO system_config(org_id,config) SELECT id,'{"events_retention_days":0,"network_flow_retention_days":0,"scan_job_retention_days":0}'::jsonb FROM orgs WHERE name='retention-hold'`)
+	for _, signal := range read(t, pool, "").Retention {
+		if signal.Enabled != 0 || signal.Cutoff != 0 || signal.ExpiredPartitions != 0 {
+			t.Fatalf("tenant hold bypassed: %+v", signal)
+		}
+	}
+	var exists bool
+	if err := pool.QueryRow(t.Context(), `SELECT to_regclass('events_20990101') IS NOT NULL`).Scan(&exists); err != nil || !exists {
+		t.Fatal("observation removed a partition")
+	}
+}
+
+func TestRetentionSignalRejectsInvalidPolicy(t *testing.T) {
+	t.Parallel()
+	pool := pgtest.Pool(t)
+	execSQL(t, pool, `INSERT INTO orgs(name,display_name) VALUES('bad-policy','Bad policy');
+ INSERT INTO system_config(org_id,config) SELECT id,'{"events_retention_days":-1}'::jsonb FROM orgs WHERE name='bad-policy'`)
+	if _, err := readSnapshot(t.Context(), pool, ""); err == nil {
+		t.Fatal("invalid policy claimed healthy expiry")
 	}
 }

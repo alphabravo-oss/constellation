@@ -25,7 +25,7 @@ assert len(rules) == 1
 rule_spec = rules[0]['spec']
 (root / 'rules.yaml').write_text(yaml.safe_dump(rule_spec))
 alert_rules = {r['alert']: r for g in rule_spec['groups'] for r in g['rules']}
-assert len(alert_rules) == 12
+assert len(alert_rules) == 16
 for rule in alert_rules.values():
     assert 'namespace="storage-tests"' in rule['expr'] and 'service="constellation-api"' in rule['expr']
 
@@ -49,7 +49,7 @@ assert env('archive-explicit')['CONSTELLATION_STORAGE_ARCHIVE_ENDPOINT']['value'
 cm = next(d for d in docs('enabled') if d['metadata']['name'].endswith('-storage-dashboard'))
 assert cm['metadata']['labels']['grafana_dashboard'] == '1'
 dashboard = json.loads(cm['data']['constellation-storage.json'])
-assert len(dashboard['panels']) == 14
+assert len(dashboard['panels']) == 18
 # Parse the real dashboard expressions too, substituting only Grafana variables.
 expressions = [target['expr'].replace('$namespace', 'storage-tests').replace('$service', 'constellation-api').replace('$__rate_interval', '5m')
                for panel in dashboard['panels'] for target in panel['targets']]
@@ -69,7 +69,7 @@ def series(name, values, extra=None):
 
 # Evaluate after 2 hours so every rule's hold period and stall window has elapsed.
 # Values have one sample per minute; timestamp baselines keep healthy watermarks current.
-healthy = [series('up', '1+0x180'), series('collector_up', '1+0x180'), series('database_bytes', '1000000+0x180'),
+healthy = [series('postgres_wal_occupancy_known', '1+0x180'), series('up', '1+0x180'), series('collector_up', '1+0x180'), series('database_bytes', '1000000+0x180'),
            series('rollup_watermark_timestamp_seconds', '0+60x180'),
            series('archive_enabled', '0+0x180'), series('archive_pending_id_distance', '0+0x180'),
            series('archive_updated_timestamp_seconds', '0+60x180'),
@@ -100,6 +100,10 @@ tests = [
     scenario('archive backlog grows despite progress', [series('archive_enabled', '1+0x180'), series('archive_pending_id_distance', '20000+0x180')], 'ConstellationAuditArchiveLagging'),
     scenario('backup overdue', [series('backup_oldest_due_timestamp_seconds', '1+0x180')], 'ConstellationBackupScheduleOverdue'),
     scenario('backup failed', [series('backup_failed_schedules', '1+0x180')], 'ConstellationBackupScheduleFailed'),
+    scenario('retained WAL warning', [series('postgres_wal_retained_bytes', '5000000000+0x180')], 'ConstellationWALRetainedHigh'),
+    scenario('WAL occupancy unknown', [series('postgres_wal_occupancy_known', '0+0x180')], 'ConstellationWALOccupancyUnknown'),
+    scenario('raw retention stalled', [series('retention_enabled', '1+0x180', {'table': 'network_flows'}), series('retention_cutoff_timestamp_seconds', '0+60x180', {'table': 'network_flows'}), series('raw_flow_pruned_before_timestamp_seconds', '0+0x180')], 'ConstellationRawFlowRetentionLagging', {'table': 'network_flows'}),
+    scenario('partition expiry stalled', [series('retention_enabled', '1+0x180', {'table': 'events'}), series('retention_cutoff_timestamp_seconds', '0+60x180', {'table': 'events'}), series('oldest_expired_partition_upper_timestamp_seconds', '1+0x180', {'table': 'events'}), series('expired_partitions', '1+0x180', {'table': 'events'})], 'ConstellationPartitionExpiryLagging', {'table': 'events'}),
     scenario('WAL rate warning', [series('postgres_wal_generated_bytes_total', '0+12000000000x180')], 'ConstellationWALGenerationHigh'),
 ]
 error_series = series('collector_errors_total', '0+1x180')
@@ -135,8 +139,13 @@ data_alerts = {
     'ConstellationDeadRowsHigh', 'ConstellationDefaultPartitionLarge',
     'ConstellationFlowRollupLagging', 'ConstellationAuditArchiveLagging',
     'ConstellationBackupScheduleOverdue', 'ConstellationBackupScheduleFailed',
-    'ConstellationWALGenerationHigh',
+    'ConstellationWALGenerationHigh', 'ConstellationWALRetainedHigh', 'ConstellationWALOccupancyUnknown',
+    'ConstellationRawFlowRetentionLagging', 'ConstellationPartitionExpiryLagging',
 }
+# Explicit holds/unknown samples must suppress data-pressure alerts.
+tests.append(scenario('unknown WAL never implies measured pressure', [series('postgres_wal_retained_bytes', '5000000000+0x180'), series('postgres_wal_occupancy_known', '0+0x180')], 'ConstellationWALRetainedHigh', firing=False))
+tests.append(scenario('raw retention hold', [series('retention_enabled', '0+0x180', {'table': 'network_flows'}), series('retention_cutoff_timestamp_seconds', '0+60x180', {'table': 'network_flows'}), series('raw_flow_pruned_before_timestamp_seconds', '0+0x180')], 'ConstellationRawFlowRetentionLagging', firing=False))
+tests.append(scenario('empty expiry backlog', [series('retention_enabled', '1+0x180', {'table': 'events'}), series('retention_cutoff_timestamp_seconds', '0+60x180', {'table': 'events'}), series('oldest_expired_partition_upper_timestamp_seconds', '0+0x180', {'table': 'events'}), series('expired_partitions', '0+0x180', {'table': 'events'})], 'ConstellationPartitionExpiryLagging', firing=False))
 positive = {}
 for test in tests:
     check = test['alert_rule_test'][0]
