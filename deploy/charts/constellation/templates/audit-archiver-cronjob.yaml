@@ -1,8 +1,24 @@
 {{- if .Values.auditArchiver.enabled }}
-{{- $signMode := default "none" .Values.auditArchiver.sign.mode }}
+{{- $signMode := default "static-key" .Values.auditArchiver.sign.mode }}
 {{- $signKeyPath := default "" .Values.auditArchiver.sign.keyPath }}
 {{- if and (eq $signMode "static-key") (not $signKeyPath) .Values.auditArchiver.sign.keySecretName }}
 {{- $signKeyPath = printf "/etc/constellation/audit-signing/%s" .Values.auditArchiver.sign.keySecretKey }}
+{{- end }}
+{{- $verifyKeyPath := default "" .Values.auditArchiver.sign.verifyKeyPath }}
+{{- if and (eq $signMode "static-key") (not $verifyKeyPath) .Values.auditArchiver.sign.keySecretName }}
+{{- $verifyKeyPath = printf "/etc/constellation/audit-signing/%s" .Values.auditArchiver.sign.verifySecretKey }}
+{{- end }}
+{{- if not (has $signMode (list "static-key" "keyless")) }}
+{{- fail "auditArchiver.sign.mode must be static-key or keyless" }}
+{{- end }}
+{{- if and (eq $signMode "static-key") (not $verifyKeyPath) }}
+{{- fail "auditArchiver.sign.keySecretName or verifyKeyPath is required for verification" }}
+{{- end }}
+{{- if and (eq $signMode "keyless") (not .Values.auditArchiver.sign.verifyIdentity) }}
+{{- fail "auditArchiver.sign.verifyIdentity is required for keyless verification" }}
+{{- end }}
+{{- if or (lt (int .Values.auditArchiver.batchSize) 1) (gt (int .Values.auditArchiver.batchSize) 10000) }}
+{{- fail "auditArchiver.batchSize must be between 1 and 10000" }}
 {{- end }}
 {{- if not .Values.auditArchiver.bucket }}
 {{- fail "auditArchiver.bucket is required when auditArchiver.enabled=true" }}
@@ -36,10 +52,19 @@ spec:
               args:
                 - "--bucket={{ .Values.auditArchiver.bucket }}"
                 - "--prefix={{ .Values.auditArchiver.prefix }}"
-                - "--window={{ .Values.auditArchiver.window }}"
+                - "--batch-size={{ .Values.auditArchiver.batchSize }}"
+                {{- if .Values.auditArchiver.endpoint }}
+                - "--endpoint={{ .Values.auditArchiver.endpoint }}"
+                {{- end }}
                 - "--sign-mode={{ $signMode }}"
                 {{- if $signKeyPath }}
                 - "--sign-key={{ $signKeyPath }}"
+                {{- end }}
+                {{- if $verifyKeyPath }}
+                - "--verify-key={{ $verifyKeyPath }}"
+                {{- end }}
+                {{- if .Values.auditArchiver.sign.verifyIdentity }}
+                - "--verify-identity={{ .Values.auditArchiver.sign.verifyIdentity }}"
                 {{- end }}
                 {{- if .Values.auditArchiver.sign.cosignBin }}
                 - "--cosign-bin={{ .Values.auditArchiver.sign.cosignBin }}"

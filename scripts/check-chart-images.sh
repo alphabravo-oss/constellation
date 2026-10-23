@@ -16,7 +16,7 @@ registry="${REGISTRY:-ghcr.io/alphabravo-oss/constellation}"
 # Every optional role that renders a first-party image from the chart default
 # (kube-bench-runner is excluded: the chart requires an explicit repository).
 profile=(
-  --set auditArchiver.enabled=true --set auditArchiver.bucket=contract-check
+  --set auditArchiver.enabled=true --set auditArchiver.bucket=contract-check --set auditArchiver.sign.keySecretName=contract-signing
   --set complianceScheduler.enabled=true
   --set complianceScheduler.storage.existingClaim=contract-check
   --set complianceScheduler.signingSecret=contract-check

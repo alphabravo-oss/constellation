@@ -1123,19 +1123,25 @@ auditArchiver:
   # Optional scheduled export of the hash-chained audit log to S3. The job uses
   # AWS SDK default credentials, so prefer IRSA/workload identity in production.
   enabled: false
-  schedule: "30 2 * * *"
+  schedule: "*/5 * * * *"
   bucket: ""
   prefix: "constellation/audit"
-  window: 24h
+  # Each run catches up from the last verified ID, including backdated events.
+  batchSize: 1000
+  endpoint: ""
   awsRegion: ""
   sign:
-    # none | static-key | keyless. static-key uses an ed25519 PEM private key
+    # static-key | keyless. Durable progress requires a trusted signature.
+    # static-key uses an ed25519 PEM private key
     # compatible with `constellationctl backup gen-key`; keyless shells out to
     # cosign and requires an ambient OIDC token.
-    mode: none
+    mode: static-key
     keySecretName: ""
     keySecretKey: cosign.key
+    verifySecretKey: cosign.pub
     keyPath: ""
+    verifyKeyPath: ""
+    verifyIdentity: ""
     cosignBin: cosign
   env: []
   # - name: AWS_ENDPOINT_URL_S3

@@ -3028,3 +3028,45 @@ tests previously skipped for lack of `DATABASE_URL` now execute in the standard
 integration gate. JSON/JUnit results and logs are retained as `unit.*`,
 `integration.*` and `check.log` in the evidence directory. GitHub Actions remains
 disabled for the repository; these are local results. No Helm templates changed.
+
+## Audit archive continuation — ten implementation items (2026-10-23)
+
+This batch implements ten concrete audit-archive improvements under DB-07/08/09;
+it does not close ten entire database-lifecycle policy entries. The detailed
+publication, upgrade and replay contract is in [audit-archive.md](audit-archive.md).
+
+| Item | Implementation and local proof |
+| --- | --- |
+| 1. Durable catch-up | Destination-specific PostgreSQL progress selects by ID, not event time. Missed-run, backdated-event and restart acceptance uses fully migrated disposable databases. |
+| 2. Bounded batches | Configurable 1–10,000 row batches, 256 MiB compressed/uncompressed limits and a CLI deadline; invalid batch settings are rejected by CLI/service and Helm. |
+| 3. Concurrent workers | Progress-row locking serializes replica publication. A real-PostgreSQL test appends another audit event during upload and verifies two workers publish disjoint successive batches. |
+| 4. Chain boundaries | Signed manifests include ID bounds, first previous hash, first/last chain hashes, count and predecessor manifest. Sequence rollback gaps remain valid; missing/changed chain rows fail. |
+| 5. Independent replay | Downloaded archives replay with the canonical database writer algorithm, including IP addresses and nested JSON. A CLI acceptance test succeeds with an invalid DATABASE_URL and AWS endpoint, then rejects a corrupted signature. |
+| 6. Signing trust | Durable runs require trusted static keys or explicit keyless identity; wrong-key acceptance fails before publication. Unsigned local previews remain diagnostic only. |
+| 7. Object read-back | Every published artifact is downloaded and checked before progress. A local HTTP S3 fixture exercises the actual AWS SDK, conditional PUTs, SHA-256 headers and gzip-preserving GETs. |
+| 8. Safe retry | Unique attempt keys and conditional creation preserve partial attempts. Injected data/manifest/signature PUT/GET/corruption and deferred-commit failures retain the old checkpoint; retry safely republishes the pending range. |
+| 9. Dry-run isolation | Local runs read progress but never create or advance it; changed bucket, prefix or endpoint starts an independent catch-up. Cancellation also leaves progress unchanged. |
+| 10. Ledger protection | Migration 191 blocks TRUNCATE, alongside existing UPDATE/DELETE guards; the seed command preserves audit evidence. SQL acceptance verifies all forbidden operations leave the chain intact. |
+
+Offline tamper tests re-sign modified manifests and recompute payload checksums
+where appropriate, so changed/missing/reordered/duplicate rows must be rejected
+by actual chain replay rather than only envelope verification. Chart acceptance
+covers four rendered configurations and seven rejected trust/batch settings.
+Existing artifact permission/symlink and signature/checksum tests moved from the
+composition root into `internal/auditarchive` with the implementation.
+
+Evidence is retained in `/root/constellation-audit-next10-20261023/`. Initial full
+runs caught the missing `RequiredSchemaVersion` bump from 190 to 191; this was
+corrected before the final gates. Those initial logs remain `initial-check.log`
+and `initial-integration.log`. No live database, bucket or cluster was changed.
+Keyless provider behavior, actual object-store retention/access/hold settings,
+fresh-host recovery, live throughput and hot/cold query/pruning support remain
+operational or follow-up implementation gates.
+
+Final gates passed: `make check` reports 3,147 tests with 8 opt-in skips;
+`make test-integration` reports 4,983 tests with 14 opt-in skips. Helm 4 lint
+and the full template-smoke suite pass, including archive trust/batch checks.
+The image-contract profile also renders successfully in list-only mode. JSON
+and JUnit results are retained as `unit.*` and `integration.*` beside `check.log`,
+`integration.log`, `helm.log` and `s3-sdk.log`. GitHub Actions remains disabled;
+these are local acceptance results, not hosted CI or live object-store proof.

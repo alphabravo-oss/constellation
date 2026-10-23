@@ -45,10 +45,7 @@ func main() {
 			logger.Warn("truncate", slog.String("table", table), slog.String("err", err.Error()))
 		}
 	}
-	// audit_events has DELETE-blocking triggers but allows TRUNCATE.
-	if _, err := pool.Exec(ctx, "TRUNCATE TABLE audit_events RESTART IDENTITY"); err != nil {
-		logger.Warn("truncate audit_events", slog.String("err", err.Error()))
-	}
+	// Keep the append-only audit ledger across repeated demo seed runs.
 
 	var orgID uuid.UUID
 	if err := pool.QueryRow(ctx, `
