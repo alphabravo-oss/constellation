@@ -201,6 +201,15 @@ type scannerRuntimeConfig struct {
 	RefreshNow       int64 `json:"refresh_now"` // unix-seconds "force refresh" signal
 }
 
+const maxScannerConfigBytes = 64 * 1024
+
+var scannerConfigClient = &http.Client{
+	Timeout: 30 * time.Second,
+	CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
+
 func (w *worker) fetchScannerConfig(ctx context.Context) (scannerRuntimeConfig, bool) {
 	var out scannerRuntimeConfig
 	if w.controlPlane == "" {
@@ -212,7 +221,7 @@ func (w *worker) fetchScannerConfig(ctx context.Context) (scannerRuntimeConfig, 
 	}
 	req.Header.Set("Authorization", "Bearer "+w.token)
 	w.setScannerHeaders(req)
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := scannerConfigClient.Do(req)
 	if err != nil {
 		return out, false
 	}
@@ -220,8 +229,24 @@ func (w *worker) fetchScannerConfig(ctx context.Context) (scannerRuntimeConfig, 
 	if resp.StatusCode != http.StatusOK {
 		return out, false
 	}
-	_ = json.NewDecoder(resp.Body).Decode(&out)
-	return out, true
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxScannerConfigBytes+1))
+	if err != nil || len(body) > maxScannerConfigBytes {
+		return out, false
+	}
+	// Pointers distinguish explicit zero/false from missing or null policy fields.
+	var wire struct {
+		DBRefreshMinutes *int   `json:"db_refresh_minutes"`
+		OfflineDB        *bool  `json:"offline_db"`
+		RefreshNow       *int64 `json:"refresh_now"`
+	}
+	if err := json.Unmarshal(body, &wire); err != nil || wire.DBRefreshMinutes == nil || wire.OfflineDB == nil || wire.RefreshNow == nil {
+		return out, false
+	}
+	minutes := *wire.DBRefreshMinutes
+	if (minutes != 0 && (minutes < 15 || minutes > 43200)) || *wire.RefreshNow < 0 {
+		return out, false
+	}
+	return scannerRuntimeConfig{DBRefreshMinutes: minutes, OfflineDB: *wire.OfflineDB, RefreshNow: *wire.RefreshNow}, true
 }
 
 // refreshVulnDBs pulls the latest Trivy + Grype DBs from their upstream feeds.
@@ -300,33 +325,55 @@ func (w *worker) pruneGrypeStaging() {
 	}
 }
 
-// dbRefreshLoop keeps the Trivy/Grype DBs fresh on the effective interval. The
-// UI-settable system_config value (polled via /api/v1/scanner/config) overrides
-// the env/flag default when set; offline mode from either source suppresses pulls.
-func (w *worker) dbRefreshLoop(ctx context.Context, envInterval time.Duration, envOffline bool) {
-	effective := func() (time.Duration, bool) {
-		iv, off := envInterval, envOffline
-		if cfg, ok := w.fetchScannerConfig(ctx); ok {
-			if cfg.DBRefreshMinutes > 0 {
-				iv = time.Duration(cfg.DBRefreshMinutes) * time.Minute
-			}
-			off = off || cfg.OfflineDB
+// dbRefreshPolicy retains the last valid remote policy through outages. A worker
+// with a control plane waits for its first valid policy before downloading.
+type dbRefreshPolicy struct {
+	envInterval    time.Duration
+	envOffline     bool
+	remoteRequired bool
+	known          bool
+	config         scannerRuntimeConfig
+	lastSignal     int64
+	last           time.Time
+}
+
+func (p *dbRefreshPolicy) due(now time.Time, cfg scannerRuntimeConfig, valid bool) bool {
+	force := false
+	if valid {
+		// Seed the signal on the first successful fetch, including after an outage.
+		// A historical click must not cause a second boot refresh.
+		force = p.known && cfg.RefreshNow > p.lastSignal
+		if !p.known || cfg.RefreshNow > p.lastSignal {
+			p.lastSignal = cfg.RefreshNow
 		}
-		return iv, off
+		p.config, p.known = cfg, true
 	}
-
-	_, off := effective()
-	w.refreshVulnDBs(ctx, off) // initial refresh on boot
-	last := time.Now()
-	// Seed the last-applied force-refresh signal from the current config so a boot
-	// doesn't re-trigger an old "refresh now" click.
-	var lastRefreshNow int64
-	if cfg, ok := w.fetchScannerConfig(ctx); ok {
-		lastRefreshNow = cfg.RefreshNow
+	if p.envOffline || (p.remoteRequired && !p.known) || p.config.OfflineDB {
+		return false
 	}
+	interval := p.envInterval
+	if p.config.DBRefreshMinutes > 0 {
+		interval = time.Duration(p.config.DBRefreshMinutes) * time.Minute
+	}
+	return p.last.IsZero() || force || (interval > 0 && now.Sub(p.last) >= interval)
+}
 
-	// Re-check config every 5 min so a UI change to the interval — or a "Refresh
-	// now" click — takes effect within minutes.
+// dbRefreshLoop polls policy once on boot and every five minutes thereafter.
+// Offline policy suppresses both scheduled and forced refreshes. Force signals
+// observed while offline are consumed, not queued for later execution.
+func (w *worker) dbRefreshLoop(ctx context.Context, envInterval time.Duration, envOffline bool) {
+	policy := dbRefreshPolicy{envInterval: envInterval, envOffline: envOffline, remoteRequired: w.controlPlane != ""}
+	poll := func() {
+		cfg, valid := w.fetchScannerConfig(ctx)
+		if ctx.Err() != nil {
+			return
+		}
+		if policy.due(time.Now(), cfg, valid) {
+			w.refreshVulnDBs(ctx, false)
+			policy.last = time.Now()
+		}
+	}
+	poll()
 	check := time.NewTicker(5 * time.Minute)
 	defer check.Stop()
 	for {
@@ -334,22 +381,7 @@ func (w *worker) dbRefreshLoop(ctx context.Context, envInterval time.Duration, e
 		case <-ctx.Done():
 			return
 		case <-check.C:
-			iv, off := envInterval, envOffline
-			forceNow := false
-			if cfg, ok := w.fetchScannerConfig(ctx); ok {
-				if cfg.DBRefreshMinutes > 0 {
-					iv = time.Duration(cfg.DBRefreshMinutes) * time.Minute
-				}
-				off = off || cfg.OfflineDB
-				if cfg.RefreshNow > lastRefreshNow {
-					forceNow = true
-					lastRefreshNow = cfg.RefreshNow
-				}
-			}
-			if forceNow || (iv > 0 && time.Since(last) >= iv) {
-				w.refreshVulnDBs(ctx, off)
-				last = time.Now()
-			}
+			poll()
 		}
 	}
 }

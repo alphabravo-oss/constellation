@@ -56,6 +56,30 @@ replaced (not merely when its container restarts). See the
 existing persistent installation. Offline deployments must preserve or reload the database
 for every new pod. See [section 5](#5-getting-dbs-into-the-air-gapped-scanner-pods).
 
+### Runtime refresh policy during control-plane outages
+
+The scanner polls `/api/v1/scanner/config` once at boot and every five minutes.
+Each request has a 30-second timeout, accepts at most 64 KiB, and does not follow
+redirects. A response must contain one complete JSON object with non-null
+`db_refresh_minutes`, `offline_db`, and `refresh_now` fields. Unknown fields are
+allowed for future API additions. The interval must be zero (use the local
+interval) or 15–43200 minutes; the refresh signal must be nonnegative.
+
+A scanner configured with a control plane waits for its first valid response
+before downloading databases. If that request fails, scans can still use installed
+databases; the loop retries configuration on its next five-minute poll. A scanner
+without a control plane uses its local settings. After a valid response, failed
+requests preserve the last valid remote interval and offline setting. The local
+offline setting always suppresses downloads, including forced refreshes.
+
+The first valid response seeds the refresh signal and supplies the boot policy in
+one read. Subsequent larger signals request a refresh; duplicates and lower values
+do not replay it. Signals observed while offline are consumed rather than queued.
+Turning online permits the initial refresh if none has run, or the next due
+scheduled refresh. A force request can also refresh when the local interval is
+zero. Policy changes are checked between refresh operations, not during an active
+download; an in-flight refresh is not interrupted by a later offline change.
+
 ### Online refresh validation and recovery
 
 The refresh loop skips disabled engines and remains a no-op offline. A successful
@@ -393,8 +417,8 @@ kubectl -n constellation exec deploy/constellation-scanner -- \
 
 Then check the scanner logs — a healthy offline scanner logs scan activity but
 **no** "vuln DB refreshed" / download lines (that log comes from the refresh
-loop, which is suppressed offline — `refreshVulnDBs` returns early when
-`offline` is true, `cmd/constellation-scanner/dbrefresh.go`):
+loop, which is suppressed by the offline policy in
+`cmd/constellation-scanner/dbrefresh.go`):
 
 ```bash
 kubectl -n constellation logs deploy/constellation-scanner --tail=100
