@@ -1158,3 +1158,14 @@ sessions remain opaque product sessions with no token refresh.
 
 The identity chart is pinned at 0.1.3 (restricted Pod Security defaults); the
 shared relying-party module and qualified runtime images are 0.1.2.
+
+### Scanner-cache monitoring
+
+The existing `metrics.serviceMonitor.enabled` toggle discovers scanner-local
+cache metrics. With the parent PrometheusRule enabled,
+`metrics.prometheusRule.scannerCache.enabled` includes eight scoped capacity,
+configuration and collection/discovery warnings. Review available-byte and
+byte/inode-ratio budgets before activation. See the
+[metric contract, values and response guide](scanner-cache-monitoring.md).
+Default parent monitoring toggles remain disabled; no cache topology or automatic
+eviction policy is selected by these rules.

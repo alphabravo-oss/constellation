@@ -3162,3 +3162,48 @@ final root-confinement/counter hardening and the extended database HTTP assertio
 the final runs above include all changes. GitHub Actions remains disabled. Chart
 and deployment resources were unchanged, so Helm/live deployment checks were
 not part of this batch.
+
+## Scanner-cache monitoring continuation (2026-10-23)
+
+Ten [monitoring implementation items](scanner-cache-monitoring.md) add scanner-local
+byte/inode capacity, explicit path states, serialized TTL snapshots, failed-sample
+invalidation, bounded private labels and pressure/configuration/collection alerts.
+Collection is read-only and does not enumerate or evict cache files. This is a
+separate path from the existing heartbeat's bounded usage walk; the previous
+statement that ordinary heartbeats omitted enumeration has been corrected.
+
+Tests gather a pedantic Prometheus registry against real temporary directories,
+check HTTP exposition, configuration copying and path/label privacy, and exercise
+missing/disabled/unconfigured paths. Failure/recovery tests replace a real directory
+with a file, verify old capacity disappears and the last-success timestamp stays,
+and perform 32 concurrent gathers without bypassing retry backoff. Independent
+cache failures do not remove healthy sibling data. Counter fixtures cover reserved
+blocks, inconsistent/overflowing counters, zero totals and inode exhaustion.
+
+Helm 4 lint and the full template smoke suite pass. The new suite validates
+ServiceMonitor-to-Service-to-Deployment selectors, disabled/default toggles,
+scanner disablement, separate rule namespace and rejected threshold values.
+All eight scanner-cache alerts pass 33 actual Prometheus scenarios using both
+the native binary and preloaded digest-pinned Docker fallback. Existing storage
+rules/dashboard queries and their 23 scenarios also pass unchanged.
+
+A negative control replaced the low-byte rule with an always-false expression;
+its expected-alert fixture failed as intended. Evidence is under
+`/root/constellation-cache-monitoring-next10-20261023/` (`monitoring.log`,
+`helm.log`, `docker-promtool.log`, `negative-alert.log` and rendered fixtures).
+The initial quality run rejected excessive nesting in the new refresh function;
+metric encoding was extracted and the gate restarted. The original lint failure
+is preserved as `check-nesting-failure.log`.
+
+No SQL, migrations, cache topology, live scraping or notification routing changed.
+DB-21/23 live acceptance, refresh/offline/restart qualification and capacity budgets
+remain open. GitHub Actions permissions were checked and remain disabled.
+
+Final `make check` passed with 3,168 reported tests and 8 opt-in skips, including
+lint, vet, formatting, shell checks and frontend type/build/bundle checks. No SQL
+or migration changed, so the PostgreSQL integration suite was not repeated.
+Final Helm lint/template-smoke and all 33 scanner-cache scenarios pass. The two
+additional cases verify isolation across optional cluster labels; restoring the
+restricted label join makes the cross-cluster negative control fail as expected
+(`negative-cluster.log`). Native and Docker promtool both pass the final rules.
+Final logs plus unit JSON/JUnit reports are retained in the evidence directory.

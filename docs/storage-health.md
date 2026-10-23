@@ -169,7 +169,8 @@ preloads that image when CI is enabled. GitHub Actions remains disabled here.
 
 This closes the ten scoped implementation items, not all of DB-23: live scrape
 and notification delivery, Grafana rendering, capacity qualification, raw
-retention/partition-drop lag, retained WAL occupancy and scanner-cache filesystem
-headroom still require follow-up. Existing volume, scanner-engine and feed alerts
+retention/partition-drop lag, retained WAL occupancy and live scanner-cache filesystem
+headroom qualification still require follow-up. Scanner-local metrics and tested
+alerts now ship under the [cache monitoring contract](scanner-cache-monitoring.md). Existing volume, scanner-engine and feed alerts
 are retained rather than duplicated. No live cluster, database retention or
 alerting configuration was changed for this work.
