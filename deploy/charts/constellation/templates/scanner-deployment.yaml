@@ -130,6 +130,10 @@ spec:
               value: {{ .Values.scanner.targetCapacity | quote }}
             - name: TMPDIR
               value: /tmp
+            {{- if .Values.scanner.registryConfigSecret }}
+            - name: DOCKER_CONFIG
+              value: /var/run/constellation/registry-config
+            {{- end }}
             # Vuln-DB caches (grype/trivy/syft) live on a PERSISTENT volume so they
             # survive pod restarts + redeploys — a code deploy reuses the DB instead of
             # re-downloading ~3.3GB and running "DB invalid" until it lands. The refresh
@@ -153,6 +157,11 @@ spec:
             - name: scanner-token
               mountPath: /var/run/constellation/scanner-token
               readOnly: true
+            {{- if .Values.scanner.registryConfigSecret }}
+            - name: registry-config
+              mountPath: /var/run/constellation/registry-config
+              readOnly: true
+            {{- end }}
             {{- if .Values.scanner.signatures.publicKeySecret }}
             - name: signature-trust
               mountPath: /var/run/constellation/signature-trust
@@ -181,6 +190,14 @@ spec:
         - name: scanner-token
           secret:
             secretName: {{ include "constellation.scannerTokenSecret" . }}
+        {{- if .Values.scanner.registryConfigSecret }}
+        - name: registry-config
+          secret:
+            secretName: {{ .Values.scanner.registryConfigSecret | quote }}
+            items:
+              - key: .dockerconfigjson
+                path: config.json
+        {{- end }}
         {{- if .Values.scanner.signatures.publicKeySecret }}
         - name: signature-trust
           secret:

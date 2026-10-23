@@ -18,19 +18,17 @@ import (
 func repositoryCmd() *cobra.Command {
 	var (
 		serverFlag string
-		email      string
 	)
 	c := &cobra.Command{
 		Use:   "repository",
 		Short: "Report repository package evidence",
 	}
 	c.PersistentFlags().StringVar(&serverFlag, "server", "", "Override Constellation server URL")
-	c.PersistentFlags().StringVar(&email, "email", "", "Email to log into if not already authenticated")
-	c.AddCommand(repositoryScanCmd(&serverFlag, &email))
+	c.AddCommand(repositoryScanCmd(&serverFlag))
 	return c
 }
 
-func repositoryScanCmd(serverFlag *string, email *string) *cobra.Command {
+func repositoryScanCmd(serverFlag *string) *cobra.Command {
 	var (
 		scanPath      string
 		repositoryRef string
@@ -50,7 +48,7 @@ func repositoryScanCmd(serverFlag *string, email *string) *cobra.Command {
 		Use:   "scan",
 		Short: "Catalog a repository checkout and queue a repository scan",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cli, err := resolveClient(cmd.Context(), *serverFlag, *email)
+			cli, err := resolveClient(cmd.Context(), *serverFlag)
 			if err != nil {
 				return err
 			}

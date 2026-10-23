@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/page"
+
 	"github.com/alphabravocompany/constellation/internal/api/apiutil"
 
 	"github.com/go-chi/chi/v5"
@@ -60,6 +62,11 @@ type policyDTO struct {
 }
 
 func (p *Policies) List(w http.ResponseWriter, r *http.Request) {
+	pagination, err := page.Parse(r.URL.Query())
+	if err != nil {
+		apiutil.WriteStatus(r.Context(), w, 400, err.Error())
+		return
+	}
 	subj, _ := authctx.SubjectFrom(r.Context())
 	category := r.URL.Query().Get("category")
 	clusterArg, err := sqlx.ParseClusterIDParam(r)
@@ -73,8 +80,8 @@ func (p *Policies) List(w http.ResponseWriter, r *http.Request) {
           WHERE org_id = $1
             AND ($2::text = '' OR category = $2)
             AND ($3::uuid IS NULL OR cluster_id IS NULL OR cluster_id = $3)
-          ORDER BY category, name`,
-		subj.OrgID, category, clusterArg)
+          ORDER BY category, name,id LIMIT $4 OFFSET $5`,
+		subj.OrgID, category, clusterArg, pagination.Limit+1, pagination.Offset)
 	if err != nil {
 		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
@@ -90,6 +97,15 @@ func (p *Policies) List(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, d)
 	}
+	if err := rows.Err(); err != nil {
+		apiutil.WriteStatus(r.Context(), w, 500, err.Error())
+		return
+	}
+	rows.Close()
+	hasMore := len(out) > pagination.Limit
+	if hasMore {
+		out = out[:pagination.Limit]
+	}
 	// Surface per-rule admission hit counts for dead-rule detection (best-effort:
 	// the count is auxiliary, so a failure here must not fail the policy list).
 	if hits, err := admissionRuleHitCounts(r.Context(), p.db.Pool(), subj.OrgID); err == nil {
@@ -97,7 +113,7 @@ func (p *Policies) List(w http.ResponseWriter, r *http.Request) {
 			out[i].HitCount = hits[out[i].ID.String()]
 		}
 	}
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"policies": out})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"policies": out, "has_more": hasMore, "limit": pagination.Limit, "offset": pagination.Offset})
 }
 
 type createPolicyBody struct {

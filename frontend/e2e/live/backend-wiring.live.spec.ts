@@ -15,7 +15,8 @@ test("theme choice is stored server-side (GET/PUT /me/preferences)", async ({ pa
 });
 
 test("cluster tiles show last-known counts with an as-of hint when inventory is stale", async ({ page }) => {
-  const body = await (await page.request.get("/api/v1/clusters", { headers: H })).json() as { clusters: Array<{ id: string; exposure?: { inventory_status: string; current_critical: number; last_known?: { critical: number; high: number } } }> };
+  // The header System workloads switch is off by default, so the tiles use the application scope.
+  const body = await (await page.request.get("/api/v1/clusters?workload_scope=application", { headers: H })).json() as { clusters: Array<{ id: string; exposure?: { inventory_status: string; current_critical: number; last_known?: { critical: number; high: number } } }> };
   await page.goto("/clusters");
   await settled(page);
   const cluster = body.clusters[0];
@@ -50,5 +51,6 @@ test("API errors show the request id as the reference", async ({ page }) => {
   await page.goto(`/clusters/${id}/findings/not-a-finding-id`);
   const reference = page.getByText(/^Reference/).first();
   await expect(reference).toBeVisible({ timeout: 30_000 });
-  await expect(reference).toContainText(/\S+\/\S+-\d+/);
+  // chi mints host/random-000001 in the dev loop; behind an ingress the proxy's X-Request-ID (e.g. 32 hex) is kept.
+  await expect(reference).toContainText(/Reference\s*\S{8,}/);
 });

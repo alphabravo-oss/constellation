@@ -5,7 +5,44 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Local accounts
+- First-class local accounts by default, independent OIDC, or both; editable sign-in
+  policy, Users administration and operator CLI. Generated retained bootstrap Secret.
+- Reuse Argon2id, one-use TOTP, age encryption and existing roles; embedded offline
+  NCSC breached-password rejection, shared IP limits and exponential account backoff.
+- Migration 188 preserves the current recovery credentials and enforces one protected
+  recovery administrator. Normal local access can be disabled without losing recovery.
+- Bounded session snapshots remove request-time SQL, check expiry per request and
+  fail closed after one second without database freshness (250ms revocation polling).
+  Migration 189 adds notifications and a replica acknowledgement barrier for new cookies.
+- Align API Go concurrency with its CPU quota to bound password-check latency
+  without lowering Argon2id cost. Explicit api.env.GOMAXPROCS remains supported.
+
+### Identity (breaking)
+- One generic OIDC relying party with a configurable roles claim, exact role mapping,
+  bounded verification memoization and last-good JWKS caching. Tokens last at most ten minutes.
+- Secret-enabled emergency administrator with Argon2id, mandatory one-use TOTP,
+  a cross-replica rate limit, a short session, critical audit events and an operator alert.
+- Remove SAML, LDAP, provider-type CRUD, legacy local refresh tokens, the Astronomer adapter and the unused password-bootstrap image.
+  Take a CNPG backup before forward-only migration 187; roll API and UI together.
+- Replace old authentication chart settings with `auth.local.*`, `auth.oidc.*` and `auth.breakGlass.*`.
+  The shared-kit settings page displays configuration without exposing secrets.
+- Preserve lazy route dependencies and enforce initial JavaScript ≤250 KB gzip in `make check`.
+
+### Fixed
+- Scanner Syft failures retain stderr diagnostics. Discovered private images can
+  use an explicitly configured `scanner.registryConfigSecret`; per-job connector
+  credentials keep precedence. Default scanner memory is 2 GiB requested / 6 GiB
+  limited for the concurrent image scan tools.
+- PostgreSQL release tags and chart defaults use 16.15. Server and client packages
+  are pinned and held at `16.15-1.pgdg12+2` during OS security upgrades.
+
 ## 0.3.0 - 2026-10-20
+
+### Shared identity adoption
+- Optional bundled single sign-on registers Constellation with teal branding and exact security-admin/analyst role mappings; local accounts remain enabled by default.
+- Replaced copied token verification and JWKS with the shared identity v0.1.2 relying-party library while retaining opaque sessions, PKCE, nonce, external OIDC and independent recovery.
+- Sign-in methods can select bundled SSO, an external provider, or local accounts, including both normal methods side by side.
 
 Re-alignment with the AlphaBravo Technology Selection Guide (Phase 0 mechanical clean-up,
 Phase 1 backend foundations) and the C1 "Triage Desk" UI on the shared AlphaBravo UI kit.
@@ -68,6 +105,35 @@ Phase 1 backend foundations) and the C1 "Triage Desk" UI on the shared AlphaBrav
   health), two-layer Settings; NeuVector migration tooling moved under Settings.
 - Skeleton loading, kit error states with the request id, in-shell 404; axe
   WCAG 2.1 AA clean on the audited pages in both themes.
+
+### Security
+- **eMudhra intermediate-CA compromise (2026-10-20):** go1.27.2 accepts the compromised
+  chain, go1.27.3 rejects it regardless of the OS trust store. Every Go binary in every
+  release image is built with go >= 1.27.3 and the release enforces it
+  (`scripts/check-image-go.sh` in release.yml, `verify-release.sh` and the fallback
+  publisher). Upstream release binaries built with older Go are rebuilt from verified tag
+  commits on the go.mod toolchain (`GOTOOLCHAIN=local`): trivy 0.76.0 (was go1.27.2), oras
+  1.3.5 (go1.26.9), rclone 1.75.2 (go1.26.9); syft/grype/cosign (scanner-tools) and
+  age/kubectl/crictl/kube-bench (go-tools) already were. A probe built with the release
+  toolchain inside the API image rejects dv-g3b-emudhra and dv-g3b-aaa-emudhra
+  (`x509: no valid chains built`); the same probe on go1.27.2 accepts both.
+- CloudNativePG operator 1.30.1 and Barman Cloud plugin/sidecar 0.15.1 (installed outside the
+  chart, previously go1.27.2 builds) are rebuilt from verified upstream tag commits on go1.27.3
+  with reviewed golang.org/x bumps by `deploy/cnpg/build-images.sh`; pinned in
+  `deploy/cnpg/images.env`, roll procedure in docs/cnpg-recovery.md. The superseded
+  `Dockerfile.barman-sidecar` Expat wrapper is removed (the rebuilt sidecar ships expat 2.9.0).
+- Base image digests refreshed on 2026-10-20 (distroless static-debian13 and wolfi-base
+  moved; golang 1.27.3-bookworm, debian bookworm/trixie-slim, alpine 3.24, nginx-unprivileged,
+  CNPG postgresql 16.14 and kube-bench were already current).
+
+### Fixed (release)
+- Release image gate (no fixable critical/high): third-party Go CLIs bundled in role
+  images are rebuilt from source on Go 1.27.3 with current golang.org/x modules
+  (`deploy/docker/go-tools`: age, kubectl 1.37.1, crictl 1.36.0, kube-bench 0.10.7);
+  audit-archiver takes cosign from the patched `scanner-tools` build; toolbox ships
+  rclone 1.75.2; Debian runtime stages run `apt-get upgrade`.
+- compliance-scheduler NetworkPolicy (it was unreachable under default-deny), hook-scoped
+  egress for the age-key Job, `backup.offhost.sync.source` for adopted object stores.
 
 ### Fixed (Phase 1)
 - Admission egress NetworkPolicy lacked kube-API egress (RBAC snapshot / namespace

@@ -1,3 +1,4 @@
+import { useAuth } from "@/contexts/AuthContext";
 import { Outlet, useLocation } from "@tanstack/react-router";
 import {
   ArrowLeftRight,
@@ -34,7 +35,8 @@ export const SETTINGS_SECTIONS: Array<{ label: string; items: SettingsLink[] }> 
     items: [
       { to: "/settings/access", label: "Access control", icon: UsersRound },
       { to: "/settings/api-tokens", label: "API tokens", icon: KeyRound },
-      { to: "/settings/security-policy", label: "Security policy", icon: Lock },
+      { to: "/settings/users", label: "Users", icon: UsersRound },
+      { to: "/settings/identity", label: "Sign-in methods", icon: Lock },
       { to: "/federation", label: "Federation", icon: Earth },
     ],
   },
@@ -78,6 +80,7 @@ export function settingsSectionFor(pathname: string): SettingsLink | undefined {
 
 export function SettingsNav({ pathname }: { pathname: string }) {
   const { Link } = useProduct();
+  const { me } = useAuth();
   const active = settingsSectionFor(pathname);
   return (
     <nav aria-label="Settings" className="w-full shrink-0 space-y-4 lg:sticky lg:top-0 lg:w-56" data-testid="settings-nav">
@@ -85,7 +88,7 @@ export function SettingsNav({ pathname }: { pathname: string }) {
         <div key={section.label}>
           <p className="px-3 pb-1 text-meta font-semibold text-muted-foreground">{section.label}</p>
           <div className="space-y-px">
-            {section.items.map((item) => {
+            {section.items.filter(item=>!["/settings/users","/settings/identity"].includes(item.to)||me?.roles.includes("GlobalAdmin")).map((item) => {
               const Icon = item.icon;
               const current = active?.to === item.to;
               const className = cn(
@@ -114,6 +117,8 @@ export function SettingsNav({ pathname }: { pathname: string }) {
 
 export function SettingsShell() {
   const { pathname } = useLocation();
+  const { me } = useAuth();
+  if (!me?.roles.some(role=>["GlobalAdmin","SecurityAdmin","ClusterAdmin"].includes(role))) return <p role="alert">Administrator access is required.</p>;
   return (
     <div className="flex flex-col gap-8 pb-16 lg:flex-row lg:items-start">
       <SettingsNav pathname={pathname} />

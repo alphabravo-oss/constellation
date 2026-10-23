@@ -11,7 +11,7 @@
 # Pinned to the 1.27.3-bookworm multi-arch index digest of the Go builder (matches go.mod).
 ARG GO_VERSION
 ARG GO_IMAGE_DIGEST=sha256:5c3e9b43cfd3bb95c7937462e29d87ada57b481a96fa23ad0eb61778d7a00110
-ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian13:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3
+ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian13:nonroot@sha256:516757106de35205efb70b91ba03f6f1298424a0678c603255cf2852a7000087
 
 FROM golang:${GO_VERSION}-bookworm@${GO_IMAGE_DIGEST} AS build
 WORKDIR /src

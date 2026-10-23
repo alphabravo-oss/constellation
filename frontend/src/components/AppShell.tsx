@@ -178,13 +178,15 @@ function ConstellationSidebar({
   onToggleCollapsed: () => void;
   onCloseMobile: () => void;
 }) {
+  const { me } = useAuth();
+  const orgNav = ORG_NAV.filter(item => item.path !== "/settings" || me?.roles.some(role=>["GlobalAdmin","SecurityAdmin","ClusterAdmin"].includes(role)));
   const clusterId = clusterIdFromPath(pathname);
   const orgActive = activeOrgItem(pathname);
   const clusterActive = clusterId ? activeClusterItem(pathname, clusterId) : undefined;
 
   const rail = (
     <Rail className="w-(--rail-w) shrink-0">
-      {ORG_NAV.map((item) => (
+      {orgNav.map((item) => (
         <RailItem
           key={item.path}
           to={item.path}
@@ -273,12 +275,14 @@ function ClusterPanel({ clusterId, activePath }: { clusterId: string; activePath
 }
 
 function OrgPanel({ pathname, activePath }: { pathname: string; activePath?: string }) {
+ const { me } = useAuth();
+ const orgNav = ORG_NAV.filter(item => item.path !== "/settings" || me?.roles.some(role=>["GlobalAdmin","SecurityAdmin","ClusterAdmin"].includes(role)));
   const list = useQuery({ queryKey: ["clusters"], queryFn: () => clustersApi.list(), staleTime: 30_000 });
   const clusters = useMemo(() => sortClustersByActivity(list.data?.clusters ?? []).slice(0, 12), [list.data]);
   return (
     <div data-testid="org-panel">
       <SidebarGroup label="Organization">
-        {ORG_NAV.map((item) => (
+        {orgNav.map((item) => (
           <SidebarItem
             key={item.path}
             to={item.path}
@@ -474,10 +478,10 @@ function AccountMenu({ onOpenHotkeys }: { onOpenHotkeys: () => void }) {
           </span>
         </MenuLabel>
         <MenuSeparator />
-        <MenuItem onSelect={() => void navigate({ href: "/settings" })}>
+        {me?.roles.some(role=>["GlobalAdmin","SecurityAdmin","ClusterAdmin"].includes(role)) && <MenuItem onSelect={() => void navigate({ href: "/settings" })}>
           <Settings className="h-4 w-4" />
           Settings
-        </MenuItem>
+        </MenuItem>}
         <MenuItem onSelect={onOpenHotkeys}>
           <Keyboard className="h-4 w-4" />
           <span className="flex-1">Keyboard shortcuts</span>

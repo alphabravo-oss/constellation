@@ -68,10 +68,10 @@ wait_for_pg() {
 
 migrate_db() { go run ./cmd/constellation-api --migrate-only; }
 
-seed_admin() {
-  # Known credentials for the dev loop and the Playwright live spec (DEV_ADMIN_* in .env.dev).
-  go run ./cmd/constellation-seed -password "$DEV_ADMIN_PASSWORD" >> "$LOG_DIR/seed.log" 2>&1 \
-    && echo "seeded $DEV_ADMIN_EMAIL (see $LOG_DIR/seed.log)"
+seed_data() {
+  # Seed data only. Human sign-in uses configured OIDC or explicit TOTP break-glass.
+  go run ./cmd/constellation-seed >> "$LOG_DIR/seed.log" 2>&1 \
+    && echo "seeded demo data (see $LOG_DIR/seed.log)"
 }
 
 ensure_kubeconfig_readable() {
@@ -90,7 +90,7 @@ cmd_up() {
   wait_for_pg
   migrate_db up
   # DEV_SEED=0 when DATABASE_URL points at a restored dump: the seed TRUNCATEs demo tables.
-  if [ "${DEV_SEED:-1}" = 1 ]; then seed_admin || echo "seed failed (non-fatal); see $LOG_DIR/seed.log"; fi
+  if [ "${DEV_SEED:-1}" = 1 ]; then seed_data || echo "seed failed (non-fatal); see $LOG_DIR/seed.log"; fi
   ensure_kubeconfig_readable
   start_bg api air -c .air.api.toml
   start_bg operator air -c .air.operator.toml
@@ -108,7 +108,7 @@ Constellation dev stack is up:
   scanner    http://localhost:${SCANNER_LISTEN_ADDR#:}/healthz
   postgres   $DATABASE_URL
   grafana    http://localhost:3000   prometheus http://localhost:9090   tempo :3200   loki :3100
-  login      $DEV_ADMIN_EMAIL / $DEV_ADMIN_PASSWORD
+  login      configure OIDC or explicit TOTP break-glass
 Logs: $0 logs [api|operator|scanner|web]
 MSG
 }
@@ -162,6 +162,6 @@ case "${1:-}" in
   migrate) load_env; migrate_db up ;;
   migrate-down) echo "migrations are forward-only (internal/server/database/migrations/README.md); drop and recreate the dev database instead:" >&2
                 echo "  $0 down && docker volume rm constellation-dev_pgdata && $0 up" >&2; exit 1 ;;
-  seed) load_env; mkdir -p "$LOG_DIR"; seed_admin ;;
+  seed) load_env; mkdir -p "$LOG_DIR"; seed_data ;;
   *) usage ;;
 esac

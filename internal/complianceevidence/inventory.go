@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/alphabravocompany/constellation/pkg/compliance"
 )
 
@@ -123,47 +121,25 @@ func (c Collector) readInventory(ctx context.Context, q Query) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	tx, err := c.Pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
-	if err != nil {
-		return Result{}, err
-	}
-	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
 	args := []any{q.OrgID, uuidArg(q.ClusterID), q.Namespace, mappings, hosts, q.Targets, q.Scope, q.Framework, q.ControlID, q.Status, q.Search, q.Target}
-	var encoded []byte
-	summarySQL := evidenceInventorySQL + ` SELECT jsonb_build_object(` + evidenceSummaryJSON + `) || jsonb_build_object('by_scope',COALESCE((SELECT jsonb_object_agg(scope,counts) FROM (SELECT scope,jsonb_build_object(` + evidenceSummaryJSON + `) AS counts FROM matching GROUP BY scope) grouped),'{}'::jsonb)) FROM matching`
-	if err := tx.QueryRow(ctx, summarySQL, args...).Scan(&encoded); err != nil {
-		return Result{}, fmt.Errorf("count compliance evidence: %w", err)
+	var encoded, items []byte
+	summarySQL := `SELECT jsonb_build_object(` + evidenceSummaryJSON + `) || jsonb_build_object('by_scope',COALESCE((SELECT jsonb_object_agg(scope,counts) FROM (SELECT scope,jsonb_build_object(` + evidenceSummaryJSON + `) AS counts FROM matching GROUP BY scope) grouped),'{}'::jsonb)) AS data FROM matching`
+	// Reuse one normalized evidence snapshot for the summary and selected page.
+	// Only the bounded page is encoded as response JSON.
+	query := evidenceInventorySQL + `, summary AS (` + summarySQL + `), page AS (
+ SELECT ` + evidenceItemJSON + ` AS item,row_number() OVER(ORDER BY ` + order + `) AS ordinal FROM matching ORDER BY ` + order + ` LIMIT $13 OFFSET $14
+ ) SELECT summary.data,COALESCE((SELECT jsonb_agg(item ORDER BY ordinal) FROM page),'[]'::jsonb) FROM summary`
+	if err := c.Pool.QueryRow(ctx, query, append(args, q.Limit, q.Offset)...).Scan(&encoded, &items); err != nil {
+		return Result{}, fmt.Errorf("read compliance evidence: %w", err)
 	}
 	result := Result{Items: []Item{}, Limit: q.Limit, Offset: q.Offset, Sort: q.Sort, Order: q.Order, ClusterID: q.ClusterID, Scope: q.Scope, Framework: q.Framework, Namespace: q.Namespace, ControlID: q.ControlID, Status: q.Status, Search: q.Search, Target: q.Target}
 	if err := json.Unmarshal(encoded, &result.Summary); err != nil {
 		return Result{}, err
 	}
+	if err := json.Unmarshal(items, &result.Items); err != nil {
+		return Result{}, err
+	}
 	result.Total = result.Summary.Total
-	rows, err := tx.Query(ctx, evidenceInventorySQL+` SELECT `+evidenceItemJSON+` FROM matching ORDER BY `+order+` LIMIT $13 OFFSET $14`, append(args, q.Limit, q.Offset)...)
-	if err != nil {
-		return Result{}, fmt.Errorf("read compliance evidence: %w", err)
-	}
-	for rows.Next() {
-		var encoded []byte
-		if err := rows.Scan(&encoded); err != nil {
-			rows.Close()
-			return Result{}, err
-		}
-		var item Item
-		if err := json.Unmarshal(encoded, &item); err != nil {
-			rows.Close()
-			return Result{}, err
-		}
-		result.Items = append(result.Items, item)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return Result{}, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return Result{}, err
-	}
 	result.HasMore = result.Total > q.Offset+len(result.Items)
 	return result, nil
 }

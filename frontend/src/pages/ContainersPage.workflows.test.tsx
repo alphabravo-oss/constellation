@@ -280,9 +280,9 @@ it("shows custom platform rows when selected and persists visibility in the URL"
     ),
   );
   expect(history.location.search).toContain("hide_platform=false");
-  expect(
+  await settled(() => expect(
     host.querySelector('[data-testid="containers-table"]')?.textContent,
-  ).toContain("Platform");
+  ).toContain("Platform"));
 });
 it("blocks stale export while search debounces or a refresh fails", async () => {
   await render("/clusters/cluster/containers");
