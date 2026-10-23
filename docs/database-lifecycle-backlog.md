@@ -38,7 +38,7 @@ production caller is superseded.
 | DB-05 | Verify current scheduled recovery points with a fresh isolated restore, record RPO/RTO, and qualify failure notification; off-host and real node-failure gates remain deferred unless explicitly resumed. |
 | DB-06 | Decision complete: preserve all existing permanent audit receipts and consumers; no suppression or stream migration. See [retention decisions](storage-retention-policy.md). Archive capacity remains DB-07–09/23. |
 | DB-07–09 | Qualify signed archive catch-up/read-back and independent verification; resolve the recorded historical chain discontinuity without rewriting hashes; design trusted query anchors before any hot-chain deletion. |
-| DB-10 | Add Kubernetes-audit freshness/gap observability and export/hold-aware retention. |
+| DB-10 | Explicit per-source Kubernetes-audit freshness/gap metrics and alerts are implemented and locally tested; no global latest-event shortcut. Export/hold-aware retention remains open. |
 | DB-11 | Qualify existing PCAP maintenance; add separate threat/payload/forensics retention with preserved case evidence. |
 | DB-12 | [Hourly retention](flow-rollup-retention.md) is implemented with a separate policy, raw-boundary gate, monotonic unavailable-history boundary, late-ingest exclusion and HTTP 410 for expired map/CSV ranges. Existing settings remain holds; live qualification remains open. |
 | DB-13 | Preserve open/triaged findings; implement eligible resolved/orphaned archival and bounded storage. |

@@ -94,7 +94,12 @@ func main() {
 		Prefix:          os.Getenv("CONSTELLATION_STORAGE_ARCHIVE_PREFIX"),
 	}).StreamID()
 
-	tel.Registry.MustRegister(storagehealth.New(database.Pool(), storagehealth.Config{ArchiveStream: archiveStream}, tel.Logger))
+	auditSources, err := storagehealth.ParseAuditSources(os.Getenv("CONSTELLATION_STORAGE_K8S_AUDIT_SOURCES"), os.Getenv("CONSTELLATION_STORAGE_K8S_AUDIT_MAX_GAP"))
+	if err != nil {
+		tel.Logger.Error("Kubernetes audit source observation configuration", slog.String("err", err.Error()))
+		os.Exit(1)
+	}
+	tel.Registry.MustRegister(storagehealth.New(database.Pool(), storagehealth.Config{ArchiveStream: archiveStream, AuditSources: auditSources}, tel.Logger))
 
 	cfg := server.Config{
 		ListenAddr:           *listenAddr,

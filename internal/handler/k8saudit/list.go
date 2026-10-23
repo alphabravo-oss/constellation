@@ -16,23 +16,23 @@ import (
 // AuditRow is the read-side shape returned by List. The full audit Event lives
 // in the raw column; the list view returns the extracted, indexable columns.
 type AuditRow struct {
-	ID          string    `json:"id"`
-	OrgID       string    `json:"org_id"`
-	ClusterID   string    `json:"cluster_id"`
-	Verb        string    `json:"verb"`
-	Resource    string    `json:"resource,omitempty"`
-	Subresource string    `json:"subresource,omitempty"`
-	APIGroup    string    `json:"api_group,omitempty"`
-	Namespace   string    `json:"namespace,omitempty"`
-	Name        string    `json:"name,omitempty"`
-	User        string    `json:"user,omitempty"`
-	SourceIP    string    `json:"source_ip,omitempty"`
-	Decision    string    `json:"decision,omitempty"`
-	Signal      string    `json:"signal,omitempty"`
-	Severity    string    `json:"severity,omitempty"`
-	AuditID     string    `json:"audit_id,omitempty"`
-	ReportedAt  time.Time `json:"reported_at"`
-	At          time.Time `json:"at"`
+	ID          string     `json:"id"`
+	OrgID       string     `json:"org_id"`
+	ClusterID   string     `json:"cluster_id"`
+	Verb        string     `json:"verb"`
+	Resource    string     `json:"resource,omitempty"`
+	Subresource string     `json:"subresource,omitempty"`
+	APIGroup    string     `json:"api_group,omitempty"`
+	Namespace   string     `json:"namespace,omitempty"`
+	Name        string     `json:"name,omitempty"`
+	User        string     `json:"user,omitempty"`
+	SourceIP    string     `json:"source_ip,omitempty"`
+	Decision    string     `json:"decision,omitempty"`
+	Signal      string     `json:"signal,omitempty"`
+	Severity    string     `json:"severity,omitempty"`
+	AuditID     string     `json:"audit_id,omitempty"`
+	ReportedAt  *time.Time `json:"reported_at"`
+	At          time.Time  `json:"at"`
 }
 
 // VerbList is the rbac verb gate for List.
@@ -71,7 +71,7 @@ SELECT id::text, org_id::text, cluster_id::text,
        COALESCE(verb,''), COALESCE(resource,''), COALESCE(subresource,''), COALESCE(api_group,''),
        COALESCE(namespace,''), COALESCE(name,''), COALESCE("user",''), COALESCE(source_ip,''),
        COALESCE(decision,''), COALESCE(signal,''), COALESCE(severity,''), COALESCE(audit_id,''),
-       COALESCE(reported_at, at), at
+       reported_at, at
   FROM k8s_audit_events
  WHERE org_id = $1
    AND at >= NOW() - ($2::text || ' hours')::interval

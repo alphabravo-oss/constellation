@@ -257,3 +257,56 @@ expiry progress and overdue attached partitions. Matching preserves all target
 labels, tenant holds suppress expiry alarms, and failed scrapes/snapshots suppress
 data alarms. Four dashboard panels expose the new signals. Thresholds are
 warning budgets, configurable through `metrics.prometheusRule.storage`.
+
+## Explicit Kubernetes audit source coverage
+
+Configure expected webhook sources through the existing `api.env` map. Each
+pair is an organization UUID and cluster UUID, separated by `/`; multiple pairs
+are comma-separated. Empty configuration disables coverage inference. Registering
+a cluster or having old audit rows does not mean a webhook is configured.
+
+```yaml
+api:
+  env:
+    CONSTELLATION_STORAGE_K8S_AUDIT_SOURCES: "11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222"
+    CONSTELLATION_STORAGE_K8S_AUDIT_MAX_GAP: "15m"
+```
+
+The default maximum gap is 15 minutes; valid explicit gaps range from one second
+to 30 days. Invalid UUID pairs, invalid durations and more than 1,000 entries fail
+startup. Duplicate pairs are observed once. Configure every API replica alike.
+The fixed-cardinality `constellation_storage_k8s_audit_*` gauges report expected,
+missing (never seen), stale (receipt older than the maximum gap), delayed (latest
+receipt minus reported event time exceeds the gap), unknown reported timestamp,
+and future reported timestamp (over five minutes after receipt) source counts.
+`oldest_receipt_timestamp_seconds` is the minimum latest receipt among sources
+with data, excluding never-seen sources. Always inspect missing counts with it.
+Tenant/cluster UUIDs, event JSON and usernames do not become metric labels.
+New ingests preserve an absent source timestamp as NULL, and the list API returns
+`reported_at: null` rather than substituting receipt time. Older binaries filled
+missing timestamps with receipt time; those historical values remain unchanged
+and cannot establish that the source supplied a timestamp.
+
+Each expected pair gets an indexed latest-row lookup under the existing snapshot
+query timeout. Sources are evaluated independently before aggregation, so a busy
+cluster cannot hide a stopped source. No high-volume JSON scan, retention change,
+implicit source enrollment or evidence deletion occurs. Failed queries invalidate
+the snapshot and use the existing collection-failure alert, not healthy zeros.
+Three alert rules cover delivery gaps, delayed events and unknown/future source
+timestamps, gated by successful collection and the same scrape target. They hold
+for five minutes. Source expectation zero means **unconfigured**, not verified
+coverage; silence on an unconfigured installation is not a passing audit check.
+
+An event silence interval is not proof of a lost event: quiet clusters may have no
+eligible activity. Set expectations and the gap against audit policy and known
+periodic audited traffic. These observations cannot prove completeness, detect
+all intermediate gaps or distinguish filtering from lost delivery. They expose
+current source gaps without asserting a continuity guarantee Kubernetes event IDs
+do not provide. Export/hold-aware retention remains separate; keep all existing
+Kubernetes audit JSON until that recovery contract is qualified.
+
+Local migrated-PostgreSQL tests cover tenant/cluster isolation, simultaneous
+healthy/stale/missing sources, delayed/unknown/future event time, recovery and
+read-only evidence preservation. Promtool fixtures cover all three new alerts,
+configuration holds, target isolation, hold periods and recovery. This does not
+assert live scrape or notification delivery; those remain deferred by the owner.

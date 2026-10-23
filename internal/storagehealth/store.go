@@ -24,6 +24,7 @@ type retentionSignal struct {
 	Enabled, Cutoff, ExpiredPartitions, OldestExpiredUpper float64
 }
 type snapshot struct {
+	AuditSources                                                                       auditSourceHealth
 	Retention                                                                          []retentionSignal
 	WALRetained, WALKnown, RawPrunedBefore                                             float64
 	ArchiveHead, ArchiveLast                                                           int64
@@ -55,7 +56,7 @@ SELECT t.name,
  FROM tree t JOIN pg_class c ON c.oid=t.oid
  LEFT JOIN pg_stat_all_tables s ON s.relid=c.oid GROUP BY t.name ORDER BY t.name`
 
-func readSnapshot(ctx context.Context, pool *pgxpool.Pool, stream string) (snapshot, error) {
+func readSnapshot(ctx context.Context, pool *pgxpool.Pool, cfg Config) (snapshot, error) {
 	var out snapshot
 	tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
@@ -84,12 +85,16 @@ func readSnapshot(ctx context.Context, pool *pgxpool.Pool, stream string) (snaps
 	if err = readRetentionProgress(ctx, tx, &out); err != nil {
 		return out, err
 	}
-	if stream != "" {
-		if err = readArchive(ctx, tx, stream, &out); err != nil {
+	if cfg.ArchiveStream != "" {
+		if err = readArchive(ctx, tx, cfg.ArchiveStream, &out); err != nil {
 			return out, err
 		}
 	}
 	if err = readBackups(ctx, tx, &out); err != nil {
+		return out, err
+	}
+	out.AuditSources, err = readAuditSources(ctx, tx, cfg.AuditSources)
+	if err != nil {
 		return out, err
 	}
 	return out, tx.Commit(ctx)

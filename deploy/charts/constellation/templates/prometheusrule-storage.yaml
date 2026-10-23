@@ -121,6 +121,38 @@ spec:
           annotations:
             summary: "Eligible time partitions remain attached"
             description: "Actual range bounds are past the safe retention cutoff. Check partition maintenance and locks; do not bypass fold or tenant-hold protections."
+        - alert: ConstellationKubernetesAuditSourceGap
+          expr: |
+            (constellation_storage_k8s_audit_missing_sources{ {{ $scope }} }
+             + constellation_storage_k8s_audit_stale_sources{ {{ $scope }} } > 0)
+             and (constellation_storage_k8s_audit_expected_sources{ {{ $scope }} } > 0)
+             and ({{ $healthy }}) and ({{ $up }})
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: "An expected Kubernetes audit source is missing or stale"
+            description: "Check each configured org/cluster webhook source and its heartbeat traffic. Another active cluster cannot clear this gap. Silence is not proof of dropped events; see docs/storage-health.md."
+        - alert: ConstellationKubernetesAuditDeliveryDelayed
+          expr: |
+            constellation_storage_k8s_audit_delayed_sources{ {{ $scope }} } > 0
+             and (constellation_storage_k8s_audit_expected_sources{ {{ $scope }} } > 0)
+             and ({{ $healthy }}) and ({{ $up }})
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: "Kubernetes audit delivery exceeds its expected delay"
+            description: "Inspect webhook buffering, network failures and source clock synchronization. A recent receipt of an old event does not establish current event coverage."
+        - alert: ConstellationKubernetesAuditTimestampUnknown
+          expr: |
+            (constellation_storage_k8s_audit_unknown_reported_sources{ {{ $scope }} }
+             + constellation_storage_k8s_audit_future_reported_sources{ {{ $scope }} } > 0)
+             and (constellation_storage_k8s_audit_expected_sources{ {{ $scope }} } > 0)
+             and ({{ $healthy }}) and ({{ $up }})
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: "Kubernetes audit source timestamps cannot establish freshness"
+            description: "The latest event lacks a reported timestamp or reports a time over five minutes after receipt. Check the sender and clocks; receipt freshness alone does not prove source freshness."
         - alert: ConstellationAuditArchiveLagging
           expr: |
             (constellation_storage_archive_pending_id_distance{ {{ $scope }} } > {{ $s.archivePendingIDDistance }}

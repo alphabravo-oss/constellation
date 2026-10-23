@@ -25,7 +25,7 @@ assert len(rules) == 1
 rule_spec = rules[0]['spec']
 (root / 'rules.yaml').write_text(yaml.safe_dump(rule_spec))
 alert_rules = {r['alert']: r for g in rule_spec['groups'] for r in g['rules']}
-assert len(alert_rules) == 16
+assert len(alert_rules) == 19
 for rule in alert_rules.values():
     assert 'namespace="storage-tests"' in rule['expr'] and 'service="constellation-api"' in rule['expr']
 
@@ -38,6 +38,8 @@ def env(name):
 
 assert env('default')['CONSTELLATION_STORAGE_ARCHIVE_ENABLED']['value'] == 'false'
 secret = env('archive-secret')
+assert secret['CONSTELLATION_STORAGE_K8S_AUDIT_SOURCES']['value'] == '11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222'
+assert secret['CONSTELLATION_STORAGE_K8S_AUDIT_MAX_GAP']['value'] == '30m'
 assert secret['CONSTELLATION_STORAGE_ARCHIVE_ENABLED']['value'] == 'true'
 assert secret['CONSTELLATION_STORAGE_ARCHIVE_BUCKET']['value'] == 'evidence'
 assert secret['CONSTELLATION_STORAGE_ARCHIVE_PREFIX']['value'] == '/private/audit/'
@@ -69,7 +71,7 @@ def series(name, values, extra=None):
 
 # Evaluate after 2 hours so every rule's hold period and stall window has elapsed.
 # Values have one sample per minute; timestamp baselines keep healthy watermarks current.
-healthy = [series('postgres_wal_occupancy_known', '1+0x180'), series('up', '1+0x180'), series('collector_up', '1+0x180'), series('database_bytes', '1000000+0x180'),
+healthy = [series('k8s_audit_expected_sources', '0+0x180'), series('k8s_audit_missing_sources', '0+0x180'), series('k8s_audit_stale_sources', '0+0x180'), series('k8s_audit_delayed_sources', '0+0x180'), series('k8s_audit_unknown_reported_sources', '0+0x180'), series('k8s_audit_future_reported_sources', '0+0x180'), series('postgres_wal_occupancy_known', '1+0x180'), series('up', '1+0x180'), series('collector_up', '1+0x180'), series('database_bytes', '1000000+0x180'),
            series('rollup_watermark_timestamp_seconds', '0+60x180'),
            series('archive_enabled', '0+0x180'), series('archive_pending_id_distance', '0+0x180'),
            series('archive_updated_timestamp_seconds', '0+60x180'),
@@ -90,6 +92,13 @@ def scenario(name, replacements, alert, extra=None, firing=True):
 
 
 tests = [
+    scenario('missing audit source', [series('k8s_audit_expected_sources', '2+0x180'), series('k8s_audit_missing_sources', '1+0x180')], 'ConstellationKubernetesAuditSourceGap'),
+    scenario('stale audit source', [series('k8s_audit_expected_sources', '2+0x180'), series('k8s_audit_stale_sources', '1+0x180')], 'ConstellationKubernetesAuditSourceGap'),
+    scenario('delayed audit source', [series('k8s_audit_expected_sources', '2+0x180'), series('k8s_audit_delayed_sources', '1+0x180')], 'ConstellationKubernetesAuditDeliveryDelayed'),
+    scenario('missing audit timestamp', [series('k8s_audit_expected_sources', '2+0x180'), series('k8s_audit_unknown_reported_sources', '1+0x180')], 'ConstellationKubernetesAuditTimestampUnknown'),
+    scenario('future audit timestamp', [series('k8s_audit_expected_sources', '2+0x180'), series('k8s_audit_future_reported_sources', '1+0x180')], 'ConstellationKubernetesAuditTimestampUnknown'),
+    scenario('audit observation unconfigured', [series('k8s_audit_missing_sources', '1+0x180')], 'ConstellationKubernetesAuditSourceGap', firing=False),
+
     scenario('collection failure', [series('collector_up', '0+0x180')], 'ConstellationStorageCollectorFailed'),
     scenario('database warning', [series('database_bytes', '20000000000+0x180')], 'ConstellationDatabaseSizeHigh'),
     scenario('relation warning', [series('relation_bytes', '3000000000+0x180', {'table': 'events', 'kind': 'total'})], 'ConstellationRelationSizeHigh', {'table': 'events', 'kind': 'total'}),
@@ -135,6 +144,7 @@ tests.append({'name': 'healthy installation has no storage alerts', 'interval': 
 # Reuse their existing positive fixtures so warning inputs and expected dimensions
 # remain realistic (including table/kind and WAL rates).
 data_alerts = {
+    "ConstellationKubernetesAuditSourceGap", "ConstellationKubernetesAuditDeliveryDelayed", "ConstellationKubernetesAuditTimestampUnknown",
     'ConstellationDatabaseSizeHigh', 'ConstellationRelationSizeHigh',
     'ConstellationDeadRowsHigh', 'ConstellationDefaultPartitionLarge',
     'ConstellationFlowRollupLagging', 'ConstellationAuditArchiveLagging',
