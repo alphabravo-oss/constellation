@@ -460,3 +460,32 @@ app.kubernetes.io/component: object-store
 {{- end }}
 {{- end }}
 {{- end -}}
+
+{{/* Validate the explicit scanner cache topology without querying live resources. */}}
+{{- define "constellation.validateScannerCache" -}}
+{{- if .Values.scanner.enabled -}}
+{{- $cache := .Values.scanner.cache -}}
+{{- if $cache.persistent -}}
+{{- if not (regexMatch "^1$" (toString .Values.scanner.replicas)) -}}
+{{- fail "scanner.cache.persistent requires scanner.replicas=1" -}}
+{{- end -}}
+{{- if .Values.scanner.autoscaling.enabled -}}
+{{- fail "scanner.cache.persistent requires scanner.autoscaling.enabled=false" -}}
+{{- end -}}
+{{- if $cache.emptyDirSizeLimit -}}
+{{- fail "scanner.cache.emptyDirSizeLimit requires scanner.cache.persistent=false" -}}
+{{- end -}}
+{{- if and $cache.existingClaim $cache.managedClaimName -}}
+{{- fail "scanner.cache.existingClaim and scanner.cache.managedClaimName are mutually exclusive" -}}
+{{- end -}}
+{{- else -}}
+{{- if or $cache.existingClaim $cache.managedClaimName -}}
+{{- fail "scanner.cache claim names require scanner.cache.persistent=true" -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "constellation.scannerCacheClaim" -}}
+{{- .Values.scanner.cache.existingClaim | default .Values.scanner.cache.managedClaimName | default (printf "%s-scanner-cache" (include "constellation.fullname" .)) -}}
+{{- end -}}
