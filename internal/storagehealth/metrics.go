@@ -12,6 +12,7 @@ import (
 
 type Config struct {
 	TTL, Timeout time.Duration
+	AuditSources AuditSources
 	// Empty disables archive-specific queries and alerts. A destination hash never
 	// becomes a metric label; neither do tenant IDs, object keys or endpoints.
 	ArchiveStream string
@@ -35,9 +36,17 @@ func New(pool *pgxpool.Pool, cfg Config, logger *slog.Logger) *Collector {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 3 * time.Second
 	}
+	cfg.AuditSources.Sources = append([]AuditSource(nil), cfg.AuditSources.Sources...)
 	c := &Collector{pool: pool, config: cfg, logger: logger, desc: map[string]*prometheus.Desc{}}
 	for name, help := range map[string]string{
-		"collector_up": "1 if the most recent storage snapshot succeeded; 0 before success or after failure.",
+		"k8s_audit_expected_sources":                 "Explicitly expected Kubernetes audit org/cluster sources; zero means not configured, not verified coverage.",
+		"k8s_audit_missing_sources":                  "Expected sources with no received audit row.",
+		"k8s_audit_stale_sources":                    "Expected sources with a latest receipt older than their configured maximum gap; excludes never-seen sources.",
+		"k8s_audit_delayed_sources":                  "Expected sources whose latest event was received more than the maximum gap after its reported time.",
+		"k8s_audit_unknown_reported_sources":         "Expected sources whose latest received event has no reported timestamp.",
+		"k8s_audit_future_reported_sources":          "Expected sources whose latest event reports a time more than five minutes after receipt.",
+		"k8s_audit_oldest_receipt_timestamp_seconds": "Oldest latest receipt among expected sources with data; zero when none, excludes missing sources.",
+		"collector_up":                               "1 if the most recent storage snapshot succeeded; 0 before success or after failure.",
 		"collector_last_success_timestamp_seconds":   "Unix time of the last complete successful snapshot, retained on failure.",
 		"collector_duration_seconds":                 "Duration of the last storage snapshot attempt.",
 		"collector_errors_total":                     "Failed storage snapshot attempts by this API process.",
@@ -110,7 +119,7 @@ func (c *Collector) Collect(ch chan<- prometheus.Metric) {
 func (c *Collector) refresh() {
 	started := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), c.config.Timeout)
-	result, err := readSnapshot(ctx, c.pool, c.config.ArchiveStream)
+	result, err := readSnapshot(ctx, c.pool, c.config)
 	cancel()
 	c.attempted = time.Now()
 	c.duration = time.Since(started).Seconds()
@@ -141,6 +150,13 @@ func (c *Collector) encode(s snapshot) []prometheus.Metric {
 	}
 	values := map[string]float64{"postgres_wal_occupancy_known": s.WALKnown, "raw_flow_pruned_before_timestamp_seconds": s.RawPrunedBefore, "database_bytes": s.DatabaseBytes, "postgres_wal_generated_bytes_total": s.WALBytes, "postgres_wal_stats_reset_timestamp_seconds": s.WALReset, "rollup_watermark_timestamp_seconds": s.RollupWatermark,
 		"backup_enabled_schedules": s.BackupSchedules, "backup_schedules_without_success": s.BackupMissing, "backup_failed_schedules": s.BackupFailed, "backup_oldest_success_timestamp_seconds": s.BackupOldestSuccess, "backup_oldest_due_timestamp_seconds": s.BackupOldestDue}
+	values["k8s_audit_expected_sources"] = s.AuditSources.Expected
+	values["k8s_audit_missing_sources"] = s.AuditSources.Missing
+	values["k8s_audit_stale_sources"] = s.AuditSources.Stale
+	values["k8s_audit_delayed_sources"] = s.AuditSources.Delayed
+	values["k8s_audit_unknown_reported_sources"] = s.AuditSources.UnknownReported
+	values["k8s_audit_future_reported_sources"] = s.AuditSources.FutureReported
+	values["k8s_audit_oldest_receipt_timestamp_seconds"] = s.AuditSources.OldestReceipt
 	if s.WALKnown == 1 {
 		values["postgres_wal_retained_bytes"] = s.WALRetained
 	}

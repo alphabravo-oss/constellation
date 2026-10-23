@@ -29,7 +29,7 @@ func execSQL(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) {
 }
 func read(t *testing.T, pool *pgxpool.Pool, stream string) snapshot {
 	t.Helper()
-	s, err := readSnapshot(t.Context(), pool, stream)
+	s, err := readSnapshot(t.Context(), pool, Config{ArchiveStream: stream})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestArchiveDestinationAndRollupProgress(t *testing.T) {
 		t.Fatal("disabled archive queried")
 	}
 	execSQL(t, pool, `UPDATE audit_archive_progress SET last_id=999999 WHERE stream=$1`, active)
-	if _, err := readSnapshot(t.Context(), pool, active); err == nil {
+	if _, err := readSnapshot(t.Context(), pool, Config{ArchiveStream: active}); err == nil {
 		t.Fatal("accepted progress ahead of source")
 	}
 }
@@ -287,7 +287,7 @@ func TestCollectorLockTimeoutAndMissingRelationFailClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	if _, err = readSnapshot(t.Context(), pool, ""); err == nil {
+	if _, err = readSnapshot(t.Context(), pool, Config{}); err == nil {
 		t.Fatal("locked source accepted")
 	}
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
@@ -297,7 +297,7 @@ func TestCollectorLockTimeoutAndMissingRelationFailClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	execSQL(t, pool, `ALTER TABLE scan_evidence RENAME TO unavailable_evidence`)
-	if _, err = readSnapshot(t.Context(), pool, ""); err == nil {
+	if _, err = readSnapshot(t.Context(), pool, Config{}); err == nil {
 		t.Fatal("missing monitored relation treated as empty")
 	}
 }
@@ -414,7 +414,7 @@ func TestRetentionSignalRejectsInvalidPolicy(t *testing.T) {
 	pool := pgtest.Pool(t)
 	execSQL(t, pool, `INSERT INTO orgs(name,display_name) VALUES('bad-policy','Bad policy');
  INSERT INTO system_config(org_id,config) SELECT id,'{"events_retention_days":-1}'::jsonb FROM orgs WHERE name='bad-policy'`)
-	if _, err := readSnapshot(t.Context(), pool, ""); err == nil {
+	if _, err := readSnapshot(t.Context(), pool, Config{}); err == nil {
 		t.Fatal("invalid policy claimed healthy expiry")
 	}
 }

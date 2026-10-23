@@ -208,9 +208,10 @@ VALUES ($1,$2, NULLIF($3,''), NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), NULLI
 		if strings.EqualFold(ev.Stage, "ResponseStarted") || strings.EqualFold(ev.Stage, "RequestReceived") {
 			continue
 		}
-		reported := ev.RequestReceivedTimestamp
-		if reported.IsZero() {
-			reported = time.Now().UTC()
+		var reported *time.Time
+		if !ev.RequestReceivedTimestamp.IsZero() {
+			at := ev.RequestReceivedTimestamp.UTC()
+			reported = &at
 		}
 		signal, severity, highSignal := classify(&ev)
 		decision := ev.decision()
@@ -231,7 +232,7 @@ VALUES ($1,$2, NULLIF($3,''), NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), NULLI
 			severity,
 			strings.TrimSpace(ev.AuditID),
 			[]byte(items[i]), // raw jsonb — full event verbatim
-			reported.UTC(),
+			reported,
 			time.Now().UTC(),
 		); err != nil {
 			apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "insert: "+err.Error())

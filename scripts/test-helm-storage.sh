@@ -20,6 +20,10 @@ for setting in databaseBytes=0 deadRowRatio=1; do
   grep -q 'metrics.prometheusRule.storage' "$work/error"
 done
 cat > "$work/archive.yaml" <<'YAML'
+api:
+  env:
+    CONSTELLATION_STORAGE_K8S_AUDIT_SOURCES: '11111111-1111-4111-8111-111111111111/22222222-2222-4222-8222-222222222222'
+    CONSTELLATION_STORAGE_K8S_AUDIT_MAX_GAP: '30m'
 auditArchiver:
   enabled: true
   bucket: evidence

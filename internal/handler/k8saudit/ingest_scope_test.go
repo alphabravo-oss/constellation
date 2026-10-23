@@ -118,6 +118,10 @@ VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', $4, 'test-kek', '\x00'::bytea)`,
 			if count != 1 {
 				t.Fatalf("accepted audit event persisted %d rows, want 1", count)
 			}
+			var reported *time.Time
+			if err := pool.QueryRow(ctx, `SELECT reported_at FROM k8s_audit_events WHERE audit_id=$1`, auditID).Scan(&reported); err != nil || reported != nil {
+				t.Fatalf("missing source timestamp fabricated: %v err=%v", reported, err)
+			}
 			var orgID, clusterID uuid.UUID
 			if err := pool.QueryRow(ctx, `SELECT org_id, cluster_id FROM k8s_audit_events WHERE audit_id=$1`, auditID).Scan(&orgID, &clusterID); err != nil {
 				t.Fatal(err)
