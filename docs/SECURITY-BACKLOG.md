@@ -9,7 +9,7 @@ Status values: `open` (not yet verified against HEAD), `verified-open`,
 
 | ID | Status | Area | Title | File |
 |---|---|---|---|---|
-| H1 | open | backup-restore | Server backup-restore writes into the org named in the uploaded tarball (cross-tenant write) | `internal/handler/backup.go` / `pkg/backup/restorer.go` |
+| H1 | fixed ([4a77a7cf3](https://github.com/alphabravo-oss/constellation/commit/4a77a7cf3015e9fb5014ae866797badde5953a47)); reverified 2026-10-23 | backup-restore | Server backup-restore writes into the org named in the uploaded tarball (cross-tenant write) | `internal/handler/backup.go` / `pkg/backup/restorer.go` |
 | H2 | fixed ([9a6945d2c](https://github.com/alphabravo-oss/constellation/commit/9a6945d2c)) | auth | IdP secrets (OIDC client secret, LDAP bind password, SAML SP key) stored unencrypted | `internal/auth/authservers.go` |
 | H3 | fixed ([4a77a7cf3](https://github.com/alphabravo-oss/constellation/commit/4a77a7cf3015e9fb5014ae866797badde5953a47)); reverified 2026-10-23 | hostscan | CIS file-permission checks use numeric mode comparison (world-readable /etc/shadow passes) | `internal/runtime/hostscan/cis.go` |
 | H4 | fixed ([4a77a7cf3](https://github.com/alphabravo-oss/constellation/commit/4a77a7cf3015e9fb5014ae866797badde5953a47)); reverified 2026-10-23 | compliance | AWS IAM inline wildcard-policy detection is fail-open (URL-encoded policy never matches) | `internal/cspm/aws/aws.go` |
@@ -25,6 +25,19 @@ Status values: `open` (not yet verified against HEAD), `verified-open`,
 ## Details
 
 ### H1. Server backup-restore writes into the org named in the uploaded tarball (cross-tenant write / privilege escalation)
+
+**Reverified on main `fff3e450a`, 2026-10-23:** HTTP restore pins the destination to
+the authenticated organization and checks archive identity before writing. The
+real-Postgres HTTP regression `TestBackupRestorePinsTenantAndIdentityScope` rejects
+a foreign archive even with operator-authorized unsigned restores, checks both
+tenants' stored data, and proves that a `manage-org`-only API token restores policy
+data without overwriting users. Repeating that restore remains idempotent; an
+authorized `manage-users` caller can restore users. The signed-archive HTTP test
+also covers foreign restore rejection and request-level trust-policy bypasses.
+Package-level tests additionally cover identity-table skipping and transaction
+rollback after a later table fails. These are isolated HTTP/database acceptance
+tests, not a production restore. The historical finding follows.
+
 - **Severity:** high  **Category:** security  **Area:** backup-restore-cli
 - **File:** internal/handler/backup.go:406 (pkg/backup/restorer.go:138,279-318)
 - **Failure:** A tenant admin with `VerbManageOrg` in org A POSTs `/api/v1/backups/restore?on_conflict=overwrite&allow_unverified=true` with a crafted tarball whose `tables/orgs.jsonl` names `victim-org`. `upsertOrg` matches/creates that org by name and writes attacker rows (users, role_bindings, policies, registries) under the victim's org_id — full cross-tenant compromise. Also an intra-org privesc: unlike `ApplyConfig`, the restore path doesn't gate identity tables behind `CanManageUsers`.
