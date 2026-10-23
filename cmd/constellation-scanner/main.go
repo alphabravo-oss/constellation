@@ -51,6 +51,7 @@ import (
 	"github.com/alphabravocompany/constellation/internal/imageid"
 	"github.com/alphabravocompany/constellation/internal/registry"
 	"github.com/alphabravocompany/constellation/internal/scanner"
+	"github.com/alphabravocompany/constellation/internal/scannercache"
 	"github.com/alphabravocompany/constellation/internal/telemetry"
 	"github.com/alphabravocompany/constellation/pkg/scanlease"
 	"github.com/alphabravocompany/constellation/pkg/sigverify"
@@ -222,6 +223,8 @@ func main() {
 		artifactHTTPClient:    newArtifactHTTPClient(*tlsSkipVerify),
 		logger:                logger,
 	}
+
+	tel.Registry.MustRegister(scannercache.New(scannercache.Config{Paths: w.cacheDirs, Engines: w.engines}))
 
 	// Health / metrics server runs alongside the polling loop.
 	mux := http.NewServeMux()
