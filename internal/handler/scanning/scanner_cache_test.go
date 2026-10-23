@@ -59,7 +59,16 @@ INSERT INTO component_heartbeats (
 		      "status": "ready",
 		      "record_count": 2,
 		      "record_size_bytes": 3072,
-		      "free_bytes": 1048576,
+		      "free_bytes": 0,
+          "capacity_known": true,
+          "capacity_bytes": 8388608,
+          "filesystem_free_bytes": 4096,
+          "inodes_known": true,
+          "capacity_inodes": 100,
+          "free_inodes": 0,
+          "usage_complete": false,
+          "usage_entries_visited": 2000,
+          "records_truncated": true,
 		      "records": [
 		        {"layer":"sha256/a","size":2048,"ref_count":1,"ref_last":"2026-06-14T08:00:00Z"},
 		        {"layer":"sha256/b","size":1024,"ref_count":1,"ref_last":"2026-06-14T08:01:00Z"}
@@ -120,6 +129,14 @@ INSERT INTO component_heartbeats (
 	}
 	if len(stat.Caches) != 2 || stat.Caches[0].Name != "grype" || stat.Caches[1].Name != "syft" {
 		t.Fatalf("caches should be sorted by name: %+v", stat.Caches)
+	}
+
+	cacheEntry := stat.Caches[1]
+	if !cacheEntry.CapacityKnown || cacheEntry.CapacityBytes != 8388608 || cacheEntry.FreeBytes != 0 || cacheEntry.FilesystemFreeBytes != 4096 || !cacheEntry.InodesKnown || cacheEntry.CapacityInodes != 100 || cacheEntry.FreeInodes != 0 || cacheEntry.UsageComplete == nil || *cacheEntry.UsageComplete || cacheEntry.UsageEntriesVisited != 2000 || !cacheEntry.RecordsTruncated {
+		t.Fatalf("heartbeat diagnostics lost through PostgreSQL/API: %+v", cacheEntry)
+	}
+	if stat.Caches[0].UsageComplete != nil || stat.Caches[0].CapacityKnown {
+		t.Fatalf("missing cache gained invented capacity/completeness: %+v", stat.Caches[0])
 	}
 
 	dataReq := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/v1/scanner-cache/scanner-instance-1/data", nil)

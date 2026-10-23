@@ -3129,3 +3129,36 @@ Actionlint passes for the updated CI workflow. JSON/JUnit reports are retained
 as `unit.*` and `integration.*` with the final `check.log`, `integration.log`,
 `helm.log`, `docker-promtool.log` and `actionlint.log` in the evidence directory.
 Repository Actions permissions were checked and remain disabled.
+
+## Scanner-cache diagnostics continuation (2026-10-23)
+
+The [ten-item cache diagnostics contract](scanner-cache-diagnostics.md) covers
+exclusive write probes, lifecycle error handling, path classification, byte
+capacity, inode headroom, bounded enumeration, root confinement, partial usage,
+stable/checked totals and API propagation. These are DB-21/23 implementation
+prerequisites; topology, refresh capacity, alerts and live rollout remain open.
+
+Real filesystem tests exercise the old predictable-name symlink trap, 32
+concurrent probes, missing/unavailable/non-directory paths, counter overflow and
+inconsistency, inode exhaustion/unknown totals, exactly 2,000 and over-limit
+entries, nested largest-file ordering, symlinks, FIFOs and enumeration failure.
+The API unit test retains zero, false and absent values distinctly. The existing
+PostgreSQL heartbeat-to-cache-stat integration test now asserts those fields
+survive JSONB storage and the HTTP response.
+
+A Go overlay restored the unsafe predictable-name probe without editing the
+checkout. `TestCacheProbePreservesPreexistingSymlink` failed as intended because
+the external fixture changed from `preserve` to `ok`. The fixed implementation
+passes; the negative-control log is
+`/root/constellation-cache-next10-20261023/negative-probe.log`. No real cache,
+cluster configuration, scanner image or database retention policy was changed.
+
+Final gates passed: `make check` reports 3,163 tests with 8 opt-in skips;
+`make test-integration` reports 5,007 tests with 14 opt-in skips. Lint, vet,
+formatting, shell checks and the frontend type/build/bundle checks all pass.
+Final logs and JSON/JUnit reports are retained under
+`/root/constellation-cache-next10-20261023/`. The initial passing runs predated
+final root-confinement/counter hardening and the extended database HTTP assertion;
+the final runs above include all changes. GitHub Actions remains disabled. Chart
+and deployment resources were unchanged, so Helm/live deployment checks were
+not part of this batch.

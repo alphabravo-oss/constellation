@@ -30,16 +30,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/fs"
 	"log/slog"
-	"math"
 	"net/http"
 	neturl "net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -1686,140 +1683,6 @@ func knownScannerTargetType(targetType string) bool {
 		}
 	}
 	return false
-}
-
-func scannerCacheHealth(dirs map[string]string, includeUsage bool) map[string]any {
-	out := map[string]any{}
-	for name, path := range dirs {
-		out[name] = scannerCacheDirHealth(path, includeUsage)
-	}
-	return out
-}
-
-const (
-	scannerCacheRecordLimit = 20
-	scannerCacheWalkLimit   = 2000
-)
-
-var errScannerCacheWalkLimit = errors.New("scanner cache walk limit reached")
-
-func scannerCacheDirHealth(path string, includeUsage bool) map[string]any {
-	path = strings.TrimSpace(path)
-	out := map[string]any{
-		"path":       path,
-		"configured": path != "",
-	}
-	if path == "" {
-		out["present"] = false
-		out["writable"] = false
-		out["status"] = "not-configured"
-		return out
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		out["present"] = false
-		out["writable"] = false
-		out["status"] = "missing"
-		out["error"] = err.Error()
-		return out
-	}
-	out["present"] = true
-	out["is_dir"] = info.IsDir()
-	if !info.IsDir() {
-		out["writable"] = false
-		out["status"] = "not-directory"
-		return out
-	}
-	testPath := filepath.Join(path, fmt.Sprintf(".constellation-cache-health-%d", os.Getpid()))
-	if err := os.WriteFile(testPath, []byte("ok"), 0o600); err != nil {
-		out["writable"] = false
-		out["status"] = "read-only"
-		out["error"] = err.Error()
-	} else {
-		_ = os.Remove(testPath)
-		out["writable"] = true
-		out["status"] = "ready"
-	}
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(path, &stat); err == nil {
-		if free, ok := scannerCacheFreeBytes(stat); ok {
-			out["free_bytes"] = free
-		}
-	}
-	if includeUsage {
-		addScannerCacheUsage(out, path)
-	}
-	return out
-}
-
-func scannerCacheFreeBytes(stat syscall.Statfs_t) (int64, bool) {
-	if stat.Bsize <= 0 || stat.Bavail > math.MaxInt64 {
-		return 0, false
-	}
-	blocks := int64(stat.Bavail)
-	if blocks > math.MaxInt64/stat.Bsize {
-		return 0, false
-	}
-	return blocks * stat.Bsize, true
-}
-
-func addScannerCacheUsage(out map[string]any, root string) {
-	var (
-		visited     int
-		recordCount int64
-		totalBytes  int64
-		truncated   bool
-		records     []map[string]any
-	)
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if path == root {
-			return nil
-		}
-		visited++
-		if visited > scannerCacheWalkLimit {
-			truncated = true
-			return errScannerCacheWalkLimit
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		info, err := entry.Info()
-		if err != nil {
-			return nil
-		}
-		recordCount++
-		size := info.Size()
-		totalBytes += size
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			rel = entry.Name()
-		}
-		records = append(records, map[string]any{
-			"layer":     filepath.ToSlash(rel),
-			"size":      size,
-			"ref_count": 1,
-			"ref_last":  info.ModTime().UTC().Format(time.RFC3339),
-		})
-		sort.Slice(records, func(i, j int) bool {
-			left, _ := records[i]["size"].(int64)
-			right, _ := records[j]["size"].(int64)
-			return left > right
-		})
-		if len(records) > scannerCacheRecordLimit {
-			records = records[:scannerCacheRecordLimit]
-		}
-		return nil
-	})
-	if err != nil && !errors.Is(err, errScannerCacheWalkLimit) {
-		out["usage_error"] = err.Error()
-	}
-	out["record_count"] = recordCount
-	out["record_size_bytes"] = totalBytes
-	out["records_truncated"] = truncated || recordCount > int64(len(records))
-	out["records"] = records
 }
 
 func writeScannerJSON(w http.ResponseWriter, status int, body any) {

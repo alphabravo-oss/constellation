@@ -621,7 +621,7 @@ func scannerComponentDiagnostics(metadata map[string]any) []componentDiagnosticC
 				Key:      "scanner_cache_" + name,
 				Label:    "Scanner cache " + name,
 				Status:   status,
-				Value:    safeMetadataSubset(cache, []string{"configured", "present", "is_dir", "writable", "status", "free_bytes", "record_count", "record_size_bytes"}),
+				Value:    safeMetadataSubset(cache, []string{"configured", "present", "is_dir", "writable", "status", "free_bytes", "capacity_known", "capacity_bytes", "filesystem_free_bytes", "inodes_known", "capacity_inodes", "free_inodes", "usage_complete", "usage_entries_visited", "records_truncated", "record_count", "record_size_bytes"}),
 				Reason:   safeDiagnosticText(metadataString(cache, "error")),
 				Evidence: "component_heartbeats.metadata.cache_health." + name,
 			})
@@ -799,7 +799,7 @@ func componentPublicMetadata(metadata map[string]any) map[string]any {
 	if vuln := safeMetadataSubset(metadataMap(metadata, "vulndb"), []string{"enabled", "ready", "status", "bundle_version", "payload_hash", "exported_at", "record_count"}); len(vuln) > 0 {
 		out["vulndb"] = vuln
 	}
-	if cacheHealth := safeNamedMetadataSubset(metadataMap(metadata, "cache_health"), []string{"configured", "present", "is_dir", "writable", "status", "free_bytes", "record_count", "record_size_bytes"}); len(cacheHealth) > 0 {
+	if cacheHealth := safeNamedMetadataSubset(metadataMap(metadata, "cache_health"), []string{"configured", "present", "is_dir", "writable", "status", "free_bytes", "capacity_known", "capacity_bytes", "filesystem_free_bytes", "inodes_known", "capacity_inodes", "free_inodes", "usage_complete", "usage_entries_visited", "records_truncated", "record_count", "record_size_bytes"}); len(cacheHealth) > 0 {
 		out["cache_health"] = cacheHealth
 	}
 	if len(out) == 0 {

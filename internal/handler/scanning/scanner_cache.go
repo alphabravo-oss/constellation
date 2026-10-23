@@ -53,17 +53,27 @@ type scannerCacheDataDTO struct {
 }
 
 type scannerCacheEntryDTO struct {
-	Name             string `json:"name"`
-	Path             string `json:"path,omitempty"`
-	Status           string `json:"status"`
-	Configured       bool   `json:"configured"`
-	Present          bool   `json:"present"`
-	Writable         bool   `json:"writable"`
-	RecordCount      int64  `json:"record_count"`
-	RecordSizeBytes  int64  `json:"record_size_bytes"`
-	FreeBytes        int64  `json:"free_bytes,omitempty"`
-	RecordsTruncated bool   `json:"records_truncated,omitempty"`
-	Error            string `json:"error,omitempty"`
+	Name                string `json:"name"`
+	Path                string `json:"path,omitempty"`
+	Status              string `json:"status"`
+	Configured          bool   `json:"configured"`
+	Present             bool   `json:"present"`
+	Writable            bool   `json:"writable"`
+	RecordCount         int64  `json:"record_count"`
+	RecordSizeBytes     int64  `json:"record_size_bytes"`
+	FreeBytes           int64  `json:"free_bytes"`
+	CapacityKnown       bool   `json:"capacity_known"`
+	CapacityBytes       int64  `json:"capacity_bytes,omitempty"`
+	FilesystemFreeBytes int64  `json:"filesystem_free_bytes"`
+	InodesKnown         bool   `json:"inodes_known"`
+	CapacityInodes      int64  `json:"capacity_inodes,omitempty"`
+	FreeInodes          int64  `json:"free_inodes"`
+	UsageComplete       *bool  `json:"usage_complete,omitempty"`
+	UsageEntriesVisited int    `json:"usage_entries_visited,omitempty"`
+	UsageError          string `json:"usage_error,omitempty"`
+	CapacityError       string `json:"capacity_error,omitempty"`
+	RecordsTruncated    bool   `json:"records_truncated,omitempty"`
+	Error               string `json:"error,omitempty"`
 }
 
 type scannerCacheRecordDTO struct {
@@ -379,17 +389,27 @@ func (r scannerCacheRow) cacheEntries() []scannerCacheEntryDTO {
 			continue
 		}
 		out = append(out, scannerCacheEntryDTO{
-			Name:             name,
-			Path:             handler.MetadataString(raw, "path"),
-			Status:           handler.MetadataString(raw, "status"),
-			Configured:       handler.MetadataBool(raw, "configured"),
-			Present:          handler.MetadataBool(raw, "present"),
-			Writable:         handler.MetadataBool(raw, "writable"),
-			RecordCount:      int64(handler.MetadataInt(raw, "record_count")),
-			RecordSizeBytes:  int64(handler.MetadataInt(raw, "record_size_bytes")),
-			FreeBytes:        int64(handler.MetadataInt(raw, "free_bytes")),
-			RecordsTruncated: handler.MetadataBool(raw, "records_truncated"),
-			Error:            handler.MetadataString(raw, "error"),
+			Name:                name,
+			Path:                handler.MetadataString(raw, "path"),
+			Status:              handler.MetadataString(raw, "status"),
+			Configured:          handler.MetadataBool(raw, "configured"),
+			Present:             handler.MetadataBool(raw, "present"),
+			Writable:            handler.MetadataBool(raw, "writable"),
+			RecordCount:         int64(handler.MetadataInt(raw, "record_count")),
+			RecordSizeBytes:     int64(handler.MetadataInt(raw, "record_size_bytes")),
+			FreeBytes:           int64(handler.MetadataInt(raw, "free_bytes")),
+			CapacityKnown:       handler.MetadataBool(raw, "capacity_known"),
+			CapacityBytes:       int64(handler.MetadataInt(raw, "capacity_bytes")),
+			FilesystemFreeBytes: int64(handler.MetadataInt(raw, "filesystem_free_bytes")),
+			InodesKnown:         handler.MetadataBool(raw, "inodes_known"),
+			CapacityInodes:      int64(handler.MetadataInt(raw, "capacity_inodes")),
+			FreeInodes:          int64(handler.MetadataInt(raw, "free_inodes")),
+			UsageComplete:       cacheOptionalBool(raw, "usage_complete"),
+			UsageEntriesVisited: handler.MetadataInt(raw, "usage_entries_visited"),
+			UsageError:          handler.MetadataString(raw, "usage_error"),
+			CapacityError:       handler.MetadataString(raw, "capacity_error"),
+			RecordsTruncated:    handler.MetadataBool(raw, "records_truncated"),
+			Error:               handler.MetadataString(raw, "error"),
 		})
 	}
 	return out
@@ -405,4 +425,12 @@ func metadataSlice(source map[string]any, key string) []any {
 	default:
 		return nil
 	}
+}
+
+func cacheOptionalBool(raw map[string]any, key string) *bool {
+	value, ok := raw[key].(bool)
+	if !ok {
+		return nil
+	}
+	return &value
 }
