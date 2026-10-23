@@ -130,3 +130,31 @@ PostgreSQL database, exact object read-back and independent signature verificati
 The test removed its own object/bucket. This proves the destination path locally;
 it does not establish off-host durability, immutable lifecycle, or a full database
 restore. Evidence: `/root/constellation-lifecycle-completion-20261023/real-object-store.log`.
+
+## Independent organization-artifact restoration (October 23)
+
+The scheduled-artifact qualification now restores into a separate empty database
+migrated by the production migration runner, with the source pool closed before
+restoration. Static-key verification is required. The fixture includes users,
+custom roles, settings, a cluster, and cluster-bound policies. It checks new
+destination organization/cluster identities, correctly remapped policy references,
+retained nonsecret settings, excluded integration secrets/tokens and idempotent
+replay. The local-file fixture passed; its first measured restore plus replay took
+about 67 ms after destination migration, which is fixture timing, not application
+RTO or a production capacity claim.
+
+The same restore assertions also passed through the local RustFS destination:
+a signed scheduled export, exact upload/read-back, a fresh independent object GET,
+and signature-verified restoration into the separate migrated database. The
+unique test object and bucket were removed successfully, and the test port-forward
+was stopped. Evidence is in `real-object-restore.log` under the October 23 lifecycle
+evidence directory. No production database, catalog, settings or workload changed.
+
+This proves the tested organization-configuration artifact contract locally.
+Organization exports deliberately exclude findings, network flows, events and the
+CVE catalog; recent audit export does not replace full audit-chain/PITR recovery.
+Passwords, tokens and integration secrets are excluded, and this fixture does not
+claim credential decryption or authenticated application recovery. Preserve the
+installation's recovery keys and follow the separate credential/PITR runbook.
+Off-host durability, immutable object retention and node-failure qualification
+remain deferred; failed/remote receipts remain held.
