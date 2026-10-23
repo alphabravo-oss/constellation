@@ -8,6 +8,7 @@ import (
 
 // Metrics has fixed family labels: no user, node, cluster or token identifiers.
 type Metrics struct {
+	active      prometheus.Gauge
 	deleted     *prometheus.CounterVec
 	failures    prometheus.Counter
 	lastSuccess prometheus.Gauge
@@ -16,6 +17,7 @@ type Metrics struct {
 
 func NewMetrics(reg prometheus.Registerer) (*Metrics, error) {
 	m := &Metrics{
+		active:      prometheus.NewGauge(prometheus.GaugeOpts{Name: "constellation_session_cleanup_active_workers", Help: "Active session cleanup loops in this API process; zero on idle replicas."}),
 		deleted:     prometheus.NewCounterVec(prometheus.CounterOpts{Name: "constellation_session_cleanup_deleted_total", Help: "Expired operational rows deleted, by fixed data family."}, []string{"family"}),
 		failures:    prometheus.NewCounter(prometheus.CounterOpts{Name: "constellation_session_cleanup_failures_total", Help: "Failed operational session cleanup passes."}),
 		lastSuccess: prometheus.NewGauge(prometheus.GaugeOpts{Name: "constellation_session_cleanup_last_success_timestamp_seconds", Help: "Unix time of the last complete successful cleanup pass; zero before first success."}),
@@ -33,6 +35,7 @@ func NewMetrics(reg prometheus.Registerer) (*Metrics, error) {
 }
 
 func (m *Metrics) Describe(ch chan<- *prometheus.Desc) {
+	m.active.Describe(ch)
 	m.deleted.Describe(ch)
 	m.failures.Describe(ch)
 	m.lastSuccess.Describe(ch)
@@ -40,6 +43,7 @@ func (m *Metrics) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (m *Metrics) Collect(ch chan<- prometheus.Metric) {
+	m.active.Collect(ch)
 	m.deleted.Collect(ch)
 	m.failures.Collect(ch)
 	m.lastSuccess.Collect(ch)
@@ -60,4 +64,15 @@ func (m *Metrics) Record(result SessionCleanup, elapsed time.Duration, err error
 		return
 	}
 	m.lastSuccess.SetToCurrentTime()
+}
+
+func (m *Metrics) workerStarted() {
+	if m != nil {
+		m.active.Inc()
+	}
+}
+func (m *Metrics) workerStopped() {
+	if m != nil {
+		m.active.Dec()
+	}
 }

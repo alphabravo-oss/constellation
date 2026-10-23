@@ -26,7 +26,7 @@ func TestCleanupMetricsPreserveFailuresAndPartialProgress(t *testing.T) {
 		t.Fatal("success not recorded")
 	}
 	families, err := registry.Gather()
-	if err != nil || len(families) != 4 {
+	if err != nil || len(families) != 5 {
 		t.Fatalf("metrics=%d err=%v", len(families), err)
 	}
 	if _, err := NewMetrics(registry); err == nil {
@@ -43,7 +43,25 @@ func TestCanceledSessionMonitorDoesNotTouchDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	RunSessionCleanup(ctx, nil, nil, metrics)
-	if testutil.ToFloat64(metrics.lastSuccess) != 0 || testutil.ToFloat64(metrics.failures) != 0 {
+	if testutil.ToFloat64(metrics.lastSuccess) != 0 || testutil.ToFloat64(metrics.failures) != 0 || testutil.ToFloat64(metrics.active) != 0 {
 		t.Fatal("canceled monitor ran cleanup")
+	}
+}
+
+func TestCleanupWorkerMetricCountsOverlappingLifetimes(t *testing.T) {
+	t.Parallel()
+	metrics, err := NewMetrics(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metrics.workerStarted()
+	metrics.workerStarted()
+	metrics.workerStopped()
+	if testutil.ToFloat64(metrics.active) != 1 {
+		t.Fatal("stopping an old worker hid the current worker")
+	}
+	metrics.workerStopped()
+	if testutil.ToFloat64(metrics.active) != 0 {
+		t.Fatal("inactive worker remained active")
 	}
 }

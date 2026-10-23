@@ -310,3 +310,54 @@ healthy/stale/missing sources, delayed/unknown/future event time, recovery and
 read-only evidence preservation. Promtool fixtures cover all three new alerts,
 configuration holds, target isolation, hold periods and recovery. This does not
 assert live scrape or notification delivery; those remain deferred by the owner.
+
+## Session cleanup worker health
+
+`constellation_session_cleanup_active_workers` counts cleanup loops active in an
+API process. It is zero on idle replicas and after the worker stops, including
+leadership-context cancellation. Overlapping loop lifetimes are counted so an
+older loop stopping cannot hide a newer active loop. Existing deleted-row,
+failure, duration and last-success metrics remain unchanged.
+
+Two storage rules now observe only active workers on the same healthy target:
+`ConstellationSessionCleanupStalled` fires after a five-minute hold when the last
+complete pass is more than five minutes old; `ConstellationSessionCleanupFailing`
+fires after a two-minute hold while the five-minute failure increase is positive.
+Collection/scrape failure uses the existing separate alerts. Idle/follower replicas
+must not alert merely because they have never run cleanup. These rules do not
+establish that at least one API has acquired leadership; lease/workload monitoring
+is still needed for total absence of background workers. Live notification routing
+remains deferred.
+
+## October 23 local session-maintenance load fixture
+
+Run the opt-in real-PostgreSQL fixture separately:
+
+```sh
+CONSTELLATION_TEST_LIFECYCLE_LOAD=true go test -tags=integration -race \
+  -run '^TestSessionCleanupLocalLoad$' -count=1 -v ./internal/lifecycle
+```
+
+It seeds 100,000 expired rows in each of OIDC login attempts, opaque identity
+sessions, network-session snapshots and kill requests, plus one live row per
+family and an audit receipt. One hundred 1,000-row-per-family cleanup calls run
+alongside a foreground probe that reads the active identity and updates the live
+network session by its full primary key. All 400,000 expired rows drained; all
+four live rows and the verified audit chain survived.
+
+The October 23 standalone local run measured 3.61 seconds for the 100 cleanup
+passes, with pass p95/p99 56.32/62.27 ms. The 1,669 concurrent foreground probes
+measured p95/p99 1.37/1.64 ms, versus 0.88/1.02 ms across 100 baseline probes.
+Combined WAL insertion between the baseline marker and final validation was
+46,884,848 bytes; it includes foreground work and PostgreSQL background activity,
+not just deletion. These are a shared-host disposable PostgreSQL fixture with race
+detection and a small indexed foreground operation, not application-login latency,
+fleet-scale capacity, cold-host performance or a guaranteed production SLO.
+
+The fixture intentionally drains without production timer waits. Production still
+runs at most 1,000 rows per family per minute: approximately 16.7 rows/second per
+family before failures/locks. A 100,000-row backlog in one family therefore needs
+about 100 scheduled passes even though SQL execution is much faster. Do not use
+the burst fixture's rows/second as the deployed sustainable cleanup budget. No
+cadence or retention setting was changed. Compare measured arrival rates with
+this scheduled budget before tuning batch size or frequency.
