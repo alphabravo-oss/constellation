@@ -2861,3 +2861,43 @@ detected packages/findings and no engine errors. The authenticated cluster page
 passes with no JavaScript errors and reconciled occurrence totals. Free disk space
 after image restoration is approximately 57 GiB. Registry-backed releases remain
 necessary to remove the manual reimport dependency exposed by image GC.
+
+
+## Runtime policy delivery reverification (2026-10-23)
+
+Main source `241e096752396c54e4c7c47ae4801cf8a26b9e74` already includes the
+agent policy-sync startup path and the workload-scoped transport introduced by
+`bf91eadcb8b91f86364e0c555f27b096a23e623c`. H6's missing-caller finding is closed
+without a new production change. The worker fetches protocol-v2 bundles and sends
+modify/delete commands through `Supervisor.PushEndpointPolicy`, which checks the
+current endpoint registration and native process generation before transfer.
+
+Fresh evidence is retained in `/root/constellation-h6-20261023/`:
+
+- `bundle.json`: `TestAgentPolicyBundle*` and `TestRuntimePolicy*Binding*` passed
+  twice with race detection and shuffle against disposable real PostgreSQL:
+  24 test/subtest executions, no skips. Coverage includes wire fields, disabled
+  policies, tenant/cluster ownership, exact pod bindings, and protocol validation.
+- `native/`: `ARTIFACT_DIR=/root/constellation-h6-20261023/native bash
+  scripts/test-native-policy.sh` built the vendored C sources from this checkout,
+  verified source and binary manifests, generated fixtures through the real sync
+  worker, and passed the native acceptance test twice without skips. Each run
+  checks 70 matcher/packet-wrapper assertions through the production Go datagram
+  encoder, including independent MAC scopes, deny/monitor/default actions,
+  direction, ICMP, incomplete replacement, scoped deletion and restart replay.
+  Wrong expected actions and malformed/unknown controls were rejected as expected.
+- The same script passed both native connection-report variants (97 aggregation
+  and 66 wall-clock assertions each). Both unpatched negative controls failed for
+  their expected reasons. Build logs, image identity, fixtures, JSON results and
+  source/object/binary provenance are retained beside these results.
+- `check.log`, `unit.json` and `unit.xml`: the full `make check` gate passed,
+  including lint/vet/format/shell checks, frontend lint/type-check/build and the
+  race-enabled unit suite. GitHub Actions remains disabled for this repository;
+  these are local results.
+
+The native containers use no network, run as a nonroot user with capabilities
+removed, and do not attach to a workload interface. This proves the missing
+policy-delivery path and native parsing/staging/matching behavior. It does not
+establish live CNI interception, DNS-derived FQDN enforcement, application
+classification, session re-evaluation, or production packet drops. No live policy
+or deployment was changed during this reverification.

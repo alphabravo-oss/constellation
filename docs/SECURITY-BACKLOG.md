@@ -14,7 +14,7 @@ Status values: `open` (not yet verified against HEAD), `verified-open`,
 | H3 | fixed ([4a77a7cf3](https://github.com/alphabravo-oss/constellation/commit/4a77a7cf3015e9fb5014ae866797badde5953a47)); reverified 2026-10-23 | hostscan | CIS file-permission checks use numeric mode comparison (world-readable /etc/shadow passes) | `internal/runtime/hostscan/cis.go` |
 | H4 | fixed ([4a77a7cf3](https://github.com/alphabravo-oss/constellation/commit/4a77a7cf3015e9fb5014ae866797badde5953a47)); reverified 2026-10-23 | compliance | AWS IAM inline wildcard-policy detection is fail-open (URL-encoded policy never matches) | `internal/cspm/aws/aws.go` |
 | H5 | fixed ([035808ba0](https://github.com/alphabravo-oss/constellation/commit/035808ba0fbe926101949ea2a5073284b5d672c5)); verified 2026-10-23 | scanning | Vulnerability-profile decisions computed at scan completion but never applied | `internal/handler/scanning/scanjobs.go` |
-| H6 | open | runtime-agent | Workload micro-segmentation policy never pushed to dp (`Supervisor.PushPolicy` has no callers) | `internal/runtime/dp/policy.go` |
+| H6 | fixed ([bf91eadcb](https://github.com/alphabravo-oss/constellation/commit/bf91eadcb8b91f86364e0c555f27b096a23e623c)); reverified 2026-10-23 | runtime-agent | Workload micro-segmentation policy never pushed to dp (`Supervisor.PushPolicy` has no callers) | `internal/runtime/dp/policy.go` |
 | H7 | open | helm | Admission quarantine DSN reads a non-existent Secret key (fail-open admission) | `deploy/charts/constellation/templates/admission-deployment.yaml` |
 | H8 | open | operator | Operator ClusterRole omits RBAC for policy CRs it reconciles | `deploy/charts/constellation/templates/operator.yaml` |
 | H9 | open | audit | Concurrent audit writes silently break the hash chain | `pkg/audit/audit.go` |
@@ -102,6 +102,27 @@ claim live admission enforcement. The historical finding follows.
 - **Fix:** Apply the decision in the finding upsert (map to lifecycle `suppressed`/`accepted`, bump severity on escalate) or remove the dead evaluation.
 
 ### H6. Workload micro-segmentation policy is never pushed to dp (dp enforces with an empty rule table)
+
+**Reverified on main `241e09675`, 2026-10-23:** the runtime-agent composition root
+starts `RuntimePolicySyncWorker` when the data-plane supervisor and API upload
+configuration are available. It fetches protocol-v2 bundles, binds each policy to
+the current pod UID/interface registration, and calls `PushEndpointPolicy` with
+`CmdModify` or `CmdDelete`. This scoped path supersedes the historical unscoped
+`PushPolicy` call. Failed transfers remain retryable; a ready replacement data-plane
+generation receives the current policies again.
+
+Real-Postgres bundle tests verify wire fields, organization/cluster isolation,
+disabled-policy exclusion, pod bindings, and incomplete/legacy protocol rejection.
+The isolated native harness sends worker-generated policies through the production
+Go datagram encoder into compiled vendored C parser/staging/matcher code. It checks
+separate workload scopes, enforce/monitor actions, terminal defaults, directions,
+ICMP opt-in, partial-transfer retention, deletion and restart reapplication. Invalid
+bundles also preserve the previously confirmed FQDN resolver allow-set in the worker
+tests. This closes the missing policy-delivery finding; it does not claim live CNI
+interception, DNS-derived FQDN enforcement, or production packet-drop acceptance.
+See [verification evidence](security-testing.md#runtime-policy-delivery-reverification-2026-10-23).
+The historical finding follows.
+
 - **Severity:** high  **Category:** half_wired  **Area:** runtime-agent
 - **File:** internal/runtime/dp/policy.go:109
 - **Failure:** `Supervisor.PushPolicy` is the only path that programs dp's policy engine, and it has **zero** callers — the runtime agent has no policy-sync goroutine (a handler comment even references one that doesn't exist). An operator-created/promoted deny-egress or FQDN-anchored allow is stored, audited and served by the control plane but never reaches dp; dp evaluates every connection against no rules and emits the default action.
