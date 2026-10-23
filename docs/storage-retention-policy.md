@@ -39,3 +39,31 @@ for published role images. The owner explicitly directed that GitHub Actions rem
 continue through code and local verification only. Release publishing and live
 rollout are deferred, alongside off-host recovery and real node-failure tests. Local/source tests and merged PRs
 are not evidence that the live release runs the new workers or alert rules.
+
+## Local organization-backup cleanup bounds
+
+An enabled policy protects `max(1, keep-last)` newest successful local catalog
+entries. Cleanup now holds if any protected entry lacks a path or its file is
+missing, empty, unreadable, or not a safe regular file. File availability does
+not establish signature validity or successful restoration; retain independent
+verification/recovery evidence. Historical catalog success alone is insufficient
+to allow removal of older available files.
+
+A pass locks the protected entries and at most 100 oldest older candidates, skips
+locked rows, and uses a per-organization transaction lock to avoid concurrent
+maintenance. The transaction has a five-second context deadline. Policy values
+over 10,000 protected entries or 36,500 age days hold with an error rather than
+allocating an unbounded maintenance batch. Existing zero policy remains a hold.
+Age never overrides the protected floor. Remote receipts and failed artifacts
+remain held; manual successful local org-backups already participate in the same
+catalog policy when their organization's scheduled maintenance runs.
+
+Catalog locks prevent path/status changes during cleanup. Shared paths remain
+until no other catalog entry references them. Application exports use unique
+paths, but arbitrary external filesystem writers or direct database alias
+insertion are not serialized by this protocol. Filesystem removal and SQL commit
+are not atomic: a failed commit can leave an old receipt with an already-removed
+file. The receipt survives for retry, and the protected floor is never removed.
+A retry treats an already-missing eligible old file as removed. File errors keep
+that receipt; repeatedly failing old artifacts may delay later candidates within
+the bounded batch and should be investigated from the maintenance logs.

@@ -165,8 +165,12 @@ func TestBackupRetentionPreservesCatalogOnUnsafeArtifact(t *testing.T) {
 	if err := os.Symlink(victim, link); err != nil {
 		t.Fatal(err)
 	}
+	protectedPath := filepath.Join(root, "protected")
+	if err := os.WriteFile(protectedPath, []byte("protected archive"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	old, newID := uuid.New(), uuid.New()
-	if _, err := pool.Exec(t.Context(), `INSERT INTO backups(id,org_id,mode,status,started_at,local_path) VALUES($1,$2,'org-backup','succeeded',now()-interval '2 days',$3),($4,$2,'org-backup','succeeded',now(),NULL)`, old, org, link, newID); err != nil {
+	if _, err := pool.Exec(t.Context(), `INSERT INTO backups(id,org_id,mode,status,started_at,local_path) VALUES($1,$2,'org-backup','succeeded',now()-interval '2 days',$3),($4,$2,'org-backup','succeeded',now(),$5)`, old, org, link, newID, protectedPath); err != nil {
 		t.Fatal(err)
 	}
 	if n := applyRetention(t.Context(), pool, uuid.MustParse(org), 1, 0, time.Now(), nil); n != 0 {
@@ -240,7 +244,7 @@ func assertSharedRetentionArtifact(t *testing.T, pool *pgxpool.Pool, org string,
 		t.Fatal(err)
 	}
 	if kind != "same owner" {
-		if _, err := pool.Exec(t.Context(), `INSERT INTO backups(id,org_id,mode,status,started_at) VALUES($1,$2,'org-backup','succeeded',now()+interval '1 hour')`, keep, org); err != nil {
+		if _, err := pool.Exec(t.Context(), `INSERT INTO backups(id,org_id,mode,status,started_at,local_path) VALUES($1,$2,'org-backup','succeeded',now()+interval '1 hour',$3)`, keep, org, path); err != nil {
 			t.Fatal(err)
 		}
 	}
