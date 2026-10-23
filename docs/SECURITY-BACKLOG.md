@@ -17,10 +17,10 @@ Status values: `open` (not yet verified against HEAD), `verified-open`,
 | H6 | fixed ([bf91eadcb](https://github.com/alphabravo-oss/constellation/commit/bf91eadcb8b91f86364e0c555f27b096a23e623c)); reverified 2026-10-23 | runtime-agent | Workload micro-segmentation policy never pushed to dp (`Supervisor.PushPolicy` has no callers) | `internal/runtime/dp/policy.go` |
 | H7 | fixed ([3b15b3ea2](https://github.com/alphabravo-oss/constellation/commit/3b15b3ea2af6eef900dd0be30d156a2e041348bc)); reverified 2026-10-23 | helm | Admission quarantine DSN reads a non-existent Secret key (fail-open admission) | `deploy/charts/constellation/templates/admission-deployment.yaml` |
 | H8 | fixed ([3b15b3ea2](https://github.com/alphabravo-oss/constellation/commit/3b15b3ea2af6eef900dd0be30d156a2e041348bc)); reverified 2026-10-23 | operator | Operator ClusterRole omits RBAC for policy CRs it reconciles | `deploy/charts/constellation/templates/operator.yaml` |
-| H9 | open | audit | Concurrent audit writes silently break the hash chain | `pkg/audit/audit.go` |
-| H10 | fixed ([9a6945d2c](https://github.com/alphabravo-oss/constellation/commit/9a6945d2c)) | auth | SAML/LDAP JIT login mints a session JWT with a stale `session_epoch` | `internal/handler/auth.go` |
-| H11 | open | compliance | kube-bench compliance ingest accumulates duplicate rows every run | `internal/handler/compliance/compliance.go` |
-| H12 | open | netpolicy | Collapsed external peers (`external`, no slash) bypass CIDR anchoring | `internal/handler/netpolicy/network_policies.go` |
+| H9 | fixed ([3b15b3ea2](https://github.com/alphabravo-oss/constellation/commit/3b15b3ea2af6eef900dd0be30d156a2e041348bc)); reverified 2026-10-23 | audit | Concurrent audit writes silently break the hash chain | `pkg/audit/audit.go` |
+| H10 | fixed ([9a6945d2c](https://github.com/alphabravo-oss/constellation/commit/9a6945d2c)); reverified 2026-10-23 | auth | SAML/LDAP JIT login mints a session JWT with a stale `session_epoch` | `internal/handler/auth.go` |
+| H11 | fixed ([5f1fe4211](https://github.com/alphabravo-oss/constellation/commit/5f1fe42114b9cd9ee28a9b15e9fba19badf6b8e0)); reverified 2026-10-23 | compliance | kube-bench compliance ingest accumulates duplicate rows every run | `internal/handler/compliance/compliance.go` |
+| H12 | fixed ([3b15b3ea2](https://github.com/alphabravo-oss/constellation/commit/3b15b3ea2af6eef900dd0be30d156a2e041348bc)); reverified 2026-10-23 | netpolicy | Collapsed external peers (`external`, no slash) bypass CIDR anchoring | `internal/handler/netpolicy/network_policies.go` |
 
 ## Details
 
@@ -179,6 +179,18 @@ The historical finding follows.
 - **Fix:** Add the policy CR kinds (get;list;watch), /status (get;update;patch), /finalizers (update) to the operator ClusterRole, matching the kubebuilder markers.
 
 ### H9. Concurrent audit writes silently break the hash chain (false tamper alarms)
+
+**Reverified on main `f63b06072`, 2026-10-23:** both `Log` and `LogInTx` acquire
+the same transaction-scoped advisory lock before reading the global chain head.
+The former concurrency/transaction tests required `DATABASE_URL` and were skipped
+by the standard integration suite; they now use individually migrated disposable
+Postgres databases, without truncating a shared audit chain. Sixteen concurrent
+writers append 400 events across two organizations, mixing both write paths,
+then verify the complete chain and exact row count. Commit/rollback and tamper
+rejection also pass. A compiler overlay restoring the historical moving-row lock
+reproduces a `prev_hash mismatch`. This verifies new writes, not repair of any
+previously corrupted production history. The historical finding follows.
+
 - **Severity:** high  **Category:** data_integrity  **Area:** notify-response-risk
 - **File:** pkg/audit/audit.go:63
 - **Failure:** `Log()` serializes on `SELECT ... ORDER BY id DESC LIMIT 1 FOR UPDATE` under READ COMMITTED. After a `FOR UPDATE` wait, EvalPlanQual re-checks only the locked tuple — the `ORDER BY/LIMIT` is not re-evaluated — so a writer that blocked on row N inserts with the stale prev_hash and doesn't see the committed row N+1. The UNIQUE constraint is on `chain_hash` only, so the divergent row inserts cleanly and `VerifyChain` reports a false `prev_hash mismatch`. Normal concurrent load corrupts the tamper-evidence chain (append-only triggers make it unrepairable).
@@ -187,18 +199,42 @@ The historical finding follows.
 ### H10. SAML/LDAP JIT login mints a session JWT with a stale session_epoch (token dead-on-arrival)
 
 **Closed by removal:** provider JIT reconciliation and local JWT issuance are deleted. OIDC issuer/subject resolution and opaque session creation use the current database epoch; the real-issuer browser suite proves first sign-in and role removal. Historical finding follows.
+
+**Reverified 2026-10-23:** `TestOIDCFirstSessionUsesCurrentEpoch` exercises the
+replacement identity store against real Postgres: the first provisioned session
+authenticates, an epoch change between resolution and login rejects session
+creation, the old session becomes unusable, and a fresh resolution/login succeeds.
+This adds store/session proof; it is not a new browser or live-issuer acceptance run.
+
 - **Severity:** high  **Category:** bug  **Area:** handler-core
 - **File:** internal/handler/auth.go:816
 - **Failure:** `issueLinkedSession` reads `sessionEpoch=0` for a new JIT user, then `reconcileJITRoles` bumps `users.session_epoch` to 1 in its own transaction, then `issueSession` issues a JWT with the stale `Epoch=0`. Middleware rejects `claims.Epoch < session_epoch` → every API call returns 401 "session revoked". First SAML/LDAP/OIDC login appears to succeed but is unusable; only a second login (no role change → no bump) works. Same transient breakage hits existing SSO users whenever asserted roles change.
 - **Fix:** Have `reconcileJITRoles` return the post-bump epoch (or re-SELECT it) and pass that into `issueSession`.
 
 ### H11. kube-bench compliance ingest accumulates duplicate rows every run (Summary/Checks counts drift)
+
+**Reverified on main `f63b06072`, 2026-10-23:** `persistBenchChecks` upserts on
+organization, cluster, node, framework and control. Real-Postgres HTTP regression
+`TestComplianceIngest_PerClusterNoClobber` repeats reports from two clusters,
+changes a control from FAIL to PASS without replacing its row ID, and repeats a
+report from a second node. It retains one current row per scope and preserves the
+other cluster/node statuses. No live benchmark was run. The historical finding follows.
+
 - **Severity:** high  **Category:** data_integrity  **Area:** compliance
 - **File:** internal/handler/compliance/compliance.go:326
 - **Failure:** `Ingest` INSERTs each check with no DELETE and no `ON CONFLICT`; `compliance_checks` has no unique constraint on (org_id, framework, control_id). The 6-hourly CronJob POSTs each run, so after N runs every control has N rows. Summary `COUNT(*)`s all rows (total inflated N×; status flips counted twice) and Checks `LIMIT 500` truncates real controls behind duplicates. The k8s-object collector dedupes; the kube-bench path is the asymmetric one.
 - **Fix:** Add a unique constraint on (org_id, cluster_id, framework, control_id) + `ON CONFLICT DO UPDATE`, or DELETE prior kube-bench rows in the same tx.
 
 ### H12. Collapsed external peers ("external", no slash) bypass CIDR-anchoring, breaking real external egress under enforcement
+
+**Reverified on main `f63b06072`, 2026-10-23:** `isExternalWorkload` recognizes
+both collapsed and named external peers. The real-Postgres lifecycle-preview test
+`TestNetworkPolicies_BareExternalAnchorsCIDRAndFQDN` verifies FQDN anchoring,
+IP-only `/32` CIDRs, and exclusion when the external address is missing. Restoring
+the historical prefix-only predicate with a compiler overlay fails the regression.
+This proves generated-policy behavior; it does not claim live Cilium enforcement.
+The historical finding follows.
+
 - **Severity:** high  **Category:** half_wired  **Area:** netpolicy
 - **File:** internal/handler/netpolicy/network_policies.go:566
 - **Failure:** Ingest collapses non-well-known external peers to bare `"external"` (real IP kept in `dst_addr`), but the read path detects externals only via `HasPrefix(dst, "external/")`. For bare `"external"` the prefix never matches: `DstIP` is never set, `tupleInclusion` returns include=true, and generation renders a `app=external` selector (matching no pod) instead of a `toCIDR`. Under protect mode Cilium default-denies the real upstream IP, breaking observed-and-allowed egress. Tests only use the un-collapsed `external/<name>` shape.

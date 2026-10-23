@@ -1,5 +1,7 @@
 # Database and storage lifecycle backlog
 
+**Latest source verification:** [2026-10-23 results for DB-01–04, DB-16 and DB-18](#october-23-source-reverification). Operational and deployment gates remain separate.
+
 Reviewed 2026-09-27 against the checked-in code and the existing local k3s
 release. This is the detailed open-item register for the OPS-2 storage item in
 `NEUVECTOR-PARITY-PLAN.md`; it does not mark the parent item complete. The
@@ -273,7 +275,7 @@ deployment was changed; DB-23 remains open for broader profiling and alarms.
 | DB-13 | **Open — decision + fix** | Define lifecycle-aware retention for `findings`. All current findings land in a DEFAULT child despite time partitioning; open findings and triage must not vanish by age alone (`internal/server/database/migrations/004_findings_partitioned.sql`). | Resolved/orphaned findings archive by policy; open/suppressed/accepted decisions remain visible; partitions or another bounded layout avoid default-child bloat. |
 | DB-14 | **Open — decision + fix** | Set separate policies for terminal versus stuck `scan_jobs`, attempts, named `image_scan_results`, registry results, and repository targets. Existing job TTL and orphan-digest cleanup do not bound all named results or verification history (`internal/handler/events_retention.go`, `internal/handler/repository_retention.go`). | Current/latest results and referenced attestations survive; stale jobs recover; historical results expire only after evidence and dependency checks. |
 | DB-15 | **Open — decision + fix** | Classify large `scan_evidence`, SBOM documents, image artifacts, scan attestations and verification records as current cache or durable evidence (`internal/server/database/migrations/063_scan_evidence.sql`, `internal/server/database/migrations/003_assets_and_images.sql`, `internal/server/database/migrations/084_scan_result_attestations.sql`). | A reference graph and restore test protect live decisions; size/age caps bound replaceable payloads. |
-| DB-16 | **Session families implemented; live/other histories open** | Migration 171 and the leader worker bound expired refresh/session rows and five-minute network snapshots/kill requests. Consumed unexpired digests, unknown legacy deadlines and audit receipts survive. See [cleanup contract](browser-sessions.md#operational-cleanup). Other operational histories remain DB-17. | Real PostgreSQL expiry, lock-skip, cascade-bound, composite-key and browser reuse tests; production-image browser validation. Live rollout, backlog/failure alarms and sustainable cleanup throughput remain open. |
+| DB-16 | **Current identity cleanup reverified; operational gates open** | After migration 187, the leader worker bounds expired OIDC login attempts and opaque identity sessions, plus five-minute network snapshots/kill requests. Current sessions and audit receipts survive. Cleanup metrics now name the current tables; other histories remain DB-17. | Real PostgreSQL batch/lock-skip/composite-key/partial-failure tests pass on the migrated schema. Live rollout, backlog/failure alarms and sustainable cleanup throughput remain open. |
 | DB-17 | **Open — decision + fix** | Set retention for receiver deliveries, compliance runs, support-bundle job metadata, restart events, and admission dry-run history; distinguish operational logs from evidence (`internal/server/database/migrations/020_settings_receivers_role_bindings.sql`, `internal/server/database/migrations/039_compliance_schedules.sql`). | Every high-rate history table has an owner, window, cleanup job, and an evidence exception where needed. |
 
 ## P1/P2: CVE, cache, and operations
@@ -317,3 +319,27 @@ Independent rollup progress, byte/rate quotas, durable side effects, 24-hour fle
 qualification and live rollout remain open. The separately requested
 [ClickHouse plan](CLICKHOUSE-PLAN.md) specifies a measured analytical-store
 evaluation, not an installed second database.
+
+
+## October 23 source reverification
+
+Source baseline `f63b06072f09424660f1a456f3adae3882cb4e9f` was reviewed alongside
+H9–H12 in the [ten-item continuation](security-testing.md#ten-item-security-and-lifecycle-continuation-2026-10-23).
+These are fresh source/database checks, not a new deployment or capacity claim.
+They do not close rollout, alarms, recovery, off-host or load acceptance gates.
+
+| Item | Verified behavior | Evidence |
+| --- | --- | --- |
+| DB-01 | Event and flow pruning preserves current rows with colliding partition-local tuple identities; batches and row locks are respected. | `TestEventsRetentionPartitionIdentityAndLocks`, `TestFlowRetentionPartitionIdentityAndBatch` |
+| DB-02 | Failed/lagging folds prevent raw expiry; late arrivals and refolds retain counts after pruning. Partition drops wait for folded history and exclude active ingest. | `TestRollupFailureAndLagBlockRetention`, `TestRollupLateArrivalPruneAndRefoldPreserveHistory`, `TestFlowPartitionExpiryRequiresFoldedHistory` |
+| DB-03 | Fresh persisted defaults are 30-day events, 14-day flows and 7-day jobs. Repeated bootstrap preserves explicit zero holds and custom windows. | `TestRetentionFirstBootSeedPreservesExistingPolicy`, `TestRetentionDefaultsPreserveStoredHolds` |
+| DB-04 | Each family takes the longest organization window; a hold affects its family, and invalid/unreadable settings prevent expiry. The leader passes these resolvers to row and partition workers. | `TestEffectiveRetentionKeepsFamilyHoldsIndependent`, `TestEffectiveRetentionRespectsEveryOrgAndFailsClosed`, `TestRollupExplicitZeroRetentionOverridesEnvironment`; `internal/server/leaderelection.go` inspection |
+| DB-16 | Current OIDC attempts/sessions and network snapshots/kill requests are reaped in bounded batches, skip locks, retain current records across reused IDs, and preserve audit evidence. Partial failures report completed work. | `TestSessionCleanupCurrentIdentityTablesAndCompositeKeys`, `TestSessionCleanupFailurePreservesPartialProgress` |
+| DB-18 | Identical feeds avoid row/checkpoint rewrites; corrected content changes data; failures roll back data and cursors; replica locks, restart, catch-up and mirror changes preserve progress. | `TestCVEFeedCheckpointRestartCorrectionAndRollback`, `TestCVEFeedReplicaLockAndCancellation`, `TestNVDCheckpoint*` |
+
+The DB-16 regression exposed outdated observability names after the identity
+cutover. `constellation_session_cleanup_deleted_total` now uses family values
+`oidc_login_attempts` and `identity_sessions` instead of `refresh_tokens` and
+`user_sessions`; cleanup log fields use the same names. Custom queries using the
+old label values must be updated. The deletion queries and retention windows did
+not change. No database migration or live cleanup was performed for this follow-up.
