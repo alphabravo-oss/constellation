@@ -1,7 +1,7 @@
 # Scanner cache diagnostics
 
-Scanner heartbeats report cache path readiness and filesystem capacity. An
-explicit status request additionally samples cache file usage. These are local
+Scanner heartbeats report cache path readiness, filesystem capacity and bounded
+cache file usage. Readiness checks omit file enumeration. These are local
 observations from each scanner, not PVC quotas or database-recovery evidence.
 
 ## Ten implementation items (2026-10-23)
@@ -58,14 +58,15 @@ kernel; the entry limit bounds enumeration and memory, not wall-clock latency.
 
 `records_truncated=true` means the displayed records omit information; it does
 not by itself imply partial totals. Inspect `usage_complete` separately. Ordinary
-heartbeats do not enumerate cache files. Write probes create and remove only their
+heartbeats run the bounded enumeration; readiness checks do not. Write probes create and remove only their
 own temporary files. They do not evict caches, update engine databases, change
 scanner topology, or enforce admission thresholds.
 
 For unavailable or write-failed paths, inspect mount configuration, permissions,
 bytes and inodes. For partial usage, resolve the reported error before treating
 subtotals as complete. Existing engine readiness/freshness checks remain necessary.
-DB-21 still requires a topology decision, filesystem alerts, restart/offline
+[Cache metrics and tested alerts](scanner-cache-monitoring.md) now provide the
+monitoring implementation. DB-21 still requires a topology decision, live alert delivery, restart/offline
 qualification and a measured Trivy/Grype refresh margin. This batch adds diagnostic
 prerequisites; no live deployment or cache eviction was performed.
 

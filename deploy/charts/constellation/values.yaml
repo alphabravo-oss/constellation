@@ -249,6 +249,11 @@ metrics:
       archivePendingIDDistance: 10000
       backupOverdueSeconds: 3600
       walBytesPerSecond: 104857600
+    scannerCache:
+      enabled: true            # requires prometheusRule.enabled and scanner.enabled
+      availableBytes: 1073741824
+      availableRatio: 0.10
+      freeInodeRatio: 0.05
     thresholds:
       heartbeatStaleSeconds: 120
       engineDBStaleSeconds: 172800

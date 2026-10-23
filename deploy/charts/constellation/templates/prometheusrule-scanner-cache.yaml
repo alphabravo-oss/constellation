@@ -1,0 +1,92 @@
+{{- $pr := .Values.metrics.prometheusRule -}}
+{{- $s := $pr.scannerCache -}}
+{{- if and $pr.enabled $s.enabled .Values.scanner.enabled -}}
+{{- range $name, $value := omit $s "enabled" -}}
+{{- if le (float64 $value) 0.0 -}}{{- fail (printf "metrics.prometheusRule.scannerCache.%s must be positive" $name) -}}{{- end -}}
+{{- end -}}
+{{- if or (ge (float64 $s.availableRatio) 1.0) (ge (float64 $s.freeInodeRatio) 1.0) -}}{{- fail "metrics.prometheusRule.scannerCache ratios must be below 1" -}}{{- end -}}
+{{- $scope := printf "namespace=%q,service=%q" .Release.Namespace (printf "%s-scanner" (include "constellation.fullname" .)) -}}
+{{- $healthy := printf "constellation_scanner_cache_collection_success{%s} == 1" $scope -}}
+{{- $up := printf "up{%s} == 1" $scope -}}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "constellation.fullname" . }}-scanner-cache
+  namespace: {{ $pr.namespace | default .Release.Namespace }}
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    {{- with $pr.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: constellation.scanner-cache
+      rules:
+        - alert: ConstellationScannerCacheBytesLow
+          expr: constellation_scanner_cache_available_bytes{ {{ $scope }} } < {{ $s.availableBytes }} and ({{ $healthy }}) and ignoring(cache) ({{ $up }})
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "Scanner cache filesystem has little available space"
+            description: "Check refresh working space and shared filesystem consumers. Available bytes exclude reserved blocks; do not evict active databases automatically. See docs/scanner-cache-monitoring.md."
+        - alert: ConstellationScannerCacheFreeRatioLow
+          expr: |
+            (constellation_scanner_cache_available_bytes{ {{ $scope }} } / constellation_scanner_cache_capacity_bytes{ {{ $scope }} } < {{ $s.availableRatio }})
+            and (constellation_scanner_cache_capacity_bytes{ {{ $scope }} } > 0)
+            and ({{ $healthy }})
+            and ignoring(cache) ({{ $up }})
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "Scanner cache filesystem free-space ratio is low"
+            description: "These are filesystem counters, not an enforced PVC quota. Do not sum values across engine directories on the same filesystem."
+        - alert: ConstellationScannerCacheInodesLow
+          expr: |
+            (constellation_scanner_cache_free_inodes{ {{ $scope }} } / constellation_scanner_cache_capacity_inodes{ {{ $scope }} } < {{ $s.freeInodeRatio }})
+            and (constellation_scanner_cache_capacity_inodes{ {{ $scope }} } > 0)
+            and (constellation_scanner_cache_inodes_known{ {{ $scope }} } == 1)
+            and ({{ $healthy }})
+            and ignoring(cache) ({{ $up }})
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "Scanner cache filesystem has few free inodes"
+            description: "Inspect small-file growth and temporary extraction directories. Unknown inode totals are not treated as exhaustion."
+        - alert: ConstellationScannerCacheCollectionFailed
+          expr: constellation_scanner_cache_collection_success{ {{ $scope }} } == 0 and ignoring(cache) ({{ $up }})
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: "Scanner cache capacity collection failed"
+            description: "Capacity values are withheld after an error. Check path type, permissions and mount availability before trusting missing capacity data."
+        - alert: ConstellationScannerCacheCapacityUnknown
+          expr: constellation_scanner_cache_capacity_known{ {{ $scope }} } == 0 and ({{ $healthy }}) and ignoring(cache) ({{ $up }})
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "Scanner cache byte capacity is unknown"
+            description: "The filesystem counters are inconsistent or unrepresentable. Inspect the filesystem and independent volume monitoring."
+        - alert: ConstellationScannerCachePathMissing
+          expr: constellation_scanner_cache_present{ {{ $scope }},cache=~"grype|trivy" } == 0 and ({{ $healthy }}) and ignoring(cache) ({{ $up }})
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "An enabled vulnerability database cache directory is missing"
+            description: "Check cache mounts and offline database provisioning. Lazy XDG and Syft scratch directories are excluded."
+        - alert: ConstellationScannerCachePathUnconfigured
+          expr: constellation_scanner_cache_configured{ {{ $scope }},cache=~"grype|trivy" } == 0 and (constellation_scanner_cache_enabled{ {{ $scope }} } == 1) and ignoring(cache) ({{ $up }})
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "An enabled scanner engine has no observed cache path"
+            description: "Set the engine cache environment variable consistently with its actual directory. Implicit CLI defaults cannot be monitored by this collector."
+        - alert: ConstellationScannerCacheMetricsUnavailable
+          expr: |
+            (up{ {{ $scope }} } == 0)
+            or (({{ $up }}) unless ignoring(cache) constellation_scanner_cache_enabled{ {{ $scope }} })
+            or absent(up{ {{ $scope }} })
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "Scanner cache metrics are unavailable"
+            description: "Check scanner ServiceMonitor discovery, target health and exporter version. A healthy replica does not hide another target's failed scrape or missing collector."
+{{- end }}
