@@ -107,6 +107,33 @@ acceptance; do not run broad volume pruning against application or backup data.
 
 ---
 
+### Grype staging cleanup
+
+After online refresh commands finish, the worker can remove abandoned
+`grype-db-download*` directories from its explicitly configured Grype cache.
+It uses the worker cache path, then `GRYPE_DB_CACHE_DIR`; without either it skips
+cleanup. The path is interpreted literally, including any glob characters.
+
+Only directories with a suffix after `grype-db-download` and a modification time
+at least 24 hours old are eligible. Recent and future-dated directories, regular
+files, symlinks, the bare prefix, and active version directories such as `6/`
+are preserved. Removal stays within the opened cache root and does not follow
+nested symlinks outside it. Each pass examines at most 2,000 top-level entries and
+removes at most 20 eligible directories. Logs report removal counts, limits, and
+errors; a limited pass is not proof that the cache is fully cleaned.
+
+Cancellation stops cleanup between directory operations. A recursive removal
+already started can still finish; the limits do not bound the contents or runtime
+of one directory. The cache must belong to one worker, with no concurrent external
+importer during cleanup: an old directory timestamp is not evidence that another
+process has released it. Directory enumeration order is filesystem-dependent, so
+a cache with more than 2,000 persistent entries can require operator cleanup.
+Offline mode and disabled Grype continue to bypass automatic cleanup.
+
+Trivy metadata must contain a complete single JSON document within 64 KiB.
+Grype recovery rejects malformed URL query parameters as well as missing or
+invalid SHA256 checksums, rather than silently dropping invalid parameters.
+
 ## 2. Enable offline mode
 
 Set these Helm values (chart `deploy/charts/constellation`, key
