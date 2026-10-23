@@ -407,7 +407,10 @@ scanner refreshes its own vulnerability databases according to
 `scanner.vulnDB.refreshInterval`; `scanner.vulnDB.offline=true` disables
 internet refreshes and requires pre-loaded data. With one scanner replica,
 `scanner.cache.persistent=true` mounts a dedicated PVC for the caches. A
-multi-replica scanner uses pod-local caches instead of sharing a RWO claim.
+multi-replica scanner must use the explicit pod-local default
+(`scanner.cache.persistent=false`). Persistence with multiple replicas or HPA is
+rejected. Existing persistent installations must preserve their mode and claim
+identity during upgrades; see [cache topology](scanner-cache-topology.md).
 
 The API's `cve_records` catalog is separate from those scanner caches and is
 updated by the live KEV/EPSS importers; NVD enrichment is opt-in through system
@@ -697,7 +700,7 @@ production supply an externally managed `ObjectStore` through
 | `scanner.engines.grype`               | `true`                                               | Grype image and package vulnerability matching                  |
 | `scanner.vulnDB.refreshInterval`      | `6h`                                                 | Trivy/Grype database refresh cadence                            |
 | `scanner.vulnDB.offline`              | `false`                                              | Disable internet database refreshes; pre-load for offline use   |
-| `scanner.cache.persistent`            | `true`                                               | Use a cache PVC with one non-autoscaled scanner replica         |
+| `scanner.cache.persistent`            | `false`                                              | Explicit PVC opt-in; requires one non-autoscaled replica        |
 | `scanner.cache.size`                  | `8Gi`                                                | Scanner cache PVC size                                           |
 | `frontend.replicas`                   | `2`                                                  | Behind an ingress controller                                    |
 | `runtimeAgent.tolerations`            | tolerate all NoSchedule/NoExecute                    | DaemonSet must land on every node                               |
@@ -1169,3 +1172,11 @@ byte/inode-ratio budgets before activation. See the
 [metric contract, values and response guide](scanner-cache-monitoring.md).
 Default parent monitoring toggles remain disabled; no cache topology or automatic
 eviction policy is selected by these rules.
+
+### Scanner cache lifecycle
+
+[Scanner cache topology](scanner-cache-topology.md) documents managed/external
+claims, retention, legacy claim-name upgrades and optional cache/tmp limits.
+The default remains two replicas with pod-local storage, now represented
+explicitly in values and schema. Do not upgrade an existing implicit persistent
+installation without preserving its persistence setting and claim name.
