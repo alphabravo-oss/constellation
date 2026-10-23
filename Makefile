@@ -182,6 +182,7 @@ helm-template-smoke: ## Render the chart against common value combinations
 	@./scripts/test-helm-identity.sh
 	@./scripts/test-helm-admission.sh
 	@./scripts/test-helm-operator.sh
+	@./scripts/test-helm-audit-archive.sh
 	@echo "helm-template-smoke: ok"
 
 CLUSTER ?=
