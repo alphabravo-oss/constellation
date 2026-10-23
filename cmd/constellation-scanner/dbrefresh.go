@@ -93,7 +93,8 @@ func (w *worker) installedDBRevision(ctx context.Context, engine string) (string
 		var metadata struct {
 			UpdatedAt string `json:"UpdatedAt"`
 		}
-		if err := json.NewDecoder(io.LimitReader(file, maxEngineDBMetadataBytes)).Decode(&metadata); err != nil {
+		body, err := io.ReadAll(io.LimitReader(file, maxEngineDBMetadataBytes+1))
+		if err != nil || len(body) > maxEngineDBMetadataBytes || json.Unmarshal(body, &metadata) != nil {
 			return "", "invalid"
 		}
 		return normalizedDBRevision(metadata.UpdatedAt)
@@ -152,7 +153,11 @@ func grypeRecoveryArchive(raw string) (string, error) {
 	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.Fragment != "" {
 		return "", fmt.Errorf("recovery requires an HTTPS archive URL")
 	}
-	checksums := u.Query()["checksum"]
+	query, err := url.ParseQuery(u.RawQuery)
+	if err != nil {
+		return "", fmt.Errorf("invalid archive query")
+	}
+	checksums := query["checksum"]
 	if len(checksums) != 1 || !strings.HasPrefix(checksums[0], "sha256:") {
 		return "", fmt.Errorf("recovery requires one SHA256 archive checksum")
 	}
@@ -299,29 +304,7 @@ func (w *worker) refreshVulnDBs(ctx context.Context, offline bool) {
 	w.refreshTrivyJavaDB(ctx)
 	run("grype", "db", "update", "-q")
 	if w.engines == nil || w.engines["grype"] {
-		w.pruneGrypeStaging()
-	}
-}
-
-// pruneGrypeStaging removes grype's abandoned download-staging dirs from the grype
-// cache, keeping the active versioned DB (e.g. `6/`). Best-effort + quiet.
-func (w *worker) pruneGrypeStaging() {
-	dir := os.Getenv("GRYPE_DB_CACHE_DIR")
-	if dir == "" {
-		dir = "/tmp/grype/db"
-	}
-	matches, err := filepath.Glob(filepath.Join(dir, "grype-db-download*"))
-	if err != nil {
-		return
-	}
-	removed := 0
-	for _, m := range matches {
-		if err := os.RemoveAll(m); err == nil {
-			removed++
-		}
-	}
-	if removed > 0 {
-		w.logger.Info("grype cache: pruned stale download-staging dirs", "count", removed, "dir", dir)
+		w.pruneGrypeStaging(ctx)
 	}
 }
 
