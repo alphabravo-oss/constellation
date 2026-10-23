@@ -4020,6 +4020,16 @@ export interface ScannerCacheHealthEntry {
   status?: string;
   error?: string;
   free_bytes?: number;
+  capacity_known?: boolean;
+  capacity_bytes?: number;
+  filesystem_free_bytes?: number;
+  inodes_known?: boolean;
+  capacity_inodes?: number;
+  free_inodes?: number;
+  usage_complete?: boolean;
+  usage_entries_visited?: number;
+  usage_error?: string;
+  capacity_error?: string;
   record_count?: number;
   record_size_bytes?: number;
   records_truncated?: boolean;
