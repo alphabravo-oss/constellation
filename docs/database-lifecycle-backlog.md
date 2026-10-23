@@ -2,6 +2,44 @@
 
 **Latest source verification:** [2026-10-23 results for DB-01–04, DB-16 and DB-18](#october-23-source-reverification). Operational and deployment gates remain separate.
 
+## October 23 completion pass
+
+The owner requested completion of DB-01–23, including implementation and
+qualification. Work is tracked by the original IDs below, not by counting small
+fixes as completed backlog items. Earlier dated observations are historical.
+
+A fresh read-only cluster check at approximately 16:46 UTC found one healthy
+CNPG instance (`constellation-cnpg-postgres`), database migration **190**, an
+8,702 MiB database, `archive_mode=on`, a recent successful WAL archive and zero
+reported archive failures. The scheduled October 23 02:00 backup is completed.
+The old statements that the live database is still a StatefulSet at migration
+167 with archiving off are superseded by this observation. This does not prove
+independent recovery, immutable retention, or separate-node availability.
+PCAP maintenance is already wired through `internal/server/runtime_maintenance.go`;
+its opt-in durable-store guard still applies. The prior statement that it has no
+production caller is superseded.
+
+| IDs | Remaining completion work |
+| --- | --- |
+| DB-01–04 | Verify deployed behavior and policy against current source; preserve historical-loss caveat; qualify maintenance/ingest concurrency and fold-lag notification. |
+| DB-05 | Verify current scheduled recovery points with a fresh isolated restore, record RPO/RTO, and qualify failure notification; off-host and real node-failure gates remain deferred unless explicitly resumed. |
+| DB-06 | Keep current audit receipts until their consumers and replacement evidence contract are mapped; do not silently suppress security evidence. |
+| DB-07–09 | Qualify signed archive catch-up/read-back and independent verification; resolve the recorded historical chain discontinuity without rewriting hashes; design trusted query anchors before any hot-chain deletion. |
+| DB-10 | Add Kubernetes-audit freshness/gap observability and export/hold-aware retention. |
+| DB-11 | Qualify existing PCAP maintenance; add separate threat/payload/forensics retention with preserved case evidence. |
+| DB-12 | Add rollup retention that respects the raw fold boundary and reports unavailable historical ranges. |
+| DB-13 | Preserve open/triaged findings; implement eligible resolved/orphaned archival and bounded storage. |
+| DB-14–15 | Map result/evidence/attestation references, preserve current decisions, and expire only unreferenced eligible history. |
+| DB-16 | Qualify current identity cleanup and its deployed alarms/throughput. |
+| DB-17 | Classify operational histories separately from evidence and add bounded, hold-aware maintenance. |
+| DB-18–20 | Qualify real-feed checkpoint/WAL behavior; document feed membership/bootstrap semantics; profile the existing PostgreSQL catalog before considering another format. |
+| DB-21 | Qualify the merged scanner topology, refresh policy, staging cleanup, restart/offline behavior, capacity and notifications. |
+| DB-22 | Honor scheduled object destinations with verified read-back; protect minimum backup copies and remote receipts; qualify lifecycle and restoration separately from PostgreSQL PITR. |
+| DB-23 | Complete remaining lag/WAL signals, activate/qualify monitoring, and measure supported workload/capacity with failure recovery. |
+
+No new evidence deletion or live rollout has been performed in this completion
+pass. Local code/test success alone does not close operational gates.
+
 Reviewed 2026-09-27 against the checked-in code and the existing local k3s
 release. This is the detailed open-item register for the OPS-2 storage item in
 `NEUVECTOR-PARITY-PLAN.md`; it does not mark the parent item complete. The

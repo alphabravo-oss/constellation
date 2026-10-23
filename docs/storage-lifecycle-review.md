@@ -103,3 +103,30 @@ memberships; these are source labels, not a count of currently enabled feeds.
 
 No audit rows or CVE records were deleted for this review. The existing URL,
 certificate, and login configuration were not changed.
+
+## Scheduled organization-backup completion (October 23)
+
+Scheduled backups now honor their stored S3 bucket, prefix, and endpoint. The
+API rejects incomplete destinations. A run exports locally, uploads under its
+unique catalog identity using the existing AWS SDK credential chain, then reads
+the object back and compares exact size and SHA256. Only that verified upload
+can produce a successful remote receipt and allow retention. A failed upload or
+read-back retains the local artifact and failed receipt and skips retention.
+The scheduled run has a 30-minute context budget; single-object uploads are
+limited to 5 GiB. HTTP endpoints remain supported for explicitly configured
+in-cluster object stores; use HTTPS for transport outside that trust boundary.
+
+Local retention always preserves at least the newest succeeded catalog entry.
+An explicit keep-last value is a protected-copy floor that age cannot override.
+Both rules zero still disable pruning. A catalog success is not independent
+restore proof. Remote receipts and their local artifacts are conservatively
+excluded from this local pruner; configure and qualify object lifecycle and
+manual/failed-artifact cleanup separately before removing those receipts.
+These organization exports do not replace PostgreSQL PITR or its audit history.
+
+Qualification on October 23 used the local RustFS service with a newly created
+isolated bucket, a fresh signed organization export from a disposable migrated
+PostgreSQL database, exact object read-back and independent signature verification.
+The test removed its own object/bucket. This proves the destination path locally;
+it does not establish off-host durability, immutable lifecycle, or a full database
+restore. Evidence: `/root/constellation-lifecycle-completion-20261023/real-object-store.log`.

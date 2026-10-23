@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -41,7 +42,7 @@ type ScheduleExecutorConfig struct {
 	BackupDir string
 	// SignKeyPath is the PEM ed25519 key used when a schedule's sign_mode=static-key.
 	SignKeyPath string
-	// DefaultKeepLast is a fallback retention count used only when a schedule leaves
+	// DefaultKeepLast is a fallback protected-copy count used only when a schedule leaves
 	// retention_keep_last NULL/0 AND CONSTELLATION_BACKUP_DEFAULT_KEEP_LAST is set. Left
 	// 0 (the default) retention is fully opt-in per schedule.
 	DefaultKeepLast int
@@ -67,6 +68,9 @@ type schedule struct {
 	OrgName         string
 	CronExpr        string
 	Enabled         bool
+	S3Bucket        string
+	S3Prefix        string
+	S3Endpoint      string
 	SignMode        string
 	NextRunAt       *time.Time
 	RetentionKeep   int // 0 = disabled
@@ -93,11 +97,8 @@ type backupRecord struct {
 	LocalPath string
 }
 
-// retentionVictims returns the subset of succeeded backups (newest-first ordering is
-// NOT assumed — the function sorts by StartedAt desc itself) that should be pruned given
-// a keep-last count and a max-age. A backup is a victim if it falls outside the newest
-// keepLast rows OR is older than maxAge. keepLast<=0 disables the count rule; maxAge<=0
-// disables the age rule. When BOTH are disabled nothing is pruned.
+// retentionVictims keeps at least the newest successful backup, and never lets
+// max age override an explicit keep-last floor. Zero rules retain everything.
 func retentionVictims(recs []backupRecord, keepLast, maxAgeDays int, now time.Time) []backupRecord {
 	if keepLast <= 0 && maxAgeDays <= 0 {
 		return nil
@@ -105,17 +106,21 @@ func retentionVictims(recs []backupRecord, keepLast, maxAgeDays int, now time.Ti
 	// Copy + sort newest-first so "keep last N" is deterministic.
 	sorted := make([]backupRecord, len(recs))
 	copy(sorted, recs)
-	for i := 1; i < len(sorted); i++ {
-		for j := i; j > 0 && sorted[j].StartedAt.After(sorted[j-1].StartedAt); j-- {
-			sorted[j], sorted[j-1] = sorted[j-1], sorted[j]
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].StartedAt.Equal(sorted[j].StartedAt) {
+			return sorted[i].ID.String() > sorted[j].ID.String()
 		}
-	}
+		return sorted[i].StartedAt.After(sorted[j].StartedAt)
+	})
 	var cutoff time.Time
 	if maxAgeDays > 0 {
 		cutoff = now.Add(-time.Duration(maxAgeDays) * 24 * time.Hour)
 	}
 	var victims []backupRecord
 	for i, r := range sorted {
+		if i < max(1, keepLast) {
+			continue
+		}
 		overCount := keepLast > 0 && i >= keepLast
 		tooOld := maxAgeDays > 0 && r.StartedAt.Before(cutoff)
 		if overCount || tooOld {
@@ -189,6 +194,8 @@ func tickSchedules(ctx context.Context, pool *pgxpool.Pool, cfg ScheduleExecutor
 // runScheduledBackup performs one org-backup for a due schedule, then applies retention
 // and advances next_run_at. Failures are recorded on the schedule row, not fatal.
 func runScheduledBackup(ctx context.Context, pool *pgxpool.Pool, cfg ScheduleExecutorConfig, s schedule, now time.Time, logger *slog.Logger) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	defer cancel()
 	id := uuid.New()
 	mode, signingErr := ResolveSignMode(s.SignMode, SignModeStaticKey)
 	signed := signingErr == nil && mode != SignModeNone
@@ -210,6 +217,12 @@ VALUES ($1, $2, 'org-backup', 'running', NOW(), $3, $4)`, id, s.OrgID, signed, F
 	fname := ArtifactName(s.OrgName, id, now)
 	path := filepath.Join(cfg.BackupDir, fname)
 
+	destination, destinationErr := scheduleDestination(s, fname)
+	if destinationErr != nil {
+		_, _ = pool.Exec(ctx, `UPDATE backups SET status='failed',error=$2,finished_at=NOW() WHERE id=$1`, id, destinationErr.Error())
+		recordScheduleRun(ctx, pool, s, now, "failed", destinationErr.Error())
+		return
+	}
 	opts := ExportOptions{
 		OrgID:          s.OrgID.String(),
 		OrgName:        s.OrgName,
@@ -223,14 +236,21 @@ VALUES ($1, $2, 'org-backup', 'running', NOW(), $3, $4)`, id, s.OrgID, signed, F
 
 	res, err := ExportManaged(ctx, pool, cfg.BackupDir, fname, opts)
 	if err != nil {
-		_, _ = pool.Exec(ctx, `UPDATE backups SET status='failed', error=$2, finished_at=NOW() WHERE id=$1`, id, "export: "+err.Error())
-		recordScheduleRun(ctx, pool, s, now, "failed", "export: "+err.Error())
+		recordScheduledFailure(ctx, pool, s, id, now, "export: "+err.Error(), "", 0)
 		if logger != nil {
 			logger.Warn("backup executor: export failed", slog.String("org", s.OrgID.String()), slog.String("err", err.Error()))
 		}
 		return
 	}
 
+	checksum := ""
+	if destination != "" {
+		checksum, err = uploadScheduledArtifact(ctx, destination, s.S3Endpoint, path, res.Bytes)
+		if err != nil {
+			recordScheduledFailure(ctx, pool, s, id, now, err.Error(), path, res.Bytes)
+			return
+		}
+	}
 	tables := make([]string, 0, len(res.Manifest.Tables))
 	for _, t := range res.Manifest.Tables {
 		tables = append(tables, t.Name)
@@ -238,9 +258,9 @@ VALUES ($1, $2, 'org-backup', 'running', NOW(), $3, $4)`, id, s.OrgID, signed, F
 	if _, err := pool.Exec(ctx, `
 UPDATE backups
    SET status='succeeded', finished_at=NOW(), size_bytes=$2, signer_identity=$3,
-       signed=$4, tables_included=$5, local_path=$6, format_version=$7
+       signed=$4, tables_included=$5, local_path=$6, format_version=$7, s3_uri=NULLIF($8,''), sha256=NULLIF($9,'')
  WHERE id=$1`, id, res.Bytes, res.SignerIdentity, res.SignMode != SignModeNone && res.SignMode != "",
-		tables, path, FormatVersion); err != nil {
+		tables, path, FormatVersion, destination, checksum); err != nil {
 		recordScheduleRun(ctx, pool, s, now, "failed", "update: "+err.Error())
 		return
 	}
@@ -263,7 +283,8 @@ UPDATE backups
 }
 
 // applyRetention deletes succeeded org-backups outside the retention window and removes
-// their local artifacts. Returns the number of pruned rows.
+// their local artifacts. Remote receipts remain available for independent object
+// lifecycle and restore verification. Returns the number of pruned rows.
 func applyRetention(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, keepLast, maxAgeDays int, now time.Time, logger *slog.Logger) int {
 	if keepLast <= 0 && maxAgeDays <= 0 {
 		return 0
@@ -271,7 +292,7 @@ func applyRetention(ctx context.Context, pool *pgxpool.Pool, orgID uuid.UUID, ke
 	rows, err := pool.Query(ctx, `
 SELECT id, started_at, COALESCE(local_path,'')
   FROM backups
- WHERE org_id=$1 AND mode='org-backup' AND status='succeeded'
+ WHERE org_id=$1 AND mode='org-backup' AND status='succeeded' AND COALESCE(s3_uri,'')=''
  ORDER BY started_at DESC`, orgID)
 	if err != nil {
 		if logger != nil {
@@ -334,6 +355,15 @@ func removeUnsharedArtifact(ctx context.Context, pool *pgxpool.Pool, v backupRec
 	return RemoveArtifact(v.LocalPath)
 }
 
+// Persist failure after a canceled upload/export without extending the operation
+// itself. A bounded independent context prevents stranded running receipts.
+func recordScheduledFailure(ctx context.Context, pool *pgxpool.Pool, s schedule, id uuid.UUID, now time.Time, message, path string, size int64) {
+	finalize, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	_, _ = pool.Exec(finalize, `UPDATE backups SET status='failed',error=$2,finished_at=NOW(),local_path=NULLIF($3,''),size_bytes=$4 WHERE id=$1 AND status='running'`, id, message, path, size)
+	recordScheduleRun(finalize, pool, s, now, "failed", message)
+}
+
 // recordScheduleRun advances next_run_at and stamps last_* on the schedule row.
 func recordScheduleRun(ctx context.Context, pool *pgxpool.Pool, s schedule, now time.Time, status, errMsg string) {
 	next, err := NextBackupRun(s.CronExpr, now)
@@ -356,7 +386,8 @@ UPDATE backup_schedules SET last_status='failed', last_error=$2, updated_at=NOW(
 func loadSchedules(ctx context.Context, pool *pgxpool.Pool) ([]schedule, error) {
 	rows, err := pool.Query(ctx, `
 SELECT bs.org_id, o.name, bs.cron_expr, bs.enabled, bs.sign_mode, bs.next_run_at,
-       COALESCE(bs.retention_keep_last,0), COALESCE(bs.retention_max_age_days,0)
+       COALESCE(bs.retention_keep_last,0), COALESCE(bs.retention_max_age_days,0),
+ COALESCE(bs.s3_bucket,''),COALESCE(bs.s3_prefix,''),COALESCE(bs.s3_endpoint,'')
   FROM backup_schedules bs
   JOIN orgs o ON o.id = bs.org_id
  WHERE bs.enabled = true`)
@@ -368,7 +399,7 @@ SELECT bs.org_id, o.name, bs.cron_expr, bs.enabled, bs.sign_mode, bs.next_run_at
 	for rows.Next() {
 		var s schedule
 		if err := rows.Scan(&s.OrgID, &s.OrgName, &s.CronExpr, &s.Enabled, &s.SignMode,
-			&s.NextRunAt, &s.RetentionKeep, &s.RetentionMaxAge); err != nil {
+			&s.NextRunAt, &s.RetentionKeep, &s.RetentionMaxAge, &s.S3Bucket, &s.S3Prefix, &s.S3Endpoint); err != nil {
 			return nil, err
 		}
 		out = append(out, s)
