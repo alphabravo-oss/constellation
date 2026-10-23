@@ -46,7 +46,7 @@ production caller is superseded.
 | DB-16 | Qualify current identity cleanup and its deployed alarms/throughput. |
 | DB-17 | Classify operational histories separately from evidence and add bounded, hold-aware maintenance. |
 | DB-18–20 | Real KEV/EPSS replay qualification passed (394,803 rows, no replay rewrites/WAL). Historical source/KEV semantics and opt-in resumable NVD backfill are implemented; measured catalog indexing keeps PostgreSQL. Source deployment and full NVD mirror traversal remain operational gates. See [catalog decision](cve-catalog-capacity.md) and [feed contract](cve-feed-checkpoints.md). |
-| DB-21 | Qualify the merged scanner topology, refresh policy, staging cleanup, restart/offline behavior, capacity and notifications. |
+| DB-21 | Real Trivy/Grype package matching passed across two network-isolated container starts using unchanged private DB copies; missing DBs fail closed. Live topology, refresh/extraction headroom and notifications remain separate gates. |
 | DB-22 | Scheduled destinations upload/read-back and bounded local retention are implemented. The copy floor requires available files and keeps remote/failed receipts; manual successful local backups already share this policy. Independent signed local-file and local-object-store configuration restoration into a separate database now pass. Remote lifecycle/off-host durability remain open, separate from PostgreSQL PITR. |
 | DB-23 | Complete remaining lag/WAL signals, activate/qualify monitoring, and measure supported workload/capacity with failure recovery. |
 

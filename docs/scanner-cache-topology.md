@@ -122,3 +122,47 @@ selection, PVC attachment/permissions, simultaneous refresh headroom, offline
 pod replacement, live alerts and restart qualification remain open. Use the
 [cache monitoring guide](scanner-cache-monitoring.md) and
 [offline provisioning instructions](offline-scanning.md) when qualifying a rollout.
+
+## October 23 local offline process-replacement qualification
+
+`TestBundledPackageMatchersOffline` now exercises the current Trivy/Grype package
+matcher wrappers with actual tools and preloaded databases. It is opt-in through
+`CONSTELLATION_TEST_OFFLINE_MATCHERS=true`; the ordinary suite skips it explicitly.
+Both cache paths must be configured. A known-vulnerable lodash 4.17.19 package is
+matched twice per engine; finding identities must remain stable and a separate
+empty cache must fail instead of returning a successful empty scan.
+
+Local qualification compiled the current test into a static executable and ran
+it in two successive fresh containers using the existing scanner image
+`sha256:4cd3d0bbb98cd0e04ea1216518f76454593b1306aaed4f0718a530ab8d2e79f0`.
+Both runs used `--network none`, a read-only container root, a 256 MiB writable
+`/tmp`, two CPUs, a 2 GiB memory limit, and the image's UID 10001. The test used
+isolated copies of the preloaded engine DB directories; it did not mount the
+live scanner cache or replace the running scanner. The image's Grype reports
+0.120.1-constellation.2 and the source commit pinned by scanner-tools/sources.json.
+
+All five copied database files (4,954,046,907 bytes, approximately 4.61 GiB)
+retained identical SHA-256 values after both runs. Both engines reported five
+findings each with stable per-engine finding digests across process replacement.
+The first complete test took 32.41 seconds and the second 5.80 seconds; the shared
+host page cache affects these timings. These are a one-package fixture result,
+not cold-host, full-image, sustained concurrency or p95/p99 performance results.
+The missing-database assertions passed on both runs. Logs, before hashes and the
+machine-readable result are in the October 23 lifecycle evidence directory. The
+temporary containers and isolated cache copies were removed after verification.
+
+To repeat, compile `go test -c ./internal/scanner` with `CGO_ENABLED=0`, mount the
+binary read-only into the digest-pinned scanner image and mount a private writable
+copy of the prepared cache. Set `TRIVY_CACHE_DIR`, `GRYPE_DB_CACHE_DIR`,
+`CONSTELLATION_TEST_OFFLINE_MATCHERS=true`, `CONSTELLATION_SCANNER_OFFLINE_DB=true`
+and `GRYPE_DB_AUTO_UPDATE=false`. Run only `^TestBundledPackageMatchersOffline$`
+with networking disabled; remove that container and run a new one against the
+same private cache. Compare finding digests and DB file hashes. Never point this
+qualification at a live writable cache.
+
+This closes the local package-matching/offline process-replacement rehearsal.
+It does not prove Kubernetes PVC attachment, eviction behavior, simultaneous DB
+refresh headroom, image extraction capacity or live notification delivery. The
+existing 8 GiB cache request must not be declared sufficient from steady-state
+DB bytes alone; archive download and replacement staging require additional room.
+Publishing and live rollout remain deferred with Actions disabled.
