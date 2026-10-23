@@ -10,6 +10,17 @@ The owner requested completion of DB-01–23, including implementation and
 qualification. Work is tracked by the original IDs below, not by counting small
 fixes as completed backlog items. Earlier dated observations are historical.
 
+The owner subsequently directed **code and local verification only**, with GitHub
+Actions kept disabled. Release publishing, live rollout and live alert delivery
+are deferred; off-host recovery and real node-failure deferrals remain in place.
+These operational gates are not requests for further approval.
+
+Independent complete-chain replay is now available through
+`audit-archiver --verify-chain-dir`, with an independently trusted head digest.
+Local PostgreSQL fixtures cover three signed segments, missing/corrupt segments,
+truncated heads, stream/link changes and cancellation. This does not clear the
+historical row-53 discontinuity or implement hot-chain deletion.
+
 A fresh read-only cluster check at approximately 16:46 UTC found one healthy
 CNPG instance (`constellation-cnpg-postgres`), database migration **190**, an
 8,702 MiB database, `archive_mode=on`, a recent successful WAL archive and zero

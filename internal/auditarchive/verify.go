@@ -33,20 +33,24 @@ func Verify(ctx context.Context, path string, raw, sig, cert []byte, opts backup
 		return m, err
 	}
 	defer func() { _ = f.Close() }()
+	return m, verifyArchiveFile(ctx, f, m)
+}
+
+func verifyArchiveFile(ctx context.Context, f *os.File, m Manifest) error {
 	stat, err := f.Stat()
 	if err != nil {
-		return m, err
+		return err
 	}
 	if !stat.Mode().IsRegular() || stat.Size() > MaxArchiveBytes {
-		return m, errors.New("invalid archive file size or type")
+		return errors.New("invalid archive file size or type")
 	}
 	if err = verifyCompressedHash(f, m); err != nil {
-		return m, err
+		return err
 	}
 	if err = replay(ctx, f, m); err != nil {
-		return m, err
+		return err
 	}
-	return m, nil
+	return nil
 }
 
 func verifyManifest(ctx context.Context, raw, sig, cert []byte, opts backup.VerifierOptions) (Manifest, error) {

@@ -35,6 +35,7 @@ the source and restored database share the pre-existing row-53 chain break.
 Temporary recovery resources were subsequently removed.
 
 The release guide requires trusted signatures and source-bound SLSA provenance
-for published role images. GitHub Actions remains disabled; enabling release
-workflows is a distinct deployment decision. Local/source tests and merged PRs
+for published role images. The owner explicitly directed that GitHub Actions remain disabled and work
+continue through code and local verification only. Release publishing and live
+rollout are deferred, alongside off-host recovery and real node-failure tests. Local/source tests and merged PRs
 are not evidence that the live release runs the new workers or alert rules.

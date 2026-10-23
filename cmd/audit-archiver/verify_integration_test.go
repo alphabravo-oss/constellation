@@ -3,6 +3,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"flag"
 	"net"
 	"os"
@@ -46,6 +48,19 @@ func TestVerifyCLIWithDatabaseUnavailable(t *testing.T) {
 	if err = run(); err != nil {
 		t.Fatalf("offline CLI required database or AWS: %v", err)
 	}
+	raw, err := os.ReadFile(filepath.Join(c.OutDir, filepath.Base(m.ManifestKey)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(raw)
+	os.Args = []string{"audit-archiver", "--sign-mode=static-key", "--verify-key=" + pub,
+		"--verify-chain-dir=" + c.OutDir, "--trusted-head=" + m.ManifestKey,
+		"--trusted-head-sha256=" + hex.EncodeToString(digest[:])}
+	flag.CommandLine = flag.NewFlagSet("offline-chain", flag.ContinueOnError)
+	if err = run(); err != nil {
+		t.Fatalf("offline chain CLI required database or AWS: %v", err)
+	}
+	os.Args = args
 	signature := filepath.Join(c.OutDir, filepath.Base(m.SignatureKey))
 	if err = os.WriteFile(signature, []byte("corrupt"), 0o600); err != nil {
 		t.Fatal(err)
