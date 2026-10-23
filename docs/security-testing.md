@@ -2936,3 +2936,42 @@ Evidence is retained in `/root/constellation-h7-20261023/`:
 This is rendered-chart acceptance. It does not connect to an external database,
 create customer Secrets, start admission pods, or establish live webhook readiness
 or quarantine enforcement. No live deployment or policy was changed.
+
+
+## Operator policy RBAC reverification (2026-10-23)
+
+Main source `3e3447372f11e767aa2f75a02cabe4c4bf2acbff` already includes H8's missing
+admission/response policy CR permissions. The controllers read/watch policy CRs,
+update their objects to manage finalizers, and update status; the chart grants
+those operations and binds them to the deployed operator ServiceAccount. The CRDs
+are cluster-scoped even when `namespaced=true` limits the namespaced workload
+cache. Policy-controller startup still requires a configured database DSN.
+
+The new `scripts/test-helm-operator.sh` is part of `make helm-template-smoke`.
+Helm 4.3.1 renders both workload scopes with default/custom resource names in a
+nondefault release namespace, plus an operator-disabled case. Assertions follow
+the Deployment account, ServiceAccount, ClusterRoleBinding subject/role reference,
+and ClusterRole rules. They verify the shipped admission/response CRDs and status
+subresources, required verbs, unrestricted resource names, absence of wildcard
+grants, watch namespace configuration, and disabled-resource omission.
+
+Evidence is retained in `/root/constellation-h8-20261023/`:
+
+- `operator-chart.log`: all five rendered configurations pass.
+- `historical-missing-rbac.log`: deleting the admission/response policy grants in
+  a disposable chart copy fails on missing admission-rule permissions.
+- `missing-object-update.log`: removing the object `update` verb fails even when
+  `patch` and finalizer/status grants remain present.
+- `wrong-subject.log`: changing the policy binding's subject namespace fails.
+  These controls do not modify the source checkout.
+- `helm.log`: `make helm-lint helm-template-smoke` passes, including the new
+  operator cases and existing HA, identity and admission checks.
+- `check.log`, `unit.json` and `unit.xml`: full `make check` passes, including
+  shellcheck, lint/vet/format, frontend lint/type-check/build and the race-enabled
+  unit suite (3,135 tests reported, 8 opt-in skips). GitHub Actions remains disabled;
+  these are local validation results.
+
+This is rendered-chart acceptance, not an API-server authorization decision or an
+end-to-end GitOps reconciliation run. No controller startup, database write, live
+RBAC change or deployment was performed. The follow-up adds tests and evidence;
+production permissions remain unchanged.
