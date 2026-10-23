@@ -73,7 +73,13 @@ func (c Config) Validate() error {
 
 func (c Config) stream() string {
 	// Include the endpoint so a destination change starts an independent catch-up.
-	b, _ := json.Marshal([]string{c.Endpoint, c.Bucket, strings.Trim(strings.TrimSpace(c.Prefix), "/")})
+	return DestinationID(c.Endpoint, c.Bucket, c.Prefix)
+}
+
+// DestinationID identifies progress for one configured archive destination.
+// Monitoring uses the same normalization as publication, without exporting it.
+func DestinationID(endpoint, bucket, prefix string) string {
+	b, _ := json.Marshal([]string{endpoint, bucket, strings.Trim(strings.TrimSpace(prefix), "/")})
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
 }

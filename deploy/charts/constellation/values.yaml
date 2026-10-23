@@ -236,10 +236,27 @@ metrics:
     namespace: ""
     labels: {}
     includeClusterRules: true   # node/pod/PVC generic alerts
+    storage:
+      enabled: true            # only rendered when prometheusRule.enabled=true
+      # Warning budgets, not retention policy. Tune for the installed capacity.
+      databaseBytes: 12884901888
+      relationBytes: 2147483648
+      defaultPartitionBytes: 134217728
+      deadRowRatio: 0.2
+      deadRowsMinimum: 10000
+      rollupLagSeconds: 600
+      archiveStallSeconds: 3600
+      archivePendingIDDistance: 10000
+      backupOverdueSeconds: 3600
+      walBytesPerSecond: 104857600
     thresholds:
       heartbeatStaleSeconds: 120
       engineDBStaleSeconds: 172800
       cveFeedStaleSeconds: 172800
+  storageDashboard:
+    enabled: false
+    labels: { grafana_dashboard: "1" }
+    namespace: ""
   # Read-only Postgres role for an external exporter (CNPG managed.roles +
   # migration-owned grants on component_heartbeats / cve_feed_checkpoints).
   postgresRole:

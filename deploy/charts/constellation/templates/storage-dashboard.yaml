@@ -1,0 +1,15 @@
+{{- if .Values.metrics.storageDashboard.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "constellation.fullname" . }}-storage-dashboard
+  namespace: {{ .Values.metrics.storageDashboard.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "constellation.labels" . | nindent 4 }}
+    {{- with .Values.metrics.storageDashboard.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+data:
+  constellation-storage.json: |
+    {{- .Files.Get "files/storage-dashboard.json" | nindent 4 }}
+{{- end }}

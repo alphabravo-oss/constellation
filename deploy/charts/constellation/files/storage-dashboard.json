@@ -1,0 +1,463 @@
+{
+  "title": "Constellation storage health",
+  "uid": "constellation-storage-health",
+  "schemaVersion": 39,
+  "version": 1,
+  "tags": [
+    "constellation",
+    "storage"
+  ],
+  "timezone": "browser",
+  "refresh": "1m",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "description": "Read-only storage signals. Tuple counts are estimates; ID distance is not archive row count; organization backups are not PITR. Replica observations are aggregated with max/min rather than summed. See docs/storage-health.md.",
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {
+          "text": "Prometheus",
+          "value": "prometheus"
+        }
+      },
+      {
+        "name": "namespace",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$datasource"
+        },
+        "query": "label_values(constellation_storage_collector_up, namespace)",
+        "refresh": 1
+      },
+      {
+        "name": "service",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$datasource"
+        },
+        "query": "label_values(constellation_storage_collector_up{namespace=\"$namespace\"}, service)",
+        "refresh": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Collector health",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "constellation_storage_collector_up{namespace=\"$namespace\",service=\"$service\"}",
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Database allocation (excludes WAL)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(constellation_storage_database_bytes{namespace=\"$namespace\",service=\"$service\"})",
+          "legendFormat": "database"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Root relation allocation",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by(table) (constellation_storage_relation_bytes{namespace=\"$namespace\",service=\"$service\",kind=\"total\"})",
+          "legendFormat": "{{table}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Table / index allocation",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by(table,kind) (constellation_storage_relation_bytes{namespace=\"$namespace\",service=\"$service\",kind!=\"total\"})",
+          "legendFormat": "{{table}} {{kind}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Live / dead row estimates",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by(table,kind) (constellation_storage_relation_rows_estimate{namespace=\"$namespace\",service=\"$service\"})",
+          "legendFormat": "{{table}} {{kind}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "DEFAULT branch allocation",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by(table) (constellation_storage_default_partition_bytes{namespace=\"$namespace\",service=\"$service\"})",
+          "legendFormat": "{{table}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Flow rollup lag",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "time() - min(constellation_storage_rollup_watermark_timestamp_seconds{namespace=\"$namespace\",service=\"$service\"})",
+          "legendFormat": "lag"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Audit archive pending ID distance (not row count)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(constellation_storage_archive_pending_id_distance{namespace=\"$namespace\",service=\"$service\"})",
+          "legendFormat": "pending ID distance"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Archive checkpoint age (enabled destination)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "time() - min(constellation_storage_archive_updated_timestamp_seconds{namespace=\"$namespace\",service=\"$service\"} > 0)",
+          "legendFormat": "checkpoint age"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Organization schedules: missing / failed backups",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(constellation_storage_backup_schedules_without_success{namespace=\"$namespace\",service=\"$service\"})",
+          "legendFormat": "without success"
+        },
+        {
+          "refId": "B",
+          "expr": "max(constellation_storage_backup_failed_schedules{namespace=\"$namespace\",service=\"$service\"})",
+          "legendFormat": "last failed"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Oldest latest organization backup age",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "time() - min(constellation_storage_backup_oldest_success_timestamp_seconds{namespace=\"$namespace\",service=\"$service\"} > 0)",
+          "legendFormat": "oldest latest success"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "WAL generation rate (instance-wide)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(rate(constellation_storage_postgres_wal_generated_bytes_total{namespace=\"$namespace\",service=\"$service\"}[$__rate_interval]))",
+          "legendFormat": "WAL bytes/s"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "title": "Storage collection duration",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 48,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "constellation_storage_collector_duration_seconds{namespace=\"$namespace\",service=\"$service\"}",
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "title": "Storage collection failures",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 48,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(constellation_storage_collector_errors_total{namespace=\"$namespace\",service=\"$service\"}[$__rate_interval]))",
+          "legendFormat": "failed attempts"
+        }
+      ]
+    }
+  ]
+}

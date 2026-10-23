@@ -17,6 +17,7 @@ import (
 	"github.com/alphabravocompany/constellation/internal/identity"
 	"github.com/alphabravocompany/constellation/internal/server"
 	migrations "github.com/alphabravocompany/constellation/internal/server/database"
+	"github.com/alphabravocompany/constellation/internal/storagehealth"
 	"github.com/alphabravocompany/constellation/internal/telemetry"
 	"github.com/alphabravocompany/constellation/pkg/version"
 )
@@ -83,6 +84,17 @@ func main() {
 	if *migrateOnly {
 		return
 	}
+
+	archiveStream := (storagehealth.ArchiveDestination{
+		Enabled:         os.Getenv("CONSTELLATION_STORAGE_ARCHIVE_ENABLED") == "true",
+		Endpoint:        os.Getenv("CONSTELLATION_STORAGE_ARCHIVE_ENDPOINT"),
+		EndpointS3:      os.Getenv("CONSTELLATION_STORAGE_ARCHIVE_ENDPOINT_S3"),
+		EndpointDefault: os.Getenv("CONSTELLATION_STORAGE_ARCHIVE_ENDPOINT_DEFAULT"),
+		Bucket:          os.Getenv("CONSTELLATION_STORAGE_ARCHIVE_BUCKET"),
+		Prefix:          os.Getenv("CONSTELLATION_STORAGE_ARCHIVE_PREFIX"),
+	}).StreamID()
+
+	tel.Registry.MustRegister(storagehealth.New(database.Pool(), storagehealth.Config{ArchiveStream: archiveStream}, tel.Logger))
 
 	cfg := server.Config{
 		ListenAddr:           *listenAddr,

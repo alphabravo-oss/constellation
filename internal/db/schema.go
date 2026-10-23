@@ -8,7 +8,7 @@ import (
 
 // RequiredSchemaVersion is the minimum migration required by this API build.
 // The migration inventory test requires updating it with each new migration.
-const RequiredSchemaVersion int64 = 191
+const RequiredSchemaVersion int64 = 192
 
 // RequireSchema fails before server initialization can write to an older schema.
 // Goose records both up and down transitions; the latest entry per version wins.

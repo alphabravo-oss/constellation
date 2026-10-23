@@ -146,15 +146,23 @@ func TestBaselineInventoryReadOnlyFullCohortAndBundle(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM process_baseline_states WHERE org_id=$1`, org).Scan(&after); err != nil || before != after {
 		t.Fatalf("inventory mutated state before%d after%d %v", before, after, err)
 	}
-	for _, query := range []string{"", "cluster_id=bad", "cluster_id=" + foreignCluster.String(), "cluster_id=" + uuid.New().String()} {
-		status := 400
-		if strings.HasPrefix(query, "cluster_id=") && !strings.HasSuffix(query, "bad") {
-			status = 404
-		}
+	// A syntactically valid UUID may end in "bad". Classify the literal malformed
+	// input explicitly rather than guessing the expected status from its suffix.
+	for _, tc := range []struct {
+		query  string
+		status int
+	}{
+		{"", 400},
+		{"cluster_id=bad", 400},
+		{"cluster_id=" + foreignCluster.String(), 404},
+		{"cluster_id=" + uuid.New().String(), 404},
+		{"cluster_id=00000000-0000-0000-0000-000000000bad", 404},
+	} {
 		for _, export := range []bool{false, true} {
-			request(query, export, status)
+			request(tc.query, export, tc.status)
 		}
 	}
+
 	for _, query := range []string{"limit=0", "limit=501", "offset=-1", "offset=" + strconv.Itoa(inventorylist.MaxOffset+1), "sort=bad", "order=bad", "mode=bad", "hide_platform=maybe", "q=a&q=b"} {
 		for _, export := range []bool{false, true} {
 			request("cluster_id="+cluster.String()+"&"+query, export, 400)

@@ -1,0 +1,119 @@
+{{- $pr := .Values.metrics.prometheusRule -}}
+{{- $s := $pr.storage -}}
+{{- if and $pr.enabled $s.enabled .Values.api.enabled -}}
+{{- range $name, $value := omit $s "enabled" -}}
+{{- if le (float64 $value) 0.0 -}}{{- fail (printf "metrics.prometheusRule.storage.%s must be positive" $name) -}}{{- end -}}
+{{- end -}}
+{{- if ge (float64 $s.deadRowRatio) 1.0 -}}{{- fail "metrics.prometheusRule.storage.deadRowRatio must be below 1" -}}{{- end -}}
+{{- $scope := printf "namespace=%q,service=%q" .Release.Namespace (printf "%s-api" (include "constellation.fullname" .)) -}}
+{{- $healthy := printf "constellation_storage_collector_up{%s} == 1" $scope -}}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "constellation.fullname" . }}-storage
+  namespace: {{ $pr.namespace | default .Release.Namespace }}
+  labels: {{- include "constellation.labels" . | nindent 4 }}
+    {{- with $pr.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: constellation.storage
+      rules:
+        - alert: ConstellationStorageCollectorFailed
+          expr: constellation_storage_collector_up{ {{ $scope }} } == 0
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: "Storage health collection failed"
+            description: "Storage values are withheld after failed queries; inspect API logs, database permissions and locks. See docs/storage-health.md."
+        - alert: ConstellationStorageMetricsAbsent
+          expr: absent(constellation_storage_collector_up{ {{ $scope }} })
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "Storage health metrics are absent"
+            description: "Check the API admin ServiceMonitor and namespace/service target labels."
+        - alert: ConstellationDBHealthCollectionFailing
+          expr: increase(constellation_db_health_scrape_errors_total{ {{ $scope }} }[5m]) > 0
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: "Component or feed health queries are failing"
+            description: "Cached component/feed ages may be stale; inspect collector errors before trusting them."
+        - alert: ConstellationDatabaseSizeHigh
+          expr: constellation_storage_database_bytes{ {{ $scope }} } > {{ $s.databaseBytes }} and on(namespace,service,job,instance) {{ $healthy }}
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "Database allocation exceeds the configured warning budget"
+            description: "Inspect relation growth and volume free space; database bytes exclude WAL. Do not delete evidence or use routine VACUUM FULL."
+        - alert: ConstellationRelationSizeHigh
+          expr: constellation_storage_relation_bytes{ {{ $scope }},kind="total" } > {{ $s.relationBytes }} and on(namespace,service,job,instance) {{ $healthy }}
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "Relation allocation exceeds the configured warning budget"
+            description: "The table label is a fixed root and includes its physical partitions, indexes and TOAST."
+        - alert: ConstellationDeadRowsHigh
+          expr: |
+            (constellation_storage_relation_rows_estimate{ {{ $scope }},kind="dead" } > {{ $s.deadRowsMinimum }}
+             and ignoring(kind) (constellation_storage_relation_rows_estimate{ {{ $scope }},kind="dead" }
+              / ignoring(kind) clamp_min(constellation_storage_relation_rows_estimate{ {{ $scope }},kind="live" },1) > {{ $s.deadRowRatio }} / (1 - {{ $s.deadRowRatio }})))
+             and on(namespace,service,job,instance) {{ $healthy }}
+          for: 30m
+          labels: { severity: warning }
+          annotations:
+            summary: "Dead-row estimate is high"
+            description: "Check autovacuum, long transactions and statistics freshness; these are estimates, not exact row counts."
+        - alert: ConstellationDefaultPartitionLarge
+          expr: constellation_storage_default_partition_bytes{ {{ $scope }} } > {{ $s.defaultPartitionBytes }} and on(namespace,service,job,instance) {{ $healthy }}
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "DEFAULT partition allocation is large"
+            description: "Inspect routing and the partition manager. Findings currently use a DEFAULT child; preserve open and referenced evidence."
+        - alert: ConstellationFlowRollupLagging
+          expr: time() - constellation_storage_rollup_watermark_timestamp_seconds{ {{ $scope }} } > {{ $s.rollupLagSeconds }} and on(namespace,service,job,instance) {{ $healthy }}
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "Flow rollup progress is stale"
+            description: "Investigate failed folds and keep raw flows; existing fold-gated pruning must remain enabled."
+        - alert: ConstellationAuditArchiveLagging
+          expr: |
+            (constellation_storage_archive_pending_id_distance{ {{ $scope }} } > {{ $s.archivePendingIDDistance }}
+             or (constellation_storage_archive_pending_id_distance{ {{ $scope }} } > 0
+              and on(namespace,service,job,instance) (time() - constellation_storage_archive_updated_timestamp_seconds{ {{ $scope }} } > {{ $s.archiveStallSeconds }})))
+             and on(namespace,service,job,instance) (constellation_storage_archive_enabled{ {{ $scope }} } == 1)
+             and on(namespace,service,job,instance) {{ $healthy }}
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "Audit archive catch-up is stalled or behind"
+            description: "ID distance includes rollback gaps and is not a row count. Verify the current destination, signing trust and read-back failures; never skip evidence to advance a cursor."
+        - alert: ConstellationBackupScheduleOverdue
+          expr: |
+            ((time() - constellation_storage_backup_oldest_due_timestamp_seconds{ {{ $scope }} } > {{ $s.backupOverdueSeconds }})
+             and (constellation_storage_backup_oldest_due_timestamp_seconds{ {{ $scope }} } > 0))
+             and on(namespace,service,job,instance) {{ $healthy }}
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "An organization backup schedule is overdue"
+            description: "Inspect enabled schedules and executor logs. This is organization-backup health, not PostgreSQL/PITR recovery coverage."
+        - alert: ConstellationBackupScheduleFailed
+          expr: constellation_storage_backup_failed_schedules{ {{ $scope }} } > 0 and on(namespace,service,job,instance) {{ $healthy }}
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "An organization backup schedule last failed"
+            description: "Inspect the failed schedule and verify a retained artifact before relying on it for recovery."
+        - alert: ConstellationWALGenerationHigh
+          expr: rate(constellation_storage_postgres_wal_generated_bytes_total{ {{ $scope }} }[5m]) > {{ $s.walBytesPerSecond }} and on(namespace,service,job,instance) {{ $healthy }}
+          for: 15m
+          labels: { severity: warning }
+          annotations:
+            summary: "PostgreSQL WAL generation rate is high"
+            description: "This counter is instance-wide and does not measure WAL disk occupancy. Check writes, checkpoints and existing CNPG/PVC alerts."
+{{- end }}

@@ -3070,3 +3070,62 @@ The image-contract profile also renders successfully in list-only mode. JSON
 and JUnit results are retained as `unit.*` and `integration.*` beside `check.log`,
 `integration.log`, `helm.log` and `s3-sdk.log`. GitHub Actions remains disabled;
 these are local acceptance results, not hosted CI or live object-store proof.
+
+## Storage visibility continuation — ten implementation items (2026-10-23)
+
+This batch implements ten concrete observability items under DB-23. It does not
+close ten whole retention-policy decisions. See [storage-health.md](storage-health.md)
+for the metric contract, installation settings and response runbook.
+
+| Item | Implementation and acceptance evidence |
+| --- | --- |
+| 1. Relation allocation | Fixed-root table/index/total and database byte metrics. Real PostgreSQL checks physical partition leaves once, including nested children and TOAST/index accounting. |
+| 2. Dead-row estimates | Live/dead statistics per fixed root, with a nonzero dead-tuple fixture and a tested ratio/minimum-population warning. These remain PostgreSQL estimates. |
+| 3. DEFAULT occupancy | Byte and estimated-row metrics use catalog ancestry; renamed and nested DEFAULT children remain visible. |
+| 4. Rollup lag | Committed watermark timestamp and a stale-progress warning, without changing fold-gated raw expiry. Healthy/stalled fixtures exercise the rendered expression. |
+| 5. Active archive progress | The same destination hash as publication, exact BIGINT subtraction before float conversion, missing-checkpoint visibility and stalled/backlog rules. Retired destinations, empty endpoint Secrets, disabled and idle archives are covered. |
+| 6. Backup health | Aggregate each enabled organization's latest successful catalog row; report missing successes, failed attempts and overdue/uninitialized schedules. Other tenants, disabled schedules and pg-dump rows cannot mask failures. Migration 192 provides the indexed latest-success lookup, verified with EXPLAIN. |
+| 7. WAL generation | Instance-wide generated-byte counter and reset timestamp, with a tested rate warning. This does not claim retained WAL disk occupancy. |
+| 8. Collector health | One-minute cache, concurrent scrape reuse, read-only transaction, bounded SQL/lock/overall deadlines, invalidation on failure and recovery. Read-only role acceptance requires neither superuser nor write grants. Old DB-health query failures also gain an alert. |
+| 9. Executable alerts | Twelve release-scoped rules evaluated by promtool in 23 scenarios, including positive, negative, absent-data and same-replica health matching cases. Native and digest-pinned Docker promtool execution both pass. |
+| 10. Dashboard/runbook | Optional 14-panel Grafana ConfigMap with 15 parsed PromQL expressions, appropriate replica aggregation, warning-budget configuration and safe investigation/rollback guidance. Live Grafana rendering is a deployment gate. |
+
+Evidence is retained in `/root/constellation-storage-next10-20261023/`.
+`monitoring-fixtures/` contains rendered chart cases, extracted rules, dashboard
+expressions and portable Prometheus test cases. Helm, actionlint, PostgreSQL
+fixtures and the actual Prometheus evaluator run locally; GitHub Actions remains
+disabled. The workflow now preloads the pinned Prometheus test image if CI is
+later enabled, while local tests never pull images implicitly.
+
+Compiler overlays restore stale-cache reuse and premature floating-point ID
+subtraction without editing the production checkout. Both fail at their expected
+assertions in `collector-negative.log`. A rendered-rule mutation that makes the
+database warning unreachable fails the expected alert fixture in
+`prometheus-negative.log`; changing a threshold therefore cannot pass merely
+because the YAML parses. An initial mutation matched no text because Helm emitted
+the threshold in scientific notation; the corrected mutation is the failing
+negative control. The first full suites passed before the final ID-precision
+correction; final gates were rerun afterward.
+
+No live alert, volume, cluster, retention rule or data cleanup was changed.
+Capacity budgets, actual scrape/notification delivery, retained WAL occupancy,
+scanner-cache filesystem headroom, raw-retention/drop lag and recovery drills
+remain open. Organization backup catalog health is not PITR or recoverability
+proof, and archive ID distance is not an exact backlog row count.
+
+The full integration rerun also exposed an unrelated pre-existing fixture error:
+`TestBaselineInventoryReadOnlyFullCohortAndBundle` inferred an expected 400 from
+any query ending in `bad`. A random valid UUID ended in those three characters,
+so the correct 404 response failed the test. Explicit expected-status cases now
+include a deterministic valid UUID ending in `bad`; the focused test passes ten
+consecutive race-enabled runs. Production authorization/handler behavior was
+unchanged. The original failure is retained in
+`integration-uuid-suffix-failure.log`, with focused results in `baseline-fixture.log`.
+
+Final gates passed: `make check` reports 3,152 tests with 8 opt-in skips, and
+`make test-integration` reports 4,996 tests with 14 opt-in skips. Helm 4 lint and
+the complete template-smoke suite pass, including all 23 Prometheus scenarios.
+Actionlint passes for the updated CI workflow. JSON/JUnit reports are retained
+as `unit.*` and `integration.*` with the final `check.log`, `integration.log`,
+`helm.log`, `docker-promtool.log` and `actionlint.log` in the evidence directory.
+Repository Actions permissions were checked and remain disabled.
