@@ -3,28 +3,21 @@
 package audit
 
 import (
-	"context"
-	"os"
 	"sync"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
 )
+
+func TestMain(m *testing.M) { pgtest.Main(m) }
 
 func TestAuditLogInTxSharesCallerTransaction(t *testing.T) {
 	t.Parallel()
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("DATABASE_URL not set")
-	}
-	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, databaseURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer pool.Close()
+	ctx := t.Context()
+	pool := pgtest.Pool(t)
 	logger := New(pool)
 	orgID := uuid.New()
 	for _, commit := range []bool{false, true} {
@@ -60,32 +53,11 @@ func TestAuditLogInTxSharesCallerTransaction(t *testing.T) {
 }
 
 // TestAuditChainIntegration appends a batch of events to a real Postgres and verifies the
-// resulting chain. Run with:
-//
-//	DATABASE_URL=postgres://... go test -tags=integration ./pkg/audit/...
-//
-// Requires the migrations to be applied.
+// resulting chain in its own fully migrated disposable database.
 func TestAuditChainIntegration(t *testing.T) {
 	t.Parallel()
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("DATABASE_URL not set")
-	}
-	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, databaseURL)
-	if err != nil {
-		t.Fatalf("pool: %v", err)
-	}
-	defer pool.Close()
-
-	// Clean previous test rows by truncating with a CASCADE — but the table has triggers
-	// forbidding DELETE/UPDATE, not TRUNCATE. We use TRUNCATE which bypasses row triggers.
-	if _, err := pool.Exec(ctx, "TRUNCATE audit_events RESTART IDENTITY"); err != nil {
-		t.Fatalf("truncate (pre): %v", err)
-	}
-	defer func() {
-		_, _ = pool.Exec(context.Background(), "TRUNCATE audit_events RESTART IDENTITY")
-	}()
+	ctx := t.Context()
+	pool := pgtest.Pool(t)
 
 	l := New(pool)
 	org := uuid.New()
@@ -125,26 +97,10 @@ func TestAuditChainIntegration(t *testing.T) {
 // taken before the head read, every writer queues and reads the genuine committed head.
 func TestAuditChainConcurrentWritersIntact(t *testing.T) {
 	t.Parallel()
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		t.Skip("DATABASE_URL not set")
-	}
-	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, databaseURL)
-	if err != nil {
-		t.Fatalf("pool: %v", err)
-	}
-	defer pool.Close()
+	ctx := t.Context()
+	pool := pgtest.Pool(t)
 
-	if _, err := pool.Exec(ctx, "TRUNCATE audit_events RESTART IDENTITY"); err != nil {
-		t.Fatalf("truncate (pre): %v", err)
-	}
-	defer func() {
-		_, _ = pool.Exec(context.Background(), "TRUNCATE audit_events RESTART IDENTITY")
-	}()
-
-	l := New(pool)
-	org := uuid.New()
+	orgs := []uuid.UUID{uuid.New(), uuid.New()}
 	actor := uuid.New()
 
 	const (
@@ -154,23 +110,38 @@ func TestAuditChainConcurrentWritersIntact(t *testing.T) {
 	)
 	var wg sync.WaitGroup
 	errs := make(chan error, writers*perWriter)
+	start := make(chan struct{})
 	for w := 0; w < writers; w++ {
 		wg.Add(1)
 		go func(w int) {
 			defer wg.Done()
+			logger := New(pool)
+			<-start
 			for i := 0; i < perWriter; i++ {
-				if _, _, err := l.Log(ctx, Event{
-					OrgID:   &org,
-					ActorID: &actor,
-					Action:  "test.concurrent",
-					After:   map[string]int{"w": w, "i": i},
-				}); err != nil {
+				event := Event{OrgID: &orgs[w%len(orgs)], ActorID: &actor,
+					Action: "test.concurrent", After: map[string]int{"w": w, "i": i}}
+				var err error
+				if w%2 == 0 {
+					_, _, err = logger.Log(ctx, event)
+				} else {
+					var tx pgx.Tx
+					tx, err = pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+					if err == nil {
+						_, _, err = logger.LogInTx(ctx, tx, event)
+						if err == nil {
+							err = tx.Commit(ctx)
+						}
+						_ = tx.Rollback(ctx)
+					}
+				}
+				if err != nil {
 					errs <- err
 					return
 				}
 			}
 		}(w)
 	}
+	close(start)
 	wg.Wait()
 	close(errs)
 	for err := range errs {

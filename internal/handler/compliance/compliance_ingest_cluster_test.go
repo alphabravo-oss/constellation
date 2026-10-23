@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -55,9 +56,9 @@ func TestComplianceIngest_PerClusterNoClobber(t *testing.T) {
 
 	h := NewCompliance(d, audit.New(pool))
 
-	ingest := func(clusterID uuid.UUID) {
+	ingest := func(clusterID uuid.UUID, node, status string) {
 		t.Helper()
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/compliance/ingest?profile=kube-bench&cluster_id="+clusterID.String(), bytes.NewReader([]byte(kbClusterSampleJSON)))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/compliance/ingest?profile=kube-bench&cluster_id="+clusterID.String()+"&node="+node, bytes.NewReader([]byte(strings.ReplaceAll(kbClusterSampleJSON, `"FAIL"`, `"`+status+`"`))))
 		req = req.WithContext(authctx.WithSubject(req.Context(), authctx.Subject{UserID: userID, OrgID: orgID}))
 		resp := httptest.NewRecorder()
 		h.Ingest(resp, req)
@@ -68,10 +69,11 @@ func TestComplianceIngest_PerClusterNoClobber(t *testing.T) {
 
 	// Ingest the identical control from both clusters, twice each — a re-run must
 	// refresh in place per-cluster, never clobber the other cluster's row.
-	ingest(clusterA)
-	ingest(clusterB)
-	ingest(clusterA)
+	ingest(clusterA, "", "FAIL")
+	ingest(clusterB, "", "FAIL")
+	ingest(clusterA, "", "FAIL")
 
+	ingest(clusterB, "", "FAIL")
 	// Exactly one row per cluster for the shared control: two rows, two clusters.
 	var rowCount, clusterCount int
 	if err := pool.QueryRow(ctx, `
@@ -101,4 +103,22 @@ SELECT COUNT(*) FROM compliance_checks
 			t.Fatalf("cluster %s has %d rows for control 1.2.22, want 1", cid, n)
 		}
 	}
+	// A changed report refreshes the same row and does not change another node.
+	var beforeID uuid.UUID
+	if err := pool.QueryRow(ctx, `SELECT id FROM compliance_checks WHERE org_id=$1 AND cluster_id=$2 AND node='' AND framework=$3 AND control_id='1.2.22'`, orgID, clusterA, compliancepkg.FrameworkCISK8s).Scan(&beforeID); err != nil {
+		t.Fatal(err)
+	}
+	ingest(clusterA, "", "PASS")
+	ingest(clusterA, "second-node", "FAIL")
+	ingest(clusterA, "second-node", "FAIL")
+	var afterID uuid.UUID
+	var status string
+	if err := pool.QueryRow(ctx, `SELECT id,status FROM compliance_checks WHERE org_id=$1 AND cluster_id=$2 AND node='' AND framework=$3 AND control_id='1.2.22'`, orgID, clusterA, compliancepkg.FrameworkCISK8s).Scan(&afterID, &status); err != nil || afterID != beforeID || status != "pass" {
+		t.Fatalf("status update replaced or duplicated the control: id=%v status=%s err=%v", afterID, status, err)
+	}
+	var passed, failed int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FILTER (WHERE status='pass'),count(*) FILTER (WHERE status='fail') FROM compliance_checks WHERE org_id=$1 AND framework=$2 AND control_id='1.2.22'`, orgID, compliancepkg.FrameworkCISK8s).Scan(&passed, &failed); err != nil || passed != 1 || failed != 2 {
+		t.Fatalf("cluster/node snapshots clobbered or duplicated: passed=%d failed=%d err=%v", passed, failed, err)
+	}
+
 }
