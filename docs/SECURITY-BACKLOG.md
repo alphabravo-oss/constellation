@@ -11,8 +11,8 @@ Status values: `open` (not yet verified against HEAD), `verified-open`,
 |---|---|---|---|---|
 | H1 | open | backup-restore | Server backup-restore writes into the org named in the uploaded tarball (cross-tenant write) | `internal/handler/backup.go` / `pkg/backup/restorer.go` |
 | H2 | fixed ([9a6945d2c](https://github.com/alphabravo-oss/constellation/commit/9a6945d2c)) | auth | IdP secrets (OIDC client secret, LDAP bind password, SAML SP key) stored unencrypted | `internal/auth/authservers.go` |
-| H3 | open | hostscan | CIS file-permission checks use numeric mode comparison (world-readable /etc/shadow passes) | `internal/runtime/hostscan/cis.go` |
-| H4 | open | compliance | AWS IAM inline wildcard-policy detection is fail-open (URL-encoded policy never matches) | `internal/cspm/aws/aws.go` |
+| H3 | fixed ([4a77a7cf3](https://github.com/alphabravo-oss/constellation/commit/4a77a7cf3015e9fb5014ae866797badde5953a47)); reverified 2026-10-23 | hostscan | CIS file-permission checks use numeric mode comparison (world-readable /etc/shadow passes) | `internal/runtime/hostscan/cis.go` |
+| H4 | fixed ([4a77a7cf3](https://github.com/alphabravo-oss/constellation/commit/4a77a7cf3015e9fb5014ae866797badde5953a47)); reverified 2026-10-23 | compliance | AWS IAM inline wildcard-policy detection is fail-open (URL-encoded policy never matches) | `internal/cspm/aws/aws.go` |
 | H5 | open | scanning | Vulnerability-profile decisions computed at scan completion but never applied | `internal/handler/scanning/scanjobs.go` |
 | H6 | open | runtime-agent | Workload micro-segmentation policy never pushed to dp (`Supervisor.PushPolicy` has no callers) | `internal/runtime/dp/policy.go` |
 | H7 | open | helm | Admission quarantine DSN reads a non-existent Secret key (fail-open admission) | `deploy/charts/constellation/templates/admission-deployment.yaml` |
@@ -39,12 +39,27 @@ Status values: `open` (not yet verified against HEAD), `verified-open`,
 - **Fix:** Seal the secret-bearing fields with the same cipher used by registries/fed-CA before INSERT; `Open()` in `BuildProviders`/`toXConfig`.
 
 ### H3. CIS file-permission checks use numeric mode comparison (world-readable /etc/shadow passes)
+
+**Reverified on main `a84a6ef97`, 2026-10-23:** `checkFileModeMax` uses a permission
+bit-subset test. `TestCheckFileModeMax*` passed twice with race detection and
+shuffle, including world-readable/writable shadow and passwd rejection, stricter
+allowed modes, and missing-file skip behavior. The historical failure follows.
+
 - **Severity:** high  **Category:** fail_open  **Area:** hostscan
 - **File:** internal/runtime/hostscan/cis.go:300
 - **Failure:** `checkFileModeMax` does `mode <= maxMode` on raw permission bits — a magnitude test, not a subset test. `/etc/shadow` at `0604` (world-READABLE hashes) = 388 ≤ 416 = `0640` → **pass**; `0606` (world-writable) and `/etc/passwd 0622` likewise pass. Nodes report CIS-compliant while shadow/passwd are world readable/writable.
 - **Fix:** Use `mode &^ maxMode.Perm() == 0` so any bit outside the allowed mask fails.
 
 ### H4. AWS IAM inline wildcard-policy detection is fail-open (policy is URL-encoded, matcher expects plain JSON)
+
+**Reverified on main `a84a6ef97`, 2026-10-23:** the scanner decodes encoded policy
+documents and evaluates statements structurally. `TestIsWildcardGrant*`,
+`TestWildcardGrantRejectsUnverifiableDocuments`, and
+`TestScanIAM_FlagsOverPrivilegedAndWildcard` passed twice with race detection and
+shuffle. Coverage includes encoded JSON, arrays, later statements, deny/non-wildcard
+controls, and malformed documents. This verifies the parser/scanner regression;
+it does not claim live AWS account acceptance. The historical failure follows.
+
 - **Severity:** high  **Category:** fail_open  **Area:** compliance
 - **File:** internal/cspm/aws/aws.go:135 (isWildcardGrant:246-254)
 - **Failure:** `GetRolePolicy` returns the document URL-encoded (per the SDK), but `isWildcardGrant` substring-matches `"effect":"allow"`/`"action":"*"`/`"resource":"*"`. The percent-escaped form never matches, so a role with inline `Allow */*` never emits the critical `aws-iam-wildcard` finding; the account is reported clean. The unit test passes only because the fake feeds decoded JSON.
