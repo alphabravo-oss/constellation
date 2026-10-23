@@ -12,7 +12,7 @@
 # Pinned to the 1.27.3-bookworm multi-arch index digest of the Go builder (matches go.mod).
 ARG GO_VERSION
 ARG GO_IMAGE_DIGEST=sha256:5c3e9b43cfd3bb95c7937462e29d87ada57b481a96fa23ad0eb61778d7a00110
-ARG WOLFI_FIPS_IMAGE=cgr.dev/chainguard/wolfi-base@sha256:34977aa13765da89f60fee8fe5230e2bb1c55192df08e383c58221ee0d1277fb
+ARG WOLFI_FIPS_IMAGE=cgr.dev/chainguard/wolfi-base@sha256:81211e15a86ea1d5357f284482af45730c51de45eaf10ad9ce205d6bfc2df323
 
 FROM golang:${GO_VERSION}-bookworm@${GO_IMAGE_DIGEST} AS build
 WORKDIR /src

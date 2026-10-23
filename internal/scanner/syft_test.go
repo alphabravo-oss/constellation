@@ -4,8 +4,22 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestSyftFailureIncludesDiagnostics(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "syft")
+	// Reproduce Syft's quiet flag suppressing the actual registry error.
+	script := "#!/bin/sh\nfor arg do\n  if [ \"$arg\" = -q ]; then exit 1; fi\ndone\necho 'UNAUTHORIZED: authentication required' >&2\nexit 1\n"
+	if err := os.WriteFile(bin, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	_, err := (&SyftEngine{Binary: bin}).Scan(t.Context(), "registry.test/private@sha256:abc", ScanOptions{})
+	if err == nil || !strings.Contains(err.Error(), "UNAUTHORIZED: authentication required") {
+		t.Fatalf("missing failure diagnostics: %v", err)
+	}
+}
 
 func TestPackageFromSyftArtifactCarriesOSNamespaceMetadata(t *testing.T) {
 	tests := []struct {

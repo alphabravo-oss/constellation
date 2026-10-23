@@ -1,75 +1,10 @@
-import axios, { type AxiosInstance, type InternalAxiosRequestConfig } from "axios";
+import axios, { type AxiosInstance } from "axios";
 
-type SessionRequest = InternalAxiosRequestConfig & { sessionRetried?: boolean; sessionGeneration?: number };
-let sessionGeneration = 0;
-let refreshInFlight: Promise<void> | null = null;
-
-if (typeof localStorage !== "undefined") localStorage.removeItem("constellation.token");
-
-const api: AxiosInstance = axios.create({
-  baseURL: "/api/v1",
-  withCredentials: true,
-  headers: { "X-Constellation-Client": "browser" },
+const api: AxiosInstance = axios.create({baseURL:"/api/v1",withCredentials:true,headers:{"X-Constellation-Client":"browser"}});
+api.interceptors.response.use((r)=>r,(err)=>{
+ if(err.response?.status===401 && !String(err.config?.url??"").startsWith("/auth/") && !window.location.pathname.startsWith("/auth/login")) window.location.href="/auth/login";
+ return Promise.reject(err);
 });
-
-api.interceptors.request.use((config) => {
-  const request = config as SessionRequest;
-  request.sessionGeneration ??= sessionGeneration;
-  return config;
-});
-
-const sessionTransport = axios.create({
-  baseURL: "/api/v1",
-  withCredentials: true,
-  headers: { "X-Constellation-Client": "browser" },
-});
-
-export function refreshBrowserSession(): Promise<void> {
-  if (!refreshInFlight) {
-    const rotate = async () => {
-      await sessionTransport.post("/auth/refresh");
-      sessionGeneration += 1;
-    };
-    const refresh = typeof navigator !== "undefined" && navigator.locks
-      ? navigator.locks.request("constellation-session-refresh", async () => {
-        try {
-          await sessionTransport.get("/auth/me");
-          sessionGeneration += 1;
-        } catch (error) {
-          if (!axios.isAxiosError(error) || error.response?.status !== 401) throw error;
-          await rotate();
-        }
-      })
-      : rotate();
-    refreshInFlight = Promise.resolve(refresh).then(() => {}).finally(() => { refreshInFlight = null; });
-  }
-  return refreshInFlight;
-}
-
-api.interceptors.response.use(
-  (r) => r,
-  async (err) => {
-    const request = err.config as SessionRequest | undefined;
-    const url = request?.url ?? "";
-    const protectedRequest = !url.startsWith("/auth/") || ["/auth/me", "/auth/logout", "/auth/change-password"].includes(url);
-    if (err.response?.status === 401 && request && protectedRequest && !request.headers.Authorization) {
-      if (!request.sessionRetried) {
-        request.sessionRetried = true;
-        try {
-          if (request.sessionGeneration === sessionGeneration) await refreshBrowserSession();
-          return await api.request(request);
-        } catch (refreshError) {
-          if (!axios.isAxiosError(refreshError) || refreshError.response?.status !== 401) throw refreshError;
-        }
-      }
-      if (!window.location.pathname.startsWith("/auth/login") && !window.location.pathname.startsWith("/login")) {
-        window.location.href = "/auth/login";
-      }
-    }
-    return Promise.reject(err);
-  },
-);
-
 export { api };
 
 // --- typed endpoints (thin layer) ---
@@ -1812,8 +1747,22 @@ export interface PlatformFactsResponse {
   }>;
 }
 
+// Pickers and existing client-side tables need the complete set. Fetch bounded
+// server pages so no individual request or response grows with the organization.
+async function readAllPages<T>(path: string, key: string, params: Record<string, unknown> = {}): Promise<T[]> {
+  const all: T[] = [];
+  let hasMore = true;
+  while (hasMore) {
+    const { data } = await api.get<Record<string, unknown>>(path, { params: { ...params, limit: 500, offset: all.length } });
+    const items = data[key] as T[];
+    all.push(...items);
+    hasMore = Boolean(data.has_more) && items.length > 0;
+  }
+  return all;
+}
+
 export const clusters = {
-  list: (params?: { workload_scope?: "application" | "all" | "constellation" }) => api.get<{ clusters: ClusterSummary[] }>("/clusters", { params }).then((r) => r.data),
+  list: async (params?: { workload_scope?: "application" | "all" | "constellation" }) => ({ clusters: await readAllPages<ClusterSummary>("/clusters", "clusters", params) }),
   getOne: (id: string) => api.get<ClusterDetail>(`/clusters/${id}`).then((r) => r.data),
   health: (id: string) => api.get<ClusterHealth>(`/clusters/${id}/health`).then((r) => r.data),
   platformFacts: (id: string) => api.get<PlatformFactsResponse>(`/clusters/${id}/platform-facts`).then((r) => r.data),
@@ -2810,11 +2759,7 @@ export const network = {
           credentials: "include",
           signal: controller.signal,
         };
-        let res = await fetch(url, options);
-        if (res.status === 401 && !controller.signal.aborted) {
-          await refreshBrowserSession();
-          res = await fetch(url, options);
-        }
+        const res = await fetch(url, options);
         if (!res.ok || !res.body) return;
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
@@ -3140,8 +3085,7 @@ export const runtimePolicies = {
   disableReviewed: (id: string, body: RuntimePolicyReview) => api.post<RuntimePolicy>(`/runtime-policies/${encodeURIComponent(id)}/reviewed/disable`, body).then(r => r.data),
   removeReviewed: (id: string, body: RuntimePolicyReview) => api.delete<RuntimePolicyDeleteReceipt>(`/runtime-policies/${encodeURIComponent(id)}/reviewed`, { data: body }).then(r => r.data),
   list: (cluster_id: string) =>
-    api.get<{ policies: RuntimePolicy[] }>("/runtime-policies", { params: { cluster_id } })
-      .then((r) => r.data.policies),
+    readAllPages<RuntimePolicy>("/runtime-policies", "policies", { cluster_id }),
   get: (id: string) =>
     api.get<RuntimePolicy>(`/runtime-policies/${encodeURIComponent(id)}`).then((r) => r.data),
   create: (body: {
@@ -3727,9 +3671,6 @@ export interface AccessControlUser {
   roles: string[];
   last_login_at: string;
   mfa_enabled: boolean;
-  local_password?: boolean;
-  locked?: boolean;
-  password_reset_required?: boolean;
 }
 
 export interface AccessControlRole {
@@ -3826,12 +3767,7 @@ export interface AccessControlOverview {
 
 export const accessControl = {
   overview: () => api.get<AccessControlOverview>("/access-control").then((r) => r.data),
-  createLocalUser: (body: { email: string; display_name: string; password: string; role: string }) =>
-    api.post<{ id: string; email: string; role: string }>("/access-control/local-users", body).then((r) => r.data),
-  unlockLocalUser: (id: string) =>
-    api.post<{ status: "unlocked" }>(`/users/${encodeURIComponent(id)}/unlock`).then((r) => r.data),
-  forceLocalPasswordReset: (id: string) =>
-    api.post<{ status: "reset_required" }>(`/users/${encodeURIComponent(id)}/force-password-reset`).then((r) => r.data),
+
 };
 
 // Canonical user-facing roles (mirror pkg/rbac). Highest privilege first.
@@ -5135,7 +5071,7 @@ export interface PolicySimulation {
 
 export const policies = {
   list:   (params: { cluster_id?: string } = {}) =>
-    api.get<{ policies: Policy[] }>("/policies", { params }).then((r) => r.data),
+    readAllPages<Policy>("/policies", "policies", params).then((policies) => ({ policies })),
   admissionProfiles: () =>
     api.get<{ profiles: AdmissionProfile[] }>("/policies/admission-profiles").then((r) => r.data),
   exportAdmissionProfile: (profile: string) =>
@@ -5349,84 +5285,30 @@ export const systemConfigApi = {
     api.post<{ refresh_now: number; revision: number }>("/scanner/refresh", {}).then((r) => r.data),
 };
 
-// A1: org password + session/idle policy (GET/PUT /auth/security-policy).
-export interface SecurityPolicy {
-  min_length: number;
-  min_classes: number;
-  min_uppercase: number;
-  min_lowercase: number;
-  min_digit: number;
-  min_special: number;
-  max_age_days: number;
-  history_depth: number;
-  session_timeout_minutes: number;
-  idle_timeout_minutes: number;
-  lockout_threshold: number;
-  lockout_window_minutes: number;
-  revision: number;
+export interface LocalAuthPolicy {
+ enabled: boolean; display: "all" | "local" | "sso"; totp_policy: "everyone" | "admins";
+ password_min_length: number; session_seconds: number; ip_rate: number; account_rate: number;
 }
-
-export const securityPolicyApi = {
-  get: () => api.get<SecurityPolicy>("/auth/security-policy").then((r) => r.data),
-  put: (body: SecurityPolicy) => api.put<SecurityPolicy>("/auth/security-policy", body).then((r) => r.data),
+export interface IdentitySettings {
+ local: LocalAuthPolicy;
+ oidc: {issuer_url:string;client_id:string;audience:string;redirect_url:string;roles_claim:string;role_mapping:Record<string,string>;org_name:string;scopes:string[]} | null;
+ bundled_oidc?: IdentitySettings["oidc"];
+ ready:boolean; revision:number;
+ break_glass:{enabled:boolean;totp_required:boolean;session_seconds:number};
+}
+export const identitySettings = {
+ get:()=>api.get<IdentitySettings>("/settings/identity").then(r=>r.data),
+ put:(body:Pick<IdentitySettings,"local"|"oidc"|"revision"> & {client_secret?:string})=>api.put("/settings/identity",body).then(r=>r.data),
 };
-
-// SSO / IdP config (LDAP / SAML / OIDC) — full CRUD via /auth-servers.
-export interface AuthServerConfig {
-  // LDAP
-  url?: string; bind_dn?: string; bind_password?: string; base_dn?: string;
-  user_filter?: string; group_attribute?: string; group_base_dn?: string; group_member_attribute?: string; email_attribute?: string;
-  // SAML
-  idp_metadata_xml?: string; entity_id?: string; acs_url?: string; sp_cert_pem?: string; sp_key_pem?: string;
-  // OIDC
-  issuer_url?: string; client_id?: string; client_secret?: string; redirect_url?: string; scopes?: string[]; groups_claim?: string;
+export interface LocalUser {
+ id:string;email:string;display_name:string;status:"active"|"disabled";break_glass:boolean;roles:string[];
+ last_login:string|null;failed_attempts:number;created_at:string;updated_at:string;
 }
-
-export interface AuthRolePreview {
-  provider_type: string;
-  input_kind: string;
-  group_count: number;
-  matched_group_count: number;
-  default_applied: boolean;
-  grants: { role: string; scope: "organization" | "cluster" | "namespace"; cluster_id?: string; namespace?: string }[];
-}
-
-export interface AuthScopedMapping {
-  id: string;
-  group: string;
-  role: string;
-  cluster_id?: string;
-  namespace?: string;
-}
-
-export interface AuthServer {
-  id?: string;
-  type: string; // ldap | saml | oidc
-  name: string;
-  enabled: boolean;
-  auth_order: number;
-  config: AuthServerConfig;
-  role_mapping: { rules: Record<string, string>; default: string };
-  revision?: number;
-}
-
-export const authServersApi = {
-  list: () => api.get<{ auth_servers: AuthServer[] }>("/auth-servers").then((r) => r.data.auth_servers),
-  testConnection: (id: string) =>
-    api.post<{ ok: boolean; type: string; message?: string }>(`/auth-servers/${encodeURIComponent(id)}/test`).then((r) => r.data),
-  previewRoles: (id: string, groups: string[]) =>
-    api.post<AuthRolePreview>(`/auth-servers/${encodeURIComponent(id)}/role-preview`, { groups }).then((r) => r.data),
-  listScopedMappings: (id: string) =>
-    api.get<{ scoped_mappings: AuthScopedMapping[] }>(`/auth-servers/${encodeURIComponent(id)}/scoped-mappings`).then((r) => r.data.scoped_mappings),
-  createScopedMapping: (id: string, body: Omit<AuthScopedMapping, "id">) =>
-    api.post<AuthScopedMapping>(`/auth-servers/${encodeURIComponent(id)}/scoped-mappings`, body).then((r) => r.data),
-  deleteScopedMapping: (id: string, mappingId: string) =>
-    api.delete(`/auth-servers/${encodeURIComponent(id)}/scoped-mappings/${encodeURIComponent(mappingId)}`).then((r) => r.data),
-  create: (body: Omit<AuthServer, "id" | "revision">) =>
-    api.post<AuthServer>("/auth-servers", body).then((r) => r.data),
-  update: (id: string, body: AuthServer) =>
-    api.put<AuthServer>(`/auth-servers/${id}`, body).then((r) => r.data),
-  delete: (id: string) => api.delete(`/auth-servers/${id}`).then((r) => r.data),
+export interface LocalEnrollment {id:string;password?:string;totp_secret?:string;totp_uri?:string}
+export const localUsers = {
+ list:()=>api.get<{users:LocalUser[]}>("/local-users").then(r=>r.data),
+ create:(body:{email:string;display_name:string;password:string;role:string})=>api.post<LocalEnrollment>("/local-users",body).then(r=>r.data),
+ change:(id:string,action:string,body:{password?:string;role?:string}={})=>api.post<LocalEnrollment>(`/local-users/${encodeURIComponent(id)}/${action}`,body).then(r=>r.data),
 };
 
 export interface Receiver {
@@ -5941,7 +5823,7 @@ export interface GroupUsage {
 
 export const groupsApi = {
   list:   (params: { cluster_id?: string } = {}) =>
-    api.get<{ groups: Group[] }>("/groups", { params }).then((r) => r.data),
+    readAllPages<Group>("/groups", "groups", params).then((groups) => ({ groups })),
   usage: (id: string, params: { cluster_id?: string } = {}) =>
     api.get<GroupUsage>(`/groups/${id}/usage`, { params }).then((r) => r.data),
   create: (body: Omit<Group, "id"|"created_at"|"updated_at">, params: { cluster_id?: string } = {}) =>
@@ -6032,9 +5914,9 @@ export const runtimeEvents = {
 };
 
 export const auth = {
-  providers: () => api.get<{ oidc: boolean; saml: boolean }>("/auth/providers").then((r) => r.data),
-  login: (email: string, password: string) =>
-    api.post<{ expires_at: string }>(`/auth/login`, { email, password }).then((r) => r.data),
+  providers: () => api.get<{ local: boolean; oidc: boolean; break_glass: boolean; totp_policy: "everyone" | "admins" }>("/auth/providers").then((r) => r.data),
+  login: (email: string, password: string, totp: string, emergency = false) =>
+    api.post<{ expires_at: string }>(emergency ? `/auth/break-glass` : `/auth/local`, { email, password, totp }).then((r) => r.data),
   me:    () => api.get<{ user_id: string; org_id: string; email: string; roles: string[] }>("/auth/me").then((r) => r.data),
   logout: () => api.post(`/auth/logout`).then((r) => r.data),
   oidcStart: () => api.get<{ authorize_url: string }>(`/auth/oidc/start`).then((r) => r.data),

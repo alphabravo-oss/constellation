@@ -20,8 +20,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/alphabravocompany/constellation/internal/clusterinventory"
 	"github.com/alphabravocompany/constellation/internal/db"
-	"github.com/alphabravocompany/constellation/internal/handler/platformrole"
 	"github.com/alphabravocompany/constellation/internal/inventorypresence"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 )
@@ -48,60 +48,36 @@ func NewClusters(d *db.DB, a ...*audit.Logger) *Clusters {
 func (h *Clusters) List(w http.ResponseWriter, r *http.Request) {
 	subj, _ := SubjectFrom(r.Context())
 	scope := r.URL.Query().Get("workload_scope")
-	findingScope, err := platformrole.ScopeSQL(scope, platformrole.ConstellationFindingSQL("f"))
-	if err != nil {
-		apiutil.WriteStatus(r.Context(), w, http.StatusBadRequest, err.Error())
+	switch scope {
+	case "", "all", "application", "constellation":
+	default:
+		apiutil.WriteStatus(r.Context(), w, 400, "invalid workload_scope")
 		return
 	}
-	deploymentScope, _ := platformrole.ScopeSQL(scope, platformrole.ConstellationDeploymentSQL("d"))
-	exposures, err := inventorypresence.ReadAllScoped(r.Context(), h.db.Pool(), subj.OrgID, scope)
-	if err != nil {
-		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, "read current finding exposure")
-		return
+	limit, offset := 100, 0
+	for _, field := range []struct {
+		name  string
+		value *int
+		max   int
+	}{{"limit", &limit, 500}, {"offset", &offset, 10000000}} {
+		if raw := r.URL.Query().Get(field.name); raw != "" {
+			n, err := strconv.Atoi(raw)
+			if err != nil || n < 0 || n > field.max || field.name == "limit" && n == 0 {
+				apiutil.WriteStatus(r.Context(), w, 400, "invalid "+field.name)
+				return
+			}
+			*field.value = n
+		}
 	}
-	query := `
-SELECT c.id, c.name, c.distro, COALESCE(c.cloud_provider,''), COALESCE(c.region,''),
-       c.state, COALESCE(c.agent_version, ''),
-       -- Every correlated subquery is scoped by org_id so the composite
-       -- (org_id, cluster_id, …) indexes are usable. Without org_id, the
-       -- network_flows MAX(at) subquery seq-scanned ~58M rows (~13s each).
-       (SELECT COUNT(*) FROM deployments d WHERE d.org_id = c.org_id AND d.cluster_id = c.id) AS deployments,
-       (SELECT COALESCE(MAX(risk_score), 0) FROM deployments d WHERE d.org_id = c.org_id AND d.cluster_id = c.id) AS max_risk,
-       c.last_heartbeat_at,
-       COALESCE(cpf.kubernetes_git_version, ''),
-       COALESCE(cpf.platform_provider, ''),
-       cpf.observed_at,
-       (SELECT COUNT(*) FROM findings f WHERE f.org_id = c.org_id AND f.cluster_id = c.id AND f.severity = 'critical' AND f.lifecycle = 'open') AS critical_open,
-       (SELECT COUNT(*) FROM findings f WHERE f.org_id = c.org_id AND f.cluster_id = c.id AND f.severity = 'high' AND f.lifecycle = 'open') AS high_open,
-       (SELECT COUNT(*) FROM findings f WHERE f.org_id = c.org_id AND f.cluster_id = c.id AND f.lifecycle = 'open') AS open_findings,
-       (SELECT COUNT(*) FROM findings f WHERE f.org_id = c.org_id AND f.cluster_id = c.id) AS total_findings,
-       (SELECT MAX(nf.at) FROM network_flows nf WHERE nf.org_id = c.org_id AND nf.cluster_id = c.id) AS last_flow_at,
-       (SELECT COUNT(DISTINCT ch.component)
-          FROM component_heartbeats ch
-         WHERE ch.org_id = c.org_id
-           AND ch.cluster_id = c.id
-           AND ch.component = ANY($2::text[])
-           AND ch.last_seen_at > NOW() - INTERVAL '2 minutes') AS connected_sensors,
-       (SELECT d.namespace || '/' || d.name FROM deployments d
-         WHERE d.org_id = c.org_id AND d.cluster_id = c.id ORDER BY d.risk_score DESC NULLS LAST, d.last_seen_at DESC NULLS LAST LIMIT 1) AS top_workload,
-       (SELECT d.risk_score FROM deployments d
-         WHERE d.org_id = c.org_id AND d.cluster_id = c.id ORDER BY d.risk_score DESC NULLS LAST, d.last_seen_at DESC NULLS LAST LIMIT 1) AS top_workload_risk
-  FROM clusters c
-  LEFT JOIN cluster_platform_facts cpf
-    ON cpf.org_id = c.org_id AND cpf.cluster_id = c.id
- WHERE c.org_id = $1
- ORDER BY c.name`
-	// These are fixed SQL fragments, never request expressions. Scope every
-	// finding/workload rollup while keeping cluster health and connectivity intact.
-	query = strings.ReplaceAll(query, "f.org_id = c.org_id AND f.cluster_id = c.id", "f.org_id = c.org_id AND f.cluster_id = c.id AND ("+findingScope+")")
-	query = strings.ReplaceAll(query, "d.org_id = c.org_id AND d.cluster_id = c.id", "d.org_id = c.org_id AND d.cluster_id = c.id AND ("+deploymentScope+") AND ("+inventorypresence.WorkloadStatusSQL("d")+")<>'absent'")
-	rows, err := h.db.Pool().Query(r.Context(), query, subj.OrgID, expectedClusterComponents)
+	rows, err := clusterinventory.List(r.Context(), h.db.Pool(), subj.OrgID, expectedClusterComponents, scope, limit, offset)
 	if err != nil {
 		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	defer rows.Close()
 	out := []map[string]any{}
+	var total int64
+	ids := []uuid.UUID{}
 	for rows.Next() {
 		var (
 			id, name, distro, cloud, region, state, agentVer    string
@@ -117,9 +93,11 @@ SELECT c.id, c.name, c.distro, COALESCE(c.cloud_provider,''), COALESCE(c.region,
 			&deployments, &maxRisk, &hb,
 			&kubernetesVersion, &platformProvider, &platformObservedAt,
 			&criticalOpen, &highOpen, &openFindings, &totalFindings,
-			&lastFlow, &connectedSensors, &topWorkload, &topWorkloadRisk); err != nil {
-			continue
+			&lastFlow, &connectedSensors, &topWorkload, &topWorkloadRisk, &total); err != nil {
+			apiutil.WriteStatus(r.Context(), w, 500, err.Error())
+			return
 		}
+		ids = append(ids, uuid.MustParse(id))
 		var heartbeat, platformObservedOut, lastFlowOut, topWorkloadOut, topWorkloadRiskOut any
 		if hb != nil {
 			heartbeat = hb.Format(time.RFC3339)
@@ -146,7 +124,6 @@ SELECT c.id, c.name, c.distro, COALESCE(c.cloud_provider,''), COALESCE(c.region,
 				"open_findings":  openFindings,
 				"total_findings": totalFindings,
 			},
-			"exposure":     exposures[uuid.MustParse(id)],
 			"last_flow_at": lastFlowOut,
 			"platform": map[string]any{
 				"kubernetes_git_version": kubernetesVersion,
@@ -168,7 +145,27 @@ SELECT c.id, c.name, c.distro, COALESCE(c.cloud_provider,''), COALESCE(c.region,
 			},
 		})
 	}
-	writeJSON(w, 200, map[string]any{"clusters": out})
+	if err := rows.Err(); err != nil {
+		apiutil.WriteStatus(r.Context(), w, 500, err.Error())
+		return
+	}
+	rows.Close()
+	if len(out) == 0 && offset > 0 {
+		total, err = clusterinventory.Count(r.Context(), h.db.Pool(), subj.OrgID)
+		if err != nil {
+			apiutil.WriteStatus(r.Context(), w, 500, err.Error())
+			return
+		}
+	}
+	exposures, err := inventorypresence.ReadClustersScoped(r.Context(), h.db.Pool(), subj.OrgID, ids, scope)
+	if err != nil {
+		apiutil.WriteStatus(r.Context(), w, 500, "read current finding exposure")
+		return
+	}
+	for i, id := range ids {
+		out[i]["exposure"] = exposures[id]
+	}
+	writeJSON(w, 200, map[string]any{"clusters": out, "total": total, "limit": limit, "offset": offset, "has_more": int64(offset+len(out)) < total})
 }
 
 // GetOne returns a single cluster's metadata. The cluster picker preloads /clusters

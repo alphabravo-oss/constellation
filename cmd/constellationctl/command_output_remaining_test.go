@@ -89,19 +89,6 @@ func (input *remainingInput) Read([]byte) (int, error) {
 	return 0, errors.New("unexpected password read")
 }
 
-func TestLoginFailedPromptDoesNotReadPasswordOrCallAPI(t *testing.T) {
-	requests := commandOutputFixture(t, http.StatusOK)
-	command := loginCmd()
-	input := &remainingInput{}
-	command.SetIn(input)
-	if err := executeRemainingOutput(t.Context(), command, &failingCommandOutput{}, "--email", "fixture@example.test"); !errors.Is(err, errCommandOutputTest) {
-		t.Fatalf("prompt failure was ignored: %v", err)
-	}
-	if input.reads != 0 || requests.Load() != 0 {
-		t.Fatal("failed prompt continued into credential collection")
-	}
-}
-
 func remainingHTTPConfig(t *testing.T, handler http.HandlerFunc) (string, *atomic.Int64) {
 	t.Helper()
 	var requests atomic.Int64

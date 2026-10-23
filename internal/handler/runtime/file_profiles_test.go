@@ -164,7 +164,7 @@ func TestFileProfilesSetModePersistsAcrossHandlers(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO orgs (id, name, display_name) VALUES ($1, $2, 'File Profile Test')`, orgID, "file-profile-"+orgID.String()); err != nil {
 		t.Fatalf("org: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO users (id, org_id, email, display_name, password_hash) VALUES ($1, $2, $3, 'Test User', 'x')`, userID, orgID, "file-profile@example.test"); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO users (id, org_id, email, display_name) VALUES ($1, $2, $3, 'Test User')`, userID, orgID, "file-profile@example.test"); err != nil {
 		t.Fatalf("user: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO clusters (id, org_id, name, distro, state) VALUES ($1, $2, 'file-profile-cluster', 'k3s', 'connected')`, clusterID, orgID); err != nil {

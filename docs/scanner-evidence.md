@@ -31,3 +31,25 @@ checks captured symbols, agreement between direct image and native-SBOM Grype
 results, and the broader results of package-only matching. Live rollout validation
 also checks engine completion, exact image identity, and authenticated private
 registry scanning. A lower finding count alone is not acceptance evidence.
+
+Grype's `constellation.2` build replaces the retired Docker module used for
+local-image shell completion with the maintained Moby client. The scanner-tool
+workflow validates both patched source behavior and the release-built executable.
+`TestGrypeBinary` in `cmd/tools/scanner-tools` accepts
+`CONSTELLATION_TEST_GRYPE_BINARY`, checks linked dependency metadata, and exercises
+the real completion CLI against disposable daemon endpoints. It covers negotiated
+and explicit API versions, tag filtering, and empty/error shell fallback.
+
+On 2026-10-23, the Helm 157 scanner image
+`ghcr.io/alphabravo-oss/constellation/scanner@sha256:4cd3d0bbb98cd0e04ea1216518f76454593b1306aaed4f0718a530ab8d2e79f0`
+was verified to contain Grype `0.120.1-constellation.2`, Go `1.27.3`, and Moby client
+`v0.6.0`, with no linked `github.com/docker/docker` module. All seven executable
+checks passed twice on the extracted binary and twice inside that same image as
+UID/GID `10001:10001`, with a read-only root, all capabilities dropped, no Docker
+socket and external networking disabled. No cluster rollout was needed.
+
+A separate direct Grype scan of that exact image returned zero matches using the
+valid cached database built `2026-10-20T06:29:49Z`, with automatic DB updates
+disabled and an empty explicit configuration. This result is scoped to that
+engine and database snapshot; it is not a current multi-engine or signed-fixture
+acceptance result.

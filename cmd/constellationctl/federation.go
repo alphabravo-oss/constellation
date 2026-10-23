@@ -41,7 +41,6 @@ func federationJoinCmd(serverFlag *string) *cobra.Command {
 	var (
 		masterURL, token       string
 		clusterID, clusterName string
-		email                  string
 	)
 	cmd := &cobra.Command{
 		Use:   "join",
@@ -49,7 +48,7 @@ func federationJoinCmd(serverFlag *string) *cobra.Command {
 		Example: `  constellationctl --server https://joint.example.com federation join \
     --master-url https://master.example.com --token <join-token>`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cli, err := resolveClient(cmd.Context(), *serverFlag, email)
+			cli, err := resolveClient(cmd.Context(), *serverFlag)
 			if err != nil {
 				return err
 			}
@@ -90,6 +89,5 @@ func federationJoinCmd(serverFlag *string) *cobra.Command {
 	cmd.Flags().StringVar(&token, "token", "", "Join token minted by the master")
 	cmd.Flags().StringVar(&clusterID, "cluster-id", "", "This joint's cluster id (optional; a stable id is derived when omitted)")
 	cmd.Flags().StringVar(&clusterName, "cluster-name", "", "This joint's display name (optional; defaults to cluster id)")
-	cmd.Flags().StringVar(&email, "email", "", "Email to log into if not already authenticated")
 	return cmd
 }

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alphabravocompany/constellation/internal/api/page"
+
 	"github.com/alphabravocompany/constellation/internal/api/apiutil"
 
 	"github.com/go-chi/chi/v5"
@@ -124,6 +126,11 @@ func propagateGroupModeTx(ctx context.Context, tx pgx.Tx, orgID uuid.UUID, clust
 }
 
 func (h *Groups) List(w http.ResponseWriter, r *http.Request) {
+	pagination, err := page.Parse(r.URL.Query())
+	if err != nil {
+		apiutil.WriteStatus(r.Context(), w, 400, err.Error())
+		return
+	}
 	subj, _ := SubjectFrom(r.Context())
 	clusterArg, err := parseClusterIDParam(r)
 	if err != nil {
@@ -135,7 +142,7 @@ SELECT id, name, kind, comment, criteria, members, learned_from, cfg_type, polic
   FROM groups
  WHERE org_id=$1
    AND ($2::uuid IS NULL OR cluster_id IS NULL OR cluster_id = $2)
- ORDER BY name`, subj.OrgID, clusterArg)
+ ORDER BY name,id LIMIT $3 OFFSET $4`, subj.OrgID, clusterArg, pagination.Limit+1, pagination.Offset)
 	if err != nil {
 		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
@@ -160,22 +167,35 @@ SELECT id, name, kind, comment, criteria, members, learned_from, cfg_type, polic
 		}
 		out = append(out, d)
 	}
+	if err := rows.Err(); err != nil {
+		apiutil.WriteStatus(r.Context(), w, 500, err.Error())
+		return
+	}
+	rows.Close()
+	hasMore := len(out) > pagination.Limit
+	if hasMore {
+		out = out[:pagination.Limit]
+	}
 	if err := h.attachMembershipPreviews(r.Context(), subj.OrgID, clusterArg, out); err != nil {
 		apiutil.WriteStatus(r.Context(), w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"groups": out})
+	writeJSON(w, http.StatusOK, map[string]any{"groups": out, "has_more": hasMore, "limit": pagination.Limit, "offset": pagination.Offset})
 }
 
 func (h *Groups) attachMembershipPreviews(ctx context.Context, orgID uuid.UUID, clusterArg any, groups []groupDTO) error {
 	if len(groups) == 0 {
 		return nil
 	}
+	wanted := []string{}
+	for _, g := range groups {
+		wanted = append(wanted, g.Members...)
+	}
 	rows, err := h.db.Pool().Query(ctx, `
 SELECT namespace, name, MAX(last_seen_at)
   FROM deployments
- WHERE org_id=$1 AND ($2::uuid IS NULL OR cluster_id = $2)
- GROUP BY namespace, name`, orgID, clusterArg)
+ WHERE org_id=$1 AND ($2::uuid IS NULL OR cluster_id = $2) AND namespace||'/'||name=ANY($3::text[])
+ GROUP BY namespace, name`, orgID, clusterArg, wanted)
 	if err != nil {
 		return err
 	}

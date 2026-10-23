@@ -1,4 +1,4 @@
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 import { expect, it } from "vitest";
 import { parseRouting, routeIndex, routingRevision, routingYamlError, serializeRouting } from "./integration-routing";
 const original = `global:\n  resolve_timeout: 5m\nroute:\n  receiver: external-default\n  group_by: [namespace]\n  group_wait: 30s\n  routes:\n    - receiver: external-sink\n      match: {severity: critical}\n      matchers: ['team=~"security|platform"']\n      continue: true\n      group_interval: 5m\n      mute_time_intervals: [overnight]\ninhibit_rules:\n  - source_match: {severity: critical}\nreceivers:\n  - name: external-sink\n    webhook_configs:\n      - url: https://external.example.test\n`;

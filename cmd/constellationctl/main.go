@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -45,7 +46,7 @@ func runCLI() error {
 		Use:   "constellationctl",
 		Short: "Constellation operator CLI",
 	}
-	root.AddCommand(loginCmd(), imageCheckCmd(), auditCmd(), versionCmd(), iacCheckCmd(), modelCheckCmd(), policyCmd(), clusterCmd(), tokensCmd(), networkFlowsCmd(), backupCmd(), vulndbCmd(), serverlessCmd(), repositoryCmd(), federationCmd(), adminCmd(), bundleCmd())
+	root.AddCommand(usersCmd(), breakGlassCmd(), loginCmd(), imageCheckCmd(), auditCmd(), versionCmd(), iacCheckCmd(), modelCheckCmd(), policyCmd(), clusterCmd(), tokensCmd(), networkFlowsCmd(), backupCmd(), vulndbCmd(), serverlessCmd(), repositoryCmd(), federationCmd(), adminCmd(), bundleCmd())
 	return root.ExecuteContext(ctx)
 }
 
@@ -105,27 +106,22 @@ func versionCmd() *cobra.Command {
 }
 
 func loginCmd() *cobra.Command {
-	var server, email string
-	cmd := &cobra.Command{Use: "login", Short: "Authenticate against a Constellation server",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			output := &commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
-			output.write("Password: ")
-			if err := output.result(); err != nil {
-				return err
-			}
-			var pw string
-			if _, err := fmt.Fscan(cmd.InOrStdin(), &pw); err != nil {
-				return fmt.Errorf("read password: %w", err)
-			}
-			token, err := loginToken(cmd.Context(), newAPIClient(), server, email, pw)
-			if err != nil {
-				return err
-			}
-			return saveConfig(cmd.Context(), &config{Server: server, Token: token})
-		}}
-	cmd.Flags().StringVar(&server, "server", "http://localhost:8080", "Constellation server URL")
-	cmd.Flags().StringVar(&email, "email", "", "Email")
-	_ = cmd.MarkFlagRequired("email")
+	var server string
+	cmd := &cobra.Command{Use: "login", Short: "Read an OIDC access token or API token from stdin", RunE: func(cmd *cobra.Command, _ []string) error {
+		raw, err := io.ReadAll(io.LimitReader(cmd.InOrStdin(), 16385))
+		if err != nil {
+			return err
+		}
+		token := strings.TrimSpace(string(raw))
+		if len(token) == 0 || len(token) > 16384 {
+			return fmt.Errorf("token required (maximum 16 KiB)")
+		}
+		if err := validateLoginToken(cmd.Context(), newAPIClient(), server, token); err != nil {
+			return err
+		}
+		return saveConfig(cmd.Context(), &config{Server: server, Token: token})
+	}}
+	cmd.Flags().StringVar(&server, "server", "https://localhost:8080", "Constellation server URL")
 	return cmd
 }
 

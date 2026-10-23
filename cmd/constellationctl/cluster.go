@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -55,7 +54,6 @@ so a leaked bundle can be killed instantly.`,
 func clusterCreateCmd(serverFlag *string) *cobra.Command {
 	var (
 		distro, region, expiry, output string
-		email                          string
 	)
 	cmd := &cobra.Command{
 		Use:   "create <name>",
@@ -67,7 +65,7 @@ func clusterCreateCmd(serverFlag *string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			outputWriter := commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
 			name := strings.TrimSpace(args[0])
-			cli, err := resolveClient(cmd.Context(), *serverFlag, email)
+			cli, err := resolveClient(cmd.Context(), *serverFlag)
 			if err != nil {
 				return err
 			}
@@ -109,18 +107,16 @@ func clusterCreateCmd(serverFlag *string) *cobra.Command {
 	cmd.Flags().StringVar(&region, "region", "", "Cluster region (e.g. us-east-1)")
 	cmd.Flags().StringVar(&expiry, "expiry", "720h", "Bundle TTL (Go duration: 24h, 720h, 7d, 30d, 90d)")
 	cmd.Flags().StringVar(&output, "output", "", "Write the rendered YAML here (otherwise print to stdout)")
-	cmd.Flags().StringVar(&email, "email", "", "Email to log into if not already authenticated")
 	return cmd
 }
 
 func clusterListCmd(serverFlag *string) *cobra.Command {
-	var email string
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List cluster init-bundles",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			outputWriter := commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
-			cli, err := resolveClient(cmd.Context(), *serverFlag, email)
+			cli, err := resolveClient(cmd.Context(), *serverFlag)
 			if err != nil {
 				return err
 			}
@@ -138,14 +134,12 @@ func clusterListCmd(serverFlag *string) *cobra.Command {
 			return outputWriter.result()
 		},
 	}
-	cmd.Flags().StringVar(&email, "email", "", "Email to log into if not already authenticated")
 	return cmd
 }
 
 func clusterRotateCmd(serverFlag *string) *cobra.Command {
 	var (
 		output string
-		email  string
 	)
 	cmd := &cobra.Command{
 		Use:   "rotate <bundle-id>",
@@ -153,7 +147,7 @@ func clusterRotateCmd(serverFlag *string) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			outputWriter := commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
-			cli, err := resolveClient(cmd.Context(), *serverFlag, email)
+			cli, err := resolveClient(cmd.Context(), *serverFlag)
 			if err != nil {
 				return err
 			}
@@ -173,19 +167,17 @@ func clusterRotateCmd(serverFlag *string) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&output, "output", "", "Write replacement YAML here")
-	cmd.Flags().StringVar(&email, "email", "", "Email to log into if not already authenticated")
 	return cmd
 }
 
 func clusterRevokeCmd(serverFlag *string) *cobra.Command {
-	var email string
 	cmd := &cobra.Command{
 		Use:   "revoke <bundle-id>",
 		Short: "Revoke a cluster init-bundle (cascades to its scanner + runtime-agent tokens)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			outputWriter := commandOutput{ctx: cmd.Context(), writer: cmd.OutOrStdout()}
-			cli, err := resolveClient(cmd.Context(), *serverFlag, email)
+			cli, err := resolveClient(cmd.Context(), *serverFlag)
 			if err != nil {
 				return err
 			}
@@ -197,22 +189,20 @@ func clusterRevokeCmd(serverFlag *string) *cobra.Command {
 			return outputWriter.result()
 		},
 	}
-	cmd.Flags().StringVar(&email, "email", "", "Email to log into if not already authenticated")
 	return cmd
 }
 
 // ---------------- shared HTTP client + auth ----------------
 
 // authedClient holds the resolved server + bearer token; pulled together by
-// resolveClient(), which transparently runs an interactive login if no token is
-// cached but email+password (from $CONSTELLATION_PASSWORD or stdin) are available.
+// resolveClient(), using the OIDC access token or API token saved by login.
 type authedClient struct {
 	server string
 	token  string
 	http   *http.Client
 }
 
-func resolveClient(ctx context.Context, serverOverride, email string) (*authedClient, error) {
+func resolveClient(ctx context.Context, serverOverride string) (*authedClient, error) {
 	cfg, err := loadConfig()
 	if err != nil {
 		return nil, err
@@ -228,26 +218,7 @@ func resolveClient(ctx context.Context, serverOverride, email string) (*authedCl
 	if cli.token != "" {
 		return cli, nil
 	}
-	if email == "" {
-		return nil, errors.New("no cached token; pass --email to authenticate")
-	}
-	pw := os.Getenv("CONSTELLATION_PASSWORD")
-	if pw == "" {
-		if _, err := fmt.Fprint(os.Stderr, "Password: "); err != nil {
-			return nil, fmt.Errorf("write password prompt: %w", err)
-		}
-		if _, err := fmt.Fscan(os.Stdin, &pw); err != nil {
-			return nil, fmt.Errorf("read password: %w", err)
-		}
-	}
-	cli.token, err = loginToken(ctx, cli.http, server, email, pw)
-	if err != nil {
-		return nil, err
-	}
-	if err := saveConfig(ctx, &config{Server: server, Token: cli.token}); err != nil {
-		return nil, fmt.Errorf("save login: %w", err)
-	}
-	return cli, nil
+	return nil, errors.New("no cached token; pipe an OIDC access token or API token into constellationctl login")
 }
 
 func (c *authedClient) postJSON(ctx context.Context, path string, body any, out any) error {

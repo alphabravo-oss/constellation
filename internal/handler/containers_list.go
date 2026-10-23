@@ -96,7 +96,7 @@ func containerInventoryDefinition(r *http.Request, org, cluster uuid.UUID) (inve
 	if hide {
 		where = "platform_role=''"
 	}
-	return inventorylist.Definition{SQL: sql, Columns: "row_id,node,id,name,namespace,pod_name,image,state,workload,privileged,run_as_root,risk_score,critical,high,platform_role,observed_at", Args: args, Where: where, Summary: `jsonb_build_object('total',count(*),'running',count(*),'privileged',count(*) FILTER(WHERE privileged),'run_as_root',count(*) FILTER(WHERE run_as_root),'platform_count',(SELECT count(*) FROM inventory WHERE platform_role='core'))`}, o, nil
+	return inventorylist.Definition{SinglePass: true, SQL: sql, Columns: "row_id,node,id,name,namespace,pod_name,image,state,workload,privileged,run_as_root,risk_score,critical,high,platform_role,observed_at", Args: args, Where: where, Summary: `jsonb_build_object('total',count(*),'running',count(*),'privileged',count(*) FILTER(WHERE privileged),'run_as_root',count(*) FILTER(WHERE run_as_root),'platform_count',(SELECT count(*) FROM inventory WHERE platform_role='core'))`}, o, nil
 }
 
 func scanContainerInventory(row inventorylist.Row) (containerRow, error) {

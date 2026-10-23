@@ -443,28 +443,48 @@ auditArchiver:
 
 ---
 
-## Astronomer Integration
+## Single sign-on provider (OIDC)
 
-`astronomer.enabled=true` exposes `/api/v1/security/*` routes that validate
-Astronomer-issued JWTs against `astronomer.jwksURL`. Set
-`astronomer.jwtIssuer` and `astronomer.jwtAudience` when the Astronomer token
-contract is known so Constellation rejects tokens signed by the same JWKS for
-other audiences.
-
-Each Astronomer principal must be linked before it can use Constellation:
-`astronomer_identity_map.astronomer_user_id` stores the JWT `sub` value and maps
-it to an existing Constellation `users.id` and `orgs.id`. Unmapped, deleted, or
-disabled users are rejected before RBAC checks run.
+Constellation is a plain OIDC relying party. Configure one provider through Helm:
 
 ```yaml
-astronomer:
-  enabled: true
-  jwksURL: https://astronomer.example/.well-known/jwks.json
-  jwtIssuer: https://astronomer.example
-  jwtAudience: constellation-security
+auth:
+  oidc:
+    enabled: true
+    issuerURL: https://identity.example.com
+    clientID: constellation
+    clientSecretName: constellation-oidc # existing Secret, key client-secret
+    audience: constellation
+    redirectURL: https://constellation.example.com/api/v1/auth/oidc/callback
+    rolesClaim: alphabravo_roles
+    roleMapping:
+      security-admins: SecurityAdmin
+      analysts: Analyst
+    orgName: default
 ```
 
----
+The roles claim accepts a flat string/array, or the platform object
+`{"constellation":["security-admins"]}`. Mapping is exact and grants no default
+role. Other claim names (for example `groups`) work directly against an existing
+external provider. Request the client’s own audience; no cross-project audience
+scopes are required. Configure ID and access token lifetimes to **ten minutes or
+less**, with `iat`, `exp` and a stable `sub`. HTTPS discovery and endpoints are
+mandatory. Settings → Sign-in methods edits local policy and the provider role map. Provider
+secrets edited there are age encrypted in Postgres. Replicas reload within two seconds.
+Changed chart values replace the saved policy on rollout; unchanged values preserve UI edits.
+
+The browser uses authorization code + PKCE and a one-use, cookie-bound nonce/state
+record. It receives an opaque, HttpOnly, Secure host cookie that expires with the
+verified ID token. No local refresh extends the role lifetime. Removing a group
+removes access on the next token, within ten minutes. Logout ends local sessions;
+the provider’s SSO session remains active. `constellationctl login --server …`
+reads an OIDC access token or API token from stdin and validates it before saving
+it to the protected local config file.
+
+This destructive identity cutover requires a CNPG backup first. Migration 187
+drops legacy provider configuration, passwords, policies and refresh sessions.
+Roll the API and frontend together; old API builds cannot use the new schema.
+SSO identities are keyed by issuer + subject and never auto-linked by email.
 
 ## Signed support bundles
 
@@ -621,10 +641,8 @@ production supply an externally managed `ObjectStore` through
 | `networkPolicies.frontendIngressCIDRs`  | `["0.0.0.0/0"]`                                      | Ingress-controller/client CIDRs allowed to reach frontend pods |
 | `networkPolicies.admissionIngressCIDRs` | `["0.0.0.0/0"]`                                      | Kubernetes API/control-plane CIDRs allowed to call the webhook |
 | `api.replicas`                        | `2`                                                  | Bump for HA                                                     |
-| `api.jwtKeysSecret`                   | `""`                                                 | Existing Secret with JWT signing keys at key `keys`; empty renders a chart-managed Secret |
 | `api.supportBundleSigningKeySecret`  | `""`                                                 | Existing Secret with an Ed25519 PKCS#8 PEM signing key; empty leaves support bundles unsigned |
 | `api.supportBundleSigningKeySecretKey` | `private-key.pem`                                  | Data key within that Secret |
-| `api.requireJWTKeys`                  | `false`                                              | Set true only with `api.jwtKeysSecret` to hard-fail startup if the Secret goes missing |
 | `api.leaderElection.enabled`          | `true`                                               | Only disable with `api.replicas=1`                              |
 | `api.metrics.annotations`             | `true`                                               | Drop the `prometheus.io/*` pod annotations                      |
 | `api.metrics.serviceMonitor.enabled`  | `false`                                              | Render a Prometheus Operator ServiceMonitor for the `admin` port |
@@ -692,17 +710,13 @@ production supply an externally managed `ObjectStore` through
 | `auditArchiver.bucket`                | `""`                                                 | Required when audit archiver is enabled                          |
 | `auditArchiver.sign.mode`             | `none`                                               | Set `static-key` or `keyless` to emit signed manifests           |
 | `auditArchiver.sign.keySecretName`    | `""`                                                 | Secret containing the static signing key when `mode=static-key`  |
-| `astronomer.enabled`                  | `false`                                              | Enable `/api/v1/security/*` routes authenticated with Astronomer JWKS |
-| `astronomer.jwksURL`                  | `""`                                                 | Required when `astronomer.enabled=true`                              |
-| `astronomer.jwtIssuer`                | `""`                                                 | Optional required `iss` claim for Astronomer JWTs                    |
-| `astronomer.jwtAudience`              | `""`                                                 | Optional required `aud` claim for Astronomer JWTs                    |
 | `ai.enabled`                          | `false`                                              | Enable Abbot GenAI integration                                  |
 | `fips.enabled`                        | `false`                                              | Switch to FIPS-validated base images for every role             |
 
 Release images use `v`-prefixed application versions, such as `api:v0.3.0`.
 An explicit `image.tag` or per-role tag is used verbatim; per-role digest pins
 still take precedence. The CNPG default is
-`<image.registry>/postgres:16.14-v<Chart.appVersion>` and follows the chart version
+`<image.registry>/postgres:16.15-v<Chart.appVersion>` and follows the chart version
 independently of the application `image.tag`. Set `postgres.cloudnativepg.imageName`
 to a version-bearing `tag@sha256:...` reference for a pinned database rollout.
 
@@ -899,26 +913,84 @@ grants owned by migration 186) for an optional exporter. With
 `networkPolicies.enabled`, `networkPolicies.monitoring.namespace` is admitted
 to every metrics port.
 
-## Changing the bootstrap admin password
+## Local accounts and recovery administrator
 
-`bootstrap.admin` mints `<release>-admin-credentials` once and the
-bootstrap-admin Job is idempotent: editing the Secret later does **not**
-change the password stored in the database. Rotate through the API, which
-also revokes the admin's other sessions:
+Local accounts are a normal sign-in method, enabled by default. Set
+`auth.local.enabled`, `auth.oidc.enabled`, or both. Configure presentation with
+`auth.local.display: all|local|sso`. When the preferred method is unavailable,
+the login page retains the other enabled method and a recovery link.
+
+The chart creates a retained `<release>-local-admin` Secret containing a generated
+40-character password and a base32 `totp-secret`. Set
+`auth.local.bootstrap.existingSecret` to supply those keys yourself. The initial
+email defaults to `admin@constellation.local`; set `auth.local.bootstrap.email` to
+change it. Retrieve both values privately using the commands in the chart's NOTES,
+and enroll the seed in an authenticator (SHA1, six digits, 30 seconds). They are
+never logged by the API or returned by user-list/settings endpoints. This Secret
+only creates the initial administrator; it never resets an existing account.
+
+On a new installation the initial administrator is also the one recovery account.
+On an upgrade, migration 188 preserves the previous break-glass administrator and
+its password/TOTP; the bootstrap administrator is then a separate normal account.
+Existing `auth.breakGlass.*` Secret values are used only to import that identity;
+subsequent credential changes use Users or the CLI, not chart env rotation.
+
+Settings → Users creates accounts (supplied or generated passwords), assigns a
+product role, disables access and resets passwords or TOTP. Creation and resets
+show enrollment material once for private delivery to the account owner. There
+is no email-delivery dependency. Use another administrator or the operator CLI to
+reset your own credentials; the UI prevents losing one-time enrollment material
+when the current session is revoked. Settings → Sign-in methods controls local login,
+OIDC, the visible choices, password length, session lifetime and TOTP policy.
+TOTP is required for everyone by default; `admins` always requires it for the
+three administrator roles and recovery. The offline NCSC top-100k list is embedded
+in the API; password checks make no network request. The API defaults GOMAXPROCS to the CPU limit (rounded up), avoiding the runtime’s
+two-thread floor and quota throttling during password verification. An explicit
+`api.env.GOMAXPROCS` overrides it. Argon2 parameters remain 64 MiB / three passes /
+four lanes. The default minimum is 16
+characters (configurable 12–128), with a 4096-byte input bound.
+
+Normal local sessions default to one hour (configurable 60–86400 seconds).
+Disabling local sign-in immediately prevents new normal local logins and revokes
+normal local sessions; the recovery administrator continues to work when SSO is
+unconfigured or unavailable. Recovery always requires TOTP and lasts five minutes
+by default (at most ten, `auth.breakGlass.sessionTTL`). Every accepted TOTP step
+is consumed once across replicas. Default limits are 20 attempts per IP per minute
+and exponential account backoff after five failures, from one second to five
+minutes. `Retry-After` reports the actual cooldown. Counters are shared in Postgres.
+
+Sessions have no refresh. The bounded session index checks expiry on every
+request; cross-replica revocations normally propagate within 250ms, and a failed
+database freshness check closes access within one second. Database notifications
+wake refreshes immediately; a login response waits until all live replicas have
+acknowledged its session, so the next request can land on any replica. Migration
+189 adds this acknowledgement barrier and one dedicated notification connection
+per API replica. No per-request network
+or database call is needed for opaque-session verification. OIDC discovery runs
+independently, so an issuer outage cannot starve session synchronization.
+
+Recovery success and critical `auth.login.break-glass` audit commit together.
+`constellation_break_glass_logins_total` records outcomes and
+`ConstellationBreakGlassUsed` alerts on use (`metrics.prometheusRule.enabled`).
+Investigate each use and rotate the recovery credentials through Users or CLI.
+The recovery identity cannot be disabled, deleted or downgraded.
+
+Operators use an administrator API token or opaque session in the existing CLI
+configuration (`constellationctl login --server …` reads the token from stdin):
 
 ```sh
-TOKEN=$(curl -sf -X POST https://constellation.example.com/api/v1/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"admin@constellation.local","password":"<current>"}' | jq -r .token)
-curl -sf -X POST https://constellation.example.com/api/v1/auth/change-password \
-  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"current_password":"<current>","new_password":"<new>"}'
-kubectl -n constellation-system create secret generic constellation-admin-credentials \
-  --from-literal=password='<new>' --dry-run=client -o yaml | kubectl apply -f -   # keep the Secret in step
+constellationctl users list
+constellationctl users create --email analyst@example.com --name Analyst --role Analyst
+constellationctl users create --email analyst@example.com --role Analyst --password-stdin
+constellationctl users disable <user-id>
+constellationctl users reset-password <user-id> --password-stdin
+constellationctl users reset-totp <user-id>
 ```
 
-`bootstrap.admin.forcePasswordChange=true` makes the UI demand this on first
-login.
+Creation and resets print setup credentials once; redirect them to protected files.
+A missing password generates a strong one. Disabling access, resetting credentials
+and assigning a role revoke existing sessions and emit audit events. Take a CNPG
+backup before applying forward-only migration 188; deploy the API and UI together.
 
 ## Pod Security Admission and the k3s host profile
 
@@ -990,3 +1062,77 @@ Verify against something other than the embedded key: `bundle verify --trust-key
 
 Moving the private key into cosign KMS/HSM (`cosign sign-blob --key awskms://...`) keeps the
 same verification format; only step 1 and the custody row change.
+
+### Private images discovered from the cluster
+
+Set `scanner.registryConfigSecret` to an existing
+`kubernetes.io/dockerconfigjson` Secret in the release namespace when discovered
+image targets need private registry access. The chart mounts its
+`.dockerconfigjson` as a read-only `config.json` and sets `DOCKER_CONFIG` for the
+scanner tools. This explicitly grants every scanner replica pull access to the
+registries in that Secret. Registry connector jobs continue to use their isolated
+per-job credentials, including an empty configuration for anonymous connectors.
+
+The scanner defaults to one concurrent job, a 2 GiB memory request and a 6 GiB
+limit: each image job runs Syft, Trivy and Grype as concurrent child processes.
+Size the limit from container memory measurements over complete scan cycles;
+the worker's Go heap alone does not include its tools or charged file cache.
+
+
+## Optional bundled single sign-on
+
+Local accounts remain the default and work independently. Enable the shared
+identity layer with `identity.enabled: true`; Constellation never requires an
+Astronomer installation. The dependency registers a teal Constellation product,
+with `security-admin` → `SecurityAdmin` and `analyst` → `Analyst`. Unmapped roles
+receive no access. The API reads the issuer, client ID and create-only client
+secret from the provisioner's durable product Secret. No client secret belongs
+in Helm values.
+
+For a shared public hostname and existing TLS Secret:
+
+```yaml
+identity:
+  enabled: true
+  ingress:
+    className: nginx
+    tlsSecretName: constellation-tls
+  zitadel:
+    zitadel:
+      configmapConfig:
+        ExternalDomain: constellation.example.com
+```
+
+The shared chart's internal `zitadel` keys are operator configuration; public
+pages, cookies and token claims use product-neutral names. The registered
+callback and logo default to that hostname. For a separate issuer hostname,
+set `identity.products` to the Constellation registration with an exact product
+callback URL and logo URL. The optional database requires the CNPG operator, or
+set `identity.database.create: false` and configure the dependency's existing
+Postgres host/database/role and password Secret. Back up that database and all
+identity Secrets together, including the master key, product credentials and
+runtime signing/cookie capabilities. The identity namespace policy selects only
+identity Pods. Set `identity.networkPolicy.ingressPeers` and `ingressPorts` for
+another ingress controller, plus explicit private upstream allowances as needed.
+Registry mirrors may use `identity.imagePullSecrets` and
+`identity.zitadel.imagePullSecrets`.
+
+While bundled identity is enabled, it supplies the initial OIDC configuration.
+An administrator can select Bundled single sign-on, External OIDC provider, or
+Disabled on **Settings → Sign-in methods**, and choose local accounts, SSO, or
+both. The bundled option remains available after SSO is disabled; re-enabling it
+restores the provisioned credentials without rotating them. Saved settings
+survive restarts with unchanged deployment policy. Changing deployment auth
+values deliberately replaces saved policy. Disabling normal local accounts
+retains the protected recovery administrator and its mandatory TOTP/audit path.
+
+For a customer-managed provider, leave `identity.enabled: false` and configure
+`auth.oidc.*` exactly as before. The shared `identity/pkg/rp` verifier performs
+local signature/issuer/audience/time checks, ten-minute token-lifetime limits,
+ID-token authorized-party checks, last-good JWKS and bounded memoization. The
+existing product code flow preserves PKCE, nonce and one-use database state;
+client authentication follows the provider's discovery document. Browser
+sessions remain opaque product sessions with no token refresh.
+
+The identity chart is pinned at 0.1.3 (restricted Pod Security defaults); the
+shared relying-party module and qualified runtime images are 0.1.2.
