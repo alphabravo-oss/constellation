@@ -474,6 +474,7 @@ function AdmissionWorkspace({ clusterId }: { clusterId?: string }) {
                 size="sm"
                 variant="ghost"
                 disabled={clearDryRunHistory.isPending}
+                title="Clears up to 1,000 assessments per request. Repeat if history remains."
                 onClick={() => {
                   if (serverDryRunHistory.length > 0) {
                     clearDryRunHistory.mutate();

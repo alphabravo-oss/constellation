@@ -13,6 +13,7 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 
+	"github.com/alphabravocompany/constellation/internal/admissionhistory"
 	"github.com/alphabravocompany/constellation/internal/handler/authctx"
 	"github.com/alphabravocompany/constellation/internal/handler/httpx"
 	"github.com/alphabravocompany/constellation/internal/handler/sqlx"
@@ -105,9 +106,8 @@ SELECT id::text,
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"history": out, "total": len(out)})
 }
 
-// ClearAdmissionDryRunHistory deletes retained dry-run assessments for the
-// caller's org and optional cluster. The tamper-evident audit trail records the
-// clear action; this table is operator history, not the append-only audit log.
+// ClearAdmissionDryRunHistory clears one bounded batch for the caller's scope.
+// The permanent audit receipt and deletion commit atomically.
 func (p *Policies) ClearAdmissionDryRunHistory(w http.ResponseWriter, r *http.Request) {
 	subj, ok := authctx.SubjectFrom(r.Context())
 	if !ok {
@@ -123,17 +123,18 @@ func (p *Policies) ClearAdmissionDryRunHistory(w http.ResponseWriter, r *http.Re
 		jsonError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	tag, err := p.db.Pool().Exec(r.Context(), `
-DELETE FROM admission_dry_run_history
- WHERE org_id = $1
-   AND ($2::uuid IS NULL OR cluster_id = $2)`, subj.OrgID, clusterArg)
+	var clusterID *uuid.UUID
+	if id, ok := clusterArg.(uuid.UUID); ok {
+		clusterID = &id
+	}
+	deleted, err := admissionhistory.Clear(r.Context(), p.db.Pool(), admissionhistory.ClearRequest{
+		OrgID: subj.OrgID, ClusterID: clusterID, ActorID: subj.UserID, ActorIP: remoteIP(r), RequestID: chimw.GetReqID(r.Context()),
+	})
 	if err != nil {
-		jsonError(w, http.StatusInternalServerError, err.Error())
+		jsonError(w, http.StatusInternalServerError, "assessment history could not be cleared")
 		return
 	}
-	deleted := tag.RowsAffected()
-	p.auditAdmissionDryRunClear(r, subj, clusterIDString(clusterArg), deleted)
-	httpx.WriteJSON(w, http.StatusOK, map[string]any{"deleted": deleted})
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"deleted": deleted, "batch_limit": admissionhistory.ClearBatchLimit})
 }
 
 func (p *Policies) recordAdmissionDryRun(r *http.Request, subj authctx.Subject, clusterArg any, req admissionAssessRequest, resp *admissionAssessResponseDTO) error {
@@ -264,28 +265,6 @@ func (p *Policies) auditAdmissionDryRun(r *http.Request, subj authctx.Subject, i
 			"matches":          len(resp.Matches),
 		},
 		RequestID: chimw.GetReqID(r.Context()),
-	})
-}
-
-func (p *Policies) auditAdmissionDryRunClear(r *http.Request, subj authctx.Subject, clusterID string, deleted int64) {
-	if p.auditLog == nil {
-		return
-	}
-	orgID := subj.OrgID
-	userID := subj.UserID
-	targetID := clusterID
-	if targetID == "" {
-		targetID = "all"
-	}
-	_, _, _ = p.auditLog.Log(r.Context(), audit.Event{
-		OrgID:      &orgID,
-		ActorID:    &userID,
-		ActorIP:    remoteIP(r),
-		Action:     "admission.dry-run.clear",
-		TargetKind: "admission-dry-run-history",
-		TargetID:   targetID,
-		After:      map[string]any{"cluster_id": clusterID, "deleted": deleted},
-		RequestID:  chimw.GetReqID(r.Context()),
 	})
 }
 

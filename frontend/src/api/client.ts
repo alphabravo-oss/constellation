@@ -5110,7 +5110,7 @@ export const policies = {
   admissionDryRunHistory: (params: { cluster_id?: string; limit?: number } = {}) =>
     api.get<{ history: AdmissionDryRunHistoryRow[]; total: number }>("/policies/admission/dry-runs", { params }).then((r) => r.data),
   clearAdmissionDryRunHistory: (params: { cluster_id?: string } = {}) =>
-    api.delete<{ deleted: number }>("/policies/admission/dry-runs", { params }).then((r) => r.data),
+    api.delete<{ deleted: number; batch_limit: number }>("/policies/admission/dry-runs", { params }).then((r) => r.data),
   admissionRules: (params: { cluster_id?: string } = {}) =>
     api.get<{ rules: AdmissionRuleRow[]; total: number }>("/policies/admission/rules", { params }).then((r) => r.data),
   admissionOptions: () =>
