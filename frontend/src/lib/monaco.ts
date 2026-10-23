@@ -3,7 +3,7 @@
 // (vendor-editor chunk). YAML has no language service, so the generic editor worker is enough.
 import { loader } from "@monaco-editor/react";
 import * as monaco from "monaco-editor";
-import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
+import EditorWorker from "monaco-editor/editor/editor.worker.js?worker";
 
 self.MonacoEnvironment = {
   getWorker: () => new EditorWorker(),
