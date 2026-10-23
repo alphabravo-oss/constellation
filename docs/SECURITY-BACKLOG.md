@@ -15,7 +15,7 @@ Status values: `open` (not yet verified against HEAD), `verified-open`,
 | H4 | fixed ([4a77a7cf3](https://github.com/alphabravo-oss/constellation/commit/4a77a7cf3015e9fb5014ae866797badde5953a47)); reverified 2026-10-23 | compliance | AWS IAM inline wildcard-policy detection is fail-open (URL-encoded policy never matches) | `internal/cspm/aws/aws.go` |
 | H5 | fixed ([035808ba0](https://github.com/alphabravo-oss/constellation/commit/035808ba0fbe926101949ea2a5073284b5d672c5)); verified 2026-10-23 | scanning | Vulnerability-profile decisions computed at scan completion but never applied | `internal/handler/scanning/scanjobs.go` |
 | H6 | fixed ([bf91eadcb](https://github.com/alphabravo-oss/constellation/commit/bf91eadcb8b91f86364e0c555f27b096a23e623c)); reverified 2026-10-23 | runtime-agent | Workload micro-segmentation policy never pushed to dp (`Supervisor.PushPolicy` has no callers) | `internal/runtime/dp/policy.go` |
-| H7 | open | helm | Admission quarantine DSN reads a non-existent Secret key (fail-open admission) | `deploy/charts/constellation/templates/admission-deployment.yaml` |
+| H7 | fixed ([3b15b3ea2](https://github.com/alphabravo-oss/constellation/commit/3b15b3ea2af6eef900dd0be30d156a2e041348bc)); reverified 2026-10-23 | helm | Admission quarantine DSN reads a non-existent Secret key (fail-open admission) | `deploy/charts/constellation/templates/admission-deployment.yaml` |
 | H8 | open | operator | Operator ClusterRole omits RBAC for policy CRs it reconciles | `deploy/charts/constellation/templates/operator.yaml` |
 | H9 | open | audit | Concurrent audit writes silently break the hash chain | `pkg/audit/audit.go` |
 | H10 | fixed ([9a6945d2c](https://github.com/alphabravo-oss/constellation/commit/9a6945d2c)) | auth | SAML/LDAP JIT login mints a session JWT with a stale `session_epoch` | `internal/handler/auth.go` |
@@ -129,6 +129,24 @@ The historical finding follows.
 - **Fix:** Add the agent-side policy-sync goroutine: fetch the node's runtime_policies, build per-workload `WorkloadPolicy`, call `dpSup.PushPolicy(..., CmdModify)`, and push empty+`CmdDelete` on removal.
 
 ### H7. Admission quarantine DSN reads a non-existent Secret key, crashing the webhook (fail-open admission)
+
+**Reverified on main `54326342a`, 2026-10-23:** quarantine already uses
+`constellation.dsnSecret` / `constellation.dsnSecretKey`, matching admission policy
+and audit configuration. The bundled CNPG path references the rendered
+`<fullname>-database-url` Secret's `url` key. External mode honors the shared DSN
+or customer-owned Secret/key, and each admission feature can override its DSN.
+
+`scripts/test-helm-admission.sh`, included in `make helm-template-smoke`, parses
+seven rendered configurations and verifies all three admission DSNs, required
+Secret references, generated DSN values, cluster arguments and disabled-feature
+behavior. A disposable chart copy restoring the historical `-postgres` / `dsn`
+reference fails the test for the expected reason. The values comments now describe
+shared external DSNs and the required explicit quarantine cluster ID accurately.
+This verifies chart wiring, not live webhook readiness or enforcement; externally
+managed Secrets still must exist with the configured key. See
+[verification evidence](security-testing.md#admission-database-secret-reverification-2026-10-23).
+The historical finding follows.
+
 - **Severity:** high  **Category:** bug  **Area:** helm-deploy
 - **File:** deploy/charts/constellation/templates/admission-deployment.yaml:100
 - **Failure:** With quarantine enabled and `dsn` blank (the documented in-cluster default), `CONSTELLATION_QUARANTINE_DSN` is sourced from `secretKeyRef <fullname>-postgres / dsn` with no `optional: true` — but that Secret only has username/password/database; no Secret defines a `dsn` key. Every admission pod is stuck in `CreateContainerConfigError`; with `failurePolicy: Ignore` the API server bypasses the webhook → quarantine deny-list, DB-backed policies and admission audit all silently unenforced.

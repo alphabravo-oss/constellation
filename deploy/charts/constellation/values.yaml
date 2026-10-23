@@ -560,17 +560,16 @@ admission:
   # can run quarantine-only or policy-rules-only.
   quarantine:
     enabled: false
-    # dsn defaults to the in-cluster postgres Service. Override when using
-    # an external Postgres; the credential SHOULD be a read-only role
+    # When empty, use the shared database DSN Secret, including postgres.dsn
+    # or postgres.existingSecret in external mode. An override SHOULD use a read-only role
     # scoped to quarantine_entries (the webhook never writes).
     dsn: ""
     refresh: "5s"
     # readyz starts failing once the snapshot is older than this — at which
     # point kubelet will stop sending it requests until it recovers.
     maxStale: "60s"
-    # cluster_id MUST be the UUID of the cluster this admission webhook
-    # runs in. Helm renders it from .Values.cluster.id if set, otherwise
-    # the webhook starts with quarantine disabled even when enabled=true.
+    # MUST be the UUID of the cluster this admission webhook runs in.
+    # Set explicitly: an empty value leaves quarantine disabled even when enabled=true.
     clusterId: ""
   # DB-backed admission policies. When enabled, the webhook loads enabled
   # `constellation-admission` policy rows for the configured cluster's org and

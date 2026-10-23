@@ -180,6 +180,7 @@ helm-template-smoke: ## Render the chart against common value combinations
 	@echo ">> object-store backups"; helm template constellation deploy/charts/constellation/ --set backup.objectStore.enabled=true > /dev/null
 	@echo ">> three-node k3s HA profile"; ./scripts/test-helm-ha.sh
 	@./scripts/test-helm-identity.sh
+	@./scripts/test-helm-admission.sh
 	@echo "helm-template-smoke: ok"
 
 CLUSTER ?=
