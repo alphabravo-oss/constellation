@@ -14,11 +14,10 @@ ARG GO_VERSION
 ARG GO_IMAGE_DIGEST=sha256:5c3e9b43cfd3bb95c7937462e29d87ada57b481a96fa23ad0eb61778d7a00110
 ARG TRIVY_VERSION=0.76.0
 ARG ORAS_VERSION=1.3.5
-ARG TRIVY_SHA256_AMD64=e24b1c51293c1b15e4ba8d45bbc7891ba053f90278ec2698f3562c993e145fe7
-ARG TRIVY_SHA256_ARM64=aab21e677a7b7071fc79f1711480840754c18a1b9d9cefa7ccd06af63a0e8f4c
-ARG ORAS_SHA256_AMD64=f48a73ea6d026a862c3919fc773da9a8c86fc259c2c737d5baed3b8b9614ad22
-ARG ORAS_SHA256_ARM64=d5d4e5afd5c0781c93eda5ea1976e654e1fdee202c1ddaeaf5f91a8c4fd67d46
-ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian13:nonroot@sha256:e2e927ec666bae08560abb3c55d0659eceabb657f56b6782ab500a9fc7f555e3
+# Tag commits, verified after clone (a moved tag fails the build).
+ARG TRIVY_COMMIT=531360e5d2a88e732373f1614ba99a38738538b8
+ARG ORAS_COMMIT=d6e7b583b9afc7fa3798de77181c53c94418d727
+ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian13:nonroot@sha256:516757106de35205efb70b91ba03f6f1298424a0678c603255cf2852a7000087
 
 # -----------------------------------------------------------------------------
 # Build the Go binary.
@@ -56,39 +55,30 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
 # Shell-equipped stage that only downloads/verifies upstream tools (ADR 0005);
 # nothing from it ships except the verified binaries. Refresh with:
 #   docker buildx imagetools inspect debian:bookworm-slim
-FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS tools
+# Trivy and ORAS: upstream release binaries are built with go1.27.2 / go1.26.9, and
+# go < 1.27.3 accepts the compromised eMudhra intermediate chain. Rebuild both from
+# their verified tag commits on the go.mod toolchain (GOTOOLCHAIN=local: never auto-
+# download another Go). scripts/check-image-go.sh enforces the floor on every image.
+FROM --platform=$BUILDPLATFORM golang:${GO_VERSION}-bookworm@${GO_IMAGE_DIGEST} AS upstream-tools
 ARG TARGETARCH
 ARG TRIVY_VERSION
+ARG TRIVY_COMMIT
 ARG ORAS_VERSION
-ARG TRIVY_SHA256_AMD64
-ARG TRIVY_SHA256_ARM64
-ARG ORAS_SHA256_AMD64
-ARG ORAS_SHA256_ARM64
+ARG ORAS_COMMIT
+ENV CGO_ENABLED=0 GOTOOLCHAIN=local GOFLAGS=-trimpath
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    git clone -q --depth 1 --branch "v${TRIVY_VERSION}" https://github.com/aquasecurity/trivy /src/trivy \
+ && test "$(git -C /src/trivy rev-parse HEAD)" = "${TRIVY_COMMIT}" \
+ && cd /src/trivy && GOARCH=${TARGETARCH} go build -ldflags "-s -w -X github.com/aquasecurity/trivy/pkg/version/app.ver=${TRIVY_VERSION}" -o /tools/trivy ./cmd/trivy
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    git clone -q --depth 1 --branch "v${ORAS_VERSION}" https://github.com/oras-project/oras /src/oras \
+ && test "$(git -C /src/oras rev-parse HEAD)" = "${ORAS_COMMIT}" \
+ && cd /src/oras && GOARCH=${TARGETARCH} go build -ldflags "-s -w -X oras.land/oras/internal/version.Version=${ORAS_VERSION} -X oras.land/oras/internal/version.BuildMetadata= -X oras.land/oras/internal/version.GitCommit=${ORAS_COMMIT} -X oras.land/oras/internal/version.GitTreeState=clean" -o /tools/oras ./cmd/oras
 
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates tar \
- && rm -rf /var/lib/apt/lists/*
+FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS tools
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 WORKDIR /tools
-
-RUN set -eux; \
-    case "${TARGETARCH}" in \
-      amd64) \
-        TRIVY_SHA256="${TRIVY_SHA256_AMD64}"; \
-        ORAS_SHA256="${ORAS_SHA256_AMD64}"; \
-        TRIVY_ARCH=64bit ;; \
-      arm64) \
-        TRIVY_SHA256="${TRIVY_SHA256_ARM64}"; \
-        ORAS_SHA256="${ORAS_SHA256_ARM64}"; \
-        TRIVY_ARCH=ARM64 ;; \
-      *) echo "unsupported arch ${TARGETARCH}" >&2; exit 1 ;; \
-    esac; \
-    curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-${TRIVY_ARCH}.tar.gz" -o trivy.tar.gz; \
-    echo "${TRIVY_SHA256}  trivy.tar.gz" | sha256sum -c -; \
-    tar -xzf trivy.tar.gz trivy; \
-    curl -fsSL "https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/oras_${ORAS_VERSION}_linux_${TARGETARCH}.tar.gz" -o oras.tar.gz; \
-    echo "${ORAS_SHA256}  oras.tar.gz" | sha256sum -c -; \
-    tar -xzf oras.tar.gz oras; \
-    rm -f trivy.tar.gz oras.tar.gz
-
+COPY --from=upstream-tools /tools/ /tools/
 COPY --from=patched-tools /tools/ /tools/
 
 RUN /tools/syft --version >/dev/null \

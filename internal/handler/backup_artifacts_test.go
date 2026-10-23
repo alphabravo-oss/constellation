@@ -30,7 +30,7 @@ func TestBackupJobsOverlapWithoutArtifactCollision(t *testing.T) {
 	if _, err := pool.Exec(t.Context(), `INSERT INTO orgs(id,name,display_name) VALUES($1,$2,$2)`, org, name); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(t.Context(), `INSERT INTO users(id,org_id,email,display_name,password_hash) VALUES($1,$2,$3,'Backup operator','test-only')`, user, org, "backup-"+user.String()+"@example.test"); err != nil {
+	if _, err := pool.Exec(t.Context(), `INSERT INTO users(id,org_id,email,display_name) VALUES($1,$2,$3,'Backup operator')`, user, org, "backup-"+user.String()+"@example.test"); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {

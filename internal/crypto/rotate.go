@@ -18,6 +18,8 @@ type Column struct {
 // Columns is the inventory of encrypted columns (guide ch.06 rotation job).
 // Adding an encrypted column means adding it here so rotate-keys covers it.
 var Columns = []Column{
+	{Table: "local_users", PK: "user_id", Ciphertext: "totp_secret", KeyID: "key_id", Algorithm: "algorithm"},
+	{Table: "identity_settings", PK: "singleton", Ciphertext: "client_secret", KeyID: "key_id", Algorithm: "algorithm"},
 	{Table: "registries", PK: "id", Ciphertext: "auth_secret", KeyID: "key_id", Algorithm: "algorithm"},
 	{Table: "git_connectors", PK: "org_id", Ciphertext: "pat_sealed", KeyID: "key_id", Algorithm: "algorithm"},
 	{Table: "fed_joint_secret", PK: "org_id", Ciphertext: "client_key_enc", KeyID: "key_id", Algorithm: "algorithm"},

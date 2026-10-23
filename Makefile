@@ -23,7 +23,7 @@ GO_LDFLAGS := -s -w \
 
 # Every production binary under cmd/. Adding a binary is a one-line edit here.
 BINARIES := constellation-api constellation-scanner constellation-operator constellation-discoverer \
-  constellation-runtime-agent constellation-admission constellation-bootstrap constellation-backup \
+  constellation-runtime-agent constellation-admission constellation-backup \
   constellation-restore constellation-seed constellation-compliance-scheduler constellation-github-app \
   constellation-k8s-compliance-collector constellation-kube-bench-runner constellation-netpolicy-applier \
   constellation-registry-walker constellation-support-bundle-verify constellationctl audit-archiver \
@@ -39,12 +39,12 @@ DOCKER_BUILD ?= docker buildx build --platform $(PLATFORMS) \
   --build-arg COMMIT=$(COMMIT) --build-arg BUILD_TIME=$(DATE) --build-arg FIPS=$(FIPS)
 
 IMAGES := api scanner operator discoverer audit-archiver frontend runtime-agent admission \
-  bootstrap postgres compliance-scheduler kube-bench-runner toolbox
+  postgres compliance-scheduler kube-bench-runner toolbox
 # Dockerfile name differs from the image name for these roles.
 dockerfile_audit-archiver := archiver
 
 .PHONY: help dev dev-down dev-status dev-logs build tools-build test test-integration lint vet fmt fmt-fix \
-  generate migrate check security updates fips-build fips-test helm-lint helm-template-smoke \
+  generate migrate bench check security updates fips-build fips-test helm-lint helm-template-smoke \
   e2e frontend-build frontend-lint frontend-test lint-shell check-go-version tools images images-push \
   release-images release-check deploy deploy-dryrun undeploy dp dp-clean vendor-neuvector-diff \
   vendor-neuvector-sync clean $(addprefix image-,$(IMAGES)) image-scanner-airgap
@@ -114,19 +114,26 @@ fmt-fix: ## Rewrite files with gofmt + goimports
 lint-shell: ## shellcheck every tracked shell script
 	bash scripts/lint-shell.sh
 
-frontend-lint: ## eslint + tsc for the frontend
+frontend-lint: frontend/node_modules/.package-lock.json ## eslint + tsc for the frontend
 	cd frontend && npm run lint && npm run type-check
 
-frontend-test: ## vitest
+frontend-test: frontend/node_modules/.package-lock.json ## vitest
 	cd frontend && npm test --silent
 
-frontend-build: ## Production bundle
-	cd frontend && npm ci && npm run build
+frontend/node_modules/.package-lock.json: frontend/package.json frontend/package-lock.json
+	cd frontend && npm ci --no-audit --no-fund
+
+frontend-build: frontend/node_modules/.package-lock.json ## Production bundle and initial JavaScript budget
+	cd frontend && npm run build
 
 generate: ## Regenerate code (controller-gen deepcopy for the operator CRDs); sqlc/buf join in Phase 2
 	$(GO) generate ./...
 
-check: lint vet fmt lint-shell frontend-lint test ## Composite quality gate
+bench: ## Hot HTTP handlers on 10k rows (real disposable Postgres) and shared RP
+	$(GO) test -tags=integration -run='^$$' -bench=BenchmarkEfficiencyHandlers -benchmem ./internal/server
+	$(GO) test -run='^$$' -bench=BenchmarkOIDC -benchmem ./internal/identity
+
+check: lint vet fmt lint-shell frontend-lint frontend-build test ## Composite quality gate
 
 security: ## gosec + govulncheck + gitleaks (SARIF under artifacts/)
 	bash scripts/security-scan.sh gosec
@@ -172,6 +179,7 @@ helm-template-smoke: ## Render the chart against common value combinations
 	@echo ">> cert-manager TLS"; helm template constellation deploy/charts/constellation/ --set tls.certManager.enabled=true --set tls.certManager.issuer=letsencrypt-prod > /dev/null
 	@echo ">> object-store backups"; helm template constellation deploy/charts/constellation/ --set backup.objectStore.enabled=true > /dev/null
 	@echo ">> three-node k3s HA profile"; ./scripts/test-helm-ha.sh
+	@./scripts/test-helm-identity.sh
 	@echo "helm-template-smoke: ok"
 
 CLUSTER ?=

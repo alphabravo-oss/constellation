@@ -37,6 +37,10 @@ func Connect(ctx context.Context, databaseURL string, opts ...Option) (*DB, erro
 		return nil, fmt.Errorf("parsing database URL: %w", err)
 	}
 
+	// These pools serve short transactional requests. Cost estimates for the
+	// inventory CTEs can trigger seconds of JIT compilation for millisecond reads;
+	// compilation cannot be amortized across prepared-statement executions.
+	cfg.ConnConfig.RuntimeParams["jit"] = "off"
 	cfg.MaxConns = 25
 	cfg.MinConns = 5
 	cfg.MaxConnLifetime = 30 * time.Minute

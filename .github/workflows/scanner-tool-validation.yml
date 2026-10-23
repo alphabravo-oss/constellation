@@ -1,6 +1,14 @@
 name: Scanner tool validation
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/scanner-tool-validation.yml
+      - deploy/docker/scanner-tools/grype/**
+      - deploy/docker/scanner-tools/sources.json
+      - cmd/tools/scanner-tools/**
+      - go.mod
+      - go.sum
   push:
     branches: [main, 'implement/**']
     paths:
@@ -8,6 +16,8 @@ on:
       - deploy/docker/scanner-tools/grype/**
       - deploy/docker/scanner-tools/sources.json
       - cmd/tools/scanner-tools/**
+      - go.mod
+      - go.sum
 permissions:
   contents: read
 concurrency:
@@ -20,7 +30,7 @@ jobs:
     env:
       GOMAXPROCS: '2'
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
@@ -41,8 +51,15 @@ jobs:
           fi
           grep -qx 'github.com/moby/moby/client' "$GITHUB_WORKSPACE/artifacts/grype-dependencies.txt"
           GOWORK=off go test -mod=readonly -race -shuffle=on -count=2 -json ./cmd/grype/cli/commands ./internal/format | tee "$GITHUB_WORKSPACE/artifacts/grype-tests.json"
+      - name: Validate the release-built Grype executable
+        run: |
+          go run ./cmd/tools/scanner-tools --tool grype --work "$RUNNER_TEMP/grype-source" --output "$RUNNER_TEMP/tool-output"
+          go version -m "$RUNNER_TEMP/tool-output/grype" > artifacts/grype-buildinfo.txt
+          "$RUNNER_TEMP/tool-output/grype" version -o json > artifacts/grype-version.json
+          CONSTELLATION_TEST_GRYPE_BINARY="$RUNNER_TEMP/tool-output/grype" \
+            go test -race -shuffle=on -count=2 -json ./cmd/tools/scanner-tools -run '^TestGrypeBinary$' | tee artifacts/grype-binary-tests.json
       - if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: scanner-tool-regression-${{ github.sha }}
           path: artifacts/

@@ -36,8 +36,8 @@ VALUES ($1, $2, 'Platform Facts Test')`, orgID, "platform-facts-"+orgID.String()
 		t.Fatalf("org: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
-INSERT INTO users (id, org_id, email, display_name, password_hash)
-VALUES ($1, $2, $3, 'Test User', 'x')`, userID, orgID, "platform-facts@example.test"); err != nil {
+INSERT INTO users (id, org_id, email, display_name)
+VALUES ($1, $2, $3, 'Test User')`, userID, orgID, "platform-facts@example.test"); err != nil {
 		t.Fatalf("user: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `

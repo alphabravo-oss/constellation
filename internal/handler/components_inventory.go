@@ -751,7 +751,7 @@ func componentDiagnosticCounters(component componentInstanceDTO, metadata map[st
 
 func componentDiagnosticConfigEntries(metadata map[string]any) []componentDiagnosticConfig {
 	keys := []string{
-		"instance_id", "listen_addr", "jwt_keys_configured", "oidc_enabled", "astronomer_enabled",
+		"instance_id", "listen_addr", "oidc_enabled", "break_glass_enabled",
 		"vulndb_ready_required", "vulndb_rescan_interval_s", "managed_namespace", "watch_namespace",
 		"node", "upload_enabled", "batch_size", "batch_interval_ms", "leader_election", "tls_enabled", "quarantine_enabled", "policy_source_enabled", "audit_enabled",
 		"flavor", "interval_seconds", "one_shot", "signing_enabled", "include_system_namespaces", "engines",

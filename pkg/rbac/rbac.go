@@ -53,12 +53,9 @@ const (
 	// knobs that change outbound traffic, certificate trust, and log routing, so the
 	// privilege is granted only to GlobalAdmin alongside the other org-level admin verbs.
 	VerbManageSystemConfig Verb = "manage-system-config"
-	// VerbManageAuthServers gates the B4 DB-backed auth-provider (IdP) CRUD surface
-	// (GET/POST/PUT/DELETE /api/v1/auth-servers — LDAP/SAML/OIDC provider rows, their
-	// secrets, auth_order, and group->role mappings). Authoring an IdP row controls who
-	// can authenticate and what roles a federated login is granted org-wide, so the
-	// privilege is granted only to GlobalAdmin alongside the other org-level admin verbs.
-	VerbManageAuthServers Verb = "manage-auth-servers"
+	// VerbManageIdentity permits inspection of the deployment OIDC provider and
+	// emergency administrator status. Credentials are never returned.
+	VerbManageIdentity Verb = "manage-identity"
 	// VerbManageResponseRules gates the E1 declarative response-rule engine CRUD
 	// (GET/POST/PUT/DELETE /api/v1/response-rule-defs). A response rule binds runtime
 	// event conditions to automated actions (quarantine, suppress-log, webhook, tag),
@@ -146,7 +143,7 @@ var rolePermissions = map[string][]Verb{
 		VerbManageUsers,
 		VerbManageOrg,
 		VerbManageSystemConfig,
-		VerbManageAuthServers,
+		VerbManageIdentity,
 		VerbInvokeAI,
 	},
 }
@@ -324,7 +321,7 @@ var AllVerbs = []Verb{
 	VerbManageUsers,
 	VerbManageOrg,
 	VerbManageSystemConfig,
-	VerbManageAuthServers,
+	VerbManageIdentity,
 	VerbInvokeAI,
 	VerbRuntimeIngest,
 	VerbFederationSync,
@@ -397,8 +394,8 @@ var verbInfo = map[Verb]VerbInfo{
 		Description: "Manage runtime system config (egress proxy, TLS/CA bundle, syslog/SIEM, autoscale)",
 		Category:    "Admin", UserGrantable: true,
 	},
-	VerbManageAuthServers: {
-		Description: "Manage auth providers (LDAP/SAML/OIDC servers, secrets, order, group->role mappings)",
+	VerbManageIdentity: {
+		Description: "Inspect single sign-on provider and emergency access status",
 		Category:    "Admin", UserGrantable: true,
 	},
 	VerbInvokeAI: {

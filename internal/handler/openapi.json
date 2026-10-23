@@ -1617,123 +1617,6 @@
           }
         }
       },
-      "AuthServer": {
-        "type": "object",
-        "description": "B4 DB-backed auth provider (IdP). One of LDAP/SAML/OIDC. The config object's meaningful fields depend on type. Provider secrets (config.bind_password, config.sp_key_pem, config.client_secret) are returned redacted on read, and a redaction-marker echo on update preserves the stored secret.",
-        "required": [
-          "type",
-          "name"
-        ],
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "readOnly": true
-          },
-          "type": {
-            "type": "string",
-            "enum": [
-              "ldap",
-              "saml",
-              "oidc"
-            ],
-            "description": "Provider kind. Immutable after create."
-          },
-          "name": {
-            "type": "string",
-            "description": "Unique provider name within the org."
-          },
-          "enabled": {
-            "type": "boolean"
-          },
-          "auth_order": {
-            "type": "integer",
-            "description": "Lower value is preferred when multiple providers of the same type are enabled."
-          },
-          "config": {
-            "type": "object",
-            "description": "Provider-specific configuration. LDAP: url, bind_dn, bind_password, base_dn, user_filter, group_attribute, email_attribute. SAML: idp_metadata_xml, entity_id, acs_url, sp_cert_pem, sp_key_pem, group_attribute, email_attribute. OIDC: issuer_url, client_id, client_secret, redirect_url, scopes.",
-            "properties": {
-              "url": {
-                "type": "string"
-              },
-              "bind_dn": {
-                "type": "string"
-              },
-              "bind_password": {
-                "type": "string",
-                "description": "SECRET. Redacted on read."
-              },
-              "base_dn": {
-                "type": "string"
-              },
-              "user_filter": {
-                "type": "string"
-              },
-              "group_attribute": {
-                "type": "string"
-              },
-              "email_attribute": {
-                "type": "string"
-              },
-              "idp_metadata_xml": {
-                "type": "string"
-              },
-              "entity_id": {
-                "type": "string"
-              },
-              "acs_url": {
-                "type": "string"
-              },
-              "sp_cert_pem": {
-                "type": "string"
-              },
-              "sp_key_pem": {
-                "type": "string",
-                "description": "SECRET. Redacted on read."
-              },
-              "issuer_url": {
-                "type": "string"
-              },
-              "client_id": {
-                "type": "string"
-              },
-              "client_secret": {
-                "type": "string",
-                "description": "SECRET. Redacted on read."
-              },
-              "redirect_url": {
-                "type": "string"
-              },
-              "scopes": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "role_mapping": {
-            "type": "object",
-            "description": "Maps IdP-supplied group/attribute values (lower-cased) to Constellation role names, with an optional default role.",
-            "properties": {
-              "rules": {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "string"
-                }
-              },
-              "default": {
-                "type": "string"
-              }
-            }
-          },
-          "revision": {
-            "type": "integer",
-            "readOnly": true
-          }
-        }
-      },
       "SystemConfig": {
         "type": "object",
         "description": "Runtime-mutable system configuration. Secret-bearing fields (ca_bundle_pem, and any credentials embedded in egress_proxy.https_proxy) are returned redacted on GET.",
@@ -9610,21 +9493,8 @@
   "paths": {
     "/api/v1/access-control": {
       "get": {
-        "description": "Requires manage_users. Each users item includes local_password (whether a local password exists), locked (whether the effective failed-login lockout window is still active), and password_reset_required (whether login must change the password). The status field remains active or suspended and is independent of these recovery flags.",
+        "description": "Requires manage-users. Returns OIDC identities, canonical and custom product roles, scoped bindings, and automation identities. Human sign-in is managed through the deployment OIDC configuration.",
         "summary": "Access control users, roles, bindings, providers, tokens, permissions, and guardrails"
-      }
-    },
-    "/api/v1/access-control/local-users": {
-      "post": {
-        "responses": {
-          "200": {
-            "description": "ok"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "summary": "Create local-users"
       }
     },
     "/api/v1/access-control/role-bindings": {
@@ -11623,201 +11493,11 @@
         "summary": "Verify the hash-chained audit log and return the first integrity break, if any"
       }
     },
-    "/api/v1/auth-servers": {
-      "get": {
-        "summary": "List configured auth providers (IdPs)",
-        "description": "Lists the calling org's configured LDAP/SAML/OIDC identity providers. Each entry carries its type, name, enabled flag, auth_order, provider config, and group->role mapping. Provider secrets (LDAP bind password, SAML SP private key, OIDC client secret) are redacted. Requires the manage_auth_servers verb.",
-        "responses": {
-          "200": {
-            "description": "The org's auth providers (secrets redacted).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "auth_servers": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/AuthServer"
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid bearer token."
-          },
-          "403": {
-            "description": "Caller lacks the manage_auth_servers verb."
-          }
-        }
-      },
+    "/api/v1/auth/break-glass": {
       "post": {
-        "summary": "Create an auth provider (IdP)",
-        "description": "Creates a new LDAP/SAML/OIDC identity provider for the calling org. The provider-specific config (including secrets) is validated by type. On success the live verifier set is hot-reloaded so the new provider takes effect without a restart. Requires the manage_auth_servers verb.",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AuthServer"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "The created provider (secrets redacted).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthServer"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid body or provider config (unknown type, missing required fields)."
-          },
-          "401": {
-            "description": "Missing or invalid bearer token."
-          },
-          "403": {
-            "description": "Caller lacks the manage_auth_servers verb."
-          },
-          "409": {
-            "description": "A provider with that name already exists in the org."
-          }
-        }
-      }
-    },
-    "/api/v1/auth-servers/{id}": {
-      "delete": {
-        "summary": "Delete an auth provider (IdP)",
-        "description": "Deletes the provider and hot-reloads the live verifier set so it stops authenticating without a restart. Requires the manage_auth_servers verb.",
-        "responses": {
-          "200": {
-            "description": "The provider was deleted.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "status": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid bearer token."
-          },
-          "403": {
-            "description": "Caller lacks the manage_auth_servers verb."
-          },
-          "404": {
-            "description": "No provider with that id in the org."
-          }
-        }
-      },
-      "get": {
-        "summary": "Get an auth provider (IdP)",
-        "description": "Returns one configured provider (secrets redacted). Requires the manage_auth_servers verb.",
-        "responses": {
-          "200": {
-            "description": "The provider (secrets redacted).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthServer"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid bearer token."
-          },
-          "403": {
-            "description": "Caller lacks the manage_auth_servers verb."
-          },
-          "404": {
-            "description": "No provider with that id in the org."
-          }
-        }
-      },
-      "parameters": [
-        {
-          "name": "id",
-          "in": "path",
-          "required": true,
-          "description": "Auth provider id.",
-          "schema": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      ],
-      "put": {
-        "summary": "Update an auth provider (IdP)",
-        "description": "Replaces the provider's mutable fields (name, enabled, auth_order, config, role mapping). The type is immutable. A secret echoed back as the redaction marker (or left empty) preserves the stored secret rather than wiping it. On success the live verifier set is hot-reloaded without a restart. Requires the manage_auth_servers verb.",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AuthServer"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "The updated provider (secrets redacted).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthServer"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid body or provider config."
-          },
-          "401": {
-            "description": "Missing or invalid bearer token."
-          },
-          "403": {
-            "description": "Caller lacks the manage_auth_servers verb."
-          },
-          "404": {
-            "description": "No provider with that id in the org."
-          },
-          "409": {
-            "description": "A provider with that name already exists in the org."
-          }
-        }
-      }
-    },
-    "/api/v1/auth-servers/{id}/role-preview": {
-      "post": {
-        "summary": "Preview saved provider group-to-role and scope resolution",
-        "description": "Requires manage_auth_servers. Resolves up to 50 already-extracted LDAP group CNs, SAML group attribute values, or OIDC groups-claim values against the caller organization's saved provider mapping and scoped grants. Uses the same mapping resolver as sign-in but does not contact an IdP, verify an assertion or token, authenticate a user, or persist an assignment. Response includes only counts and mapped role/scope grants; supplied groups and provider secrets are not echoed. Disabled providers can also be previewed. Unknown request fields (such as credentials or tokens) are rejected.",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
+        "summary": "Sign in as the emergency administrator",
+        "description": "Signs in as the one protected local recovery administrator, including when normal local sign-in is disabled and OIDC is unconfigured or unreachable. Requires password and fresh mandatory six-digit TOTP. Uses the shared per-IP rate limit and per-account exponential backoff. Sets an opaque Secure HttpOnly host session cookie, at most ten minutes, without refresh. Success commits a critical audit event and increments the emergency-login metric. Requires browser origin and X-Constellation-Client: browser.",
+        "security": [],
         "requestBody": {
           "required": true,
           "content": {
@@ -11825,18 +11505,17 @@
               "schema": {
                 "type": "object",
                 "required": [
-                  "groups"
+                  "password",
+                  "totp"
                 ],
-                "additionalProperties": false,
                 "properties": {
-                  "groups": {
-                    "type": "array",
-                    "maxItems": 50,
-                    "items": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256
-                    }
+                  "password": {
+                    "type": "string",
+                    "format": "password"
+                  },
+                  "totp": {
+                    "type": "string",
+                    "pattern": "^[0-9]{6}$"
                   }
                 }
               }
@@ -11845,232 +11524,52 @@
         },
         "responses": {
           "200": {
-            "description": "Redacted saved-mapping result. Grants are mapping results, not proof of a successful sign-in.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "provider_type",
-                    "input_kind",
-                    "group_count",
-                    "matched_group_count",
-                    "default_applied",
-                    "grants"
-                  ],
-                  "properties": {
-                    "provider_type": {
-                      "type": "string",
-                      "enum": [
-                        "ldap",
-                        "saml",
-                        "oidc"
-                      ]
-                    },
-                    "input_kind": {
-                      "type": "string"
-                    },
-                    "group_count": {
-                      "type": "integer"
-                    },
-                    "matched_group_count": {
-                      "type": "integer"
-                    },
-                    "default_applied": {
-                      "type": "boolean"
-                    },
-                    "grants": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "required": [
-                          "role",
-                          "scope"
-                        ],
-                        "properties": {
-                          "role": {
-                            "type": "string"
-                          },
-                          "scope": {
-                            "type": "string",
-                            "enum": [
-                              "organization",
-                              "cluster",
-                              "namespace"
-                            ]
-                          },
-                          "cluster_id": {
-                            "type": "string",
-                            "format": "uuid"
-                          },
-                          "namespace": {
-                            "type": "string"
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid group values or unsupported input fields."
+            "description": "Emergency browser session established"
           },
           "401": {
-            "description": "Missing or invalid authentication."
+            "$ref": "#/components/responses/Error"
           },
           "403": {
-            "description": "Caller lacks manage_auth_servers."
+            "$ref": "#/components/responses/Error"
           },
           "404": {
-            "description": "Provider not found in caller organization."
+            "$ref": "#/components/responses/Error"
           },
-          "409": {
-            "description": "A saved scoped mapping references a cluster outside the caller organization."
+          "429": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
           }
         }
       }
     },
-    "/api/v1/auth-servers/{id}/scoped-mappings": {
-      "get": {
-        "responses": {
-          "200": {
-            "description": "ok"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "summary": "Get scoped-mappings"
-      },
+    "/api/v1/auth/local": {
       "post": {
         "responses": {
           "200": {
-            "description": "ok"
+            "description": "Success"
           },
-          "default": {
-            "$ref": "#/components/responses/Error"
+          "400": {
+            "description": "Invalid input or offline breached-password rejection"
+          },
+          "401": {
+            "description": "Authentication failed or session revoked"
+          },
+          "403": {
+            "description": "Role or browser-origin policy denied"
+          },
+          "429": {
+            "description": "Account backoff or shared per-IP rate limit. Retry-After contains seconds."
+          },
+          "503": {
+            "description": "Database or cryptographic key unavailable"
           }
         },
-        "summary": "Create scoped-mappings"
-      }
-    },
-    "/api/v1/auth-servers/{id}/scoped-mappings/{mid}": {
-      "delete": {
-        "responses": {
-          "200": {
-            "description": "ok"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "summary": "Delete scoped-mappings"
-      }
-    },
-    "/api/v1/auth-servers/{id}/test": {
-      "post": {
-        "summary": "Test a saved identity provider configuration",
-        "description": "Requires manage_auth_servers. Tests only the caller organization's stored provider: LDAPS TLS and optional service bind, local SAML metadata parsing (not a live IdP fetch), or HTTPS OIDC discovery. This bounded probe intentionally rejects private, loopback, link-local, and other non-public LDAP/OIDC targets; private enterprise and air-gapped IdPs are not supported by this test endpoint yet. Outbound connections pin a vetted resolved address, disallow redirects and proxies, and have a short timeout. No credentials, metadata, or remote error detail is returned.",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
+        "summary": "Sign in with a first-class local account",
+        "tags": [
+          "Identity"
         ],
-        "responses": {
-          "200": {
-            "description": "Probe succeeded.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    },
-                    "type": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid provider id."
-          },
-          "401": {
-            "description": "Missing or invalid authentication."
-          },
-          "403": {
-            "description": "Caller lacks manage_auth_servers."
-          },
-          "404": {
-            "description": "Provider not found in the caller's organization."
-          },
-          "422": {
-            "description": "Probe failed; sanitized reason only.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "ok": {
-                      "type": "boolean"
-                    },
-                    "type": {
-                      "type": "string"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/auth/change-password": {
-      "post": {
-        "responses": {
-          "200": {
-            "description": "ok"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "summary": "Create change-password"
-      }
-    },
-    "/api/v1/auth/ldap/login": {
-      "post": {
-        "responses": {
-          "200": {
-            "description": "ok"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [],
-        "summary": "Create login"
-      }
-    },
-    "/api/v1/auth/login": {
-      "post": {
-        "summary": "Local login (Argon2id)",
-        "description": "Browser clients send X-Constellation-Client: browser with a validated Origin and receive secure HttpOnly cookies, not a JSON token. Non-browser clients receive a bearer token. Access tokens expire within 15 minutes. Responses are never cacheable.",
-        "security": [],
         "requestBody": {
           "required": true,
           "content": {
@@ -12081,46 +11580,34 @@
                   "email",
                   "password"
                 ],
+                "additionalProperties": false,
                 "properties": {
                   "email": {
-                    "type": "string"
+                    "type": "string",
+                    "format": "email"
                   },
                   "password": {
                     "type": "string",
-                    "writeOnly": true
+                    "maxLength": 4096
+                  },
+                  "totp": {
+                    "type": "string",
+                    "pattern": "^[0-9]{6}$",
+                    "description": "Required by the installation policy (always for administrators and recovery)."
                   }
                 }
               }
             }
           }
         },
-        "responses": {
-          "200": {
-            "description": "Session established.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SessionResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Invalid credentials."
-          },
-          "403": {
-            "description": "Browser origin or CSRF header rejected."
-          },
-          "429": {
-            "description": "Login rate limit exceeded."
-          }
-        }
+        "description": "Issues an opaque Secure HttpOnly host session cookie. Local sign-in must be enabled, except for the single recovery administrator. TOTP steps are consumed once across replicas. No network password check is made.",
+        "security": []
       }
     },
     "/api/v1/auth/logout": {
       "post": {
         "summary": "Logout (audited)",
-        "description": "Revokes all user sessions and refresh families and expires both browser cookies. Cookie-authenticated requests require browser CSRF headers."
+        "description": "Ends the caller\u2019s local browser sessions. Does not end the upstream identity provider session. Cookie requests require browser CSRF headers."
       }
     },
     "/api/v1/auth/me": {
@@ -12171,112 +11658,7 @@
         },
         "security": [],
         "summary": "List available browser SSO methods",
-        "description": "Returns live OIDC and SAML availability without exposing provider configuration. No authentication required."
-      }
-    },
-    "/api/v1/auth/refresh": {
-      "post": {
-        "summary": "Rotate browser session",
-        "description": "Requires the secure HttpOnly refresh cookie, X-Constellation-Client: browser and a validated Origin. Atomically consumes the old refresh secret and issues new cookies without extending the absolute session lifetime. Reuse revokes the entire session family, including issued access tokens. No credentials are returned in JSON.",
-        "security": [
-          {
-            "browserRefresh": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "X-Constellation-Client",
-            "in": "header",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "const": "browser"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Cookies rotated; response is not cacheable.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SessionResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Refresh session missing, expired, revoked or reused; cookies cleared."
-          },
-          "403": {
-            "description": "Browser origin or CSRF header rejected."
-          },
-          "429": {
-            "description": "Refresh rate limit exceeded."
-          }
-        }
-      }
-    },
-    "/api/v1/auth/saml/acs": {
-      "post": {
-        "description": "Validates the signed SAML response. Browser requests additionally require a single-use five-minute SP-login cookie matching POST RelayState; unsolicited IdP-initiated browser ACS is rejected. The cookie is HttpOnly/Secure/SameSite=None for the cross-site IdP POST. Pending requests require serving-replica login affinity. Non-browser bearer responses remain supported; form bodies are limited to one MiB.",
-        "responses": {
-          "200": {
-            "description": "ok"
-          },
-          "400": {
-            "description": "Invalid SAML form; submitted assertion data is not echoed."
-          },
-          "403": {
-            "description": "Missing, expired, mismatched or consumed browser login binding; restart SP login."
-          },
-          "413": {
-            "description": "SAML form body exceeds one MiB."
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [],
-        "summary": "Validate SAML assertion and browser login binding"
-      }
-    },
-    "/api/v1/auth/saml/login": {
-      "get": {
-        "responses": {
-          "200": {
-            "description": "ok"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [],
-        "summary": "Get login"
-      }
-    },
-    "/api/v1/auth/security-policy": {
-      "get": {
-        "responses": {
-          "200": {
-            "description": "ok"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "summary": "Get security-policy"
-      },
-      "put": {
-        "responses": {
-          "200": {
-            "description": "ok"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "summary": "Replace security-policy"
+        "description": "Returns OIDC configuration availability and whether emergency break-glass access is enabled. Contains no secrets."
       }
     },
     "/api/v1/backups": {
@@ -23319,6 +22701,177 @@
         "summary": "Create k8s-audit:bulk"
       }
     },
+    "/api/v1/local-users": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Profiles, status, roles, last sign-in and backoff counters. Password hashes and TOTP seeds are never returned."
+          },
+          "400": {
+            "description": "Invalid input or offline breached-password rejection"
+          },
+          "401": {
+            "description": "Authentication failed or session revoked"
+          },
+          "403": {
+            "description": "Role or browser-origin policy denied"
+          },
+          "429": {
+            "description": "Account backoff or shared per-IP rate limit. Retry-After contains seconds."
+          },
+          "503": {
+            "description": "Database or cryptographic key unavailable"
+          }
+        },
+        "summary": "List local accounts in the administrator\u2019s organization",
+        "tags": [
+          "Identity"
+        ]
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "New user id, password, TOTP seed and enrollment URI. Shown only in this response; store privately."
+          },
+          "400": {
+            "description": "Invalid input or offline breached-password rejection"
+          },
+          "401": {
+            "description": "Authentication failed or session revoked"
+          },
+          "403": {
+            "description": "Role or browser-origin policy denied"
+          },
+          "429": {
+            "description": "Account backoff or shared per-IP rate limit. Retry-After contains seconds."
+          },
+          "503": {
+            "description": "Database or cryptographic key unavailable"
+          }
+        },
+        "summary": "Create a local account and return one-time setup material",
+        "tags": [
+          "Identity"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "email",
+                  "role"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "email": {
+                    "type": "string",
+                    "format": "email"
+                  },
+                  "display_name": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "role": {
+                    "enum": [
+                      "Analyst",
+                      "Auditor",
+                      "ClusterAdmin",
+                      "SecurityAdmin",
+                      "GlobalAdmin"
+                    ]
+                  },
+                  "password": {
+                    "type": "string",
+                    "maxLength": 4096,
+                    "description": "Omit or leave empty to generate. Checked against the embedded offline NCSC corpus."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/local-users/{id}/{action}": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Invalid input or offline breached-password rejection"
+          },
+          "401": {
+            "description": "Authentication failed or session revoked"
+          },
+          "403": {
+            "description": "Role or browser-origin policy denied"
+          },
+          "429": {
+            "description": "Account backoff or shared per-IP rate limit. Retry-After contains seconds."
+          },
+          "503": {
+            "description": "Database or cryptographic key unavailable"
+          }
+        },
+        "summary": "Disable, reset credentials or assign a local account role",
+        "tags": [
+          "Identity"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "password": {
+                    "type": "string",
+                    "maxLength": 4096
+                  },
+                  "role": {
+                    "enum": [
+                      "Analyst",
+                      "Auditor",
+                      "ClusterAdmin",
+                      "SecurityAdmin",
+                      "GlobalAdmin"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "action",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "disable",
+                "reset-password",
+                "reset-totp",
+                "role"
+              ]
+            }
+          }
+        ],
+        "description": "Scoped to the calling administrator\u2019s organization. Access changes increment the revocation epoch and remove sessions. Credential resets return one-time enrollment material. Recovery access cannot be disabled or downgraded."
+      }
+    },
     "/api/v1/me/preferences": {
       "get": {
         "responses": {
@@ -33978,19 +33531,6 @@
         "summary": "Get search"
       }
     },
-    "/api/v1/security/findings": {
-      "get": {
-        "responses": {
-          "200": {
-            "description": "ok"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "summary": "Get findings"
-      }
-    },
     "/api/v1/security/score/predict": {
       "post": {
         "responses": {
@@ -34735,6 +34275,136 @@
         "summary": "Create serverless-packages:report"
       }
     },
+    "/api/v1/settings/identity": {
+      "get": {
+        "summary": "Inspect the single sign-on provider and emergency access status",
+        "description": "Returns local policy, generic OIDC provider, readiness and recovery session policy. Credentials are never returned.",
+        "responses": {
+          "200": {
+            "description": "Provider configuration and break-glass status"
+          },
+          "401": {
+            "$ref": "#/components/responses/Error"
+          },
+          "403": {
+            "$ref": "#/components/responses/Error"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Invalid input or offline breached-password rejection"
+          },
+          "401": {
+            "description": "Authentication failed or session revoked"
+          },
+          "403": {
+            "description": "Role or browser-origin policy denied"
+          },
+          "429": {
+            "description": "Account backoff or shared per-IP rate limit. Retry-After contains seconds."
+          },
+          "503": {
+            "description": "Database or cryptographic key unavailable"
+          },
+          "409": {
+            "description": "Revision changed; reload before saving"
+          }
+        },
+        "summary": "Update local policy and the generic OIDC provider",
+        "tags": [
+          "Identity"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "local",
+                  "oidc",
+                  "revision"
+                ],
+                "properties": {
+                  "local": {
+                    "type": "object",
+                    "required": [
+                      "enabled",
+                      "display",
+                      "totp_policy",
+                      "password_min_length",
+                      "session_seconds",
+                      "ip_rate",
+                      "account_rate"
+                    ],
+                    "properties": {
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "display": {
+                        "enum": [
+                          "all",
+                          "local",
+                          "sso"
+                        ]
+                      },
+                      "totp_policy": {
+                        "enum": [
+                          "everyone",
+                          "admins"
+                        ]
+                      },
+                      "password_min_length": {
+                        "type": "integer",
+                        "minimum": 12,
+                        "maximum": 128
+                      },
+                      "session_seconds": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 86400
+                      },
+                      "ip_rate": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100
+                      },
+                      "account_rate": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 20
+                      }
+                    }
+                  },
+                  "oidc": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "description": "Generic OIDC configuration; HTTPS issuer and callback, exact roles claim mapping. Never auto-link by email."
+                  },
+                  "revision": {
+                    "type": "integer"
+                  },
+                  "client_secret": {
+                    "type": "string",
+                    "description": "Optional replacement, age encrypted at rest and never returned."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/settings/org": {
       "get": {
         "responses": {
@@ -35220,19 +34890,6 @@
         ]
       }
     },
-    "/api/v1/users": {
-      "post": {
-        "responses": {
-          "200": {
-            "description": "ok"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "summary": "Create users"
-      }
-    },
     "/api/v1/users/{id}": {
       "delete": {
         "responses": {
@@ -35268,112 +34925,6 @@
           }
         },
         "summary": "Create disable"
-      }
-    },
-    "/api/v1/users/{id}/force-password-reset": {
-      "post": {
-        "description": "Requires manage_users. Marks an org-scoped local-password user for a required password change, invalidates existing JWT sessions, and revokes personal access tokens. The mutation and audit record commit atomically. SSO-only users return 404.",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Password change required",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "status"
-                  ],
-                  "properties": {
-                    "status": {
-                      "type": "string",
-                      "const": "reset_required"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "summary": "Require a local user to reset their password"
-      }
-    },
-    "/api/v1/users/{id}/unlock": {
-      "post": {
-        "description": "Requires manage_users. Clears the failed-login count and block timestamp for an org-scoped user. Idempotent and audited atomically; does not re-enable disabled users.",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Lockout cleared",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "required": [
-                    "status"
-                  ],
-                  "properties": {
-                    "status": {
-                      "type": "string",
-                      "const": "unlocked"
-                    }
-                  }
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/Error"
-          },
-          "401": {
-            "$ref": "#/components/responses/Error"
-          },
-          "403": {
-            "$ref": "#/components/responses/Error"
-          },
-          "404": {
-            "$ref": "#/components/responses/Error"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "summary": "Clear a user's failed-login lockout"
       }
     },
     "/api/v1/version": {

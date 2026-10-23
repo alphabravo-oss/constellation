@@ -228,7 +228,12 @@ func (s *RuntimePolicyStore) Get(ctx context.Context, orgID, id uuid.UUID) (*Run
 // ListInventoryForCluster includes disabled policies so operators can review,
 // edit and re-enable them. The agent distribution method below remains filtered.
 func (s *RuntimePolicyStore) ListInventoryForCluster(ctx context.Context, orgID, clusterID uuid.UUID) ([]*RuntimePolicy, error) {
-	rows, err := s.db.Pool().Query(ctx, `SELECT `+policySelectCols+` FROM runtime_policies WHERE org_id=$1 AND cluster_id=$2 ORDER BY namespace,name,id`, orgID, clusterID)
+	return s.ListInventoryPage(ctx, orgID, clusterID, 0, 0)
+}
+
+// ListInventoryPage bounds browser reads without truncating agent distribution.
+func (s *RuntimePolicyStore) ListInventoryPage(ctx context.Context, orgID, clusterID uuid.UUID, limit, offset int) ([]*RuntimePolicy, error) {
+	rows, err := s.db.Pool().Query(ctx, `SELECT `+policySelectCols+` FROM runtime_policies WHERE org_id=$1 AND cluster_id=$2 ORDER BY namespace,name,id LIMIT NULLIF($3,0) OFFSET $4`, orgID, clusterID, limit, offset)
 	if err != nil {
 		return nil, err
 	}

@@ -17,7 +17,7 @@ grep -q 'constellation.dev.alphabravo.io' "$rendered"
 grep -q '^kind: Cluster$' "$rendered"
 grep -q 'instances: 3' "$rendered"
 grep -q 'storageClass: longhorn' "$rendered"
-grep -q 'imageName: ghcr.io/alphabravo-oss/constellation/postgres:16.14-v0.3.0' "$rendered"
+grep -q 'imageName: ghcr.io/alphabravo-oss/constellation/postgres:16.15-v0.3.0' "$rendered"
 grep -q 'CREATE EXTENSION IF NOT EXISTS vector' "$rendered"
 grep -q 'port: 8000' "$rendered"
 # migrations run in-process (embedded goose): no schema-wait init container
@@ -32,10 +32,6 @@ if grep -Eqi 'vulndb|constellation-vulndb' "$rendered"; then
   echo "removed VulnDB subsystem unexpectedly rendered" >&2
   exit 1
 fi
-grep -A2 'name: BOOTSTRAP_FORCE_PASSWORD_CHANGE' "$rendered" | grep -q 'value: "false"'
-helm template constellation "$chart" --kube-version 1.35.0 -f "$profile" \
-  --set bootstrap.admin.forcePasswordChange=true >"$rendered"
-grep -A2 'name: BOOTSTRAP_FORCE_PASSWORD_CHANGE' "$rendered" | grep -q 'value: "true"'
 grep -A12 'app.kubernetes.io/component: network-policy-applier' "$rendered" | grep -q 'port: 5432'
 # HA API replicas must reach the Lease API or none of the leader-only passive
 # workers (including network-flow rollups) will start.

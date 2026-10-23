@@ -27,8 +27,8 @@ build_bundle() {
   step "bundle build (signed)"
   local images=() role
   for role in api admission bootstrap toolbox scanner; do images+=(--image "$REG/$role:$TAG"); done
-  # CNPG requires the PostgreSQL version in the tag (release.yml tags it 16.14-<version>).
-  images+=(--image "$REG/postgres:16.14-$TAG")
+  # CNPG requires the PostgreSQL version in the tag (release.yml tags it 16.15-<version>).
+  images+=(--image "$REG/postgres:16.15-$TAG")
   rm -rf "$OUT" && mkdir -p "$OUT"
   "$CTL" bundle build --from-daemon --sign-key "$SIGN_KEY" --chart deploy/charts/constellation \
     --out "$OUT/bundle" --version "$TAG" "${images[@]}" --image docker.io/library/registry:2.8.3

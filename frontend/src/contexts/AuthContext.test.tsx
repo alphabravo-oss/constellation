@@ -40,7 +40,7 @@ it("clears identity-scoped query data when logging in or out without reading bro
   expect(host.textContent).toBe("first@test");
   client.setQueryData(["findings"], { private: "first-org data" });
   vi.mocked(auth.me).mockResolvedValue({ user_id: "second", org_id: "second-org", email: "second@test", roles: ["Auditor"] });
-  await act(async () => state.login("second@test", "password"));
+  await act(async () => state.login("second@test", "password", "123456"));
   expect(host.textContent).toBe("second@test");
   expect(client.getQueryData(["findings"])).toBeUndefined();
   client.setQueryData(["findings"], { private: "second-org data" });

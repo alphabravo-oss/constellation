@@ -59,26 +59,34 @@ type LastKnown struct {
 // Counts refer to open critical/high vulnerability findings. CVEs are unique
 // within each severity; occurrences retain asset multiplicity. Unmatched images
 // remain unverified because runtime configuration and manifest digests can differ.
-const countsSQL = `WITH classified AS (
+// Snapshot lookups depend on the asset, not each vulnerability on it. Compute
+// those JSONB lookups once per asset, then classify the finding's own timestamp.
+const countsSQL = `WITH asset_state AS MATERIALIZED (
+ SELECT a.id,a.org_id,a.cluster_id,
+ a.kind='workload' AND a.name ~ '^[^/]+/pod/[^/]+$' AS is_pod,
+ CASE WHEN a.kind='workload' AND a.name ~ '^[^/]+/pod/[^/]+$'
+ THEN s.pods->>a.name IN ('Running','Pending','Unknown','')
+ WHEN a.kind='image' THEN s.image_digests ? COALESCE(NULLIF(a.digest,''),a.name)
+ ELSE false END AS is_current
+ FROM assets a
+ LEFT JOIN cluster_inventory_presence s ON s.org_id=a.org_id AND s.cluster_id=a.cluster_id
+ WHERE a.org_id=$1 AND a.cluster_id IS NOT NULL AND ($2::uuid IS NULL OR a.cluster_id=$2)
+ ), classified AS MATERIALIZED (
  SELECT c.id AS cluster_id,s.observed_at,s.expires_at,f.id AS finding_id,
  COALESCE(NULLIF(f.external_id,''),f.id::text) AS external_id,f.severity,
  CASE WHEN s.expires_at IS NULL OR s.expires_at<=NOW() OR a.cluster_id IS DISTINCT FROM c.id THEN 'unverified'
- WHEN a.kind='workload' AND a.name ~ '^[^/]+/pod/[^/]+$' THEN
-   CASE WHEN s.pods->>a.name IN ('Running','Pending','Unknown','') THEN 'current'
-   WHEN f.last_seen_at>s.observed_at THEN 'unverified' ELSE 'historical' END
- WHEN a.kind='image' AND s.image_digests ? COALESCE(NULLIF(a.digest,''),a.name) THEN 'current'
+ WHEN a.is_current THEN 'current'
+ WHEN a.is_pod THEN CASE WHEN f.last_seen_at>s.observed_at THEN 'unverified' ELSE 'historical' END
  ELSE 'unverified' END AS presence,
  CASE WHEN s.observed_at IS NULL OR a.cluster_id IS DISTINCT FROM c.id THEN 'unverified'
- WHEN a.kind='workload' AND a.name ~ '^[^/]+/pod/[^/]+$' THEN
-   CASE WHEN s.pods->>a.name IN ('Running','Pending','Unknown','') THEN 'current' ELSE 'other' END
- WHEN a.kind='image' AND s.image_digests ? COALESCE(NULLIF(a.digest,''),a.name) THEN 'current'
+ WHEN a.is_current THEN 'current' WHEN a.is_pod THEN 'other'
  ELSE 'unverified' END AS last_presence
  FROM clusters c
  LEFT JOIN cluster_inventory_presence s ON s.org_id=c.org_id AND s.cluster_id=c.id
  LEFT JOIN findings f ON f.org_id=c.org_id AND f.cluster_id=c.id
  AND f.lifecycle='open' AND f.kind='vulnerability' AND f.severity IN ('critical','high')
  /* finding_scope */
- LEFT JOIN assets a ON a.id=f.asset_id AND a.org_id=f.org_id
+ LEFT JOIN asset_state a ON a.id=f.asset_id AND a.org_id=f.org_id
  WHERE c.org_id=$1 AND ($2::uuid IS NULL OR c.id=$2)
  ) SELECT cluster_id,
  CASE WHEN max(expires_at) IS NULL THEN 'missing' WHEN max(expires_at)>NOW() THEN 'fresh' ELSE 'stale' END,
@@ -104,11 +112,20 @@ func ReadAllScoped(ctx context.Context, pool *pgxpool.Pool, org uuid.UUID, scope
 }
 
 func read(ctx context.Context, pool *pgxpool.Pool, org uuid.UUID, cluster *uuid.UUID, scope string) (map[uuid.UUID]Counts, error) {
+	return readSelected(ctx, pool, org, cluster, scope, nil)
+}
+func readSelected(ctx context.Context, pool *pgxpool.Pool, org uuid.UUID, cluster *uuid.UUID, scope string, clusters []uuid.UUID) (map[uuid.UUID]Counts, error) {
 	predicate, err := platformrole.ScopeSQL(scope, platformrole.ConstellationFindingSQL("f"))
 	if err != nil {
 		return nil, err
 	}
-	rows, err := pool.Query(ctx, strings.Replace(countsSQL, "/* finding_scope */", "AND ("+predicate+")", 1), org, cluster)
+	query := strings.Replace(countsSQL, "/* finding_scope */", "AND ("+predicate+")", 1)
+	args := []any{org, cluster}
+	if clusters != nil {
+		query = strings.Replace(query, "WHERE c.org_id=$1 AND", "WHERE c.org_id=$1 AND c.id=ANY($3::uuid[]) AND", 1)
+		args = append(args, clusters)
+	}
+	rows, err := pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -127,4 +144,9 @@ func read(ctx context.Context, pool *pgxpool.Pool, org uuid.UUID, cluster *uuid.
 		out[id] = c
 	}
 	return out, rows.Err()
+}
+
+// ReadClustersScoped confines exposure aggregation to the returned cluster page.
+func ReadClustersScoped(ctx context.Context, pool *pgxpool.Pool, org uuid.UUID, clusters []uuid.UUID, scope string) (map[uuid.UUID]Counts, error) {
+	return readSelected(ctx, pool, org, nil, scope, clusters)
 }

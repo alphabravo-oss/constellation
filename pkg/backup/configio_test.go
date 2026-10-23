@@ -41,9 +41,9 @@ func seedConfigOrg(t *testing.T, pool *pgxpool.Pool) (orgID string, cleanup func
 
 	var userID string
 	if err := pool.QueryRow(ctx, `
-INSERT INTO users(org_id, email, display_name, password_hash)
-VALUES($1, $2, 'Alice', $3) RETURNING id::text`,
-		orgID, "alice@"+name+".test", "$argon2id$SUPERSECRETHASH").Scan(&userID); err != nil {
+INSERT INTO users(org_id, email, display_name)
+VALUES($1, $2, 'Alice') RETURNING id::text`,
+		orgID, "alice@"+name+".test").Scan(&userID); err != nil {
 		cleanup()
 		t.Fatalf("seed user: %v", err)
 	}

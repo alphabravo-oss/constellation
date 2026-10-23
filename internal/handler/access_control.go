@@ -14,7 +14,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/alphabravocompany/constellation/internal/auth"
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/rbac"
@@ -199,17 +198,14 @@ type accessControlSummaryDTO struct {
 }
 
 type accessControlUserDTO struct {
-	ID                    string   `json:"id"`
-	Name                  string   `json:"name"`
-	Email                 string   `json:"email"`
-	Status                string   `json:"status"`
-	AuthProviderID        string   `json:"auth_provider_id"`
-	Roles                 []string `json:"roles"`
-	LastLoginAt           string   `json:"last_login_at"`
-	MFAEnabled            bool     `json:"mfa_enabled"`
-	LocalPassword         bool     `json:"local_password"`
-	Locked                bool     `json:"locked"`
-	PasswordResetRequired bool     `json:"password_reset_required"`
+	ID             string   `json:"id"`
+	Name           string   `json:"name"`
+	Email          string   `json:"email"`
+	Status         string   `json:"status"`
+	AuthProviderID string   `json:"auth_provider_id"`
+	Roles          []string `json:"roles"`
+	LastLoginAt    string   `json:"last_login_at"`
+	MFAEnabled     bool     `json:"mfa_enabled"`
 }
 
 type accessControlRoleDTO struct {
@@ -331,15 +327,10 @@ func (h *AccessControl) loadOverview(r *http.Request, orgID uuid.UUID) (accessCo
 		PermissionMatrix: accessControlPermissionMatrix,
 		Guardrails:       accessControlGuardrails,
 	}
-	lockoutWindow := loginLockoutWindow
-	if policy, _, err := auth.LoadSecurityPolicy(ctx, h.db.Pool(), orgID); err == nil {
-		lockoutWindow = policy.EffectiveLockoutWindow(loginLockoutWindow)
-	}
 
 	// Users from DB.
 	userRows, err := h.db.Pool().Query(ctx, `
-SELECT id, email, display_name, disabled, COALESCE(oidc_issuer, ''), created_at,
-       password_hash IS NOT NULL, block_login_since, must_change_password
+SELECT id, email, display_name, disabled, COALESCE(oidc_issuer, ''), COALESCE(last_login_at,created_at)
   FROM users WHERE org_id = $1 ORDER BY display_name`, orgID)
 	if err != nil {
 		return out, fmt.Errorf("query users: %w", err)
@@ -347,32 +338,27 @@ SELECT id, email, display_name, disabled, COALESCE(oidc_issuer, ''), created_at,
 	defer userRows.Close()
 	for userRows.Next() {
 		var (
-			id                           uuid.UUID
-			email, name                  string
-			disabled                     bool
-			oidcIssuer                   string
-			createdAt                    time.Time
-			localPassword, resetRequired bool
-			blockSince                   *time.Time
+			id          uuid.UUID
+			email, name string
+			disabled    bool
+			oidcIssuer  string
+			createdAt   time.Time
 		)
-		if err := userRows.Scan(&id, &email, &name, &disabled, &oidcIssuer, &createdAt, &localPassword, &blockSince, &resetRequired); err != nil {
+		if err := userRows.Scan(&id, &email, &name, &disabled, &oidcIssuer, &createdAt); err != nil {
 			return out, fmt.Errorf("scan user: %w", err)
 		}
 		status := "active"
 		if disabled {
 			status = "suspended"
 		}
-		provider := "local"
-		if oidcIssuer != "" {
+		provider := "break-glass"
+		if oidcIssuer != "" && oidcIssuer != "break-glass" {
 			provider = "oidc:" + oidcIssuer
 		}
 		out.Users = append(out.Users, accessControlUserDTO{
 			ID: id.String(), Name: name, Email: email, Status: status,
 			AuthProviderID: provider, Roles: []string{},
-			LastLoginAt:           createdAt.UTC().Format(time.RFC3339),
-			LocalPassword:         localPassword,
-			Locked:                blockSince != nil && time.Since(*blockSince) < lockoutWindow,
-			PasswordResetRequired: resetRequired,
+			LastLoginAt: createdAt.UTC().Format(time.RFC3339),
 		})
 	}
 

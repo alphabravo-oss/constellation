@@ -21,16 +21,13 @@ type Route struct {
 // (the global security applies otherwise). Mirrors the `security: []` overrides
 // in the hand-written spec so regeneration keeps them unauthenticated.
 var publicRoutes = map[string]bool{
+	"POST /api/v1/auth/break-glass":  true,
 	"GET /healthz":                   true,
 	"GET /readyz":                    true,
 	"GET /metrics":                   true,
 	"GET /version":                   true,
 	"GET /openapi.json":              true,
-	"POST /api/v1/auth/login":        true,
 	"GET /api/v1/auth/providers":     true,
-	"POST /api/v1/auth/ldap/login":   true,
-	"GET /api/v1/auth/saml/login":    true,
-	"POST /api/v1/auth/saml/acs":     true,
 	"GET /api/v1/auth/oidc/start":    true,
 	"GET /api/v1/auth/oidc/callback": true,
 }
