@@ -1,0 +1,38 @@
+# Scan evidence retention contract
+
+Scan age alone is not sufficient reason to delete a security decision or its
+inputs. The retention workers now use `internal/scanretention`; they do not add
+SQL to the legacy HTTP handler layer.
+
+| Parent | References / protected state | Cleanup behavior |
+| --- | --- | --- |
+| `scan_jobs` | `scan_result_attestations.scan_job_id`, `image_scan_results.last_scan_job_id`, newest terminal job per target | Keep referenced/latest/live jobs. Delete only older unreferenced terminal jobs after the existing configured window. Attempts cascade only with an eligible job. A zero window remains a hold. |
+| `image_scan_results` | Attestations, image findings, target findings, running workload digest links, newest result per image/platform/profile and per target | Keep all named results and protected records. Remove at most one batch of superseded unnamed cache records older than six hours. Linked artifacts cascade only with an eligible parent. |
+| `scan_targets` (repository) | Findings, inventory evidence, all attestations regardless of trust/expiry, image results, active jobs, references to descendant jobs | The existing opt-in repository policy can remove only empty, inactive history. It never deletes findings. Preserve inventory evidence pending a verified archive contract. |
+| Repository `assets` | Any finding referencing the asset, even through another target | Lock before checking references; retain referenced assets. |
+| `scan_evidence`, attestations and verification records | Current decisions and restore provenance | No age-only payload cleanup is introduced. These remain held until verified archival and dependency-aware restoration exist. |
+
+Every pass has a five-second deadline, a row budget and transaction rollback on
+failure. Repository cleanup caps targets at 5,000 and cascade parents at 20,000;
+exceeding the cascade budget fails safely. Unnamed-result cleanup no longer drains
+an arbitrarily large backlog in one invocation. Terminal job/result candidate
+selection skips row locks.
+
+Selection and deletion are separate READ COMMITTED statements. Candidate parent
+rows are locked before deletion obtains a fresh snapshot and checks references
+again. This matters because several evidence FKs use `ON DELETE SET NULL`: a
+single-statement candidate/delete can otherwise erase a reference committed after
+its snapshot. Foreign-key key-share locks serialize subsequent reference inserts.
+Repository cleanup also locks descendant jobs and assets before rechecking them.
+Migration 195 indexes job-reference and chronological cleanup lookups.
+
+Real PostgreSQL tests exercise a reference committed after the candidate snapshot,
+existing trusted/untrusted references, current results, finding preservation,
+locked rows, bounded batches, holds, dry runs and eligible empty repository cleanup.
+No source data was deleted while developing or testing this change.
+
+This is protection for existing cleanup, not the missing archival implementation.
+Named scan history, resolved findings, inventory payloads and attestations remain
+held. Their storage is observable but not bounded by this worker; DB-13–15 retain
+those explicit archive/restore acceptance gates. The documented audit-chain break
+is never bypassed to authorize evidence deletion.

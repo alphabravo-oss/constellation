@@ -1,4 +1,4 @@
-package handler
+package scanretention
 
 import (
 	"context"
@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -47,6 +49,9 @@ func PruneRepositoryScansOnce(ctx context.Context, pool *pgxpool.Pool, cfg Repos
 	if pool == nil {
 		return out, fmt.Errorf("database pool required")
 	}
+	if cfg.BatchSize > 5000 {
+		return out, fmt.Errorf("repository retention batch must not exceed 5000")
+	}
 	if !cfg.Enabled || cfg.MaxAge <= 0 {
 		return out, nil
 	}
@@ -55,7 +60,9 @@ func PruneRepositoryScansOnce(ctx context.Context, pool *pgxpool.Pool, cfg Repos
 	}
 	out.Cutoff = now.Add(-cfg.MaxAge)
 
-	tx, err := pool.Begin(ctx)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return out, err
 	}
@@ -75,18 +82,62 @@ func PruneRepositoryScansOnce(ctx context.Context, pool *pgxpool.Pool, cfg Repos
 		return out, tx.Commit(ctx)
 	}
 
-	if err := tx.QueryRow(ctx, repositoryRetentionDeleteSQL, out.Cutoff, cfg.BatchSize, now).Scan(
-		&out.Candidates,
-		&out.DeletedFindings,
-		&out.DeletedAssets,
-		&out.PrunedTargets,
-	); err != nil {
+	// Lock targets first, then recheck all references using a fresh statement
+	// snapshot. FK key-share locks serialize new findings/evidence against expiry.
+	rows, err := tx.Query(ctx, repositoryRetentionEligibleSQL+` FOR UPDATE OF st SKIP LOCKED`, out.Cutoff, cfg.BatchSize, now)
+	if err != nil {
 		return out, err
 	}
+	ids, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (uuid.UUID, error) {
+		var id, org uuid.UUID
+		err := row.Scan(&id, &org)
+		return id, err
+	})
+	if err != nil {
+		return out, err
+	}
+	if err := lockRepositoryCascade(ctx, tx, ids); err != nil {
+		return out, err
+	}
+	if err := tx.QueryRow(ctx, repositoryRetentionDeleteSQL, out.Cutoff, cfg.BatchSize, now, ids).Scan(&out.Candidates, &out.DeletedFindings, &out.DeletedAssets, &out.PrunedTargets); err != nil {
+		return out, err
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return out, err
 	}
 	return out, nil
+}
+
+func lockRepositoryCascade(ctx context.Context, tx pgx.Tx, ids []uuid.UUID) error {
+	// Jobs can be referenced independently of the target by an attestation or
+	// image result. Lock the cascade parents too before the final reference check.
+	jobRows, err := tx.Query(ctx, `SELECT id FROM scan_jobs WHERE target_id=ANY($1::uuid[]) LIMIT 20001 FOR UPDATE`, ids)
+	if err != nil {
+		return err
+	}
+	jobs, err := pgx.CollectRows(jobRows, pgx.RowTo[uuid.UUID])
+	if err != nil {
+		return err
+	}
+	if len(jobs) > 20000 {
+		return fmt.Errorf("repository retention cascade exceeds job budget")
+	}
+	// Assets have their own finding FK. Lock them before the next snapshot so
+	// a concurrent finding cannot be cascade-deleted by asset cleanup.
+	assetRows, err := tx.Query(ctx, `SELECT a.id FROM assets a JOIN scan_targets st ON a.org_id=st.org_id
+ AND a.digest='scan-target:'||st.id::text WHERE st.id=ANY($1::uuid[]) AND a.kind='repository' LIMIT 20001 FOR UPDATE OF a`, ids)
+	if err != nil {
+		return err
+	}
+	assets, err := pgx.CollectRows(assetRows, pgx.RowTo[uuid.UUID])
+	if err != nil {
+		return err
+	}
+	if len(assets) > 20000 {
+		return fmt.Errorf("repository retention cascade exceeds asset budget")
+	}
+	return nil
 }
 
 func RunRepositoryScanRetentionMonitor(ctx context.Context, pool *pgxpool.Pool, cfg RepositoryScanRetentionConfig, logger *slog.Logger) {
@@ -133,23 +184,13 @@ const repositoryRetentionEligibleSQL = `
                AND active.target_id = st.id
                AND active.status IN ('pending', 'running', 'paused')
        )
-       AND NOT EXISTS (
-            SELECT 1
-              FROM scan_result_attestations sra
-              JOIN scan_attestation_verifications sav
-                ON sav.attestation_id = sra.id
-               AND sav.org_id = sra.org_id
-             WHERE sra.org_id = st.org_id
-               AND sra.scan_target_id = st.id
-       )
-       AND NOT EXISTS (
-            SELECT 1
-              FROM scan_result_attestations trusted
-             WHERE trusted.org_id = st.org_id
-               AND trusted.scan_target_id = st.id
-               AND trusted.trusted
-               AND (trusted.expires_at IS NULL OR trusted.expires_at > $3)
-       )
+       AND NOT EXISTS (SELECT 1 FROM findings f WHERE f.scan_target_id=st.id)
+       AND NOT EXISTS (SELECT 1 FROM scan_evidence e WHERE e.scan_target_id=st.id)
+       AND NOT EXISTS (SELECT 1 FROM scan_result_attestations a WHERE a.scan_target_id=st.id)
+       AND NOT EXISTS (SELECT 1 FROM image_scan_results r WHERE r.scan_target_id=st.id)
+       AND NOT EXISTS (SELECT 1 FROM scan_jobs j JOIN image_scan_results r ON r.last_scan_job_id=j.id WHERE j.target_id=st.id)
+       AND NOT EXISTS (SELECT 1 FROM scan_jobs j JOIN scan_result_attestations a ON a.scan_job_id=j.id WHERE j.target_id=st.id)
+       AND st.last_seen_at <= $3
      ORDER BY st.last_seen_at ASC, st.id ASC
      LIMIT $2`
 
@@ -158,20 +199,15 @@ WITH candidate AS (` + repositoryRetentionEligibleSQL + `)
 SELECT COUNT(*)::int FROM candidate`
 
 const repositoryRetentionDeleteSQL = `
-WITH candidate AS MATERIALIZED (` + repositoryRetentionEligibleSQL + ` FOR UPDATE SKIP LOCKED),
-deleted_findings AS (
-    DELETE FROM findings f
-     USING candidate c
-     WHERE f.org_id = c.org_id
-       AND f.scan_target_id = c.id
- RETURNING f.id
-),
+WITH eligible AS (` + repositoryRetentionEligibleSQL + `),
+candidate AS MATERIALIZED (SELECT * FROM eligible WHERE id=ANY($4::uuid[])),
 deleted_assets AS (
     DELETE FROM assets a
      USING candidate c
      WHERE a.org_id = c.org_id
        AND a.kind = 'repository'
        AND a.digest = 'scan-target:' || c.id::text
+       AND NOT EXISTS (SELECT 1 FROM findings f WHERE f.asset_id=a.id)
  RETURNING a.id
 ),
 deleted_targets AS (
@@ -181,6 +217,6 @@ deleted_targets AS (
  RETURNING st.id
 )
 SELECT (SELECT COUNT(*)::int FROM candidate),
-       (SELECT COUNT(*)::int FROM deleted_findings),
+       0::int,
        (SELECT COUNT(*)::int FROM deleted_assets),
        (SELECT COUNT(*)::int FROM deleted_targets)`
