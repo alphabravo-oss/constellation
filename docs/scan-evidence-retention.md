@@ -36,3 +36,52 @@ Named scan history, resolved findings, inventory payloads and attestations remai
 held. Their storage is observable but not bounded by this worker; DB-13–15 retain
 those explicit archive/restore acceptance gates. The documented audit-chain break
 is never bypassed to authorize evidence deletion.
+
+## Signed inventory export and recovery
+
+`constellationctl evidence` can preserve one package-inventory record together
+with its target identity. The artifact contains the full inventory payload and
+source organization, target and evidence UUIDs. A signed manifest binds the raw
+record and compressed payload SHA-256 digests, byte count and signing identity.
+Verification requires an independently trusted Ed25519 public key; it never
+trusts a key embedded in an archive. Protect these artifacts as sensitive data.
+
+```sh
+constellationctl evidence export-inventory \
+  --org-id "$SOURCE_ORG" --evidence-id "$EVIDENCE_ID" \
+  --sign-key /secure/archive-private.pem --verify-key /secure/archive-public.pem \
+  --out-dir /secure/inventory-archives
+
+constellationctl evidence verify-inventory \
+  --in /secure/inventory-archives/ARCHIVE.inventory.json \
+  --verify-key /secure/archive-public.pem
+
+constellationctl evidence restore-inventory \
+  --in /secure/inventory-archives/ARCHIVE.inventory.json \
+  --verify-key /secure/archive-public.pem \
+  --org-id "$DESTINATION_ORG" --target-id "$DESTINATION_TARGET"
+```
+
+Export and restore use `DATABASE_URL` or `--database-url`, with database credentials
+that authorize the operation. Verification is offline and needs neither a database
+nor object storage. Generate a key pair with `constellationctl backup gen-key`.
+Export creates a unique file with mode 0600 in a dedicated private directory;
+JSON command output contains identities/digests, never the inventory payload.
+The record limit is 32 MiB, the artifact limit 48 MiB, and each database operation
+has a five-second deadline. Oversized records fail without modifying the source.
+
+Restoration requires an existing destination target whose type, reference and
+source identity match the signed target. The operator explicitly chooses the
+destination organization and target; cluster context comes from that target.
+Evidence UUID and original timestamps, including expiration, are preserved.
+An identical existing record is a no-op; a conflicting UUID or inventory identity
+fails without overwriting evidence. New evidence and its `scan.evidence.restore`
+audit receipt commit atomically. Real PostgreSQL tests close the source connection
+and restore into a separately migrated database, check replay and rejected scopes,
+and inject an audit failure to verify rollback. The CLI test verifies an exported
+file while database and AWS environment settings point to unusable endpoints.
+
+This is a single-record preservation primitive. It does not restore targets,
+credentials, findings, scan results, attestations or their reference graph, upload
+to durable storage, schedule exports, or authorize source pruning. Existing holds
+remain in force. A verified inventory archive alone does not complete DB-14–15.
