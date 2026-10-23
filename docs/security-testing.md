@@ -2901,3 +2901,38 @@ policy-delivery path and native parsing/staging/matching behavior. It does not
 establish live CNI interception, DNS-derived FQDN enforcement, application
 classification, session re-evaluation, or production packet drops. No live policy
 or deployment was changed during this reverification.
+
+
+## Admission database Secret reverification (2026-10-23)
+
+Main source `54326342af24b90f964d4a404cbf2aa6cc3e9b67` already routes quarantine,
+policy and audit DSNs through the shared database Secret helpers. H7's historical
+`<fullname>-postgres` / `dsn` reference is absent. No deployment-template behavior
+changed in this follow-up. Configuration comments now describe shared external
+DSNs and the explicit quarantine cluster ID requirement.
+
+The new `scripts/test-helm-admission.sh` runs as part of `make helm-template-smoke`.
+Using Helm 4.3.1, it parses seven complete rendered configurations: CNPG, renamed
+release resources, external inline DSN, existing Secret with default key, existing
+Secret with custom key, per-feature DSN overrides, and disabled database features.
+For generated Secrets it checks that each admission reference resolves to the
+expected DSN value. For customer-owned Secrets it checks the configured name/key
+and that the chart does not overwrite the Secret. All three DSN references remain
+required, and enabled features carry the expected cluster arguments.
+
+Evidence is retained in `/root/constellation-h7-20261023/`:
+
+- `admission-chart.log`: all seven rendered configurations pass.
+- `historical-negative.log`: a disposable chart copy restores the historical
+  quarantine reference to `<fullname>-postgres` / `dsn`; the test rejects that
+  reference in the CNPG case. The source checkout is unchanged by this control.
+- `helm.log`: `make helm-lint helm-template-smoke` passes, including the existing
+  HA and identity checks and the new admission cases.
+- `check.log`, `unit.json` and `unit.xml`: full `make check` passes, including
+  shellcheck, lint/vet/format, frontend lint/type-check/build and the race-enabled
+  unit suite (3,135 tests reported, 8 opt-in skips). GitHub Actions remains disabled;
+  these are local validation results.
+
+This is rendered-chart acceptance. It does not connect to an external database,
+create customer Secrets, start admission pods, or establish live webhook readiness
+or quarantine enforcement. No live deployment or policy was changed.
