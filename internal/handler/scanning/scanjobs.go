@@ -914,6 +914,7 @@ UPDATE scan_targets
 	}
 
 	findingsInserted := 0
+	responseFindings := make([]scanner.Finding, 0, len(body.Findings))
 	currentImageFindingKeys := make([]string, 0, len(body.Findings))
 	for _, f := range body.Findings {
 		sev := strings.ToLower(strings.TrimSpace(f.Severity))
@@ -935,6 +936,14 @@ UPDATE scan_targets
 		// decision), so only the non-image path needs the override threaded into the upsert.
 		sev, risk = applyVulnProfileEscalation(vulnProfileDecision, sev, risk)
 		lifecycleOverride := vulnProfileLifecycleOverride(vulnProfileDecision)
+		// Response rules must see the same profile verdict as persistence. Retain
+		// raw findings for scan evidence/counts, but omit profile-suppressed CVEs
+		// from response conditions and use the escalated severity for the rest.
+		if lifecycleOverride == "" {
+			responseFinding := f
+			responseFinding.Severity, responseFinding.RiskScore = sev, risk
+			responseFindings = append(responseFindings, responseFinding)
+		}
 		imageScanFindingID := uuid.Nil
 		imageScanFindingKey := findingKey
 		if target.Type == "image" {
@@ -1072,7 +1081,7 @@ ON CONFLICT (job_id, attempt_number) DO UPDATE
 		after["response_rules_skipped"] = "inventory_changed_since_claim"
 	}
 	if h.evalResponseRules != nil && inventoryStatus != "outdated" {
-		h.dispatchScanResponseRules(r.Context(), token.OrgID, target, identity, body.Findings)
+		h.dispatchScanResponseRules(r.Context(), token.OrgID, target, identity, responseFindings)
 	}
 	_, _, _ = h.audit.Log(r.Context(), audit.Event{
 		OrgID:      &token.OrgID,

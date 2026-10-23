@@ -13,7 +13,7 @@ Status values: `open` (not yet verified against HEAD), `verified-open`,
 | H2 | fixed ([9a6945d2c](https://github.com/alphabravo-oss/constellation/commit/9a6945d2c)) | auth | IdP secrets (OIDC client secret, LDAP bind password, SAML SP key) stored unencrypted | `internal/auth/authservers.go` |
 | H3 | fixed ([4a77a7cf3](https://github.com/alphabravo-oss/constellation/commit/4a77a7cf3015e9fb5014ae866797badde5953a47)); reverified 2026-10-23 | hostscan | CIS file-permission checks use numeric mode comparison (world-readable /etc/shadow passes) | `internal/runtime/hostscan/cis.go` |
 | H4 | fixed ([4a77a7cf3](https://github.com/alphabravo-oss/constellation/commit/4a77a7cf3015e9fb5014ae866797badde5953a47)); reverified 2026-10-23 | compliance | AWS IAM inline wildcard-policy detection is fail-open (URL-encoded policy never matches) | `internal/cspm/aws/aws.go` |
-| H5 | open | scanning | Vulnerability-profile decisions computed at scan completion but never applied | `internal/handler/scanning/scanjobs.go` |
+| H5 | fixed ([035808ba0](https://github.com/alphabravo-oss/constellation/commit/035808ba0fbe926101949ea2a5073284b5d672c5)); verified 2026-10-23 | scanning | Vulnerability-profile decisions computed at scan completion but never applied | `internal/handler/scanning/scanjobs.go` |
 | H6 | open | runtime-agent | Workload micro-segmentation policy never pushed to dp (`Supervisor.PushPolicy` has no callers) | `internal/runtime/dp/policy.go` |
 | H7 | open | helm | Admission quarantine DSN reads a non-existent Secret key (fail-open admission) | `deploy/charts/constellation/templates/admission-deployment.yaml` |
 | H8 | open | operator | Operator ClusterRole omits RBAC for policy CRs it reconciles | `deploy/charts/constellation/templates/operator.yaml` |
@@ -79,6 +79,23 @@ it does not claim live AWS account acceptance. The historical failure follows.
 - **Fix:** `url.QueryUnescape` (or `json.Unmarshal` + structural eval) before matching.
 
 ### H5. Vulnerability-profile decisions are computed at scan completion but never applied or consumed
+
+**Verified and completed 2026-10-23:** main `47af9ba9a` already applied profile
+decisions to stored severity/risk and finding lifecycle, but response rules still
+received the original scanner findings. The remaining bug reproduced through the
+scanner-token claim/completion handlers against real Postgres: suppressed CVEs
+inflated response counts and a fully suppressed image scan created a quarantine
+entry. Response rules now consume unsuppressed findings with the applied severity.
+Scan history retains its raw finding count; an all-suppressed scan still emits a
+completion event with zero CVEs and informational severity, like a clean scan.
+
+`TestScanCompletionProfilesReachResponseRules` covers image and platform targets,
+accept/defer suppression, escalation, disabled profiles, persisted lifecycle/risk,
+response severity/CVE/fixable/KEV fields, image quarantine entries, rescans and
+completion replay. Existing promotion tests also cover open-finding rollups and
+manual acceptance preservation. This verifies API/database behavior; it does not
+claim live admission enforcement. The historical finding follows.
+
 - **Severity:** high  **Category:** half_wired  **Area:** handler-scanning
 - **File:** internal/handler/scanning/scanjobs.go:824
 - **Failure:** `Complete()` evaluates findings against active vuln profiles producing suppress_accept/suppress_defer/escalate, then only stuffs the verdict into `detail_json["vulnerability_profile"]` — read by nothing in production. Lifecycle is hard-coded `'open'` and severity/risk are computed before the decision. Suppress doesn't suppress, escalate doesn't escalate; suppressed CVEs still inflate critical/high rollups and can re-fire response rules.
