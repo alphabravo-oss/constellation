@@ -43,6 +43,9 @@ func run() error {
 	flag.StringVar(&c.Verifier.KeyPath, "verify-key", env("AUDIT_VERIFY_KEY", ""), "Trusted Ed25519 public key path")
 	flag.StringVar(&c.Verifier.Identity, "verify-identity", env("AUDIT_VERIFY_IDENTITY", ""), "Expected keyless certificate identity")
 	flag.StringVar(&c.Signer.CosignBin, "cosign-bin", env("COSIGN_BIN", "cosign"), "cosign executable")
+	chainDir := flag.String("verify-chain-dir", "", "Verify a complete downloaded chain with S3 key paths relative to this directory")
+	headKey := flag.String("trusted-head", "", "Independently trusted committed head manifest key")
+	headSHA := flag.String("trusted-head-sha256", "", "Independently trusted SHA-256 of the head manifest bytes")
 	manifestPath := flag.String("verify-manifest", "", "Verify downloaded manifest without connecting to a database")
 	archivePath := flag.String("verify-archive", "", "Downloaded .jsonl.gz path")
 	signaturePath := flag.String("signature", "", "Downloaded signature path")
@@ -57,6 +60,19 @@ func run() error {
 	c.Signer.Mode = backup.SignMode(*mode)
 	c.Verifier.Mode = c.Signer.Mode
 	c.Verifier.CosignBin = c.Signer.CosignBin
+	if *chainDir != "" {
+		if *manifestPath != "" || *archivePath != "" || *signaturePath != "" || *certificatePath != "" {
+			return fmt.Errorf("chain verification and single-segment verification flags are mutually exclusive")
+		}
+		proof, err := auditarchive.VerifyChain(ctx, *chainDir, *headKey, *headSHA, c.Verifier)
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(proof)
+	}
+	if *headKey != "" || *headSHA != "" {
+		return fmt.Errorf("trusted head flags require --verify-chain-dir")
+	}
 	if *manifestPath != "" {
 		raw, err := readMetadata(*manifestPath)
 		if err != nil {

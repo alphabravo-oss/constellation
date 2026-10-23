@@ -117,13 +117,37 @@ ID order, hash-chain links and row content. A successful result prints the
 verified manifest. Keyless replay uses `--certificate` and `--verify-identity`
 and inherits cosign's trust/network requirements.
 
-To prove completeness across multiple segments, begin at a trusted committed
-manifest, follow `previous_manifest`, and verify every downloaded segment. Check
-that stream IDs agree, each segment's `first_prev_hash` equals its predecessor's
-`last_chain`, IDs increase across segments, and the first segment begins with the
-all-zero genesis hash and no predecessor. A valid individual segment does not
-prove that the complete archive set is present. Do not treat every object in a
-bucket listing as a committed segment, since retries can leave orphan attempts.
+To verify completeness automatically, download the committed head and every
+linked predecessor with its archive/signature (and keyless certificate), preserving
+S3 key paths underneath a private directory. Obtain the committed head key and
+SHA-256 of its exact manifest bytes through an independently trusted record.
+Computing a digest from an untrusted download alone does not establish the head:
+a valid old prefix could otherwise be substituted for the complete chain.
+
+```sh
+audit-archiver --verify-chain-dir /private/evidence \
+  --trusted-head audit/COMMITTED.manifest.json \
+  --trusted-head-sha256 "$TRUSTED_MANIFEST_SHA256" \
+  --sign-mode static-key --verify-key /trusted/archive-signing.pub
+```
+
+This follows signed predecessor links to genesis, verifies every signature and
+row, and requires matching stream IDs, increasing inter-segment IDs, and matching
+chain boundaries. Sequence-number gaps from rollbacks are permitted. Missing,
+corrupt, cyclic, mislinked, and path-escaping artifacts fail closed without
+emitting a partial proof. Processing is bounded by the CLI deadline, 100,000
+segments, and the existing per-artifact byte limits. The result reports the
+verified head, final chain hash, segment count and row count. A proof covers only
+the trusted head; it does not assert that no newer events exist. The selected
+public key or keyless identity must verify every segment in this invocation;
+chains spanning different signing identities require separately reviewed trust
+rotation support before they can pass this complete-chain command.
+
+Do not treat every object in a bucket listing as committed: retries leave orphan
+attempts. The proof is independent of PostgreSQL and AWS with static-key trust.
+It does not repair the historical source discontinuity at row 53 or authorize
+source deletion. Trusted hot/cold query anchors and a historical-query service
+remain separate work.
 
 Replay validates portable evidence; it does not insert archived rows into the
 append-only operational table or implement a historical-query service. Full
