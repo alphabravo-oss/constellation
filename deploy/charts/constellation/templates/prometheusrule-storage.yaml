@@ -121,6 +121,26 @@ spec:
           annotations:
             summary: "Eligible time partitions remain attached"
             description: "Actual range bounds are past the safe retention cutoff. Check partition maintenance and locks; do not bypass fold or tenant-hold protections."
+        - alert: ConstellationSessionCleanupStalled
+          expr: |
+            (time() - constellation_session_cleanup_last_success_timestamp_seconds{ {{ $scope }} } > 300)
+             and (constellation_session_cleanup_active_workers{ {{ $scope }} } > 0)
+             and ({{ $healthy }}) and ({{ $up }})
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: "Active session cleanup has no recent successful pass"
+            description: "Inspect the active worker's database errors and locks. Idle API replicas are excluded; preserve current identity state and audit evidence."
+        - alert: ConstellationSessionCleanupFailing
+          expr: |
+            increase(constellation_session_cleanup_failures_total{ {{ $scope }} }[5m]) > 0
+             and (constellation_session_cleanup_active_workers{ {{ $scope }} } > 0)
+             and ({{ $healthy }}) and ({{ $up }})
+          for: 2m
+          labels: { severity: warning }
+          annotations:
+            summary: "Active session cleanup is reporting failures"
+            description: "A pass failed, possibly after partial progress. Inspect API logs and SQL permissions/locks; expired backlogs drain through bounded passes."
         - alert: ConstellationKubernetesAuditSourceGap
           expr: |
             (constellation_storage_k8s_audit_missing_sources{ {{ $scope }} }

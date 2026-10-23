@@ -66,6 +66,8 @@ DELETE FROM network_session_kills k USING expired e
 // RunSessionCleanup is started under the API leader's lifetime. Each pass is
 // bounded; a backlog drains over subsequent ticks rather than monopolizing SQL.
 func RunSessionCleanup(ctx context.Context, pool *pgxpool.Pool, logger *slog.Logger, metrics *Metrics) {
+	metrics.workerStarted()
+	defer metrics.workerStopped()
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {

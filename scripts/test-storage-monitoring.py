@@ -25,7 +25,7 @@ assert len(rules) == 1
 rule_spec = rules[0]['spec']
 (root / 'rules.yaml').write_text(yaml.safe_dump(rule_spec))
 alert_rules = {r['alert']: r for g in rule_spec['groups'] for r in g['rules']}
-assert len(alert_rules) == 19
+assert len(alert_rules) == 21
 for rule in alert_rules.values():
     assert 'namespace="storage-tests"' in rule['expr'] and 'service="constellation-api"' in rule['expr']
 
@@ -65,13 +65,13 @@ prefix = 'constellation_storage_'
 
 def series(name, values, extra=None):
     all_labels = dict(labels, **(extra or {}))
-    metric = name if name == 'up' else prefix + name
+    metric = name if name == 'up' or name.startswith('constellation_') else prefix + name
     return {'series': metric + '{' + ','.join(k + '=' + json.dumps(v) for k, v in all_labels.items()) + '}', 'values': values}
 
 
 # Evaluate after 2 hours so every rule's hold period and stall window has elapsed.
 # Values have one sample per minute; timestamp baselines keep healthy watermarks current.
-healthy = [series('k8s_audit_expected_sources', '0+0x180'), series('k8s_audit_missing_sources', '0+0x180'), series('k8s_audit_stale_sources', '0+0x180'), series('k8s_audit_delayed_sources', '0+0x180'), series('k8s_audit_unknown_reported_sources', '0+0x180'), series('k8s_audit_future_reported_sources', '0+0x180'), series('postgres_wal_occupancy_known', '1+0x180'), series('up', '1+0x180'), series('collector_up', '1+0x180'), series('database_bytes', '1000000+0x180'),
+healthy = [series('constellation_session_cleanup_active_workers', '0+0x180'), series('constellation_session_cleanup_last_success_timestamp_seconds', '0+60x180'), series('constellation_session_cleanup_failures_total', '0+0x180'), series('k8s_audit_expected_sources', '0+0x180'), series('k8s_audit_missing_sources', '0+0x180'), series('k8s_audit_stale_sources', '0+0x180'), series('k8s_audit_delayed_sources', '0+0x180'), series('k8s_audit_unknown_reported_sources', '0+0x180'), series('k8s_audit_future_reported_sources', '0+0x180'), series('postgres_wal_occupancy_known', '1+0x180'), series('up', '1+0x180'), series('collector_up', '1+0x180'), series('database_bytes', '1000000+0x180'),
            series('rollup_watermark_timestamp_seconds', '0+60x180'),
            series('archive_enabled', '0+0x180'), series('archive_pending_id_distance', '0+0x180'),
            series('archive_updated_timestamp_seconds', '0+60x180'),
@@ -92,6 +92,11 @@ def scenario(name, replacements, alert, extra=None, firing=True):
 
 
 tests = [
+    scenario('active cleanup stalled', [series('constellation_session_cleanup_active_workers', '1+0x180'), series('constellation_session_cleanup_last_success_timestamp_seconds', '0+0x180')], 'ConstellationSessionCleanupStalled'),
+    scenario('active cleanup failing', [series('constellation_session_cleanup_active_workers', '1+0x180'), series('constellation_session_cleanup_failures_total', '0+1x180')], 'ConstellationSessionCleanupFailing'),
+    scenario('idle replica has no cleanup obligation', [series('constellation_session_cleanup_last_success_timestamp_seconds', '0+0x180')], 'ConstellationSessionCleanupStalled', firing=False),
+    scenario('former worker failures do not alert idle replica', [series('constellation_session_cleanup_failures_total', '0+1x180')], 'ConstellationSessionCleanupFailing', firing=False),
+
     scenario('missing audit source', [series('k8s_audit_expected_sources', '2+0x180'), series('k8s_audit_missing_sources', '1+0x180')], 'ConstellationKubernetesAuditSourceGap'),
     scenario('stale audit source', [series('k8s_audit_expected_sources', '2+0x180'), series('k8s_audit_stale_sources', '1+0x180')], 'ConstellationKubernetesAuditSourceGap'),
     scenario('delayed audit source', [series('k8s_audit_expected_sources', '2+0x180'), series('k8s_audit_delayed_sources', '1+0x180')], 'ConstellationKubernetesAuditDeliveryDelayed'),
@@ -144,6 +149,7 @@ tests.append({'name': 'healthy installation has no storage alerts', 'interval': 
 # Reuse their existing positive fixtures so warning inputs and expected dimensions
 # remain realistic (including table/kind and WAL rates).
 data_alerts = {
+    "ConstellationSessionCleanupStalled", "ConstellationSessionCleanupFailing",
     "ConstellationKubernetesAuditSourceGap", "ConstellationKubernetesAuditDeliveryDelayed", "ConstellationKubernetesAuditTimestampUnknown",
     'ConstellationDatabaseSizeHigh', 'ConstellationRelationSizeHigh',
     'ConstellationDeadRowsHigh', 'ConstellationDefaultPartitionLarge',
