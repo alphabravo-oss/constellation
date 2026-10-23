@@ -16,6 +16,7 @@ const hasControlCharacter = (value: string) => ["\r", "\n", "\0"].some((characte
 
 const nvdSchema = z.object({
   nvd_enabled: z.boolean(),
+  nvd_bootstrap_enabled: z.boolean(),
   apiKey: z.string().max(4096, "The API key is too long.").refine((value) => !hasControlCharacter(value), "Enter a single-line API key."),
   nvd_mirror_url: z.string().max(2048, "The mirror URL is too long.").refine((value) => {
     if (!value.trim()) return true;
@@ -30,6 +31,7 @@ const nvdSchema = z.object({
 function valuesFrom(data: SystemConfigResponse) {
   return {
     nvd_enabled: data.config.nvd_enabled === true,
+    nvd_bootstrap_enabled: data.config.nvd_bootstrap_enabled === true,
     apiKey: "", // Never hydrate the replacement field from a stored/redacted key.
     nvd_mirror_url: typeof data.config.nvd_mirror_url === "string" ? data.config.nvd_mirror_url : "",
   };
@@ -62,7 +64,7 @@ function NvdConfigForm({ data, onClose }: { data: SystemConfigResponse; onClose:
         return;
       }
       setSaveError("");
-      const body: Record<string, unknown> = { nvd_enabled: value.nvd_enabled, nvd_mirror_url: value.nvd_mirror_url.trim() };
+      const body: Record<string, unknown> = { nvd_enabled: value.nvd_enabled, nvd_bootstrap_enabled: value.nvd_bootstrap_enabled, nvd_mirror_url: value.nvd_mirror_url.trim() };
       if (value.apiKey.trim()) body.nvd_api_key = value.apiKey.trim();
       try {
         const saved = await systemConfigApi.patch(body, loadedRevision);
@@ -98,6 +100,8 @@ function NvdConfigForm({ data, onClose }: { data: SystemConfigResponse; onClose:
         <form.Field name="nvd_enabled">{(field) => <Switch checked={field.state.value} onCheckedChange={field.handleChange}
           label="Enable NVD import" description="Fetch descriptions and CVSS for recently modified CVEs." />}</form.Field>
       </div>
+      <form.Field name="nvd_bootstrap_enabled">{(field) => <Switch checked={field.state.value} onCheckedChange={field.handleChange}
+        label="Import historical NVD records" description="Requires NVD import enabled. Gradually imports older records, resuming after interruptions. Recent updates run first. This can take several scheduled cycles and uses additional bandwidth and storage." />}</form.Field>
       <form.AppField name="apiKey">{(field) => <field.TextField label="NVD API key" type="password" autoComplete="new-password"
         hint={hasKey ? "A key is already set — leave blank to keep it." : "Optional. Raises the NVD request rate limit."}
         placeholder={hasKey ? "••••••••" : "optional"} />}</form.AppField>

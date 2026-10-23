@@ -49,7 +49,7 @@ describe("NVD settings form", () => {
     await render();
     expect(host.querySelector<HTMLInputElement>('input[name="apiKey"]')!.value).toBe("");
     await change("nvd_mirror_url", "https://mirror.test/api"); await submit();
-    expect(systemConfigApi.patch).toHaveBeenCalledWith({ nvd_enabled: false, nvd_mirror_url: "https://mirror.test/api" }, 1);
+    expect(systemConfigApi.patch).toHaveBeenCalledWith({ nvd_enabled: false, nvd_bootstrap_enabled: false, nvd_mirror_url: "https://mirror.test/api" }, 1);
   });
   it("preserves edited key and mirror through a conflict without echoing backend errors", async () => {
     vi.mocked(systemConfigApi.patch).mockRejectedValue({ response: { status: 412, data: { error: "sensitive-backend-value" } } });

@@ -227,7 +227,7 @@ export function CVEPage() {
             { label: "EPSS above 0.5", value: statsData.epss_gt_50.toLocaleString(), tone: "high" },
             { label: "CVSS 7.0 or higher", value: statsData.cvss_gt_70.toLocaleString(), tone: "high" },
           ] : undefined}
-          detail={<span>Aggregated from NVD, CISA KEV, EPSS, OSV, GHSA and distribution feeds.{importedAt ? <> Bundle <span className="font-mono">{bundleVersion}</span> imported {importedAt}.</> : null} Manage sources in <a href="/settings/scanner" className="text-link">Settings › Scanner and CVE sources</a>.{bundleData?.available ? <span className="mt-1 block">Bundle <span className="font-mono" data-testid="bundle-version">{bundleVersion}</span> · <span data-testid="bundle-signed">{bundleData.signed ? `signed${bundleData.signer_identity ? ` by ${bundleData.signer_identity}` : ""}` : "unsigned"}</span></span> : null}</span>}
+          detail={<span>Aggregated from NVD, CISA KEV, EPSS, OSV, GHSA and distribution feeds. Sources and KEV flags record historical observations; they do not certify current feed membership.{importedAt ? <> Bundle <span className="font-mono">{bundleVersion}</span> imported {importedAt}.</> : null} Manage sources in <a href="/settings/scanner" className="text-link">Settings › Scanner and CVE sources</a>.{bundleData?.available ? <span className="mt-1 block">Bundle <span className="font-mono" data-testid="bundle-version">{bundleVersion}</span> · <span data-testid="bundle-signed">{bundleData.signed ? `signed${bundleData.signer_identity ? ` by ${bundleData.signer_identity}` : ""}` : "unsigned"}</span></span> : null}</span>}
         />
       )}
 

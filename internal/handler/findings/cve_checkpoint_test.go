@@ -387,3 +387,102 @@ func cveSnapshotFixture(probability *atomic.Value, invalid *atomic.Bool) http.Ha
 		}
 	}
 }
+
+func TestNVDBootstrapSeparateCursorAndResume(t *testing.T) {
+	t.Parallel()
+	pool := checkpointPool(t)
+	var starts []time.Time
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start, err := time.Parse(time.RFC3339Nano, r.URL.Query().Get("lastModStartDate"))
+		if err != nil {
+			t.Error(err)
+		}
+		starts = append(starts, start)
+		_, _ = fmt.Fprint(w, `{"resultsPerPage":0,"startIndex":0,"totalResults":0,"vulnerabilities":[]}`)
+	}))
+	defer server.Close()
+	cfg := nvdConfig{BaseURL: server.URL, Client: server.Client(), APIKey: "fixture", bootstrapPass: true}
+	conn, err := pool.Acquire(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Release()
+	// One remaining request completes an empty historical window, then exhausts
+	// the bounded cycle. Completed work must survive restart independently of NVD.
+	pages := nvdMaxPages - 1
+	if _, err := importNVDPass(t.Context(), conn, cfg, &pages); err == nil {
+		t.Fatal("expected page budget exhaustion")
+	}
+	var through time.Time
+	if err := conn.QueryRow(t.Context(), `SELECT completed_through FROM cve_feed_checkpoints WHERE feed='nvd-bootstrap'`).Scan(&through); err != nil {
+		t.Fatal(err)
+	}
+	if len(starts) != 1 || !starts[0].Equal(time.Unix(0, 0)) || !through.Equal(time.Unix(0, 0).Add(120*24*time.Hour)) {
+		t.Fatalf("wrong bootstrap boundary: %v %v", starts, through)
+	}
+	pages = nvdMaxPages - 1
+	if _, err := importNVDPass(t.Context(), conn, cfg, &pages); err == nil {
+		t.Fatal("expected page budget exhaustion on resumed pass")
+	}
+	if !starts[1].Equal(through.Add(-2 * time.Hour)) {
+		t.Fatal("bootstrap restarted instead of resuming")
+	}
+	var count int
+	if err := conn.QueryRow(t.Context(), `SELECT count(*) FROM cve_feed_checkpoints WHERE feed='nvd'`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("bootstrap overwrote incremental cursor: %d %v", count, err)
+	}
+	// Once backfill reaches the recent window, current updates alone maintain it.
+	if _, err := conn.Exec(t.Context(), `UPDATE cve_feed_checkpoints SET completed_through=now()-interval '1 hour' WHERE feed='nvd-bootstrap'`); err != nil {
+		t.Fatal(err)
+	}
+	pages = 0
+	if _, err := importNVDPass(t.Context(), conn, cfg, &pages); err != nil || pages != 0 {
+		t.Fatalf("completed bootstrap repeated: %d %v", pages, err)
+	}
+	// A different source must not inherit completeness from the previous mirror.
+	if _, err := conn.Exec(t.Context(), `UPDATE cve_feed_checkpoints SET source_hash=repeat('0',64) WHERE feed='nvd-bootstrap'`); err != nil {
+		t.Fatal(err)
+	}
+	pages = nvdMaxPages - 1
+	if _, err := importNVDPass(t.Context(), conn, cfg, &pages); err == nil {
+		t.Fatal("expected bounded restart for changed source")
+	}
+	if !starts[len(starts)-1].Equal(time.Unix(0, 0)) {
+		t.Fatal("new mirror inherited historical coverage")
+	}
+}
+
+func TestNVDBootstrapFailureDoesNotBlockRecentUpdates(t *testing.T) {
+	t.Parallel()
+	pool := checkpointPool(t)
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start, err := time.Parse(time.RFC3339Nano, r.URL.Query().Get("lastModStartDate"))
+		if err != nil {
+			t.Error(err)
+		}
+		if requests.Add(1) == 1 {
+			if start.Before(time.Now().Add(-121 * 24 * time.Hour)) {
+				t.Error("historical work ran before recent updates")
+			}
+			_, _ = fmt.Fprint(w, `{"resultsPerPage":0,"startIndex":0,"totalResults":0,"vulnerabilities":[]}`)
+			return
+		}
+		if !start.Equal(time.Unix(0, 0)) {
+			t.Error("expected historical bootstrap")
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	_, err := ImportNVD(t.Context(), pool, nvdConfig{Bootstrap: true, BaseURL: server.URL, Client: server.Client(), APIKey: "fixture"}, nil)
+	if err == nil {
+		t.Fatal("bootstrap failure hidden")
+	}
+	var recent, historical int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FILTER (WHERE feed='nvd'),count(*) FILTER (WHERE feed='nvd-bootstrap') FROM cve_feed_checkpoints`).Scan(&recent, &historical); err != nil {
+		t.Fatal(err)
+	}
+	if recent != 1 || historical != 0 {
+		t.Fatalf("failed bootstrap affected recent progress: %d %d", recent, historical)
+	}
+}
