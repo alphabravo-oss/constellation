@@ -2975,3 +2975,56 @@ This is rendered-chart acceptance, not an API-server authorization decision or a
 end-to-end GitOps reconciliation run. No controller startup, database write, live
 RBAC change or deployment was performed. The follow-up adds tests and evidence;
 production permissions remain unchanged.
+
+
+## Ten-item security and lifecycle continuation (2026-10-23)
+
+Baseline `f63b06072f09424660f1a456f3adae3882cb4e9f` was reviewed for ten explicit
+items: H9, H10, H11, H12, DB-01, DB-02, DB-03, DB-04, DB-16 and DB-18. The remaining
+security findings are already fixed in production source; this follow-up makes
+their regression coverage current and records the verified closure. Database
+rollout, capacity, alarms and recovery gates remain open; local tests do not
+establish those operational outcomes.
+
+| Item | Result of this continuation |
+| --- | --- |
+| H9 | Removed the manual `DATABASE_URL` prerequisite and shared-chain truncation from three audit tests. Each uses its own migrated Postgres database. Sixteen writers mix `Log`/`LogInTx` across two organizations, append exactly 400 rows and verify the full chain. Caller rollback and tamper protection also pass. |
+| H10 | Added a real-Postgres first-OIDC-session regression: immediate authentication, stale epoch rejection without persisting a session, old-session revocation, and successful fresh login after revocation. |
+| H11 | Extended HTTP/database replay coverage to both clusters twice, changed FAIL to PASS with stable row identity, and proved repeat ingestion for another node retains separate statuses without duplicates. |
+| H12 | Re-ran real-Postgres generated-policy coverage for bare external peers: FQDN, IP-only CIDR and missing-address exclusion. |
+| DB-01 | Re-ran partition-collision pruning and lock/batch preservation tests for events and network flows. |
+| DB-02 | Re-ran failed/lagging fold, late-arrival, refold-after-prune and fold-gated partition-expiry tests. |
+| DB-03 | Added persisted first-boot seeding and restart/idempotence coverage preserving zero holds and custom windows; default/legacy-hold checks also pass. |
+| DB-04 | Added three-family, two-organization coverage for longest-window selection and independent event/flow holds; existing invalid-config and read-error protections pass. |
+| DB-16 | Added current-schema cleanup acceptance for all four families: bounded batches, locked rows, reused session IDs across nodes/clusters/organizations, live-row and audit preservation, and partial failure. Fixed stale metric/log names from the identity cutover. |
+| DB-18 | Re-ran feed content/cursor atomicity, identical-repeat write avoidance, correction, rollback, replica-lock, restart, catch-up and mirror-change tests. |
+
+Evidence is retained in `/root/constellation-next10-20261023/`. Focused race/shuffle
+runs passed twice; `focused-existing.json` retains an initial unused-import build
+failure in the audit package, corrected before the passing `audit-identity.json`.
+Other focused results are in `focused-new.json` and `retention-families.json`.
+`session-before.json` captures the reporting regression: cleanup succeeds, but the
+current `oidc_login_attempts` metric remains zero before the label correction.
+
+Compiler overlays avoid editing the production checkout for negative controls:
+`audit-negative.log` restores the historical moving-row lock and detects a chain
+break; `external-negative.log` restores prefix-only external detection and rejects
+the resulting policy preview. Both fail for their expected assertion, rather than
+for setup or compilation errors.
+
+The cleanup metric family values changed from `refresh_tokens` / `user_sessions`
+to `oidc_login_attempts` / `identity_sessions`, matching the tables actually reaped.
+The cleanup log fields and Go result fields follow the same correction. Custom
+metric queries using the retired family values must be updated. Deletion SQL,
+retention windows and production audit hashes were not changed.
+
+All database mutations were confined to disposable fixtures. This is not a new
+live-issuer/browser login proof, live Cilium enforcement test, repair of historical
+audit corruption, deployment, or live retention run.
+
+Full gates passed: `make check` reports 3,135 tests with 8 opt-in skips, and
+`make test-integration` reports 4,932 tests with 14 opt-in skips. The three audit
+tests previously skipped for lack of `DATABASE_URL` now execute in the standard
+integration gate. JSON/JUnit results and logs are retained as `unit.*`,
+`integration.*` and `check.log` in the evidence directory. GitHub Actions remains
+disabled for the repository; these are local results. No Helm templates changed.
