@@ -3207,3 +3207,35 @@ additional cases verify isolation across optional cluster labels; restoring the
 restricted label join makes the cross-cluster negative control fail as expected
 (`negative-cluster.log`). Native and Docker promtool both pass the final rules.
 Final logs plus unit JSON/JUnit reports are retained in the evidence directory.
+
+## Ten storage-alert isolation fixes (2026-10-23)
+
+Nine data alerts and the missing-exporter alert now use the isolation contract in
+[storage health](storage-health.md#ten-storage-alert-isolation-fixes-2026-10-23).
+Data alerts retain all target labels across collector/scrape-health joins, ignoring
+only reserved application dimensions where needed. Failed scrapes suppress stale
+warnings. Missing exporter/scrape health is reported per discovered target instead
+of being hidden by another replica's successful collection.
+
+The storage suite now evaluates 75 real PromQL scenarios, including each data
+alert with matching extra labels, mismatched cluster/Prometheus/instance health,
+and failed local scrapes alongside healthy remote-cluster scrapes. Archive-enabled
+and progress signals are isolated too. Discovery cases distinguish absent targets,
+missing exporters, failed scrapes and an exporter that is present but reports a
+failed database query. Existing 12 rule definitions, 15 dashboard expressions and
+33 scanner-cache scenarios remain valid.
+
+An isolated negative control restores the restricted health joins and global
+absence expression. All ten selected regression cases fail as expected; the real
+rules pass. Logs and rendered fixtures are retained in
+`/root/constellation-storage-isolation-next10-20261023/`, including
+`negative-controls.log`, `monitoring.log`, `helm.log` and `docker-promtool.log`.
+No SQL, migration, Go runtime, alert thresholds, retention policy or live resources
+changed. Monitoring activation and DB-23 capacity/recovery gates remain open.
+
+Final `make check` passed: 3,168 reported tests, 8 opt-in skips, with lint, vet,
+formatting, shell and frontend type/build/bundle checks green. Helm 4 lint and the
+full smoke suite passed; native and Docker promtool both pass the final 75 storage
+scenarios. Unit JSON/JUnit reports are retained with `check.log`. No database
+integration rerun was needed for this chart/test/documentation-only change.
+Repository Actions permissions were verified disabled.

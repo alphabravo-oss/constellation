@@ -110,9 +110,12 @@ They are warning budgets, not deletion thresholds or approved retention windows.
 Rules are scoped to this release's namespace and API Service. Standard
 ServiceMonitor discovery supplies those labels; annotation-based scraping must
 supply matching `namespace` and `service` labels. Each data alert joins the
-collector-health signal for the same job/instance, preventing one healthy
-replica from masking another's failed read. A separate absent-metric rule catches
-missing discovery. Existing DB-health collector query failures now have an alert
+collector-health and scrape-health signals for the same complete target label set,
+ignoring only the application labels `table` and `kind` where needed. This retains
+optional cluster/Prometheus labels, preventing a healthy target elsewhere from
+validating a failed read at the same address. A failed scrape suppresses stale
+capacity/progress warnings. The missing-metrics rule reports discovered targets
+with failed scrapes or missing collectors, plus completely absent discovery. Existing DB-health collector query failures now have an alert
 because its cached feed/component ages can otherwise look current during failure.
 
 The optional ConfigMap contains a 14-panel Grafana dashboard, selected by the
@@ -161,7 +164,7 @@ statistics, least-privilege reads, active/missing/invalid archive progress,
 backup tenant aggregation, uninitialized schedules and the indexed lookup plan,
 concurrent cache hits, failed-query invalidation/recovery, missing tables and
 lock deadlines. `scripts/test-helm-storage.sh` renders chart wiring and evaluates
-23 scenarios with Prometheus `promtool`, including failing and healthy conditions,
+75 scenarios with Prometheus `promtool`, including failing and healthy conditions,
 disabled/idle archives, absence and per-replica joins. It also parses all dashboard
 queries. Set `PROMTOOL` to a local binary or preload the digest-pinned Prometheus
 3.15.0 test image; tests do not pull images or use the network. The CI workflow
@@ -174,3 +177,47 @@ headroom qualification still require follow-up. Scanner-local metrics and tested
 alerts now ship under the [cache monitoring contract](scanner-cache-monitoring.md). Existing volume, scanner-engine and feed alerts
 are retained rather than duplicated. No live cluster, database retention or
 alerting configuration was changed for this work.
+
+## Ten storage-alert isolation fixes (2026-10-23)
+
+The following nine data alerts now require both a successful collector snapshot
+and a healthy scrape from the same complete target. All target labels are
+preserved; only the application's `table` and `kind` dimensions are excluded from
+joins to target-level health. Thresholds, severities and hold periods are unchanged.
+
+| Item | Alert | Preserved application dimensions |
+| --- | --- | --- |
+| 1 | `ConstellationDatabaseSizeHigh` | None |
+| 2 | `ConstellationRelationSizeHigh` | Table and size kind |
+| 3 | `ConstellationDeadRowsHigh` | Table and dead-row kind; live/dead arithmetic still matches the same table and target |
+| 4 | `ConstellationDefaultPartitionLarge` | Table |
+| 5 | `ConstellationFlowRollupLagging` | None |
+| 6 | `ConstellationAuditArchiveLagging` | Archive-enabled and progress timestamps must also match the complete target |
+| 7 | `ConstellationBackupScheduleOverdue` | None |
+| 8 | `ConstellationBackupScheduleFailed` | None |
+| 9 | `ConstellationWALGenerationHigh` | None |
+| 10 | `ConstellationStorageMetricsAbsent` | Detects failed scrapes/missing collectors per discovered target; completely absent discovery produces a release-scoped alert |
+
+Previously the health joins matched only namespace/service/job/instance, allowing
+a healthy collector in another cluster or Prometheus source to validate stale
+values at the same address. The missing-metrics rule previously used only global
+`absent(collector_up)`, so one healthy replica could hide another missing exporter.
+The rule name is retained, but its summary now says metrics are unavailable and
+its per-target failures carry the target labels. A collector reporting zero is
+present: its query failures remain covered by `ConstellationStorageCollectorFailed`.
+
+Forward `up` alongside these metrics when using remote write/federation. Preserve
+consistent target labels on all series; `table` and `kind` are reserved application
+labels here. Annotation-based scraping must still supply the namespace/service
+labels used by the rules. These rules do not infer desired replica counts: if one
+target disappears from discovery while others remain, workload-availability alerts
+must detect the missing desired replica.
+
+For every data alert, executable fixtures prove positive behavior with matching
+extra labels, suppression for mismatched cluster/Prometheus/instance health, and
+suppression after failed scrapes. Additional archive fixtures isolate enabled and
+progress values across clusters. The complete suite has 75 scenarios. An isolated
+negative control restores the restricted health joins and global absence rule;
+all ten corresponding regression cases fail as expected. This changes monitoring
+correctness, not retention policy, deletion behavior, live alert routing or DB-23
+capacity/recovery acceptance.
