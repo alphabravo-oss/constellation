@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/alphabravocompany/constellation/internal/cvecatalog"
 	"github.com/alphabravocompany/constellation/internal/syscfg"
 )
 
@@ -35,12 +36,14 @@ const (
 )
 
 type nvdConfig struct {
-	Enabled    bool
-	APIKey     string
-	BaseURL    string
-	Interval   time.Duration
-	Client     *http.Client
-	WindowDays int
+	Enabled       bool
+	Bootstrap     bool
+	bootstrapPass bool
+	APIKey        string
+	BaseURL       string
+	Interval      time.Duration
+	Client        *http.Client
+	WindowDays    int
 }
 
 func (c nvdConfig) base() string {
@@ -167,6 +170,24 @@ func ImportNVD(ctx context.Context, pool *pgxpool.Pool, cfg nvdConfig, logger *s
 }
 
 func importNVD(ctx context.Context, conn *pgxpool.Conn, cfg nvdConfig) (int, error) {
+	pages := 0
+	total, err := importNVDPass(ctx, conn, cfg, &pages)
+	if err != nil || !cfg.Bootstrap {
+		return total, err
+	}
+	cfg.bootstrapPass = true
+	count, err := importNVDPass(ctx, conn, cfg, &pages)
+	return total + count, err
+}
+
+func (c nvdConfig) feed() string {
+	if c.bootstrapPass {
+		return "nvd-bootstrap"
+	}
+	return "nvd"
+}
+
+func importNVDPass(ctx context.Context, conn *pgxpool.Conn, cfg nvdConfig, pages *int) (int, error) {
 	days := cfg.WindowDays
 	if days <= 0 || days > nvdWindowDays {
 		days = nvdWindowDays
@@ -174,8 +195,10 @@ func importNVD(ctx context.Context, conn *pgxpool.Conn, cfg nvdConfig) (int, err
 	sourceHash := cveFeedHash(cfg.base())
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	start := now.Add(-time.Duration(days) * 24 * time.Hour)
-	var through time.Time
-	err := conn.QueryRow(ctx, `SELECT completed_through FROM cve_feed_checkpoints WHERE feed='nvd' AND source_hash=$1`, sourceHash).Scan(&through)
+	if cfg.bootstrapPass {
+		start = time.Unix(0, 0).UTC()
+	}
+	through, err := cvecatalog.CompletedThrough(ctx, conn, cfg.feed(), sourceHash)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return 0, err
 	}
@@ -183,15 +206,20 @@ func importNVD(ctx context.Context, conn *pgxpool.Conn, cfg nvdConfig) (int, err
 		if through.After(now) {
 			return 0, fmt.Errorf("nvd checkpoint is ahead of local clock")
 		}
+		// A completed historical traversal stays complete while the incremental
+		// cursor maintains the recent window. Both are bound to the same source.
+		if cfg.bootstrapPass && !through.Before(now.Add(-time.Duration(days)*24*time.Hour)) {
+			return 0, nil
+		}
 		start = through.Add(-2 * time.Hour)
 	}
-	total, pages := 0, 0
+	total := 0
 	for start.Before(now) {
 		end := start.Add(time.Duration(days) * 24 * time.Hour)
 		if end.After(now) {
 			end = now
 		}
-		count, err := importNVDWindow(ctx, conn, cfg, sourceHash, start, end, &pages)
+		count, err := importNVDWindow(ctx, conn, cfg, sourceHash, start, end, pages)
 		total += count
 		if err != nil {
 			return total, err
@@ -225,7 +253,7 @@ func importNVDWindow(ctx context.Context, conn *pgxpool.Conn, cfg nvdConfig, sou
 		}
 		expected = count
 		index += len(rows)
-		if err := commitNVDPage(ctx, conn, sourceHash, end, index, count, rows); err != nil {
+		if err := commitNVDPage(ctx, conn, cfg.feed(), sourceHash, end, index, count, rows); err != nil {
 			return total, err
 		}
 		total += len(rows)
@@ -252,7 +280,7 @@ func validateNVDPageProgress(expected, index, count int, rows []cveImportRow, se
 	return nil
 }
 
-func commitNVDPage(ctx context.Context, conn *pgxpool.Conn, sourceHash string, end time.Time, index, count int, rows []cveImportRow) error {
+func commitNVDPage(ctx context.Context, conn *pgxpool.Conn, feed, sourceHash string, end time.Time, index, count int, rows []cveImportRow) error {
 	tx, err := conn.Begin(ctx)
 	if err != nil {
 		return err
@@ -262,12 +290,7 @@ func commitNVDPage(ctx context.Context, conn *pgxpool.Conn, sourceHash string, e
 		return err
 	}
 	if index == count {
-		if _, err := tx.Exec(ctx, `SET LOCAL synchronous_commit=on`); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO cve_feed_checkpoints(feed,source_hash,completed_through,row_count)
-            VALUES ('nvd',$1,$2,$3) ON CONFLICT(feed) DO UPDATE SET source_hash=EXCLUDED.source_hash,
-            completed_through=EXCLUDED.completed_through,row_count=EXCLUDED.row_count,updated_at=now()`, sourceHash, end, index); err != nil {
+		if err := cvecatalog.SaveCompletedWindow(ctx, tx, feed, sourceHash, end, index); err != nil {
 			return err
 		}
 	}
@@ -370,8 +393,9 @@ func loadNVDConfig(ctx context.Context, pool *pgxpool.Pool) (nvdConfig, bool) {
 		return nvdConfig{}, false
 	}
 	return nvdConfig{
-		Enabled: cfg.NVDEnabled,
-		APIKey:  cfg.NVDAPIKey,
-		BaseURL: cfg.NVDMirrorURL,
+		Enabled:   cfg.NVDEnabled,
+		Bootstrap: cfg.NVDBootstrapEnabled,
+		APIKey:    cfg.NVDAPIKey,
+		BaseURL:   cfg.NVDMirrorURL,
 	}, true
 }

@@ -4,6 +4,7 @@ package findings
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/google/uuid"
@@ -54,5 +55,41 @@ func TestCVEImportSkipsUnchangedAndSparseRows(t *testing.T) {
 	}
 	if err := upsertCVERows(ctx, pool, nil); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCVEHistoricalProvenanceSurvivesFeedWithdrawal(t *testing.T) {
+	t.Parallel()
+	pool := checkpointPool(t)
+	ctx := t.Context()
+	rows := []cveImportRow{
+		{id: "CVE-2026-12345", sources: []string{"nvd", "nvd"}, aliases: []string{"B", "A"}},
+		{id: "CVE-2026-12345", sources: []string{"kev", "epss"}, kevListed: true, aliases: []string{"C"}},
+		{id: "CVE-2026-12345", sources: []string{"nvd"}},
+	}
+	for _, row := range rows {
+		if err := upsertCVERows(ctx, pool, []cveImportRow{row}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var sources, aliases []string
+	var kev bool
+	var before, after string
+	if err := pool.QueryRow(ctx, `SELECT sources,aliases,kev_listed,xmin::text FROM cve_records WHERE cve_id='CVE-2026-12345'`).Scan(&sources, &aliases, &kev, &before); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(sources, []string{"epss", "kev", "nvd"}) || !slices.Equal(aliases, []string{"A", "B", "C"}) || !kev {
+		t.Fatalf("lost historical observations: %v %v %v", sources, aliases, kev)
+	}
+	for _, row := range rows {
+		if err := upsertCVERows(ctx, pool, []cveImportRow{row}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := pool.QueryRow(ctx, `SELECT xmin::text FROM cve_records WHERE cve_id='CVE-2026-12345'`).Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if before != after {
+		t.Fatal("alternating feeds rewrote unchanged provenance")
 	}
 }

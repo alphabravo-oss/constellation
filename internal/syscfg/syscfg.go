@@ -80,6 +80,8 @@ type Config struct {
 	// NVDEnabled turns on the NVD full-catalog CVE importer (descriptions + CVSS),
 	// complementing the always-on KEV+EPSS exploitation-intel importer.
 	NVDEnabled bool `json:"nvd_enabled,omitempty"`
+	// NVDBootstrapEnabled opts into resumable full-history NVD traversal, after recent updates.
+	NVDBootstrapEnabled bool `json:"nvd_bootstrap_enabled,omitempty"`
 	// NVDAPIKey is the api.nvd.nist.gov key (raises the rate limit from 5 to 50
 	// requests / 30s). SECRET-ish: redacted on GET.
 	NVDAPIKey string `json:"nvd_api_key,omitempty"`

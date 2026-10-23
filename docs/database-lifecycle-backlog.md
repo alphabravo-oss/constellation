@@ -32,7 +32,7 @@ production caller is superseded.
 | DB-14–15 | Map result/evidence/attestation references, preserve current decisions, and expire only unreferenced eligible history. |
 | DB-16 | Qualify current identity cleanup and its deployed alarms/throughput. |
 | DB-17 | Classify operational histories separately from evidence and add bounded, hold-aware maintenance. |
-| DB-18–20 | Qualify real-feed checkpoint/WAL behavior; document feed membership/bootstrap semantics; profile the existing PostgreSQL catalog before considering another format. |
+| DB-18–20 | Real KEV/EPSS replay qualification passed (394,803 rows, no replay rewrites/WAL). Historical source/KEV semantics and opt-in resumable NVD backfill are implemented; measured catalog indexing keeps PostgreSQL. Source deployment and full NVD mirror traversal remain operational gates. See [catalog decision](cve-catalog-capacity.md) and [feed contract](cve-feed-checkpoints.md). |
 | DB-21 | Qualify the merged scanner topology, refresh policy, staging cleanup, restart/offline behavior, capacity and notifications. |
 | DB-22 | Honor scheduled object destinations with verified read-back; protect minimum backup copies and remote receipts; qualify lifecycle and restoration separately from PostgreSQL PITR. |
 | DB-23 | Complete remaining lag/WAL signals, activate/qualify monitoring, and measure supported workload/capacity with failure recovery. |
