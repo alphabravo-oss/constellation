@@ -417,6 +417,20 @@ to Trivy/Grype cache refresh settings, not that retired producer.
 
 ---
 
+## Storage health monitoring
+
+The API exposes bounded read-only database storage metrics on its admin listener.
+Enable `metrics.prometheusRule.enabled` for the storage warning group and
+`metrics.storageDashboard.enabled` for the Grafana dashboard ConfigMap. Both
+parent features remain disabled by default. Tune
+`metrics.prometheusRule.storage` warning budgets for the installation.
+
+These rules require the API ServiceMonitor (or equivalent namespace/service
+labels), and they distinguish collector failure, active archive lag and overdue
+organization backups. They do not enable cleanup or establish PITR coverage.
+See [storage health metrics and operating limits](storage-health.md) for metric
+semantics, all ten implementation items, alert tests and safe response steps.
+
 ## Audit Archiver
 
 `auditArchiver.enabled=true` creates a CronJob that catches up the global audit
