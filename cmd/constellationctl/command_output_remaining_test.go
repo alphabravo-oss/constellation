@@ -429,7 +429,7 @@ func remainingBackfillFixture(t *testing.T) *pgxpool.Pool {
 	pool := remainingCLIDatabase(t)
 	_, err := pool.Exec(t.Context(), `CREATE TABLE network_flows (LIKE public.network_flows INCLUDING ALL);
 CREATE TABLE network_flow_rollups (LIKE public.network_flow_rollups INCLUDING ALL);
-CREATE TABLE network_flow_rollup_state (id boolean PRIMARY KEY, watermark timestamptz, raw_pruned_before timestamptz);
+CREATE TABLE network_flow_rollup_state (id boolean PRIMARY KEY, watermark timestamptz, raw_pruned_before timestamptz, rollups_pruned_before timestamptz NOT NULL DEFAULT '0001-01-01');
 INSERT INTO network_flow_rollup_state VALUES (true, now(), '1970-01-01');
 CREATE TABLE pod_ips (org_id uuid, ip inet, namespace text, deployment text, pod_name text);
 CREATE TABLE cluster_services (org_id uuid, cluster_ip inet, namespace text, name text);

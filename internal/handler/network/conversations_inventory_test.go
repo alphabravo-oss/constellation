@@ -334,3 +334,19 @@ func TestConversationInventoryHighOffsetOptions(t *testing.T) {
 		}
 	}
 }
+
+func TestConversationExpiredHistoryIsExplicitForJSONAndCSV(t *testing.T) {
+	t.Parallel()
+	database, org, _, cluster, _, _ := conversationFixture(t)
+	if _, err := database.Pool().Exec(t.Context(), `UPDATE network_flow_rollup_state SET rollups_pruned_before=date_trunc('hour',now()-interval '12 hours')`); err != nil {
+		t.Fatal(err)
+	}
+	h := NewNetworkConversations(database)
+	for _, export := range []bool{false, true} {
+		expired := conversationRequest(t, h, org, "cluster_id="+cluster.String()+"&hours=24", export, 410)
+		if !strings.Contains(expired.Body.String(), "expired hourly flow history") || expired.Header().Get("X-History-Available-From") == "" {
+			t.Fatalf("missing availability: %s", expired.Body.String())
+		}
+		conversationRequest(t, h, org, "cluster_id="+cluster.String()+"&hours=1", export, 200)
+	}
+}

@@ -17,7 +17,7 @@ import (
 
 func TestRetentionDefaultsPreserveStoredHolds(t *testing.T) {
 	cfg := Default()
-	if cfg.EventsRetentionDays != 30 || cfg.NetworkFlowRetentionDays != 14 || cfg.ScanJobRetentionDays != 7 {
+	if cfg.EventsRetentionDays != 30 || cfg.NetworkFlowRetentionDays != 14 || cfg.ScanJobRetentionDays != 7 || cfg.NetworkRollupRetentionDays != 90 {
 		t.Fatalf("unbounded new install: %+v", cfg)
 	}
 	for _, raw := range []string{`{}`, `{"events_retention_days":0,"network_flow_retention_days":0,"scan_job_retention_days":0}`} {
@@ -25,7 +25,7 @@ func TestRetentionDefaultsPreserveStoredHolds(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if stored.EventsRetentionDays != 0 || stored.NetworkFlowRetentionDays != 0 || stored.ScanJobRetentionDays != 0 {
+		if stored.EventsRetentionDays != 0 || stored.NetworkFlowRetentionDays != 0 || stored.ScanJobRetentionDays != 0 || stored.NetworkRollupRetentionDays != 0 {
 			t.Fatal("existing hold replaced by defaults")
 		}
 	}

@@ -183,6 +183,7 @@ func unmarshalStoredConfig(raw json.RawMessage) (Config, error) {
 	// Older writers omitted zero retention fields. Preserve those existing holds;
 	// bounded defaults apply to new orgs/seeds, never silently to stored configs.
 	cfg.NetworkFlowRetentionDays = 0
+	cfg.NetworkRollupRetentionDays = 0
 	cfg.EventsRetentionDays = 0
 	cfg.ScanJobRetentionDays = 0
 	if err := json.Unmarshal(raw, &cfg); err != nil {

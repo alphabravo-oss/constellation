@@ -174,6 +174,7 @@ func conversationRowID(from, to string) string {
 }
 
 func (h *NetworkConversations) listConversations(w http.ResponseWriter, r *http.Request, export bool) {
+	started := time.Now()
 	subject, ok := authctx.SubjectFrom(r.Context())
 	if !ok || subject.OrgID == uuid.Nil {
 		apiutil.WriteStatus(r.Context(), w, 401, "authentication required")
@@ -235,6 +236,9 @@ func (h *NetworkConversations) listConversations(w http.ResponseWriter, r *http.
 	conversations, g, meta, err := h.readConversationInventory(r.Context(), subject.OrgID, o, !export)
 	if err != nil {
 		conversationReadError(w)
+		return
+	}
+	if !historyAvailable(w, r, h.db.Pool(), started.Add(-time.Duration(o.Hours)*time.Hour)) {
 		return
 	}
 	if export {

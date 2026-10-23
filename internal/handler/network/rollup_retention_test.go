@@ -20,7 +20,7 @@ func TestFlowRetentionPartitionIdentityAndBatch(t *testing.T) {
 	t.Cleanup(database.Close)
 	pool := pgfixture.Schema(t, database.Pool())
 	pgfixture.PartitionCollision(t, pool, "network_flows")
-	if _, err := pool.Exec(context.Background(), `CREATE TABLE network_flow_rollup_state (id boolean PRIMARY KEY, watermark timestamptz, raw_pruned_before timestamptz);
+	if _, err := pool.Exec(context.Background(), `CREATE TABLE network_flow_rollup_state (id boolean PRIMARY KEY, watermark timestamptz, raw_pruned_before timestamptz, rollups_pruned_before timestamptz NOT NULL DEFAULT '0001-01-01');
  INSERT INTO network_flow_rollup_state VALUES (true, now(), '1970-01-01');`); err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func rollupFixture(t *testing.T) *RollupRefresher {
 	_, err := pool.Exec(context.Background(), `
 CREATE TABLE network_flows (LIKE public.network_flows INCLUDING ALL);
 CREATE TABLE network_flow_rollups (LIKE public.network_flow_rollups INCLUDING ALL);
-CREATE TABLE network_flow_rollup_state (id boolean PRIMARY KEY, watermark timestamptz, raw_pruned_before timestamptz);
+CREATE TABLE network_flow_rollup_state (id boolean PRIMARY KEY, watermark timestamptz, raw_pruned_before timestamptz, rollups_pruned_before timestamptz NOT NULL DEFAULT '0001-01-01');
 INSERT INTO network_flow_rollup_state VALUES (true, '1970-01-01', '1970-01-01');`)
 	if err != nil {
 		t.Fatal(err)

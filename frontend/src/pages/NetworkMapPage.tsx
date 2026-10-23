@@ -54,6 +54,7 @@ import { Collapse } from "@/components/ui/collapse";
 import { clusterCacheReady } from "@/lib/cluster-evidence";
 import { policyActionAvailable } from "./network-secondary";
 import { ErrorState } from "@/components/ui/states";
+import { apiErrorMessage } from "@/lib/api-error";
 import { useCluster } from "@/hooks/useCluster";
 import { usePlatformComponentVisibility } from "@/hooks/usePlatformComponentVisibility";
 import { cn } from "@/lib/cn";
@@ -943,7 +944,7 @@ function NetworkMapInner() {
             <EmptyState
               icon={<TriangleAlert className="h-8 w-8" aria-hidden />}
               title="Couldn’t load the traffic map"
-              hint={(q.error as Error | null)?.message ?? "The network map request failed."}
+              hint={apiErrorMessage(q.error) ?? (q.error as Error | null)?.message ?? "The network map request failed."}
               action={
                 <Button size="sm" variant="outline" onClick={() => void q.refetch()} data-testid="network-map-retry">
                   Retry
