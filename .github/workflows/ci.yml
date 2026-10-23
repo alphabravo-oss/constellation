@@ -54,7 +54,9 @@ jobs:
       - if: ${{ !cancelled() }}
         run: actionlint
       - if: ${{ !cancelled() }}
-        run: make helm-lint helm-template-smoke
+        run: |
+          docker pull prom/prometheus:v3.15.0@sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e
+          make helm-lint helm-template-smoke
       - if: ${{ always() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

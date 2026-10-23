@@ -443,3 +443,20 @@ app.kubernetes.io/name: {{ include "constellation.name" . }}
 app.kubernetes.io/component: object-store
 {{- end -}}
 {{- end -}}
+
+{{/* Preserve dynamic endpoint values separately: Go applies the same nonempty
+     explicit > S3 > generic precedence as the archive publisher. */}}
+{{- define "constellation.storageArchiveEndpointEnv" -}}
+- name: CONSTELLATION_STORAGE_ARCHIVE_ENDPOINT
+  value: {{ .Values.auditArchiver.endpoint | quote }}
+{{- range .Values.auditArchiver.env }}
+{{- if eq .name "AWS_ENDPOINT_URL" }}
+- name: CONSTELLATION_STORAGE_ARCHIVE_ENDPOINT_DEFAULT
+  {{- omit . "name" | toYaml | nindent 2 }}
+{{- end }}
+{{- if eq .name "AWS_ENDPOINT_URL_S3" }}
+- name: CONSTELLATION_STORAGE_ARCHIVE_ENDPOINT_S3
+  {{- omit . "name" | toYaml | nindent 2 }}
+{{- end }}
+{{- end }}
+{{- end -}}
