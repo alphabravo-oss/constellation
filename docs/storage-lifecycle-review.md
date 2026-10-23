@@ -1,5 +1,11 @@
 # Storage lifecycle review (2026-09-27)
 
+**2026-10-23 implementation update:** [Audit archive catch-up](audit-archive.md)
+now replaces the rolling-window exporter with signed ID segments and verified
+durable progress, and migration 191 protects TRUNCATE. The deployment observations
+below are historical; immutable storage, hot/cold retention and live recovery
+acceptance are still open.
+
 This review compares the checked-in `../neuvector` source with Constellation's
 current k3s database and scanner deployment. It corrects the earlier mistaken
 assumption that `../constellation-vulndb` is still the active producer. It is a
