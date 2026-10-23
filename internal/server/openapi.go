@@ -11,6 +11,7 @@ import (
 
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/handler"
+	"github.com/alphabravocompany/constellation/internal/identity"
 	"github.com/alphabravocompany/constellation/internal/syscfg"
 	"github.com/alphabravocompany/constellation/internal/telemetry"
 	"github.com/alphabravocompany/constellation/pkg/audit"
@@ -81,9 +82,8 @@ func newSpecServer() (*Server, error) {
 	dbHandle := db.NewFromPool(pool)
 	s := &Server{
 		cfg: Config{
-			ListenAddr:        ":0",
-			CORSOrigins:       []string{"http://localhost:5173"},
-			AstronomerJWKSURL: "https://astronomer.example.com/.well-known/jwks.json",
+			ListenAddr:  ":0",
+			CORSOrigins: []string{"http://localhost:5173"},
 		},
 		tel:         tel,
 		db:          dbHandle,
@@ -91,6 +91,7 @@ func newSpecServer() (*Server, error) {
 		syscfg:      syscfg.NewProvider(pool),
 		customRoles: handler.NewCustomRoles(pool),
 	}
+	s.identity = &identity.Service{} // Route introspection never executes handlers or accesses the database.
 	s.router = s.buildRouter()
 	return s, nil
 }

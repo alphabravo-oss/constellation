@@ -50,7 +50,7 @@ type FedCA struct {
 // key is stored only as Seal(privPEM) in fed_ca.key_enc — never in plaintext. A nil sealer
 // disables the fed CA (returns nil, nil) so a deployment that has not configured a KEK
 // keeps the D1 bearer-only path rather than failing startup.
-func LoadFedCA(ctx context.Context, store sessionKeyStore, sealer Sealer) (*FedCA, error) {
+func LoadFedCA(ctx context.Context, store keyStore, sealer Sealer) (*FedCA, error) {
 	if sealer == nil {
 		return nil, nil
 	}
@@ -78,7 +78,7 @@ func LoadFedCA(ctx context.Context, store sessionKeyStore, sealer Sealer) (*FedC
 // private key, and returns the live CA. A transaction-scoped advisory lock serializes
 // concurrent first-boot callers; once held we re-check for an existing CA so the loser
 // adopts the winner's. Mirrors generateAndStoreFedSigningKey.
-func generateAndStoreFedCA(ctx context.Context, store sessionKeyStore, sealer Sealer) (*FedCA, error) {
+func generateAndStoreFedCA(ctx context.Context, store keyStore, sealer Sealer) (*FedCA, error) {
 	tx, err := store.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("auth: begin fed CA tx: %w", err)

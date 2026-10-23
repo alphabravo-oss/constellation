@@ -33,7 +33,9 @@ type Metadata struct {
 }
 type Definition struct {
 	SQL, Columns, Where, Summary string
-	Args                         []any
+	// SinglePass materializes expensive inventories once for both page and summary.
+	SinglePass bool
+	Args       []any
 }
 type Row interface{ Scan(...any) error }
 
@@ -110,6 +112,9 @@ func CSV[T any](ctx context.Context, pool *pgxpool.Pool, d Definition, o Options
 }
 
 func run[T any](ctx context.Context, pool *pgxpool.Pool, d Definition, o Options, scan func(Row) (T, error), visit func(T) error) (Metadata, error) {
+	if d.SinglePass {
+		return runSinglePass(ctx, pool, d, o, scan, visit)
+	}
 	meta := Metadata{}
 	tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
@@ -166,3 +171,63 @@ func WriteCSV(w http.ResponseWriter, filename string, body []byte, meta Metadata
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body)
 }
+
+// A single statement gives page and summary the same snapshot without BEGIN,
+// COMMIT or a second evaluation of the source inventory. Opt in only where the
+// summary already needs the expensive source fields; other lists retain pruning.
+func runSinglePass[T any](ctx context.Context, pool *pgxpool.Pool, d Definition, o Options, scan func(Row) (T, error), visit func(T) error) (Metadata, error) {
+	meta := Metadata{}
+	where := d.Where
+	if where == "" {
+		where = "true"
+	}
+	names := strings.Split(d.Columns, ",")
+	qualified := make([]string, len(names))
+	for i, name := range names {
+		qualified[i] = "p." + strings.TrimSpace(name)
+	}
+	query := fmt.Sprintf("WITH inventory(%s) AS MATERIALIZED (%s), summary AS (SELECT count(*) AS __total,%s AS __summary FROM inventory WHERE %s), page AS (SELECT true AS __present,* FROM inventory WHERE %s ORDER BY %s LIMIT $%d OFFSET $%d) SELECT s.__total,s.__summary,p.__present,%s FROM summary s LEFT JOIN page p ON true ORDER BY %s", d.Columns, d.SQL, d.Summary, where, where, o.OrderSQL, len(d.Args)+1, len(d.Args)+2, strings.Join(qualified, ","), o.OrderSQL)
+	args := append(append([]any{}, d.Args...), o.Limit, o.Offset)
+	rows, err := pool.Query(ctx, query, args...)
+	if err != nil {
+		return meta, err
+	}
+	defer rows.Close()
+	first := true
+	for rows.Next() {
+		var summary []byte
+		var present *bool
+		dest := make([]any, len(names)+3)
+		dest[0] = &meta.Total
+		dest[1] = &summary
+		dest[2] = &present
+		if err := rows.Scan(dest...); err != nil {
+			return meta, err
+		}
+		if first {
+			if err := json.Unmarshal(summary, &meta.Summary); err != nil {
+				return meta, err
+			}
+			first = false
+		}
+		if present == nil {
+			continue
+		}
+		item, err := scan(prefixedRow{row: rows})
+		if err != nil {
+			return meta, err
+		}
+		if err := visit(item); err != nil {
+			return meta, err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return meta, err
+	}
+	meta.HasMore = int64(o.Offset) < meta.Total && meta.Total-int64(o.Offset) > int64(o.Limit)
+	return meta, nil
+}
+
+type prefixedRow struct{ row Row }
+
+func (r prefixedRow) Scan(dest ...any) error { return r.row.Scan(append(make([]any, 3), dest...)...) }

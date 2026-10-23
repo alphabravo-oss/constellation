@@ -66,6 +66,11 @@ func TestNodesFilteredInventoryAndCSV(t *testing.T) {
 	if _, err := pool.Exec(ctx, `INSERT INTO scan_targets(id,org_id,cluster_id,type,ref,inventory_hash)VALUES($1,$2,$3,'host','clean-node','hash')`, target, org, cluster); err != nil {
 		t.Fatal(err)
 	}
+	// A host may have targets from different producers. Its inventory row must
+	// use only the newest target, retaining one node and the completed scan below.
+	if _, err := pool.Exec(ctx, `INSERT INTO scan_targets(org_id,cluster_id,type,ref,source_type,last_seen_at) VALUES($1,$2,'host','clean-node','runtime-agent',NOW()-INTERVAL '1 hour')`, org, cluster); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := pool.Exec(ctx, `INSERT INTO scan_jobs(id,org_id,target_id,status,finished_at)VALUES($1,$2,$3,'completed',NOW())`, job, org, target); err != nil {
 		t.Fatal(err)
 	}

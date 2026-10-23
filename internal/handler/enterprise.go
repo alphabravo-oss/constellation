@@ -454,7 +454,6 @@ func defaultOnboarding() map[string]any {
 		"install_methods": []map[string]any{
 			{"id": "helm", "name": "Helm", "status": "ready", "command": "helm upgrade --install constellation deploy/charts/constellation --namespace constellation-system --create-namespace"},
 			{"id": "operator", "name": "Operator-managed cluster registration", "status": "ready", "command": "helm upgrade --install constellation deploy/charts/constellation --namespace constellation-system --create-namespace --set operator.enabled=true --set clusterRegistration.enabled=true"},
-			{"id": "astronomer", "name": "Astronomer security route mount", "status": "jwks-ready", "command": "helm upgrade --install constellation deploy/charts/constellation --namespace constellation-system --create-namespace --set astronomer.enabled=true --set astronomer.jwksURL=$JWKS_URL"},
 		},
 		"health_gates": defaultOnboardingHealthGates(),
 	}

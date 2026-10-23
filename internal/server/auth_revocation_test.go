@@ -11,14 +11,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/alphabravocompany/constellation/internal/auth"
 	"github.com/alphabravocompany/constellation/internal/db"
 	"github.com/alphabravocompany/constellation/internal/telemetry"
 )
@@ -49,7 +47,7 @@ func testDBURL(t *testing.T) string {
 
 // newAuthTestServer boots a Server against the test DB and returns it plus a seeded,
 // enabled GlobalAdmin user. Skips the test if the DB is unreachable.
-func newAuthTestServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, *auth.Signer, uuid.UUID, uuid.UUID) {
+func newAuthTestServer(t *testing.T) (*httptest.Server, *pgxpool.Pool, *testSessionIssuer, uuid.UUID, uuid.UUID) {
 	t.Helper()
 	t.Setenv("CONSTELLATION_ALLOW_HS256_JWT", "true") // tests sign with a symmetric JWTKeys secret
 	ctx := context.Background()
@@ -103,21 +101,22 @@ VALUES ($1, $2, $3, 'Revoke Admin', 0)`, userID, orgID, email); err != nil {
 	cfg := Config{
 		ListenAddr:  ":0",
 		DatabaseURL: url,
-		JWTKeys:     [][]byte{[]byte("0123456789abcdef0123456789abcdef")},
-		JWTIssuer:   "constellation-test",
-		JWTAudience: "constellation-api",
-		JWTTTL:      time.Hour,
 		CORSOrigins: []string{"http://localhost:5173"},
 	}
 	srv, err := New(ctx, cfg, tel, dbHandle)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	signer, err := auth.NewSigner(cfg.JWTIssuer, cfg.JWTAudience, cfg.JWTTTL, cfg.JWTKeys...)
-	if err != nil {
-		t.Fatalf("signer: %v", err)
-	}
-	ts := httptest.NewServer(srv.Handler())
+	signer := &testSessionIssuer{pool: pool}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Domain fixtures insert sessions and mutate users with SQL. Synchronize the
+		// same production snapshot before each request; identity tests cover its
+		// background propagation, expiry and fail-closed freshness separately.
+		if err := srv.identity.RefreshSessions(r.Context()); err != nil {
+			t.Error(err)
+		}
+		srv.Handler().ServeHTTP(w, r)
+	}))
 	t.Cleanup(ts.Close)
 	return ts, pool, signer, userID, orgID
 }
@@ -138,7 +137,7 @@ func getMe(t *testing.T, baseURL, bearer string) int {
 	return resp.StatusCode
 }
 
-func issueFor(t *testing.T, signer *auth.Signer, userID, orgID uuid.UUID, epoch int64) string {
+func issueFor(t *testing.T, signer *testSessionIssuer, userID, orgID uuid.UUID, epoch int64) string {
 	t.Helper()
 	tok, _, err := signer.Issue(userID, orgID, "revoke@example.test", []string{"GlobalAdmin"}, epoch)
 	if err != nil {

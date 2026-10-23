@@ -20,6 +20,14 @@ spec:
   groups:
     - name: constellation.components
       rules:
+        - alert: ConstellationBreakGlassUsed
+          expr: sum(increase(constellation_break_glass_logins_total{outcome="success"}[15m])) > 0
+          labels:
+            severity: critical
+          annotations:
+            summary: "Constellation emergency administrator used"
+            description: "Investigate the critical auth.login.break-glass audit event and rotate emergency credentials after recovery."
+
         - alert: ConstellationComponentHeartbeatStale
           expr: constellation_component_heartbeat_age_seconds{component!="k8s-compliance-collector"} > {{ $pr.thresholds.heartbeatStaleSeconds }}
           for: 2m

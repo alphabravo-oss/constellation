@@ -10,15 +10,15 @@ Status values: `open` (not yet verified against HEAD), `verified-open`,
 | ID | Status | Area | Title | File |
 |---|---|---|---|---|
 | H1 | open | backup-restore | Server backup-restore writes into the org named in the uploaded tarball (cross-tenant write) | `internal/handler/backup.go` / `pkg/backup/restorer.go` |
-| H2 | open | auth | IdP secrets (OIDC client secret, LDAP bind password, SAML SP key) stored unencrypted | `internal/auth/authservers.go` |
-| H3 | open | hostscan | CIS file-permission checks use numeric mode comparison (world-readable /etc/shadow passes) | `internal/runtime/hostscan/cis.go` |
-| H4 | open | compliance | AWS IAM inline wildcard-policy detection is fail-open (URL-encoded policy never matches) | `internal/cspm/aws/aws.go` |
+| H2 | fixed ([9a6945d2c](https://github.com/alphabravo-oss/constellation/commit/9a6945d2c)) | auth | IdP secrets (OIDC client secret, LDAP bind password, SAML SP key) stored unencrypted | `internal/auth/authservers.go` |
+| H3 | fixed ([4a77a7cf3](https://github.com/alphabravo-oss/constellation/commit/4a77a7cf3015e9fb5014ae866797badde5953a47)); reverified 2026-10-23 | hostscan | CIS file-permission checks use numeric mode comparison (world-readable /etc/shadow passes) | `internal/runtime/hostscan/cis.go` |
+| H4 | fixed ([4a77a7cf3](https://github.com/alphabravo-oss/constellation/commit/4a77a7cf3015e9fb5014ae866797badde5953a47)); reverified 2026-10-23 | compliance | AWS IAM inline wildcard-policy detection is fail-open (URL-encoded policy never matches) | `internal/cspm/aws/aws.go` |
 | H5 | open | scanning | Vulnerability-profile decisions computed at scan completion but never applied | `internal/handler/scanning/scanjobs.go` |
 | H6 | open | runtime-agent | Workload micro-segmentation policy never pushed to dp (`Supervisor.PushPolicy` has no callers) | `internal/runtime/dp/policy.go` |
 | H7 | open | helm | Admission quarantine DSN reads a non-existent Secret key (fail-open admission) | `deploy/charts/constellation/templates/admission-deployment.yaml` |
 | H8 | open | operator | Operator ClusterRole omits RBAC for policy CRs it reconciles | `deploy/charts/constellation/templates/operator.yaml` |
 | H9 | open | audit | Concurrent audit writes silently break the hash chain | `pkg/audit/audit.go` |
-| H10 | open | auth | SAML/LDAP JIT login mints a session JWT with a stale `session_epoch` | `internal/handler/auth.go` |
+| H10 | fixed ([9a6945d2c](https://github.com/alphabravo-oss/constellation/commit/9a6945d2c)) | auth | SAML/LDAP JIT login mints a session JWT with a stale `session_epoch` | `internal/handler/auth.go` |
 | H11 | open | compliance | kube-bench compliance ingest accumulates duplicate rows every run | `internal/handler/compliance/compliance.go` |
 | H12 | open | netpolicy | Collapsed external peers (`external`, no slash) bypass CIDR anchoring | `internal/handler/netpolicy/network_policies.go` |
 
@@ -31,18 +31,35 @@ Status values: `open` (not yet verified against HEAD), `verified-open`,
 - **Fix:** Scope restore to the caller — require the archive org to match `subj.OrgID`, pass `subj.OrgID` into `Restore`, and never derive the write-target org from archive content.
 
 ### H2. IdP secrets (OIDC client secret, LDAP bind password, SAML SP key) stored unencrypted
+
+**Closed by removal:** the provider store and its configuration column are deleted by the OIDC cutover and migration 187. The single OIDC client secret is mounted from a deployment Secret, never persisted in application Postgres. Historical finding follows.
 - **Severity:** high  **Category:** security  **Area:** auth-rbac
 - **File:** internal/auth/authservers.go:215 (and UpdateAuthServer:247)
 - **Failure:** `CreateAuthServer`/`UpdateAuthServer` `json.Marshal` `srv.Config` (BindPassword/ClientSecret/SPKeyPEM, all marked `// SECRET`) straight into the `config` JSONB column. Redaction is GET-only. Anyone with DB read (backup, replica, SQLi sink, compromised role) recovers cleartext IdP credentials and can impersonate the SP — while the same deployment seals registry creds and the fed-CA key under the install KEK.
 - **Fix:** Seal the secret-bearing fields with the same cipher used by registries/fed-CA before INSERT; `Open()` in `BuildProviders`/`toXConfig`.
 
 ### H3. CIS file-permission checks use numeric mode comparison (world-readable /etc/shadow passes)
+
+**Reverified on main `a84a6ef97`, 2026-10-23:** `checkFileModeMax` uses a permission
+bit-subset test. `TestCheckFileModeMax*` passed twice with race detection and
+shuffle, including world-readable/writable shadow and passwd rejection, stricter
+allowed modes, and missing-file skip behavior. The historical failure follows.
+
 - **Severity:** high  **Category:** fail_open  **Area:** hostscan
 - **File:** internal/runtime/hostscan/cis.go:300
 - **Failure:** `checkFileModeMax` does `mode <= maxMode` on raw permission bits — a magnitude test, not a subset test. `/etc/shadow` at `0604` (world-READABLE hashes) = 388 ≤ 416 = `0640` → **pass**; `0606` (world-writable) and `/etc/passwd 0622` likewise pass. Nodes report CIS-compliant while shadow/passwd are world readable/writable.
 - **Fix:** Use `mode &^ maxMode.Perm() == 0` so any bit outside the allowed mask fails.
 
 ### H4. AWS IAM inline wildcard-policy detection is fail-open (policy is URL-encoded, matcher expects plain JSON)
+
+**Reverified on main `a84a6ef97`, 2026-10-23:** the scanner decodes encoded policy
+documents and evaluates statements structurally. `TestIsWildcardGrant*`,
+`TestWildcardGrantRejectsUnverifiableDocuments`, and
+`TestScanIAM_FlagsOverPrivilegedAndWildcard` passed twice with race detection and
+shuffle. Coverage includes encoded JSON, arrays, later statements, deny/non-wildcard
+controls, and malformed documents. This verifies the parser/scanner regression;
+it does not claim live AWS account acceptance. The historical failure follows.
+
 - **Severity:** high  **Category:** fail_open  **Area:** compliance
 - **File:** internal/cspm/aws/aws.go:135 (isWildcardGrant:246-254)
 - **Failure:** `GetRolePolicy` returns the document URL-encoded (per the SDK), but `isWildcardGrant` substring-matches `"effect":"allow"`/`"action":"*"`/`"resource":"*"`. The percent-escaped form never matches, so a role with inline `Allow */*` never emits the critical `aws-iam-wildcard` finding; the account is reported clean. The unit test passes only because the fake feeds decoded JSON.
@@ -79,6 +96,8 @@ Status values: `open` (not yet verified against HEAD), `verified-open`,
 - **Fix:** Serialize on a fixed object — `pg_advisory_xact_lock(<chain key>)` or `LOCK TABLE ... IN EXCLUSIVE MODE` (or SERIALIZABLE + retry) — then read the head inside the lock.
 
 ### H10. SAML/LDAP JIT login mints a session JWT with a stale session_epoch (token dead-on-arrival)
+
+**Closed by removal:** provider JIT reconciliation and local JWT issuance are deleted. OIDC issuer/subject resolution and opaque session creation use the current database epoch; the real-issuer browser suite proves first sign-in and role removal. Historical finding follows.
 - **Severity:** high  **Category:** bug  **Area:** handler-core
 - **File:** internal/handler/auth.go:816
 - **Failure:** `issueLinkedSession` reads `sessionEpoch=0` for a new JIT user, then `reconcileJITRoles` bumps `users.session_epoch` to 1 in its own transaction, then `issueSession` issues a JWT with the stale `Epoch=0`. Middleware rejects `claims.Epoch < session_epoch` → every API call returns 401 "session revoked". First SAML/LDAP/OIDC login appears to succeed but is unusable; only a second login (no role change → no bump) works. Same transient breakage hits existing SSO users whenever asserted roles change.

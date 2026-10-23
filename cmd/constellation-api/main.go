@@ -3,9 +3,8 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
+	"encoding/json"
 	"flag"
-	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -14,8 +13,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/alphabravocompany/constellation/internal/auth"
 	"github.com/alphabravocompany/constellation/internal/db"
+	"github.com/alphabravocompany/constellation/internal/identity"
 	"github.com/alphabravocompany/constellation/internal/server"
 	migrations "github.com/alphabravocompany/constellation/internal/server/database"
 	"github.com/alphabravocompany/constellation/internal/telemetry"
@@ -24,8 +23,6 @@ import (
 
 func main() {
 	listenAddr := flag.String("listen", env("LISTEN_ADDR", ":8080"), "HTTP listen address")
-	rotateJWT := flag.Bool("rotate-jwt-key", false,
-		"A5: mint a new RS256 session-signing keypair, demote the previous to verify-only, then exit")
 	checkSchemaOnly := flag.Bool("check-schema", false, "verify the required database migration, then exit without starting services")
 	migrateOnly := flag.Bool("migrate-only", false, "apply pending schema migrations under the advisory lock, then exit")
 	flag.Parse()
@@ -43,10 +40,6 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
-	if *rotateJWT {
-		os.Exit(rotateJWTKey(ctx, databaseURL))
-	}
-
 	telCfg := telemetry.ConfigFromEnv("constellation-api")
 	tel, err := telemetry.Init(ctx, telCfg)
 	if err != nil {
@@ -61,8 +54,6 @@ func main() {
 	telemetry.NewEgress().
 		Add("otlp", telCfg.Endpoint).
 		Add("oidc_issuer", os.Getenv("OIDC_ISSUER_URL")).
-		Add("astronomer_jwks", os.Getenv("ASTRONOMER_JWKS_URL")).
-		Add("ldap", os.Getenv("LDAP_URL")).
 		Add("fed_master", os.Getenv("CONSTELLATION_FED_MASTER_URL")).
 		Log(tel.Logger)
 	defer func() {
@@ -100,16 +91,8 @@ func main() {
 		MaxBodyBytes:         int64(envInt("MAX_BODY_BYTES", 64<<20)),
 		EnablePprof:          envBool("CONSTELLATION_ENABLE_PPROF", false),
 		DatabaseURL:          databaseURL,
-		JWTKeys:              loadJWTKeys(envBool("CONSTELLATION_REQUIRE_JWT_KEYS", false)),
-		JWTIssuer:            env("JWT_ISSUER", "constellation"),
-		JWTAudience:          env("JWT_AUDIENCE", "constellation-api"),
-		JWTTTL:               envDuration("JWT_TTL", 15*time.Minute),
-		SessionIdleTimeout:   envDuration("SESSION_IDLE_TIMEOUT", 30*time.Minute),
 		PATMaxLifetime:       envDuration("PAT_MAX_LIFETIME", 90*24*time.Hour),
 		CORSOrigins:          strings.Split(env("CORS_ORIGINS", "http://localhost:5173"), ","),
-		AstronomerJWKSURL:    os.Getenv("ASTRONOMER_JWKS_URL"),
-		AstronomerIssuer:     os.Getenv("ASTRONOMER_JWT_ISSUER"),
-		AstronomerAudience:   os.Getenv("ASTRONOMER_JWT_AUDIENCE"),
 		VulnDBReadyRequired:  envBool("CONSTELLATION_VULNDB_READY_REQUIRED", false),
 		VulnDBReadyMaxAge:    envDuration("CONSTELLATION_VULNDB_READY_MAX_AGE", 0),
 		VulnDBRescanInterval: envDuration("CONSTELLATION_VULNDB_RESCAN_INTERVAL", 2*time.Minute),
@@ -121,35 +104,25 @@ func main() {
 		RepositoryScanRetentionDryRun:    envBool("CONSTELLATION_REPOSITORY_SCAN_RETENTION_DRY_RUN", false),
 	}
 	if iss := os.Getenv("OIDC_ISSUER_URL"); iss != "" {
-		cfg.OIDC = &auth.OIDCConfig{
+		cfg.OIDC = &identity.OIDCConfig{
 			IssuerURL:    iss,
+			Bundled:      envBool("OIDC_BUNDLED", false),
 			ClientID:     os.Getenv("OIDC_CLIENT_ID"),
 			ClientSecret: os.Getenv("OIDC_CLIENT_SECRET"),
-			RedirectURL:  env("OIDC_REDIRECT_URL", "http://localhost:8080/api/v1/auth/oidc/callback"),
+			RedirectURL:  os.Getenv("OIDC_REDIRECT_URL"),
+			Audience:     os.Getenv("OIDC_AUDIENCE"), RolesClaim: env("OIDC_ROLES_CLAIM", "alphabravo_roles"), OrgName: env("OIDC_ORG", "default"), Scopes: strings.Fields(env("OIDC_SCOPES", "openid email profile")),
 		}
 	}
-	// SAML SP config: enabled when the IdP metadata is supplied (inline XML or a file path).
-	// The SP cert/key are optional (only needed for signed AuthnRequests / encrypted assertions);
-	// signature validation of the IdP's assertions is driven by the IdP cert in the metadata.
-	if md := envFileOrValue("SAML_IDP_METADATA"); len(md) > 0 {
-		cfg.SAML = &auth.SAMLConfig{
-			IdPMetadataXML: md,
-			ACSURL:         env("SAML_ACS_URL", "http://localhost:8080/api/v1/auth/saml/acs"),
-			SPCertPEM:      envFileOrValue("SAML_SP_CERT"),
-			SPKeyPEM:       envFileOrValue("SAML_SP_KEY"),
-		}
-	}
-	// LDAP/AD config: enabled when a directory URL is supplied. Mirrors the bind+search model.
-	if url := os.Getenv("LDAP_URL"); url != "" {
-		cfg.LDAP = &auth.LDAPConfig{
-			URL:          url,
-			BindDN:       os.Getenv("LDAP_BIND_DN"),
-			BindPassword: os.Getenv("LDAP_BIND_PW"),
-			BaseDN:       os.Getenv("LDAP_BASE_DN"),
-			UserFilter:   env("LDAP_USER_FILTER", "(uid=%s)"),
-		}
-	}
+	cfg.Local = identity.LocalConfig{Enabled: envBool("LOCAL_AUTH_ENABLED", true), Display: env("LOCAL_AUTH_DISPLAY", "all"), TOTPPolicy: env("LOCAL_AUTH_TOTP_POLICY", "everyone"), PasswordMinLength: envInt("LOCAL_AUTH_PASSWORD_MIN_LENGTH", 16), SessionSeconds: envInt("LOCAL_AUTH_SESSION_SECONDS", 3600), IPRate: envInt("LOCAL_AUTH_IP_RATE", 20), AccountRate: envInt("LOCAL_AUTH_ACCOUNT_RATE", 5), OrgName: env("LOCAL_AUTH_ORG", "default"), BootstrapEmail: env("LOCAL_BOOTSTRAP_EMAIL", "admin@constellation.local"), BootstrapPassword: os.Getenv("LOCAL_BOOTSTRAP_PASSWORD"), BootstrapTOTP: os.Getenv("LOCAL_BOOTSTRAP_TOTP")}
 
+	cfg.BreakGlass = identity.BreakGlassConfig{Enabled: envBool("BREAK_GLASS_ENABLED", false), PasswordHash: os.Getenv("BREAK_GLASS_PASSWORD_HASH"), TOTPSecret: os.Getenv("BREAK_GLASS_TOTP_SECRET"), OrgName: env("BREAK_GLASS_ORG", "default"), SessionTTL: envDuration("BREAK_GLASS_SESSION_TTL", 5*time.Minute)}
+
+	if cfg.OIDC != nil {
+		if err := json.Unmarshal([]byte(env("OIDC_ROLE_MAPPING", "{}")), &cfg.OIDC.RoleMapping); err != nil {
+			tel.Logger.Error("invalid OIDC_ROLE_MAPPING")
+			os.Exit(2)
+		}
+	}
 	srv, err := server.New(ctx, cfg, tel, database)
 	if err != nil {
 		tel.Logger.Error("server new", slog.String("err", err.Error()))
@@ -164,11 +137,8 @@ func main() {
 			return map[string]any{
 				"listen_addr":                       *listenAddr,
 				"admin_listen_addr":                 cfg.AdminListenAddr,
-				"jwt_keys_configured":               len(cfg.JWTKeys) > 0,
 				"oidc_enabled":                      cfg.OIDC != nil,
-				"saml_enabled":                      cfg.SAML != nil,
-				"ldap_enabled":                      cfg.LDAP != nil,
-				"astronomer_enabled":                strings.TrimSpace(cfg.AstronomerJWKSURL) != "",
+				"break_glass_enabled":               cfg.BreakGlass.Enabled,
 				"vulndb_ready_required":             cfg.VulnDBReadyRequired,
 				"vulndb_rescan_interval_s":          cfg.VulnDBRescanInterval.Seconds(),
 				"repository_scan_retention_enabled": cfg.RepositoryScanRetentionEnabled,
@@ -224,25 +194,6 @@ func env(key, def string) string {
 	return def
 }
 
-// envFileOrValue resolves a PEM/XML blob from either <KEY> (inline value) or <KEY>_FILE (a path
-// to read), preferring the inline value. Returns nil when neither is set. SAML metadata/cert/key
-// are usually mounted as Secret files, so the _FILE form is the common production path; the inline
-// form keeps local/dev config a single env var.
-func envFileOrValue(key string) []byte {
-	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
-		return []byte(v)
-	}
-	if path := strings.TrimSpace(os.Getenv(key + "_FILE")); path != "" {
-		b, err := os.ReadFile(path)
-		if err != nil {
-			slog.Error("read "+key+"_FILE", slog.String("err", err.Error()))
-			os.Exit(2)
-		}
-		return b
-	}
-	return nil
-}
-
 func envDuration(key string, def time.Duration) time.Duration {
 	v := os.Getenv(key)
 	if v == "" {
@@ -280,79 +231,6 @@ func envInt(key string, def int) int {
 		return def
 	}
 	return n
-}
-
-// rotateJWTKey performs the A5 session-key rotation against the DB-persisted
-// session_signing_keys store and exits. Already-issued tokens keep verifying against the
-// demoted previous key until they expire; new logins are signed with the fresh active key.
-// Running replicas pick up the rotation within one reload interval via the in-process
-// session-key reloader (server.runSessionKeyReloader) — no restart required. Returns a
-// process exit code.
-func rotateJWTKey(ctx context.Context, databaseURL string) int {
-	database, err := db.Connect(ctx, databaseURL)
-	if err != nil {
-		slog.Error("rotate-jwt-key: db connect", slog.String("err", err.Error()))
-		return 1
-	}
-	defer database.Close()
-	if _, err := auth.RotateSessionKey(ctx, database.Pool()); err != nil {
-		slog.Error("rotate-jwt-key", slog.String("err", err.Error()))
-		return 1
-	}
-	slog.Info("rotate-jwt-key: new RS256 session-signing key is active; previous key kept for verification until its tokens expire")
-	return 0
-}
-
-// loadJWTKeys returns the operator-supplied rotation key set, or nil. JWT_KEYS may
-// contain multiple comma-separated base64 values (active key first). A5: on empty
-// env we return nil so server.New falls through to the DB-backed RS256 session
-// keypair (the default production path) instead of minting an ephemeral HS256 key.
-func loadJWTKeys(required bool) [][]byte {
-	out, err := buildJWTKeys(os.Getenv("JWT_KEYS"), required)
-	if err != nil {
-		slog.Error("JWT_KEYS unavailable", slog.String("err", err.Error()))
-		os.Exit(2)
-	}
-	if len(out) == 0 {
-		slog.Info("JWT_KEYS empty; signing sessions RS256 with the shared DB-backed keypair")
-	}
-	return out
-}
-
-func buildJWTKeys(raw string, required bool) ([][]byte, error) {
-	if strings.TrimSpace(raw) == "" {
-		if required {
-			return nil, fmt.Errorf("JWT_KEYS required")
-		}
-		// Empty key set: server.New loads the persisted RS256 keypair from
-		// session_signing_keys (generating it on first boot).
-		return nil, nil
-	}
-	return parseJWTKeys(raw)
-}
-
-func parseJWTKeys(raw string) ([][]byte, error) {
-	parts := strings.Split(raw, ",")
-	out := make([][]byte, 0, len(parts))
-	for _, p := range parts {
-		value := strings.TrimSpace(p)
-		if value == "" {
-			continue
-		}
-		b, err := base64.StdEncoding.DecodeString(value)
-		if err != nil || len(b) < 32 {
-			b = []byte(value)
-		}
-		if len(b) < 32 {
-			slog.Warn("JWT_KEYS entry shorter than 32 bytes; skipping", slog.Int("len", len(b)))
-			continue
-		}
-		out = append(out, b)
-	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("no key is at least 32 bytes")
-	}
-	return out, nil
 }
 
 // checkSchema is also the Helm init-container gate. It uses the API image's own

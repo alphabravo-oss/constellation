@@ -34,6 +34,16 @@ ENV CGO_ENABLED=0 GOOS=linux
 RUN go build -trimpath -ldflags="-s -w -X github.com/alphabravocompany/constellation/pkg/version.Version=${VERSION} -X github.com/alphabravocompany/constellation/pkg/version.Commit=${COMMIT} -X github.com/alphabravocompany/constellation/pkg/version.BuildTime=${BUILD_TIME}" \
       -o /out/constellation-kube-bench-runner ./cmd/constellation-kube-bench-runner
 
+FROM golang:${GO_VERSION}-bookworm@${GO_IMAGE_DIGEST} AS kube-bench-build
+# Third-party Go CLIs rebuilt on the go.mod toolchain with current x/* modules
+# (deploy/docker/go-tools/go.mod); upstream release binaries embed stale ones.
+WORKDIR /go-tools
+COPY deploy/docker/go-tools/ ./
+ENV CGO_ENABLED=0 GOTOOLCHAIN=local GOFLAGS="-trimpath -mod=readonly"
+ARG KUBE_BENCH_VERSION=v0.10.7
+RUN go build -ldflags="-s -w -X github.com/aquasecurity/kube-bench/cmd.KubeBenchVersion=${KUBE_BENCH_VERSION}" \
+      -o /out/kube-bench github.com/aquasecurity/kube-bench
+
 FROM ${KUBE_BENCH_IMAGE} AS kubebench
 
 FROM ${RUNTIME_IMAGE} AS runtime
@@ -42,11 +52,12 @@ ARG COMMIT=dev
 LABEL org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${COMMIT}"
 RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
  && apt-get install -y --no-install-recommends ca-certificates tzdata procps \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=build /out/constellation-kube-bench-runner /usr/local/bin/constellation-kube-bench-runner
 # kube-bench binary + its config tree (the cfg/ dir is required at runtime).
-COPY --from=kubebench /usr/local/bin/kube-bench /usr/local/bin/kube-bench
+COPY --from=kube-bench-build /out/kube-bench /usr/local/bin/kube-bench
 COPY --from=kubebench /opt/kube-bench/cfg /opt/kube-bench/cfg
 # Same UID/GID as the chart's shared pod security context. kube-bench reads the
 # host paths the chart mounts read-only; nothing here requires root.

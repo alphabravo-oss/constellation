@@ -28,6 +28,7 @@ export function LoginPage() {
   const navigate = useNavigate();
   const [searchParams] = useRouteSearchParams();
   const [email, setEmail] = useState("");
+  const [totp, setTOTP] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -36,18 +37,19 @@ export function LoginPage() {
     queryFn: authApi.providers,
     retry: false,
   });
-  const hasSSO = providers?.oidc || providers?.saml;
+  const [emergency, setEmergency] = useState(false);
+  const hasSSO = providers?.oidc;
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
     try {
-      await login(email, password);
+      await login(email, password, totp, emergency);
       const returnTo = searchParams.get("returnTo");
       const nextPath = loginReturnPath(returnTo);
       navigate({ href: nextPath, replace: true });
     } catch (err) {
-      toast.error("Login failed");
+      toast.error("Sign-in failed. Check your credentials or try again after the cooldown.");
       console.error(err);
     } finally {
       setSubmitting(false);
@@ -108,55 +110,15 @@ export function LoginPage() {
 
           <div className="space-y-2 text-center lg:text-left">
             <h2 className="text-2xl font-semibold tracking-tight text-foreground">Sign in to Constellation</h2>
-            <p className="text-sm text-muted-foreground">{hasSSO ? "Enter your credentials or use SSO to continue." : "Enter your credentials to continue."}</p>
+            <p className="text-sm text-muted-foreground">Use your local account or your organization’s single sign-on.</p>
           </div>
 
-          {hasSSO && (
-            <>
-              {providers?.oidc && (
-                <button
-                  type="button"
-                  onClick={onOIDC}
-                  className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 text-sm font-medium text-foreground transition-colors hover:bg-accent"
-                >
-                  {providers?.saml ? "Continue with OIDC" : "Continue with SSO"}
-                </button>
-              )}
-              {providers?.saml && (
-                <a
-                  href="/api/v1/auth/saml/login"
-                  className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 text-sm font-medium text-foreground transition-colors hover:bg-accent"
-                >
-                  {providers?.oidc ? "Continue with SAML" : "Continue with SSO"}
-                </a>
-              )}
-              <div className="relative">
-                <div className="absolute inset-0 flex items-center">
-                  <div className="w-full border-t border-border" />
-                </div>
-                <div className="relative flex justify-center text-xs">
-                  <span className="bg-background px-3 text-muted-foreground">continue with password</span>
-                </div>
-              </div>
-            </>
-          )}
-
+          {hasSSO && <Button type="button" intent="primary" className="w-full" onClick={onOIDC}>Continue with SSO</Button>}
+          {providers?.break_glass && <Button type="button" intent="ghost" className="w-full" onClick={() => setEmergency(!emergency)}>{emergency ? "Use normal sign-in" : "Emergency access"}</Button>}
+          {(providers?.local || (emergency && providers?.break_glass)) && <>
+          {emergency && <p className="text-sm text-muted-foreground">Recovery administrator. Every use is audited and alerts your operators.</p>}
           <form onSubmit={onSubmit} className="space-y-4">
-            <div className="space-y-1.5">
-              <label htmlFor="login-email" className="text-sm font-medium text-foreground">Email</label>
-              <Form.Input
-                id="login-email"
-                type="email"
-                className="h-10"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                autoFocus
-                autoComplete="username"
-                placeholder="you@example.com"
-              />
-            </div>
-
+            {!emergency && <Form.Field label="Email" id="login-email" required>{ids => <Form.Input {...ids} type="email" autoComplete="username" required value={email} onChange={e=>setEmail(e.target.value)} />}</Form.Field>}
             <div className="space-y-1.5">
               <label htmlFor="login-password" className="text-sm font-medium text-foreground">Password</label>
               <div className="relative">
@@ -181,11 +143,15 @@ export function LoginPage() {
               </div>
             </div>
 
+            <div className="space-y-1.5">
+              <label htmlFor="login-totp" className="text-sm font-medium">Authenticator code</label>
+              <Form.Input id="login-totp" value={totp} onChange={e=>setTOTP(e.target.value)} inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" required={emergency || providers?.totp_policy === "everyone"} />
+            </div>
             <Button type="submit" intent="primary" disabled={submitting} className="h-10 w-full">
               {submitting ? "Signing in…" : "Sign in"}
               <ArrowRight className="h-4 w-4" />
             </Button>
-          </form>
+          </form></>}
 
           <p className="text-center text-xs text-muted-foreground">
             By signing in, you agree to the Constellation terms of service and privacy policy.

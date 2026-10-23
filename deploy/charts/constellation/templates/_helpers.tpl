@@ -302,11 +302,11 @@ external
 {{/*
 constellation.cnpgImage resolves the CloudNativePG operand image. Empty
 postgres.cloudnativepg.imageName selects the chart's own pgvector-enabled build
-<image.registry>/postgres:16.14-v<Chart.appVersion> (deploy/docker/Dockerfile.postgres).
+<image.registry>/postgres:16.15-v<Chart.appVersion> (deploy/docker/Dockerfile.postgres).
 */}}
 {{- define "constellation.cnpgImage" -}}
 {{- $cfg := .Values.postgres.cloudnativepg -}}
-{{- default (printf "%s/postgres:16.14-v%s" (default "ghcr.io/alphabravo-oss/constellation" .Values.image.registry) (trimPrefix "v" .Chart.AppVersion)) $cfg.imageName -}}
+{{- default (printf "%s/postgres:16.15-v%s" (default "ghcr.io/alphabravo-oss/constellation" .Values.image.registry) (trimPrefix "v" .Chart.AppVersion)) $cfg.imageName -}}
 {{- end -}}
 
 {{/*
@@ -382,18 +382,6 @@ unless overridden by .Values.<role>.tokenSecret.
 {{- .Values.runtimeAgent.tokenSecret -}}
 {{- else -}}
 {{- printf "%s-runtime-agent-token" (include "constellation.fullname" .) -}}
-{{- end -}}
-{{- end -}}
-
-{{/*
-constellation.jwtKeysSecretName returns the Secret holding API JWT signing keys.
-When api.jwtKeysSecret is empty, the chart creates <fullname>-jwt-keys.
-*/}}
-{{- define "constellation.jwtKeysSecretName" -}}
-{{- if .Values.api.jwtKeysSecret -}}
-{{- .Values.api.jwtKeysSecret -}}
-{{- else -}}
-{{- printf "%s-jwt-keys" (include "constellation.fullname" .) -}}
 {{- end -}}
 {{- end -}}
 

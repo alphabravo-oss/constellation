@@ -82,7 +82,6 @@ func ensureA7Schema(t *testing.T, d *db.DB) {
 	ctx := context.Background()
 	stmts := []string{
 		`ALTER TABLE api_tokens ALTER COLUMN user_id DROP NOT NULL`,
-		`ALTER TABLE user_sessions ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now()`,
 	}
 	for _, s := range stmts {
 		if _, err := d.Pool().Exec(ctx, s); err != nil {

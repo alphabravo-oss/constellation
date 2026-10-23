@@ -302,27 +302,12 @@ api:
     requests: { cpu: 200m, memory: 256Mi }
   env:
     OTEL_EXPORTER_OTLP_ENDPOINT: ""
-    JWT_ISSUER: constellation
-    JWT_AUDIENCE: constellation-api
-    JWT_TTL: 15m
-    # Concurrent live JWT sessions per user before the oldest is evicted (default 5 in
-    # code). Raised so shared automation logins can't evict a human user's session.
-    MAX_CONCURRENT_SESSIONS: "25"
-  # A5: by default (jwtKeysSecret unset) the api signs sessions RS256 with a
-  # shared keypair it generates + persists in the session_signing_keys table on
-  # first boot, so JWT_KEYS is NOT injected and no symmetric secret is created.
-  # Set jwtKeysSecret to a pre-existing Secret (key `keys`) to override with your
-  # own key: a PEM RSA/EC private key (RS256/ES256), or — only with
-  # CONSTELLATION_ALLOW_HS256_JWT=true on the api — a 32+ byte HS256 secret.
-  jwtKeysSecret: ""
+    GOMEMLIMIT: 110MiB
+    GOGC: "75"
   # Optional existing Secret containing the support-bundle Ed25519 private key.
   # The key is mounted read-only; this chart never creates private key material.
   supportBundleSigningKeySecret: ""
   supportBundleSigningKeySecretKey: private-key.pem
-  # Refuse API startup if JWT_KEYS is absent. Now false by default: the absent
-  # JWT_KEYS is the intended RS256 DB-backed path. Set true only when you supply
-  # jwtKeysSecret and want startup to hard-fail if it goes missing.
-  requireJWTKeys: false
   # D5: leader election for singleton background loops (CVE reconcilers,
   # fed-sync, rescan/retention monitors). Enabled because the clean-install
   # default has two API replicas; only the lease holder runs singleton work.
@@ -623,6 +608,10 @@ scanner:
   # Set 0 to let a scanner auto-size from runtime.NumCPU().
   maxConcurrent: 1
   targetCapacity: "" # e.g. "image=2,host=8,platform=4"; empty uses global concurrency for all target types.
+  # Optional kubernetes.io/dockerconfigjson Secret for discovered private images
+  # without a registry connector binding. Grants this worker pull access to its
+  # entries; explicit per-job connector credentials still take precedence.
+  registryConfigSecret: ""
   leaseRenewInterval: 5m
   cache:
     # Persist the vuln-DB caches (grype/trivy/syft, ~3.3GB) on a PVC so redeploys don't
@@ -675,8 +664,10 @@ scanner:
     enabled: true
     maxFindings: 500
   resources:
-    limits:   { cpu: 2,    memory: 2Gi }
-    requests: { cpu: 250m, memory: 256Mi }
+    # One image scan runs Syft, Trivy and Grype concurrently. Reserve memory for
+    # the worker plus those child processes, not just the Go worker heap.
+    limits:   { cpu: 2,    memory: 6Gi }
+    requests: { cpu: 250m, memory: 2Gi }
   # SCANNER_TOKEN env wiring. The bootstrap Job creates this Secret unless an
   # existing one is referenced here.
   tokenSecret: ""        # defaults to <release>-scanner-token
@@ -899,7 +890,7 @@ postgres:
     # `embedding vector(1536)` in the findings table. The default CNPG image
     # (ghcr.io/cloudnative-pg/postgresql) does NOT include pgvector.
     #
-    # Empty -> <image.registry>/postgres:16.14-v<Chart.appVersion>, the chart's
+    # Empty -> <image.registry>/postgres:16.15-v<Chart.appVersion>, the chart's
     # own CNPG-compatible pgvector build (deploy/docker/Dockerfile.postgres).
     # Independent of image.tag; use a version-bearing tag@digest override to pin.
     # NOTES.txt warns when a CUSTOM imageName does not contain "pgvector".
@@ -1068,9 +1059,9 @@ tls:
     createSelfSignedIssuer: false
   bootstrap:
     enabled: true
-    # An image that has both /bin/sh AND kubectl in $PATH. bitnami/kubectl bundles
+    # An image with /bin/sh and Go >= 1.27.3 kubectl. The toolbox bundles
     # both; the chainguard kubectl image is distroless (no shell) so don't use it.
-    image: bitnami/kubectl@sha256:323998cf83a2332f6761706df910870a3fa24dd8d4b999db977aa322de553399
+    image: ghcr.io/alphabravo-oss/constellation/toolbox:v0.3.0-rc.3@sha256:87abcb7a07271f509cfaa97d229f87020abeaa60f6eb0d17a20af244fcaee4bb
     opensslImage: alpine/openssl:3.3.2@sha256:5008e829163320a6e8166883c03e68189e8925ade68cde36584dc2a41cfa5248
 
 # ---------------------------------------------------------------------------
@@ -1080,51 +1071,12 @@ bootstrap:
   enabled: true
   # Image used by the init container to copy a kubectl binary into a shared
   # volume so the psql container can call kubectl. Must have /bin/sh.
-  image: bitnami/kubectl@sha256:323998cf83a2332f6761706df910870a3fa24dd8d4b999db977aa322de553399
+  image: ghcr.io/alphabravo-oss/constellation/toolbox:v0.3.0-rc.3@sha256:87abcb7a07271f509cfaa97d229f87020abeaa60f6eb0d17a20af244fcaee4bb
   # Postgres client image used to seed the org + tokens.
-  psqlImage: postgres:16.10-alpine3.22@sha256:029660641a0cfc575b14f336ba448fb8a75fd595d42e1fa316b9fb4378742297
+  psqlImage: ghcr.io/alphabravo-oss/constellation/postgres:16.15-v0.3.0-fix.1@sha256:5a15cb2867fe8c5c3df0ff766d5f2019970ec2008a69b9fd27ba94bec767850e
   org:
     name: default
     displayName: Default
-  # Wave E (testnode fix): post-install admin-credentials Job.
-  # Mints the initial human admin user so `helm install` yields a
-  # cluster you can immediately log into. Idempotent: re-runs on
-  # `helm upgrade` are no-ops if the org already has local-login users.
-  #
-  # Retrieve the generated password after install with:
-  #   kubectl -n <ns> get secret <release>-admin-credentials \
-  #     -o jsonpath='{.data.password}' | base64 -d
-  admin:
-    enabled: true
-    email: admin@constellation.local
-    displayName: Constellation Admin
-    # Require the generated bootstrap credential to be changed after login.
-    # Keep false unless the client implements the forced-change flow.
-    forcePasswordChange: false
-    # password: ""   # leave empty to auto-generate (recommended)
-
-  # B4: declarative identity providers (LDAP/SAML/OIDC) seeded at install into auth_servers —
-  # Constellation's equivalent of NeuVector's LoadInitCfg *initcfg.yaml ConfigMaps. Leave empty
-  # to manage providers only through the API/UI. Each entry mirrors the /api/v1/auth-servers
-  # body. Rendered into a Secret (carries client_secret / bind_password) the bootstrap-admin Job
-  # mounts. Seeding is idempotent: a provider is inserted only if none of its type exists for the
-  # org yet, so it never clobbers one later edited through the API. Example:
-  #   authProviders:
-  #     - type: oidc
-  #       name: corp-okta
-  #       enabled: true
-  #       auth_order: 100
-  #       config:
-  #         issuer_url: https://corp.okta.com
-  #         client_id: 0oa...
-  #         client_secret: "<secret>"
-  #         redirect_url: https://constellation.example.com/auth/oidc/callback
-  #         scopes: [openid, email, profile]
-  #       role_mapping:
-  #         rules: { "group:platform-admins": GlobalAdmin }
-  #         default: Viewer
-  authProviders: []
-
 # ---------------------------------------------------------------------------
 # Init-bundle consumer (Wave N1)
 # ---------------------------------------------------------------------------
@@ -1150,9 +1102,9 @@ initBundle:
   # Empty disables consumer mode (default: chart self-mints via bootstrap-job).
   secretName: ""
   # Image used by the consumer Job — must have /bin/sh + kubectl + yq (or python).
-  # bitnami/kubectl ships with sh but not yq; we shell out to a pure-sed pipeline
+  # The purpose-built toolbox ships with sh but not yq; we shell out to a pure-sed pipeline
   # in the consumer script so a vanilla kubectl image suffices.
-  image: bitnami/kubectl@sha256:323998cf83a2332f6761706df910870a3fa24dd8d4b999db977aa322de553399
+  image: ghcr.io/alphabravo-oss/constellation/toolbox:v0.3.0-rc.3@sha256:87abcb7a07271f509cfaa97d229f87020abeaa60f6eb0d17a20af244fcaee4bb
 
 repositoryScans:
   retention:
@@ -1190,17 +1142,66 @@ auditArchiver:
   # - name: AWS_ENDPOINT_URL_S3
   #   value: https://s3.us-gov-west-1.amazonaws.com
 
-# ---------------------------------------------------------------------------
-# Astronomer integration (off by default)
-# ---------------------------------------------------------------------------
-astronomer:
-  # Enables /api/v1/security/* routes authenticated with Astronomer-issued
-  # JWTs. jwksURL is required when enabled; jwtIssuer/jwtAudience are optional
-  # hardening constraints for iss/aud validation.
+# Optional shared identity layer. Local accounts remain enabled independently.
+# Set identity.zitadel.zitadel.configmapConfig.ExternalDomain and ingress TLS for
+# this install. Registry URLs are rendered by the identity chart from that host.
+identity:
   enabled: false
-  jwksURL: ""
-  jwtIssuer: ""
-  jwtAudience: ""
+  secretPrefix: constellation-identity-product-
+  ingress:
+    className: nginx
+    tlsSecretName: constellation-tls
+  networkPolicy:
+    ingressPeers:
+      - namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: ingress-nginx}}
+        podSelector: {matchLabels: {app.kubernetes.io/name: ingress-nginx}}
+    ingressPorts: [{port: 443}, {port: 80}]
+  products:
+    - slug: constellation
+      displayName: Constellation
+      branding:
+        Accent: '#0d9488'
+        AccentDark: '#2dd4bf'
+        Logo: 'https://{{ .Values.zitadel.zitadel.configmapConfig.ExternalDomain }}/icon.svg'
+      roles: [security-admin, analyst]
+      redirectURIs:
+        - 'https://{{ .Values.zitadel.zitadel.configmapConfig.ExternalDomain }}/api/v1/auth/oidc/callback'
+      groupRoles:
+        security-admin: [security-admin]
+        analyst: [analyst]
+
+# Human authentication. Local and OIDC can be enabled independently.
+# Values seed settings; later changes to these values replace the saved policy.
+auth:
+  local:
+    enabled: true
+    display: all # all, local, or sso; controls the normal login choices
+    totpPolicy: everyone # everyone or admins
+    passwordMinLength: 16
+    sessionSeconds: 3600
+    ipRate: 20 # attempts per minute, shared across replicas
+    accountRate: 5 # failures before exponential backoff (1 second to 5 minutes)
+    orgName: default
+    bootstrap:
+      enabled: true
+      email: admin@constellation.local
+      existingSecret: "" # password and totp-secret; generated if empty
+  oidc:
+    enabled: false
+    issuerURL: ""
+    clientID: ""
+    clientSecretName: "" # key: client-secret; empty for a public PKCE client
+    audience: "" # defaults to clientID
+    redirectURL: "" # https://<public-host>/api/v1/auth/oidc/callback
+    rolesClaim: alphabravo_roles
+    roleMapping: {} # exact claim value -> canonical product role; no fallback grant
+    orgName: default
+    scopes: [openid, email, profile]
+  breakGlass:
+    enabled: false
+    existingSecret: "" # required when enabled; keys: password-hash, totp-secret
+    orgName: default
+    sessionTTL: 5m
 
 # ---------------------------------------------------------------------------
 # Abbot GenAI integration (off by default)
