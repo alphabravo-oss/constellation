@@ -52,6 +52,7 @@ SELECT f.org_id, f.cluster_id, f.src_workload, f.dst_workload, f.protocol,
        MAX(f.threat_id), MAX(f.severity), MAX(f.application), COALESCE(MIN(NULLIF(f.fqdn, '')), ''), true
   FROM network_flows f
  WHERE f.cluster_id IS NOT NULL
+   AND f.at >= (SELECT rollups_pruned_before FROM network_flow_rollup_state WHERE id=true)
    AND /*predicate*/
  GROUP BY f.org_id, f.cluster_id, f.src_workload, f.dst_workload, f.protocol,
           COALESCE(f.l7_protocol, ''), COALESCE(f.dst_port, 0), COALESCE(f.verdict, ''),

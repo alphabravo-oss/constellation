@@ -55,7 +55,7 @@ describe("retention form", () => {
     await render();
     await change("0");
     await submit();
-    expect(systemConfigApi.patch).toHaveBeenCalledWith({ network_flow_retention_days: 0, events_retention_days: 30, scan_job_retention_days: 7 }, 1);
+    expect(systemConfigApi.patch).toHaveBeenCalledWith({ network_flow_retention_days: 0, network_rollup_retention_days: 0, events_retention_days: 30, scan_job_retention_days: 7 }, 1);
     expect(host.querySelector<HTMLInputElement>("input")!.value).toBe("0");
     const event = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(event);

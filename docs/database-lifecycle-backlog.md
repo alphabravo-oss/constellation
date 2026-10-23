@@ -4,6 +4,8 @@
 
 ## October 23 completion pass
 
+Current conservative decisions are recorded in [the retention policy](storage-retention-policy.md). Merged implementation is distinct from deployed operational acceptance.
+
 The owner requested completion of DB-01–23, including implementation and
 qualification. Work is tracked by the original IDs below, not by counting small
 fixes as completed backlog items. Earlier dated observations are historical.
@@ -23,11 +25,11 @@ production caller is superseded.
 | --- | --- |
 | DB-01–04 | Verify deployed behavior and policy against current source; preserve historical-loss caveat; qualify maintenance/ingest concurrency and fold-lag notification. |
 | DB-05 | Verify current scheduled recovery points with a fresh isolated restore, record RPO/RTO, and qualify failure notification; off-host and real node-failure gates remain deferred unless explicitly resumed. |
-| DB-06 | Keep current audit receipts until their consumers and replacement evidence contract are mapped; do not silently suppress security evidence. |
+| DB-06 | Decision complete: preserve all existing permanent audit receipts and consumers; no suppression or stream migration. See [retention decisions](storage-retention-policy.md). Archive capacity remains DB-07–09/23. |
 | DB-07–09 | Qualify signed archive catch-up/read-back and independent verification; resolve the recorded historical chain discontinuity without rewriting hashes; design trusted query anchors before any hot-chain deletion. |
 | DB-10 | Add Kubernetes-audit freshness/gap observability and export/hold-aware retention. |
 | DB-11 | Qualify existing PCAP maintenance; add separate threat/payload/forensics retention with preserved case evidence. |
-| DB-12 | Add rollup retention that respects the raw fold boundary and reports unavailable historical ranges. |
+| DB-12 | [Hourly retention](flow-rollup-retention.md) is implemented with a separate policy, raw-boundary gate, monotonic unavailable-history boundary, late-ingest exclusion and HTTP 410 for expired map/CSV ranges. Existing settings remain holds; live qualification remains open. |
 | DB-13 | Preserve open/triaged findings; implement eligible resolved/orphaned archival and bounded storage. |
 | DB-14–15 | [Reference protections](scan-evidence-retention.md) now preserve newest/referenced jobs and results, all findings and inventory/attestation evidence; bounded cleanup rechecks references under locks. Named-history and payload archival/restoration remain open. |
 | DB-16 | Qualify current identity cleanup and its deployed alarms/throughput. |

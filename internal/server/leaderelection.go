@@ -17,6 +17,7 @@ import (
 
 	"github.com/alphabravocompany/constellation/internal/auth"
 	colcrypto "github.com/alphabravocompany/constellation/internal/crypto"
+	"github.com/alphabravocompany/constellation/internal/flowrollup"
 	"github.com/alphabravocompany/constellation/internal/handler"
 	"github.com/alphabravocompany/constellation/internal/handler/findings"
 	"github.com/alphabravocompany/constellation/internal/handler/network"
@@ -166,6 +167,7 @@ func (s *Server) startSingletonLoops(ctx context.Context) {
 	rollupRefresher := network.NewRollupRefresher(s.db)
 	rollupRefresher.SetRetentionResolver(retentionResolver(func(c syscfg.Config) int { return c.NetworkFlowRetentionDays }))
 	rollupRefresher.Start(ctx)
+	go flowrollup.RunRetention(ctx, s.db.Pool(), s.tel.Logger)
 
 	// Events retention: prune the events table (the other unbounded sink) on the live
 	// horizon. Leader-gated + batched; no-op while events_retention_days is 0.

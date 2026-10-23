@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 const days = z.number().int("Enter a whole number of days.").min(0).max(3650);
 const retentionSchema = z.object({
   network_flow_retention_days: days,
+  network_rollup_retention_days: days,
   events_retention_days: days,
   scan_job_retention_days: days,
 });
@@ -21,6 +22,7 @@ function valuesFrom(data: SystemConfigResponse) {
   const number = (key: string) => typeof data.config[key] === "number" ? data.config[key] as number : 0;
   return {
     network_flow_retention_days: number("network_flow_retention_days"),
+    network_rollup_retention_days: number("network_rollup_retention_days"),
     events_retention_days: number("events_retention_days"),
     scan_job_retention_days: number("scan_job_retention_days"),
   };
@@ -29,7 +31,7 @@ function valuesFrom(data: SystemConfigResponse) {
 export function DataRetentionPage() {
   const query = useQuery({ queryKey: ["system-config"], queryFn: () => systemConfigApi.get() });
   return <div className="space-y-6">
-    <PageHeader title="Data retention" description="Control how long raw network flows, runtime events, and finished scan jobs are kept." />
+    <PageHeader title="Data retention" description="Control how long raw network flows, hourly history, runtime events, and finished scan jobs are kept." />
     {query.isPending ? <p role="status">Loading retention settings…</p> : query.isError && !query.data ?
       <div role="alert">Could not load retention settings. <Button onClick={() => void query.refetch()}>Retry</Button></div> :
       <RetentionForm data={query.data!} />}
@@ -92,6 +94,7 @@ function RetentionForm({ data }: { data: SystemConfigResponse }) {
         <form.AppField name="network_flow_retention_days">{(field) => <field.NumberField label="Keep raw flows for (days)" min={0} max={3650} hint="0 keeps raw flows indefinitely. New organizations default to 14 days." />}</form.AppField>
       </Card>
       <Card title="Runtime events" description="Process, network, and file events emitted by runtime agents.">
+        <form.AppField name="network_rollup_retention_days">{(field) => <field.NumberField label="Keep hourly flow history for (days)" min={0} max={3650} hint="0 holds hourly history indefinitely. New organizations default to 90 days. Cleanup waits for the raw-history boundary; expired ranges become unavailable." />}</form.AppField>
         <form.AppField name="events_retention_days">{(field) => <field.NumberField label="Keep events for (days)" min={0} max={3650} hint="0 keeps events indefinitely. New organizations default to 30 days." />}</form.AppField>
       </Card>
       <Card title="Scan-job history" description="Finished scan jobs. live jobs and scan results are kept.">

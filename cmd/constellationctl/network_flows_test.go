@@ -20,7 +20,7 @@ func TestCLIBackfillCommitsLabelsAndTotalsTogether(t *testing.T) {
 	pool := pgfixture.Schema(t, database.Pool())
 	_, err := pool.Exec(ctx, `CREATE TABLE network_flows (LIKE public.network_flows INCLUDING ALL);
  CREATE TABLE network_flow_rollups (LIKE public.network_flow_rollups INCLUDING ALL);
- CREATE TABLE network_flow_rollup_state (id boolean PRIMARY KEY, watermark timestamptz, raw_pruned_before timestamptz);
+ CREATE TABLE network_flow_rollup_state (id boolean PRIMARY KEY, watermark timestamptz, raw_pruned_before timestamptz, rollups_pruned_before timestamptz NOT NULL DEFAULT '0001-01-01');
  INSERT INTO network_flow_rollup_state VALUES (true, now(), '1970-01-01');`)
 	if err != nil {
 		t.Fatal(err)

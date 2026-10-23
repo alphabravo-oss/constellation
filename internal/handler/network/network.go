@@ -34,6 +34,7 @@ func (h *Network) WithAudit(a *audit.Logger) *Network {
 
 // Map returns workloads plus observed network edges aggregated over a recent window.
 func (h *Network) Map(w http.ResponseWriter, r *http.Request) {
+	started := time.Now()
 	subj, _ := authctx.SubjectFrom(r.Context())
 	hours, _ := strconv.Atoi(r.URL.Query().Get("hours"))
 	if hours <= 0 || hours > 24*30 {
@@ -177,6 +178,9 @@ func (h *Network) Map(w http.ResponseWriter, r *http.Request) {
 	cni := h.clusterCNI(r, subj.OrgID, clusterID)
 	summary["cni"] = cni
 	summary["deny_capable_cni"] = denyCapableCNI(cni)
+	if !historyAvailable(w, r, h.db.Pool(), started.Add(-time.Duration(hours)*time.Hour)) {
+		return
+	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{
 		"summary":      summary,
 		"workloads":    workloads,
