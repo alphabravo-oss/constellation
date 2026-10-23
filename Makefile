@@ -181,6 +181,7 @@ helm-template-smoke: ## Render the chart against common value combinations
 	@echo ">> three-node k3s HA profile"; ./scripts/test-helm-ha.sh
 	@./scripts/test-helm-identity.sh
 	@./scripts/test-helm-admission.sh
+	@./scripts/test-helm-operator.sh
 	@echo "helm-template-smoke: ok"
 
 CLUSTER ?=

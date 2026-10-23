@@ -16,7 +16,7 @@ Status values: `open` (not yet verified against HEAD), `verified-open`,
 | H5 | fixed ([035808ba0](https://github.com/alphabravo-oss/constellation/commit/035808ba0fbe926101949ea2a5073284b5d672c5)); verified 2026-10-23 | scanning | Vulnerability-profile decisions computed at scan completion but never applied | `internal/handler/scanning/scanjobs.go` |
 | H6 | fixed ([bf91eadcb](https://github.com/alphabravo-oss/constellation/commit/bf91eadcb8b91f86364e0c555f27b096a23e623c)); reverified 2026-10-23 | runtime-agent | Workload micro-segmentation policy never pushed to dp (`Supervisor.PushPolicy` has no callers) | `internal/runtime/dp/policy.go` |
 | H7 | fixed ([3b15b3ea2](https://github.com/alphabravo-oss/constellation/commit/3b15b3ea2af6eef900dd0be30d156a2e041348bc)); reverified 2026-10-23 | helm | Admission quarantine DSN reads a non-existent Secret key (fail-open admission) | `deploy/charts/constellation/templates/admission-deployment.yaml` |
-| H8 | open | operator | Operator ClusterRole omits RBAC for policy CRs it reconciles | `deploy/charts/constellation/templates/operator.yaml` |
+| H8 | fixed ([3b15b3ea2](https://github.com/alphabravo-oss/constellation/commit/3b15b3ea2af6eef900dd0be30d156a2e041348bc)); reverified 2026-10-23 | operator | Operator ClusterRole omits RBAC for policy CRs it reconciles | `deploy/charts/constellation/templates/operator.yaml` |
 | H9 | open | audit | Concurrent audit writes silently break the hash chain | `pkg/audit/audit.go` |
 | H10 | fixed ([9a6945d2c](https://github.com/alphabravo-oss/constellation/commit/9a6945d2c)) | auth | SAML/LDAP JIT login mints a session JWT with a stale `session_epoch` | `internal/handler/auth.go` |
 | H11 | open | compliance | kube-bench compliance ingest accumulates duplicate rows every run | `internal/handler/compliance/compliance.go` |
@@ -153,6 +153,26 @@ The historical finding follows.
 - **Fix:** Source from `constellation.dsnSecret`/`dsnSecretKey` (the `<fullname>-database-url`/`url` Secret) like the policy/audit DSNs.
 
 ### H8. Operator ClusterRole omits all RBAC for the policy CRs it reconciles (GitOps policy reconcile broken)
+
+**Reverified on main `3e3447372`, 2026-10-23:** the operator ClusterRole already
+grants admission/response policy CR reads, list/watch, object update/patch, status
+get/update/patch and finalizer update. The object update grant covers the
+controllers' actual `Update` calls when adding or removing finalizers. These CRDs
+are cluster-scoped, so the ClusterRoleBinding remains necessary even with a
+namespaced workload cache. Policy controllers start only when a database DSN is
+configured; permission presence alone does not activate them.
+
+`scripts/test-helm-operator.sh`, included in `make helm-template-smoke`, follows
+the rendered Deployment account through the policy ClusterRoleBinding and role.
+It checks both CRDs and their status subresources, required verbs without wildcard
+grants or resource-name restrictions, namespaced/cluster workload modes, custom
+resource names, a nondefault namespace and operator-disabled rendering. Disposable
+negative controls reject the historical missing grants, a missing object-update
+verb, and a wrong binding namespace. This is chart-contract verification, not a
+live Kubernetes authorization or database reconciliation test. See
+[verification evidence](security-testing.md#operator-policy-rbac-reverification-2026-10-23).
+The historical finding follows.
+
 - **Severity:** high  **Category:** half_wired  **Area:** operator
 - **File:** deploy/charts/constellation/templates/operator.yaml:78
 - **Failure:** The operator ClusterRole grants verbs only on `constellationclusters`/status. When `--database-url` is set the AdmissionRule/ResponseRule reconcilers start and List/Watch/Update `ConstellationAdmissionRule`/`ConstellationResponseRule` (+ status/finalizers) — but no manifest grants any access. Informers fail with `forbidden: cannot list constellationadmissionrules`; the cache never syncs (can fail the whole manager), no policy CR is reconciled, and applied CRs wedge on delete.
