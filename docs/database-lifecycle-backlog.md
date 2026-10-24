@@ -38,7 +38,7 @@ production caller is superseded.
 | DB-05 | Verify current scheduled recovery points with a fresh isolated restore, record RPO/RTO, and qualify failure notification; off-host and real node-failure gates remain deferred unless explicitly resumed. |
 | DB-06 | Decision complete: preserve all existing permanent audit receipts and consumers; no suppression or stream migration. See [retention decisions](storage-retention-policy.md). Archive capacity remains DB-07–09/23. |
 | DB-07–09 | Qualify signed archive catch-up/read-back and independent verification; resolve the recorded historical chain discontinuity without rewriting hashes; design trusted query anchors before any hot-chain deletion. |
-| DB-10 | Explicit per-source Kubernetes-audit freshness/gap metrics and alerts are implemented and locally tested; no global latest-event shortcut. Export/hold-aware retention remains open. |
+| DB-10 | Explicit per-source Kubernetes-audit freshness/gap metrics and alerts are implemented and locally tested; no global latest-event shortcut. [Signed paged export and independent recovery](k8s-audit-archive.md) are now implemented; scheduled archival and hold-aware source retention remain open. |
 | DB-11 | Qualify existing PCAP maintenance; add separate threat/payload/forensics retention with preserved case evidence. |
 | DB-12 | [Hourly retention](flow-rollup-retention.md) is implemented with a separate policy, raw-boundary gate, monotonic unavailable-history boundary, late-ingest exclusion and HTTP 410 for expired map/CSV ranges. Existing settings remain holds; live qualification remains open. |
 | DB-13 | Preserve open/triaged findings; implement eligible resolved/orphaned archival and bounded storage. |
@@ -320,7 +320,7 @@ deployment was changed; DB-23 remains open for broader profiling and alarms.
 | DB-07 | **Implemented/tested; deployment qualification open** | Version-2 archive segments use bounded ID catch-up, destination-specific locked progress, canonical row replay, signed boundary/checksum metadata and verified S3 read-back. See [archive contract](audit-archive.md). | Local PostgreSQL tests cover missed runs, backdated rows, rollback sequence gaps, replicas and safe replay after upload/read-back/commit failure. Actual destination capacity, compatibility and sustained catch-up remain deployment gates. |
 | DB-08 | **Offline complete-chain verification implemented; external durability gates open** | Downloaded segments and complete linked chains verify offline using an independently trusted key and head digest. Bounds, signatures, checksums, IDs, predecessor links and chain hashes are checked. | Local independent replay/tamper/missing-segment tests pass. The historical row-53 discontinuity is not bypassed. Fresh-host recovery, immutable object policy and long-term availability remain unproven. |
 | DB-09 | **TRUNCATE protected; hot/cold pruning design open** | Migration 191 closes the TRUNCATE gap; UPDATE/DELETE remain blocked, and demo seeding preserves audit rows. Full source verification still starts at genesis; no pruning or trusted hot/cold query anchor is introduced. | Local PostgreSQL rejects UPDATE/DELETE/TRUNCATE and preserves the chain. After DB-07/08 deployment acceptance, design trusted archive anchors and preserve audit, timeline, support, exception-history and admission-hit queries before pruning. |
-| DB-10 | **Per-source health implemented; archive/retention open** | Explicit organization/cluster source configuration detects missing, stale, delayed and unknown-reported timestamps independently. No global latest-event shortcut or fabricated reported timestamp remains for new ingress. | PostgreSQL and PromQL failure/recovery tests pass. Verified export and hold-aware raw/search/archive retention remain unimplemented; live delivery is deferred. |
+| DB-10 | **Per-source health and paged recovery implemented; retention open** | Explicit organization/cluster source configuration detects missing, stale, delayed and unknown-reported timestamps independently. No global latest-event shortcut or fabricated reported timestamp remains for new ingress. | PostgreSQL and PromQL failure/recovery tests pass. Signed export/offline verification and independent-database scoped restore pass local tests. Scheduled archival and hold-aware source retention remain open; live delivery is deferred. |
 | DB-11 | **PCAP maintenance wired; broader evidence lifecycle open** | The runtime maintenance caller invokes bounded PCAP expiry only with a verified durable store. The earlier claim that it had no production caller is superseded. Threats, packet bytes and forensic snapshots need separate case-evidence/archive handling. | Existing file/receipt failure behavior is tested. No new age-only threat or forensic deletion is introduced; selected evidence restoration and broader lifecycle remain open. |
 | DB-12 | **Implemented/local tests passed; live gates deferred** | Migration 196 and the [hourly retention contract](flow-rollup-retention.md) provide a separate window, bounded raw-boundary-gated cleanup, monotonic unavailable-history boundary and late-ingest exclusion. | Existing values remain holds; new defaults are 90 days. PostgreSQL and HTTP tests preserve counts and return 410 for expired map/conversation/CSV ranges. Live rollout remains deferred. |
 | DB-13 | **Preservation policy set; archive/layout open** | Define lifecycle-aware retention for `findings`. All current findings land in a DEFAULT child despite time partitioning; open findings and triage must not vanish by age alone (`internal/server/database/migrations/004_findings_partitioned.sql`). | Resolved/orphaned findings archive by policy; open/suppressed/accepted decisions remain visible; partitions or another bounded layout avoid default-child bloat. |
@@ -434,3 +434,24 @@ claims and add optional cache/tmp limits. Existing persistent installations must
 preserve mode and claim identity when upgrading. DB-21 remains open for live
 attachment, offline replacement, refresh/restart capacity and alert qualification.
 No cluster resources or cache contents were changed during this implementation.
+
+## October 24 next-ten code/local batch
+
+These are ten concrete deliverables, not ten additional closed DB IDs. Actions,
+release publishing and live rollout remain disabled/deferred as instructed.
+
+1. Kubernetes-audit export explicitly scoped by organization, cluster and receipt-time window.
+2. Exclusive `(at,id)` continuation with row/byte budgets and oversized-row holds.
+3. Trusted signed-page verification independent of the source database or AWS.
+4. Explicit destination recovery with atomic audit receipts, conflict rejection and idempotent replay.
+5. Operator CLI export, verify and restore workflows with independent-database qualification.
+6. Private archive publication with directory sync and exact-byte/signature read-back before success.
+7. Strict archive JSON parsing: duplicate/escaped keys, unknown fields, invalid UTF-8 and depth/trailing guards.
+8. Cancellation checks during archive reads, compressed hashing and decompression.
+9. Inventory restore rejects and locks against cross-organization destination cluster bindings.
+10. Support payload expiry holds pending/missing audit receipts while preserving bounded lock-skipping cleanup.
+
+The Kubernetes-audit pages do not form a cross-request source snapshot or prove
+that no backdated event can arrive later. They authorize no source pruning.
+Findings/attestation dependency archives, trusted hot/cold query anchors and the
+other explicitly open lifecycle work remain tracked above.

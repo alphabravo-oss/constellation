@@ -85,3 +85,9 @@ This is a single-record preservation primitive. It does not restore targets,
 credentials, findings, scan results, attestations or their reference graph, upload
 to durable storage, schedule exports, or authorize source pruning. Existing holds
 remain in force. A verified inventory archive alone does not complete DB-14–15.
+
+Inventory recovery also locks and validates any destination target's cluster
+against the explicit destination organization. A malformed cross-tenant target
+binding fails before insertion. Inventory files now use verified disk read-back
+and directory synchronization before export reports success; the shared parser
+also rejects ambiguous JSON and observes cancellation during input reads.

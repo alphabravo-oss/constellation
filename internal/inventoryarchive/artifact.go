@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/alphabravocompany/constellation/internal/archiveio"
 	"github.com/alphabravocompany/constellation/pkg/backup"
 )
 
@@ -84,17 +85,7 @@ func checksum(data []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func strictJSON(raw []byte, value any) error {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(value); err != nil {
-		return err
-	}
-	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
-		return errors.New("unexpected trailing archive content")
-	}
-	return nil
-}
+func strictJSON(raw []byte, value any) error { return archiveio.Decode(raw, value) }
 
 func encode(ctx context.Context, row record, target targetIdentity, privateKey, publicKey string) ([]byte, Report, error) {
 	var report Report
@@ -151,7 +142,7 @@ func verify(ctx context.Context, input io.Reader, publicKey string) (record, man
 	if err := ctx.Err(); err != nil {
 		return row, m, report, err
 	}
-	raw, err := io.ReadAll(io.LimitReader(input, MaxArtifactBytes+1))
+	raw, err := io.ReadAll(io.LimitReader(archiveio.Reader{Context: ctx, Input: input}, MaxArtifactBytes+1))
 	if err != nil {
 		return row, m, report, err
 	}
