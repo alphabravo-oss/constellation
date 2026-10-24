@@ -112,7 +112,16 @@ func lockDestination(ctx context.Context, tx pgx.Tx, orgID, targetID uuid.UUID, 
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && !same {
 		return nil, errors.New("destination target does not match signed inventory identity")
 	}
-	return cluster, err
+	if err != nil {
+		return nil, err
+	}
+	if cluster != nil {
+		var id uuid.UUID
+		if err = tx.QueryRow(ctx, `SELECT id FROM clusters WHERE id=$1 AND org_id=$2 FOR SHARE`, cluster, orgID).Scan(&id); err != nil {
+			return nil, errors.New("destination target cluster unavailable or outside organization")
+		}
+	}
+	return cluster, nil
 }
 
 func restoreRecord(ctx context.Context, tx pgx.Tx, id uuid.UUID, raw []byte) (bool, error) {

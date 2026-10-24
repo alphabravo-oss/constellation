@@ -115,3 +115,36 @@ func TestInventoryAuditFailureRollsBack(t *testing.T) {
 		t.Fatalf("rollback failed: %d %v", count, err)
 	}
 }
+
+func TestRestoreRejectsForeignTargetCluster(t *testing.T) {
+	t.Parallel()
+	pool := pgtest.Pool(t)
+	private, public := keys(t)
+	row, identity := fixture()
+	org, target := seedTarget(t, pool, identity)
+	foreign, _ := seedTarget(t, pool, identity)
+	var cluster uuid.UUID
+	if err := pool.QueryRow(t.Context(), `INSERT INTO clusters(org_id,name) VALUES($1,'foreign-cluster') RETURNING id`, foreign).Scan(&cluster); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE scan_targets SET cluster_id=$2 WHERE id=$1`, target, cluster); err != nil {
+		t.Fatal(err)
+	}
+	data, _, err := encode(t.Context(), row, identity, private, public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Restore(t.Context(), pool, bytes.NewReader(data), public, org, target); err == nil {
+		t.Fatal("foreign cluster binding accepted")
+	}
+	var count int
+	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM scan_evidence WHERE id=$1`, row.ID).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("foreign evidence inserted: %d %v", count, err)
+	}
+	if _, err := pool.Exec(t.Context(), `UPDATE clusters SET org_id=$2 WHERE id=$1`, cluster, org); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := Restore(t.Context(), pool, bytes.NewReader(data), public, org, target); err != nil || !result.Inserted {
+		t.Fatalf("valid cluster mapping failed: %+v %v", result, err)
+	}
+}

@@ -15,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 
+	"github.com/alphabravocompany/constellation/internal/archiveio"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 	"github.com/alphabravocompany/constellation/pkg/backup"
 )
@@ -44,7 +45,7 @@ func verifyArchiveFile(ctx context.Context, f *os.File, m Manifest) error {
 	if !stat.Mode().IsRegular() || stat.Size() > MaxArchiveBytes {
 		return errors.New("invalid archive file size or type")
 	}
-	if err = verifyCompressedHash(f, m); err != nil {
+	if err = verifyCompressedHash(ctx, f, m); err != nil {
 		return err
 	}
 	if err = replay(ctx, f, m); err != nil {
@@ -68,7 +69,7 @@ func verifyManifest(ctx context.Context, raw, sig, cert []byte, opts backup.Veri
 	if err != nil {
 		return m, err
 	}
-	if err = json.Unmarshal(raw, &m); err != nil {
+	if err = archiveio.Decode(raw, &m); err != nil {
 		return m, err
 	}
 	if m.FormatVersion != archiveManifestVersion || m.SignMode != opts.Mode || m.SignerIdentity != identity || m.RecordCount < 1 || m.RecordCount > MaxBatch || m.FirstID < 1 || m.LastID < m.FirstID || m.Stream == "" || len(m.FirstPrevHash) != 64 {
@@ -77,9 +78,9 @@ func verifyManifest(ctx context.Context, raw, sig, cert []byte, opts backup.Veri
 	return m, nil
 }
 
-func verifyCompressedHash(f *os.File, m Manifest) error {
+func verifyCompressedHash(ctx context.Context, f *os.File, m Manifest) error {
 	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
+	if _, err := io.Copy(h, archiveio.Reader{Context: ctx, Input: f}); err != nil {
 		return err
 	}
 	sum := hex.EncodeToString(h.Sum(nil))
@@ -99,7 +100,7 @@ func replay(ctx context.Context, f *os.File, m Manifest) error {
 	}
 	defer func() { _ = gz.Close() }()
 	h := sha256.New()
-	bounded := &io.LimitedReader{R: gz, N: MaxArchiveBytes + 1}
+	bounded := &io.LimitedReader{R: archiveio.Reader{Context: ctx, Input: gz}, N: MaxArchiveBytes + 1}
 	dec := json.NewDecoder(io.TeeReader(bounded, h))
 	dec.DisallowUnknownFields()
 	var count, lastID int64

@@ -4,23 +4,26 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/spf13/cobra"
 
+	"github.com/alphabravocompany/constellation/internal/archiveio"
 	"github.com/alphabravocompany/constellation/internal/inventoryarchive"
-	"github.com/alphabravocompany/constellation/internal/securefiles"
 	"github.com/alphabravocompany/constellation/pkg/backup"
 )
 
 func evidenceCmd() *cobra.Command {
-	root := &cobra.Command{Use: "evidence", Short: "Signed inventory evidence export, offline verification, and scoped restore"}
+	root := &cobra.Command{Use: "evidence", Short: "Signed evidence export, offline verification, and scoped restore"}
 	for _, action := range []string{"export-inventory", "verify-inventory", "restore-inventory"} {
 		root.AddCommand(inventoryCommand(action))
+	}
+	for _, action := range []string{"export-k8s-audit", "verify-k8s-audit", "restore-k8s-audit"} {
+		root.AddCommand(k8sAuditArchiveCommand(action))
 	}
 	return root
 }
@@ -113,17 +116,15 @@ func (a *inventoryOptions) export(ctx context.Context, cmd *cobra.Command, pool 
 	if err != nil {
 		return backup.CLIFailure("inventory export", err)
 	}
-	root, err := securefiles.OpenPrivateDir(a.output)
+	path, err := archiveio.WriteVerified(ctx, a.output, ".inventory.json", data, func(input io.Reader) error {
+		_, err := inventoryarchive.Verify(ctx, input, a.public)
+		return err
+	})
 	if err != nil {
-		return backup.CLIFailure("inventory output directory", err)
-	}
-	defer func() { _ = root.Close() }()
-	name := uuid.NewString() + ".inventory.json"
-	if err = securefiles.WriteFile(root, name, data, 0o600); err != nil {
-		return backup.CLIFailure("inventory write", err)
+		return backup.CLIFailure("inventory read-back", err)
 	}
 	return json.NewEncoder(cmd.OutOrStdout()).Encode(struct {
 		Path   string                  `json:"path"`
 		Report inventoryarchive.Report `json:"archive"`
-	}{filepath.Join(a.output, name), report})
+	}{path, report})
 }
