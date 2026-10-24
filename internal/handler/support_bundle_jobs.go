@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/alphabravocompany/constellation/internal/db"
+	"github.com/alphabravocompany/constellation/internal/supportretention"
 	"github.com/alphabravocompany/constellation/pkg/audit"
 )
 
@@ -435,17 +436,7 @@ FROM support_bundle_jobs WHERE audit_pending IS NOT NULL`
 }
 
 func (h *SupportBundleJobs) expireJobs(ctx context.Context) error {
-	queryCtx, cancel := context.WithTimeout(ctx, supportBundleJobDBTimeout)
-	defer cancel()
-	_, err := h.db.Pool().Exec(queryCtx, `
-WITH candidate AS (
-    SELECT id FROM support_bundle_jobs
-    WHERE status IN ('ready', 'failed') AND expires_at <= now()
-    ORDER BY expires_at, id FOR UPDATE SKIP LOCKED LIMIT 100
-)
-UPDATE support_bundle_jobs AS job
-SET status = 'expired', payload = NULL, error = NULL, lease_expires_at = NULL
-FROM candidate WHERE job.id = candidate.id`)
+	_, err := supportretention.ExpirePayloads(ctx, h.db.Pool())
 	return err
 }
 

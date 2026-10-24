@@ -71,3 +71,14 @@ file. The receipt survives for retry, and the protected floor is never removed.
 A retry treats an already-missing eligible old file as removed. File errors keep
 that receipt; repeatedly failing old artifacts may delay later candidates within
 the bounded batch and should be investigated from the maintenance logs.
+
+## Support payload expiry and incomplete audit receipts
+
+The existing seven-day support-bundle payload TTL now also requires
+`audit_pending IS NULL` and a non-null `audit_event_id`. A pending or missing
+receipt holds the payload/error even after its TTL. After audit reconciliation
+links the receipt, a later pass can expire it. The worker retains job metadata,
+uses a five-second deadline and at most 100 terminal rows, and skips locked rows.
+This preserves evidence during audit outages; it does not make an expired bundle
+downloadable or extend its download TTL. Held metadata/payload growth still needs
+operational monitoring and the separate DB-17 archive/lifecycle work.
