@@ -69,7 +69,7 @@ for infrastructure images. Canary each role, verify the running digest and keep
 rollback artifacts.
 
 Current measurements and deployment limits are recorded in the
-[canonical parity plan](NEUVECTOR-PARITY-PLAN.md).
+[current readiness plan](readiness-and-parity-plan.md).
 
 ## Scanner acceptance
 

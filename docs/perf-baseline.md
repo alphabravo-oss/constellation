@@ -1,5 +1,9 @@
 # Constellation performance baseline
 
+This historical smoke run does not qualify inline DPI/enforcement overhead or
+fleet capacity. Current bounded measurements are in [efficiency](efficiency.md);
+remaining qualification is tracked in the [readiness plan](readiness-and-parity-plan.md#m5--qualify-one-release-profile).
+
 First-run synthetic baseline measured on a single-node k3s cluster (16 vCPU /
 30 GB RAM Ubuntu 24.04, kernel 6.8 with BTF) on **2026-05-14**. This is the
 **v1 smoke baseline** — short profiles, intra-node ClusterIP traffic, no
@@ -14,12 +18,10 @@ at the bottom.
 | Light (1k qps)   | 0.99 ms      | 0.99 ms        | 0 µs  | <1%    | 60 MB  | Indistinguishable           |
 | Heavy (5k qps)   | 0.99 ms      | 0.99 ms        | 0 µs  | 5.5%   | 60 MB  | ~0.88 cores at 5k qps; flat |
 
-Headline: under typical microservice traffic profiles (≤5k qps) the runtime
-agent + dp data-plane impose **no measurable p99 latency overhead** on the
-hot path, and dp's CPU stays at ~0.18 mCPU per 1k qps. The reason is
-architectural: our BPF probes attach to exec/file syscalls (not the network
-fast path), and dp processes flows asynchronously via DPMsgSession polling
-rather than sitting inline on every packet.
+In these two 30-second synthetic profiles, recorded p99 latency was unchanged
+at the measurement precision. This run had no policies promoted to enforce and
+did not exercise inline packet verdicts. It cannot establish overhead for typical
+customer traffic, DLP/WAF enforcement, or a comparison with NeuVector.
 
 ## Methodology
 

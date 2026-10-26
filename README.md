@@ -6,6 +6,10 @@
 > production release. APIs, data formats and the Helm values surface change between
 > commits; see [`CHANGELOG.md`](CHANGELOG.md) for what is landing and
 > [`docs/SECURITY-BACKLOG.md`](docs/SECURITY-BACKLOG.md) for known open findings.
+> The [readiness and NeuVector comparison plan](docs/readiness-and-parity-plan.md)
+> tracks verified scope, remaining acceptance work, intentional differences and
+> deferred operational checks. Capability descriptions below are not release
+> qualification or a claim of complete NeuVector parity.
 
 Constellation gives security teams, platform engineers, and operators one place to see what is running, understand what is vulnerable, control what is allowed, and prove what happened. It combines vulnerability intelligence, runtime visibility, admission control, compliance evidence, network security, and enterprise governance into a single Kubernetes-native security platform.
 

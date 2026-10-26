@@ -1,7 +1,8 @@
 # Event and flow delivery
 
 Updated 2026-10-12. Source implementation requires migration 169. Live rollout
-and full fleet capacity qualification remain open in the canonical parity plan.
+and full fleet capacity qualification remain open under M3/M5 in the
+[current readiness plan](readiness-and-parity-plan.md).
 
 ## Protocol and guarantees
 
