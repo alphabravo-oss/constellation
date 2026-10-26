@@ -11,7 +11,7 @@ maintainers. Next review: 2027-01-12, or earlier for a security advisory, major
 upgrade or changed product requirements.
 
 The reference checkout is Astronomer commit `3b378ef1`, as recorded in the
-[canonical parity plan](../NEUVECTOR-PARITY-PLAN.md). Its stack guides shared
+[historical parity plan](https://github.com/alphabravo-oss/constellation/blob/388ad8ce861989e4604d1649a27499dc74b8af7c/docs/NEUVECTOR-PARITY-PLAN.md). Its stack guides shared
 patterns and contracts; copying unrelated services or dependency versions is
 not an acceptance criterion.
 

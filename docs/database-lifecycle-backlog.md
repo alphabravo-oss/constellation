@@ -2,6 +2,10 @@
 
 **Latest local verification:** October 26 runtime-threat archive qualification, October 24 partitioned flow qualification and the reconciled register below; earlier [October 23 source results](#october-23-source-reverification) remain available. Operational and deployment gates remain separate.
 
+The [current readiness plan](readiness-and-parity-plan.md#m3--make-evidence-and-response-delivery-recoverable)
+tracks this backlog under M3, with release qualification under M5. DB-01–23 remain
+the acceptance IDs; ten implementation fixes do not close ten DB requirements.
+
 ## October 23 completion pass
 
 Current conservative decisions are recorded in [the retention policy](storage-retention-policy.md). Merged implementation is distinct from deployed operational acceptance.
@@ -54,8 +58,9 @@ No new evidence deletion or live rollout has been performed in this completion
 pass. Local code/test success alone does not close operational gates.
 
 Reviewed 2026-09-27 against the checked-in code and the existing local k3s
-release. This is the detailed open-item register for the OPS-2 storage item in
-`NEUVECTOR-PARITY-PLAN.md`; it does not mark the parent item complete. The
+release. This originated as the detailed register for OPS-2 in the retired parity
+plan; its current parent is [M3](readiness-and-parity-plan.md#m3--make-evidence-and-response-delivery-recoverable).
+It does not mark the parent milestone complete. The
 retired `constellation-vulndb` integration is tracked separately and is not a
 proposed destination for current CVE data.
 

@@ -1,7 +1,7 @@
 # FIPS build and runtime contract
 
 Updated: 2026-10-12. The Go build path is implemented; whole-product and deployed
-FIPS qualification remain open in [the parity plan](NEUVECTOR-PARITY-PLAN.md).
+FIPS qualification remain open in [the readiness plan](readiness-and-parity-plan.md#m5--qualify-one-release-profile).
 
 ## Supported source build
 

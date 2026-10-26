@@ -1,5 +1,12 @@
 # Scale hardening guide
 
+**Historical design guidance, not a qualified production profile.** Several
+implementation/default claims below require reconciliation under M1-02 of the
+[readiness plan](readiness-and-parity-plan.md). Use [efficiency measurements](efficiency.md),
+[storage lifecycle status](database-lifecycle-backlog.md) and current chart values
+for bounded evidence. The scale numbers and RPO below are not measured capacity
+or agreed service objectives.
+
 Constellation's design target is **mid-market self-hosted** (100 clusters, 10k nodes,
 100k images, 100M findings on a single Postgres 16 instance) and **SaaS small tier**
 (10 clusters, 500 nodes, 5k images, 5M findings).

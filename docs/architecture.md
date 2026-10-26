@@ -1,7 +1,8 @@
 # Architecture
 
-Reviewed October 11, 2026. The [canonical parity plan](NEUVECTOR-PARITY-PLAN.md)
-owns implementation status and acceptance. This document distinguishes source
+Architecture snapshot originally reviewed October 11, 2026; delivery and database
+status below reconciled October 26. The [current readiness plan](readiness-and-parity-plan.md)
+owns acceptance status. This document distinguishes source
 behavior from the proposed fleet topology; neither a diagram nor the existence
 of federation APIs establishes production scale or disconnected operation.
 
@@ -12,7 +13,7 @@ node-local runtime agents. Agents supervise the native DP/DPI subsystem,
 collect runtime observations, and upload batches to authenticated API endpoints.
 Kubernetes/CNI policy and node-local enforcement are distinct from telemetry
 storage. Their full enforcement, workload scoping and outage/restart behavior
-remain subject to the parity plan's acceptance matrix.
+remain subject to the readiness plan's supported-profile acceptance criteria.
 
 ```mermaid
 flowchart LR
@@ -31,14 +32,13 @@ reside there. Some work can run concurrently across API/worker replicas, but
 rollup state and the control-audit chain each have a shared serialization point.
 Time partitioning enables pruning; it is not horizontal write sharding.
 
-The agent upload path batches and bounds concurrent requests, retries transient
-errors, and counts drops. It is memory-buffered: exhausted retries, buffer
-pressure and process loss can lose observations. The inspected event uploader
-also treats HTTP 429 as a terminal 4xx. The event/flow ingest endpoints do not
-provide a durable producer sequence/idempotency contract, so replay after a
-lost response must be designed before promising lossless outage recovery.
-An HTTP bulk endpoint currently still executes individual row inserts inside a
-transaction; it is not equivalent to COPY or a pipelined batch.
+Receipt-aware event/flow producers use bounded durable node-local spools and
+producer/sequence receipts. The API commits raw rows and replay state atomically,
+acknowledges after commit, and uses pgx batches for inserts. Legacy producers and
+other telemetry lanes have different loss boundaries; node/disk loss can destroy
+unacknowledged evidence. Response callbacks, notifications and graph updates are
+not a transactional delivery outbox. See the [delivery contract](telemetry-delivery.md)
+for bounds, retries, replay guarantees and remaining gaps.
 
 Source anchors: `cmd/constellation-runtime-agent/main.go`,
 `internal/handler/runtime/events_ingest.go`,
@@ -47,12 +47,12 @@ Source anchors: `cmd/constellation-runtime-agent/main.go`,
 Federation membership/policy primitives exist, but capacity isolation, regional
 routing and a complete federated query contract are not thereby established.
 
-The managed database target is CNPG; external PostgreSQL remains supported.
-The existing development deployment still runs the original StatefulSet at
-migration 167. The separate local RustFS/CNPG rehearsal verified backup/PITR
-and test-API reconnection. It did not migrate the live service or establish
-HA/off-host recovery. See [database recovery](cnpg-recovery.md) and the
-[live database assessment](database-lifecycle-backlog.md).
+The managed database is CNPG; external PostgreSQL remains supported. The last
+recorded live observation, October 23, found one healthy CNPG instance at migration
+190 with successful WAL archiving and a completed scheduled backup. This was not
+remeasured October 26, and does not establish HA/off-host recovery. Source reviewed
+October 26 requires migration 198. See [database recovery](cnpg-recovery.md) and
+the [database lifecycle assessment](database-lifecycle-backlog.md).
 
 ## Active vulnerability and scanning pipeline
 

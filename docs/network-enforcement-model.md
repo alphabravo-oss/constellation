@@ -1,14 +1,15 @@
 # Network Enforcement Model (D-1 resolution / NET-INLINE-22)
 
-> Records decision **D-1** from the [canonical parity plan](NEUVECTOR-PARITY-PLAN.md) and closes
-> **NET-INLINE-22** ("no inline enforcement on Cilium/eBPF CNIs").
+> Records the historical **D-1** design resolution for **NET-INLINE-22**.
+> The [current readiness plan](readiness-and-parity-plan.md) tracks qualification
+> separately: Cilium uses CNI-native policy; inline WAF/DLP remains unavailable.
 
 ## The two backends
 
 Constellation enforces network policy through **two** datapaths, selected by CNI
 capability. They are complementary, not redundant.
 
-### 1. CNI-native policy (PRIMARY — all clusters, including Cilium)
+### 1. CNI-native policy (PRIMARY — supported CNI profiles, including Cilium)
 
 The netpolicy candidate lifecycle generates a real Kubernetes object per flavor —
 `networking.k8s.io/v1 NetworkPolicy` (native), `cilium.io/v2 CiliumNetworkPolicy`
@@ -18,13 +19,14 @@ candidate) and `pkg/netpolicy` (`GenerateNative` / `GenerateCilium` /
 `GenerateCalico`). The in-cluster `network-policy-applier` applies the flavor set
 by `CONSTELLATION_NETWORK_POLICY_APPLIER_FLAVOR` (`cmd/constellation-netpolicy-applier`).
 
-**This is enforced by the CNI's own dataplane**, so it works everywhere — crucially
-on **Cilium/eBPF**, where a `CiliumNetworkPolicy` is enforced by Cilium's eBPF
-dataplane (`egressDeny`/`ingressDeny`, `toFQDNs`, L3/L4 + limited L7). This is
-enforcement Constellation has that NeuVector does **not** — NV cannot emit CNI-native
-policy. It is fail-open-safe (a dp crash cannot blackhole), survives agent restarts,
-and is the correct answer for the "block IP / isolate workload / deny conversation"
-actions (Phase 1) and for learned default-deny segmentation.
+**This is enforced by the selected CNI's own dataplane.** On **Cilium/eBPF**, a
+`CiliumNetworkPolicy` is enforced by Cilium (`egressDeny`/`ingressDeny`, `toFQDNs`,
+L3/L4 + limited L7). Applied CNI policy is independent of the Constellation dp
+process and can remain active across agent restarts. It is the primary path for
+block-IP, isolation and segmentation. Each supported CNI/profile still needs
+qualification; object generation alone does not prove the traffic verdict.
+NeuVector also [documents Cilium support](https://open-docs.neuvector.com/basics/requirements/).
+This architectural difference does not establish superior enforcement.
 
 **On a Cilium cluster: set `netpolicy.flavor: cilium`.** The applier then emits
 CiliumNetworkPolicy for every approved candidate and for the Phase-1 map actions
@@ -43,8 +45,9 @@ because Cilium's eBPF dataplane bypasses the iptables chains NFQUEUE hooks — a
 NFQUEUE rule there simply never sees the packets. `cmd/constellation-runtime-agent/main.go`
 gates inline on `SafeForNFQUEUE() || CONSTELLATION_DP_ENFORCE_ON_CILIUM`, so on
 Cilium the inline path stays dormant by default and the agent runs tap/monitor only.
-It is **fail-OPEN** (`iptables --queue-bypass`), a deliberate safety divergence from
-NeuVector's fail-closed veth surgery.
+It uses `iptables --queue-bypass` so packets pass when no NFQUEUE listener is
+available. That availability tradeoff and other failure cases require explicit
+testing for the supported profile.
 
 ## Decision (D-1)
 
@@ -53,14 +56,15 @@ NFQUEUE is a **secondary** datapath whose job is the L7/DPI/WAF verdicts CNI pol
 cannot express, and it runs only on iptables-class CNIs.
 
 Therefore, on Cilium clusters:
-- L3/L4 segmentation, block-IP, isolate → **CiliumNetworkPolicy** (applier `flavor: cilium`). ✅ real enforcement.
+- L3/L4 segmentation, block-IP, isolate → **CiliumNetworkPolicy** (applier `flavor: cilium`), subject to the qualified policy/profile scope.
 - L7 WAF/DLP inline drop → **not available on Cilium** (NFQUEUE-blind). Requires either
-  a future TC-BPF verdict hook, or running an iptables-class CNI. This is the one
-  documented Cilium limitation; it is L7-only, and CNI-native covers all L3/L4.
+  a future verdict hook, or a qualified iptables-class CNI profile. CNI-native
+  L3/L4 policy does not substitute for payload inspection verdicts.
 
-We do **not** port NeuVector's tc/ovs veth port-pair intercept for Cilium: it is
-the most dangerous code in NV (fail-closed veth surgery), and CiliumNetworkPolicy
-already gives Cilium clusters a real, safer L3/L4 enforcement path NV lacks.
+This design does not port NeuVector's tc/ovs veth port-pair intercept for Cilium.
+CiliumNetworkPolicy supplies the primary L3/L4 path, with different failure and
+policy semantics from inline interception. Comparative safety requires evidence
+for the specific profiles being compared.
 
 ## Configuration matrix
 

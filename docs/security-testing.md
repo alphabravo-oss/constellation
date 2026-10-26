@@ -1,5 +1,17 @@
 # Blocking security and test tooling
 
+**Current scope (2026-10-26):** GitHub Actions is disabled by owner direction.
+Continue code and local verification only. The [readiness plan](readiness-and-parity-plan.md)
+owns current acceptance status and deferred release/live gates. Use
+[CLAUDE.md](../CLAUDE.md) and the [Makefile](../Makefile) for current commands.
+
+## Historical gate design and execution records
+
+The records below retain their original scope and dates. Historical CI claims,
+Python tooling, Helm 3 commands and parity counts are not current operating
+instructions or evidence that Actions is enabled. Consult the readiness plan
+before using an old result as current qualification.
+
 The `CI` workflow runs on every pull request (including forks), main-branch pushes,
 merge queues and manual dispatch. Repository administrators must require the
 `required` check in the branch/ruleset settings; workflow files cannot enable
@@ -369,7 +381,7 @@ JUnit/JSON are in `/tmp/constellation-parity-seeded-race/`. New federation redir
 
 Repository Go formatting and ShellCheck pass locally. The remaining strict lint
 and security findings still block release; they have not been suppressed.
-See [the canonical tracker](NEUVECTOR-PARITY-PLAN.md) for current gate evidence.
+See [the readiness plan](readiness-and-parity-plan.md) for current gate evidence.
 
 ## Resource and conditional-editor fixes — 2026-10-12
 
