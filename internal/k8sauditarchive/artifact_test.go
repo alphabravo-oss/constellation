@@ -99,7 +99,7 @@ func TestSignedInvalidBoundariesAndOrder(t *testing.T) {
 			case "duplicate":
 				rows = append(rows, rows[0])
 			case "after":
-				w.After = Cursor{rows[0].At, rows[0].ID}
+				w.After = Cursor{At: rows[0].At, ID: rows[0].ID}
 			case "submicrosecond":
 				rows[0].At = rows[0].At.Add(time.Nanosecond)
 			case "limit":

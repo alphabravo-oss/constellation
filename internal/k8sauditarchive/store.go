@@ -20,7 +20,7 @@ import (
 // exports, not a cross-request database snapshot or proof permitting pruning.
 func Export(ctx context.Context, pool *pgxpool.Pool, w Window, limit int, private, public string) ([]byte, Report, error) {
 	var report Report
-	if err := w.validate(); err != nil {
+	if err := w.Validate(); err != nil {
 		return nil, report, err
 	}
 	if limit < 1 || limit > MaxRows {

@@ -1,6 +1,6 @@
 # Database and storage lifecycle backlog
 
-**Latest local verification:** October 24 partitioned flow qualification and the reconciled register below; earlier [October 23 source results](#october-23-source-reverification) remain available. Operational and deployment gates remain separate.
+**Latest local verification:** October 26 runtime-threat archive qualification, October 24 partitioned flow qualification and the reconciled register below; earlier [October 23 source results](#october-23-source-reverification) remain available. Operational and deployment gates remain separate.
 
 ## October 23 completion pass
 
@@ -39,7 +39,7 @@ production caller is superseded.
 | DB-06 | Decision complete: preserve all existing permanent audit receipts and consumers; no suppression or stream migration. See [retention decisions](storage-retention-policy.md). Archive capacity remains DB-07–09/23. |
 | DB-07–09 | Qualify signed archive catch-up/read-back and independent verification; resolve the recorded historical chain discontinuity without rewriting hashes; design trusted query anchors before any hot-chain deletion. |
 | DB-10 | Explicit per-source Kubernetes-audit freshness/gap metrics and alerts are implemented and locally tested; no global latest-event shortcut. [Signed paged export and independent recovery](k8s-audit-archive.md) are now implemented; scheduled archival and hold-aware source retention remain open. |
-| DB-11 | Qualify existing PCAP maintenance; add separate threat/payload/forensics retention with preserved case evidence. |
+| DB-11 | [Signed runtime-threat export and independent packet recovery](runtime-threat-archives.md) are implemented and locally tested. Qualify existing PCAP maintenance; scheduled archival, case/forensics dependency recovery and hold-aware retention remain open. |
 | DB-12 | [Hourly retention](flow-rollup-retention.md) is implemented with a separate policy, raw-boundary gate, monotonic unavailable-history boundary, late-ingest exclusion and HTTP 410 for expired map/CSV ranges. Existing settings remain holds; live qualification remains open. |
 | DB-13 | Preserve open/triaged findings; implement eligible resolved/orphaned archival and bounded storage. |
 | DB-14–15 | [Reference protections](scan-evidence-retention.md) now preserve newest/referenced jobs and results, all findings and inventory/attestation evidence; bounded cleanup rechecks references under locks. Signed single-inventory export, offline verification and explicit scoped recovery now pass independent-database tests. Named-history and complete payload/dependency archival/restoration remain open; no pruning is authorized. |
@@ -455,3 +455,24 @@ The Kubernetes-audit pages do not form a cross-request source snapshot or prove
 that no backdated event can arrive later. They authorize no source pruning.
 Findings/attestation dependency archives, trusted hot/cold query anchors and the
 other explicitly open lifecycle work remain tracked above.
+
+
+## October 26 next-ten runtime-evidence batch
+
+Ten code/local deliverables advance DB-11; they do not close ten original DB IDs:
+
+1. Shared bounded signed-page encoding with distinct threat/audit format identities.
+2. Runtime-threat export scoped to organization, cluster and receipt-time window.
+3. Timestamp-tie-safe continuation and a concurrent source/cursor index (migration 198).
+4. Row and byte budgets, oversized-record holds and cancellation-aware archive I/O.
+5. Exact packet preservation, including null versus empty and arbitrary binary bytes.
+6. Lossless persisted metadata and full unsigned-32-bit threat identifiers.
+7. Trusted offline verification and private CLI publication with verified disk read-back.
+8. Explicit destination recovery with organization validation and cluster locking.
+9. Atomic audit receipts, whole-page conflict rollback and concurrent idempotent replay.
+10. Independent-database/CLI recovery and byte-budget qualification with source/quarantine preservation.
+
+No source expiry is enabled. Quarantine/case/forensics dependency archives,
+scheduled immutable storage, trusted historical queries and the other open work
+remain tracked above. Actions, live migration/deployment, off-host recovery and
+real node-failure tests remain disabled/deferred under the owner's instruction.
