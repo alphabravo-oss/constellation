@@ -25,6 +25,9 @@ func evidenceCmd() *cobra.Command {
 	for _, action := range []string{"export-k8s-audit", "verify-k8s-audit", "restore-k8s-audit"} {
 		root.AddCommand(k8sAuditArchiveCommand(action))
 	}
+	for _, action := range []string{"export-runtime-threat", "verify-runtime-threat", "restore-runtime-threat"} {
+		root.AddCommand(threatArchiveCommand(action))
+	}
 	return root
 }
 

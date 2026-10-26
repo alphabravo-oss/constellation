@@ -13,20 +13,40 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/alphabravocompany/constellation/internal/archiveio"
+	"github.com/alphabravocompany/constellation/internal/evidencepage"
 	"github.com/alphabravocompany/constellation/internal/k8sauditarchive"
+	"github.com/alphabravocompany/constellation/internal/threatarchive"
 	"github.com/alphabravocompany/constellation/pkg/backup"
 )
 
-type k8sArchiveOptions struct {
+type pagedArchiveOptions struct {
+	family string
+
+	exportPage  func(context.Context, *pgxpool.Pool, evidencepage.Window, int, string, string) ([]byte, evidencepage.Report, error)
+	verifyPage  func(context.Context, io.Reader, string) (evidencepage.Report, error)
+	restorePage func(context.Context, *pgxpool.Pool, io.Reader, string, uuid.UUID, uuid.UUID) (any, error)
+
 	action, org, cluster, from, through, afterAt, afterID, private, public, input, output, database string
 	limit                                                                                           int
 }
 
 func k8sAuditArchiveCommand(action string) *cobra.Command {
-	a := &k8sArchiveOptions{action: action}
+	a := &pagedArchiveOptions{action: action, family: "k8s-audit", exportPage: k8sauditarchive.Export, verifyPage: k8sauditarchive.Verify, restorePage: func(ctx context.Context, p *pgxpool.Pool, r io.Reader, key string, org, cluster uuid.UUID) (any, error) {
+		return k8sauditarchive.Restore(ctx, p, r, key, org, cluster)
+	}}
+	return pagedArchiveCommand(a)
+}
+func threatArchiveCommand(action string) *cobra.Command {
+	a := &pagedArchiveOptions{action: action, family: "runtime-threat", exportPage: threatarchive.Export, verifyPage: threatarchive.Verify, restorePage: func(ctx context.Context, p *pgxpool.Pool, r io.Reader, key string, org, cluster uuid.UUID) (any, error) {
+		return threatarchive.Restore(ctx, p, r, key, org, cluster)
+	}}
+	return pagedArchiveCommand(a)
+}
+func pagedArchiveCommand(a *pagedArchiveOptions) *cobra.Command {
+	action := a.action
 	cmd := &cobra.Command{Use: action, Args: cobra.NoArgs, RunE: a.run}
 	cmd.Flags().StringVar(&a.public, "verify-key", "", "Independently trusted Ed25519 public key PEM")
-	if action == "export-k8s-audit" {
+	if action == "export-"+a.family {
 		cmd.Flags().StringVar(&a.private, "sign-key", "", "Ed25519 private key PEM")
 		cmd.Flags().StringVar(&a.output, "out-dir", "", "Dedicated private archive directory")
 		cmd.Flags().StringVar(&a.from, "from", "", "Inclusive receipt time, RFC3339 with at most microsecond precision")
@@ -35,9 +55,9 @@ func k8sAuditArchiveCommand(action string) *cobra.Command {
 		cmd.Flags().StringVar(&a.afterID, "after-id", "", "Exclusive previous page UUID (requires --after-at)")
 		cmd.Flags().IntVar(&a.limit, "limit", 1000, "Maximum rows per page (1..1000)")
 	} else {
-		cmd.Flags().StringVar(&a.input, "in", "", "Signed Kubernetes audit archive file")
+		cmd.Flags().StringVar(&a.input, "in", "", "Signed evidence archive file")
 	}
-	if action != "verify-k8s-audit" {
+	if action != "verify-"+a.family {
 		cmd.Flags().StringVar(&a.org, "org-id", "", "Explicit source/export or destination/restore organization UUID")
 		cmd.Flags().StringVar(&a.cluster, "cluster-id", "", "Explicit source/export or destination/restore cluster UUID")
 		cmd.Flags().StringVar(&a.database, "database-url", "", "Postgres URL (or DATABASE_URL)")
@@ -45,13 +65,13 @@ func k8sAuditArchiveCommand(action string) *cobra.Command {
 	return cmd
 }
 
-func (a *k8sArchiveOptions) run(cmd *cobra.Command, _ []string) error {
+func (a *pagedArchiveOptions) run(cmd *cobra.Command, _ []string) error {
 	ctx, cancel := context.WithTimeout(cmd.Context(), time.Minute)
 	defer cancel()
 	if a.public == "" {
 		return errors.New("--verify-key required")
 	}
-	if a.action == "verify-k8s-audit" {
+	if a.action == "verify-"+a.family {
 		return a.verify(ctx, cmd)
 	}
 	org, err := uuid.Parse(a.org)
@@ -73,36 +93,36 @@ func (a *k8sArchiveOptions) run(cmd *cobra.Command, _ []string) error {
 		return backup.CLIFailure("database configuration", err)
 	}
 	defer pool.Close()
-	if a.action == "export-k8s-audit" {
+	if a.action == "export-"+a.family {
 		return a.export(ctx, cmd, pool, org, cluster)
 	}
 	file, err := backup.OpenArtifact(a.input)
 	if err != nil {
-		return backup.CLIFailure("audit archive open", err)
+		return backup.CLIFailure("evidence archive open", err)
 	}
 	defer func() { _ = file.Close() }()
-	result, err := k8sauditarchive.Restore(ctx, pool, file, a.public, org, cluster)
+	result, err := a.restorePage(ctx, pool, file, a.public, org, cluster)
 	if err != nil {
-		return backup.CLIFailure("audit archive restore", err)
+		return backup.CLIFailure("evidence archive restore", err)
 	}
 	return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
 }
 
-func (a *k8sArchiveOptions) verify(ctx context.Context, cmd *cobra.Command) error {
+func (a *pagedArchiveOptions) verify(ctx context.Context, cmd *cobra.Command) error {
 	file, err := backup.OpenArtifact(a.input)
 	if err != nil {
-		return backup.CLIFailure("audit archive open", err)
+		return backup.CLIFailure("evidence archive open", err)
 	}
 	defer func() { _ = file.Close() }()
-	result, err := k8sauditarchive.Verify(ctx, file, a.public)
+	result, err := a.verifyPage(ctx, file, a.public)
 	if err != nil {
-		return backup.CLIFailure("audit archive verification", err)
+		return backup.CLIFailure("evidence archive verification", err)
 	}
 	return json.NewEncoder(cmd.OutOrStdout()).Encode(result)
 }
 
-func (a *k8sArchiveOptions) window(org, cluster uuid.UUID) (k8sauditarchive.Window, error) {
-	w := k8sauditarchive.Window{OrgID: org, ClusterID: cluster}
+func (a *pagedArchiveOptions) window(org, cluster uuid.UUID) (evidencepage.Window, error) {
+	w := evidencepage.Window{OrgID: org, ClusterID: cluster}
 	var err error
 	if w.From, err = time.Parse(time.RFC3339Nano, a.from); err != nil {
 		return w, errors.New("valid --from timestamp required")
@@ -121,7 +141,7 @@ func (a *k8sArchiveOptions) window(org, cluster uuid.UUID) (k8sauditarchive.Wind
 	return w, nil
 }
 
-func (a *k8sArchiveOptions) export(ctx context.Context, cmd *cobra.Command, pool *pgxpool.Pool, org, cluster uuid.UUID) error {
+func (a *pagedArchiveOptions) export(ctx context.Context, cmd *cobra.Command, pool *pgxpool.Pool, org, cluster uuid.UUID) error {
 	if a.private == "" || a.output == "" {
 		return errors.New("--sign-key and --out-dir required")
 	}
@@ -129,19 +149,19 @@ func (a *k8sArchiveOptions) export(ctx context.Context, cmd *cobra.Command, pool
 	if err != nil {
 		return err
 	}
-	data, report, err := k8sauditarchive.Export(ctx, pool, w, a.limit, a.private, a.public)
+	data, report, err := a.exportPage(ctx, pool, w, a.limit, a.private, a.public)
 	if err != nil {
-		return backup.CLIFailure("audit archive export", err)
+		return backup.CLIFailure("evidence archive export", err)
 	}
-	path, err := archiveio.WriteVerified(ctx, a.output, ".k8s-audit.json", data, func(input io.Reader) error {
-		_, err := k8sauditarchive.Verify(ctx, input, a.public)
+	path, err := archiveio.WriteVerified(ctx, a.output, "."+a.family+".json", data, func(input io.Reader) error {
+		_, err := a.verifyPage(ctx, input, a.public)
 		return err
 	})
 	if err != nil {
-		return backup.CLIFailure("audit archive read-back", err)
+		return backup.CLIFailure("evidence archive read-back", err)
 	}
 	return json.NewEncoder(cmd.OutOrStdout()).Encode(struct {
-		Path   string                 `json:"path"`
-		Report k8sauditarchive.Report `json:"archive"`
+		Path   string              `json:"path"`
+		Report evidencepage.Report `json:"archive"`
 	}{path, report})
 }
