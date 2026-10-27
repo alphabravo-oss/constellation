@@ -114,7 +114,7 @@ jobs:
           path: artifacts/
           retention-days: 14
       - if: ${{ !cancelled() && matrix.scanner != 'gitleaks' && hashFiles(format('artifacts/{0}.sarif', matrix.scanner)) != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
-        uses: github/codeql-action/upload-sarif@45775bd8235c68ba998cffa5171334d58593da47 # v3.28.15
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:
           sarif_file: artifacts/${{ matrix.scanner }}.sarif
           category: ${{ matrix.scanner }}
