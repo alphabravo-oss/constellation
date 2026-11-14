@@ -1,7 +1,7 @@
 # Architecture
 
 Architecture snapshot originally reviewed October 11, 2026; delivery and database
-status below reconciled October 26. The [current readiness plan](readiness-and-parity-plan.md)
+status below reconciled October 26. The [current readiness plan](../PLAN.md)
 owns acceptance status. This document distinguishes source
 behavior from the proposed fleet topology; neither a diagram nor the existence
 of federation APIs establishes production scale or disconnected operation.
@@ -52,7 +52,7 @@ recorded live observation, October 23, found one healthy CNPG instance at migrat
 190 with successful WAL archiving and a completed scheduled backup. This was not
 remeasured October 26, and does not establish HA/off-host recovery. Source reviewed
 October 26 requires migration 198. See [database recovery](cnpg-recovery.md) and
-the [database lifecycle assessment](database-lifecycle-backlog.md).
+the [database lifecycle assessment](../PLAN.md#storage-and-retention-work).
 
 ## Active vulnerability and scanning pipeline
 

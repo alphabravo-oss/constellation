@@ -12,7 +12,7 @@ This document is the canonical entry point. Pick your platform below.
 | GitHub App      | [`deploy/integrations/github-app/INSTALL.md`](../deploy/integrations/github-app/INSTALL.md) | Webhook server  |
 | GitLab CI       | [`deploy/integrations/gitlab-app/`](../deploy/integrations/gitlab-app/README.md) | Template + MR notes |
 | Jenkins         | [`deploy/integrations/jenkins/`](../deploy/integrations/jenkins/README.md) | Shared library  |
-| VS Code         | [`tools/vscode-extension/`](../tools/vscode-extension/README.md) | Editor extension |
+| VS Code         | [INT-03 in the working plan](../PLAN.md#consolidated-ui-and-integration-follow-ups) | Proposed; extension source/artifact is not present in this tree |
 
 ## Pick a path
 
@@ -62,15 +62,13 @@ constellationIacScan(path: '.')
 constellationSbom(image: "my-app:${env.GIT_COMMIT}")
 ```
 
-### "I want findings in my editor" → VS Code extension
+### Editor integration scope
 
-Install the `.vsix` from `tools/vscode-extension/`. Features:
-
-- Sidebar tree view of findings (grouped by severity, scoped by repo).
-- Code lens over `image:` refs in YAML/Dockerfiles.
-- Hover for CVE details.
-- Quick-fix action "Upgrade to <fixed-version>".
-- Device-code sign-in.
+The earlier VS Code proposal is not an installable extension in the current
+tree. INT-03 in [PLAN.md](../PLAN.md#consolidated-ui-and-integration-follow-ups)
+owns source/artifact discovery, supported authentication and distribution
+qualification. Historical endpoint examples below need current contract review
+under M1-02 before use; they do not establish a shipped editor integration.
 
 ## Shared primitives
 
@@ -120,10 +118,8 @@ Across every integration the CLI behaves identically:
 Default `--fail-on` for image-check is `critical`, for iac-check is
 `high`. Override per pipeline as needed.
 
-## Roadmap
+## Future integration scope
 
-- Bitbucket Pipelines template (same shape as the GitLab one).
-- Argo CD admission hook for GitOps repos.
-- VS Code extension marketplace listing under the `alphabravo` publisher.
-- Native go-github client (currently the GitHub App uses raw REST to
-  keep the binary small).
+The Bitbucket, Argo CD, marketplace-distribution and GitHub-client proposals are
+tracked as INT-01–04 in the sole [working plan](../PLAN.md#consolidated-ui-and-integration-follow-ups).
+They are proposed work, not capabilities established by this guide.

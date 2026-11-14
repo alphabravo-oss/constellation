@@ -2,7 +2,7 @@
 
 This historical smoke run does not qualify inline DPI/enforcement overhead or
 fleet capacity. Current bounded measurements are in [efficiency](efficiency.md);
-remaining qualification is tracked in the [readiness plan](readiness-and-parity-plan.md#m5--qualify-one-release-profile).
+remaining qualification is tracked in the [readiness plan](../PLAN.md#m5--qualify-one-release-profile).
 
 First-run synthetic baseline measured on a single-node k3s cluster (16 vCPU /
 30 GB RAM Ubuntu 24.04, kernel 6.8 with BTF) on **2026-05-14**. This is the

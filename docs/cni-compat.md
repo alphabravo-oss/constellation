@@ -137,4 +137,4 @@ exercised against a real cluster:
   detector's Cilium-wins-precedence is unit-tested; the live behaviour
   should match the pure-Cilium row exactly.
 - **EKS / GKE / AKS managed clusters** — need actual cloud accounts in
-  each provider; tracked in `docs/hardware-validation-plan.md` Spec 2.
+  each provider; tracked as HW-A4 in the [working plan](../PLAN.md#hardware-qualification-and-deferred-operational-work).

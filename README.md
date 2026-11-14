@@ -5,8 +5,8 @@
 > **Status: pre-release.** Constellation is under active development and has not shipped a
 > production release. APIs, data formats and the Helm values surface change between
 > commits; see [`CHANGELOG.md`](CHANGELOG.md) for what is landing and
-> [`docs/SECURITY-BACKLOG.md`](docs/SECURITY-BACKLOG.md) for known open findings.
-> The [readiness and NeuVector comparison plan](docs/readiness-and-parity-plan.md)
+> [PLAN.md](PLAN.md) for remaining security and product work.
+> This is the only current working plan; it
 > tracks verified scope, remaining acceptance work, intentional differences and
 > deferred operational checks. Capability descriptions below are not release
 > qualification or a claim of complete NeuVector parity.
@@ -58,15 +58,15 @@ Constellation turns vulnerability data into decisions:
 
 Constellation is built to prioritize active exposure, not just produce long CVE lists.
 
-### Constellation VulnDB Alignment
+### Scanner and Vulnerability Data
 
-Constellation consumes versioned vulnerability bundles produced by the separate **Constellation VulnDB** system.
+The active scanner uses Syft for package inventory and Trivy/Grype for matching.
+The API's PostgreSQL CVE catalog receives KEV/EPSS and optional NVD feeds. The
+separate Constellation VulnDB producer is retired from this pipeline.
 
-VulnDB is the intelligence factory. It can aggregate and normalize vulnerability data, generate signed and versioned bundles, and publish those bundles through the delivery path that fits the environment: S3, artifact storage, manual upload, internal release channels, or other controlled distribution workflows.
-
-Constellation is the consumer. It imports those bundles, tracks the active database version, scans assets against the imported intelligence, and exposes findings through dashboards, APIs, policy workflows, and reports.
-
-This separation keeps vulnerability production independent from runtime security operations and makes Constellation suitable for connected, restricted, and air-gapped environments.
+[Offline scanning](docs/offline-scanning.md) documents cache preparation and
+bounded local qualification. Full disconnected installation, update and recovery
+acceptance remains in [PLAN.md](PLAN.md#m5--qualify-one-release-profile).
 
 ### Runtime Security
 
@@ -154,7 +154,7 @@ It is designed for teams that need delegated operation without losing central co
 | Compliance | Evidence collection, framework mapping, schedules, exemptions, audit trails, and report artifacts |
 | Governance | RBAC, GlobalAdmin operations, OIDC-ready auth, API tokens, audit verification, integrations, backups, and system health |
 | Operations | Helm deployment, Kubernetes-native services, scanner workers, runtime agents, health probes, and enterprise observability |
-| VulnDB | Independent bundle generation, versioned imports, S3/manual/artifact delivery, and air-gap-friendly update paths |
+| Scanner data | Syft inventory, Trivy/Grype matcher databases, and KEV/EPSS/optional NVD catalog feeds |
 
 ## Built For Enterprise Outcomes
 
@@ -176,7 +176,9 @@ RBAC, audit verification, exemptions, accept-risk workflows, and evidence artifa
 
 ### Air-Gap And Restricted Environment Readiness
 
-The separation between Constellation and Constellation VulnDB allows vulnerability intelligence to be generated, approved, transported, and imported through controlled channels.
+Scanner databases can be prepared for network-isolated matching. Full disconnected
+deployment and recovery qualification remains an explicit release requirement in
+[PLAN.md](PLAN.md#m5--qualify-one-release-profile).
 
 ## Product Experience
 
@@ -190,15 +192,15 @@ The platform is API-first for automation, but the primary user experience is des
 
 Constellation is Kubernetes-native and deploys into the environments it protects. **Helm is
 the only supported deployment path** (ADR 0007); the chart lives at
-[`deploy/charts/constellation`](deploy/charts/constellation/).
+[`deploy/charts/constellation`](deploy/charts/constellation).
 
 - Frontend, API, scanner, admission webhook, runtime agent, discoverer, operator and
   supporting jobs are separate per-role images under `ghcr.io/alphabravo-oss/constellation/<role>`
 - PostgreSQL 16 (pgvector) through the CloudNativePG operator in production (`postgres.mode=cnpg`),
   or an external DSN (`postgres.mode=external`)
 - Optional in-cluster object store for Barman backups (`backup.objectStore`)
-- Ingress or Gateway API, cert-manager TLS, OIDC with emergency TOTP break-glass, VulnDB bundle import for
-  connected or air-gapped clusters
+- Ingress or Gateway API, cert-manager TLS, local accounts/TOTP and optional OIDC,
+  with an independent recovery administrator
 
 ```sh
 helm upgrade --install constellation deploy/charts/constellation \
@@ -226,10 +228,11 @@ integration suite against a disposable Postgres. See [`docs/development.md`](doc
 
 ## Documentation
 
+- Current working plan: [PLAN.md](PLAN.md); historical plans: [archive index](docs/archive/plans/README.md)
 - Architecture: [`docs/architecture.md`](docs/architecture.md)
 - Development: [`docs/development.md`](docs/development.md) and the root [`CLAUDE.md`](CLAUDE.md)
 - Helm chart and values: [`docs/deployment-helm.md`](docs/deployment-helm.md)
-- Decisions: [`docs/decisions/`](docs/decisions/)
+- Decisions: [`docs/decisions/`](docs/decisions)
 - Security policy: [`SECURITY.md`](SECURITY.md)
 
 ## The Constellation Promise

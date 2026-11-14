@@ -1,3 +1,7 @@
+> **Archived 2026-11-14.** Historical record, not an active work queue.
+> [PLAN.md](../../../PLAN.md) is the only current working plan.
+> Original: `docs/SECURITY-BACKLOG.md` at `de4ca4090`. Dates, results and unchecked items below retain their original scope.
+
 # Security backlog
 
 Archived from the 2026-07 deficiency audit (High severity only) when the
@@ -120,7 +124,7 @@ ICMP opt-in, partial-transfer retention, deletion and restart reapplication. Inv
 bundles also preserve the previously confirmed FQDN resolver allow-set in the worker
 tests. This closes the missing policy-delivery finding; it does not claim live CNI
 interception, DNS-derived FQDN enforcement, or production packet-drop acceptance.
-See [verification evidence](security-testing.md#runtime-policy-delivery-reverification-2026-10-23).
+See [verification evidence](../../security-testing.md#runtime-policy-delivery-reverification-2026-10-23).
 The historical finding follows.
 
 - **Severity:** high  **Category:** half_wired  **Area:** runtime-agent
@@ -144,7 +148,7 @@ reference fails the test for the expected reason. The values comments now descri
 shared external DSNs and the required explicit quarantine cluster ID accurately.
 This verifies chart wiring, not live webhook readiness or enforcement; externally
 managed Secrets still must exist with the configured key. See
-[verification evidence](security-testing.md#admission-database-secret-reverification-2026-10-23).
+[verification evidence](../../security-testing.md#admission-database-secret-reverification-2026-10-23).
 The historical finding follows.
 
 - **Severity:** high  **Category:** bug  **Area:** helm-deploy
@@ -170,7 +174,7 @@ resource names, a nondefault namespace and operator-disabled rendering. Disposab
 negative controls reject the historical missing grants, a missing object-update
 verb, and a wrong binding namespace. This is chart-contract verification, not a
 live Kubernetes authorization or database reconciliation test. See
-[verification evidence](security-testing.md#operator-policy-rbac-reverification-2026-10-23).
+[verification evidence](../../security-testing.md#operator-policy-rbac-reverification-2026-10-23).
 The historical finding follows.
 
 - **Severity:** high  **Category:** half_wired  **Area:** operator
