@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Installs the pinned CI tool set into ${CI_TOOLS_BIN:-~/.local/bin}. Pins are the latest
-# stable as of 2026-10-20; bump here and in docs when upgrading.
+# Installs the pinned CI tool set into ${CI_TOOLS_BIN:-~/.local/bin}.
+# Every tool version is explicit; qualify the new toolchain when upgrading.
 set -euo pipefail
 
 bin_dir="${CI_TOOLS_BIN:-${HOME}/.local/bin}"
@@ -63,10 +63,10 @@ for tool in "$@"; do
       install -m 0755 "$temporary/grype" "$bin_dir/grype"
       ;;
     gosec) go install github.com/securego/gosec/v2/cmd/gosec@v2.29.0 ;;
-    govulncheck) go install golang.org/x/vuln/cmd/govulncheck@latest ;;
+    govulncheck) go install golang.org/x/vuln/cmd/govulncheck@v1.9.0 ;;
     gotestsum) go install gotest.tools/gotestsum@v1.13.0 ;;
     air) go install github.com/air-verse/air@v1.67.4 ;;
-    actionlint) go install github.com/rhysd/actionlint/cmd/actionlint@latest ;;
+    actionlint) go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.11 ;;
     *) echo "Unknown CI tool: $tool" >&2; exit 2 ;;
   esac
 done

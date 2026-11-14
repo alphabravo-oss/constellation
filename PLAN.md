@@ -199,6 +199,37 @@ initial `check.log` and investigate fixture reliability under M5-01; the later
 full result does not establish that the intermittent failure is fixed.
 Actions remains disabled, and no release image was published or deployed.
 
+## Fresh development checkout qualification — November 14
+
+A new public GitHub clone at
+[`b9eacb34a399a14ca79acd8e114b89729e9eb4e3`](https://github.com/alphabravo-oss/constellation/commit/b9eacb34a399a14ca79acd8e114b89729e9eb4e3)
+built all 23 Go programs/tools and the production frontend in fresh Linux/amd64
+containers, without host dependency/build caches, private credentials, sibling
+repositories or copied generated source. Uncached BPF and native dataplane stages
+also built from tracked inputs. An isolated API boot applied migration 198 to an
+empty PostgreSQL database, passed health/readiness and schema checks, and completed
+local password/TOTP login plus an authenticated identity request. Temporary test
+containers and credentials were removed.
+
+The follow-up `make check` passed with freshly installed pinned tools: 3,278 Go
+tests, 9 opt-in skips, plus lint/vet/format/shell and frontend lint/type/build.
+Actionlint also passed. The existing 129 Fast Refresh warnings remain M5-02 work;
+this follow-up did not repeat the full frontend or integration suites.
+
+The [development guide](docs/development.md) now records machine prerequisites,
+bootstrap commands, actual first-login setup and the source/state backup boundary.
+The tool installer pins govulncheck and actionlint instead of resolving `latest`.
+The [portable receipt](docs/verification/fresh-checkout-2026-11-14.json) records
+commands, tool versions, results and local-log hashes. Historical branches are
+superseded context; generated files and raw logs are not build inputs. Existing
+database/evidence data, secret material and original raw logs require separate
+backup or archival storage and are not restored by cloning Git.
+
+This is bounded development continuity evidence for M1-02 and M5-01. It does not
+close either milestone, certify a signed deployment, exercise a browser, qualify
+other architectures/kernel enforcement, establish an air-gapped installation, or
+prove off-host recovery. Actions remains disabled.
+
 ## Remaining milestones
 
 All five parent milestones are **open**. Work within the current scope can
@@ -212,7 +243,7 @@ Review responsibility: product, architecture and security maintainers.
 | ID | State | Completion criterion |
 | --- | --- | --- |
 | M1-01 | Open | Finish current-source evidence revalidation for NV-001–154 below. The inventory and current milestone mapping are complete; each remaining revalidation needs a source/test receipt or an explicit superseding decision with customer impact. Reconcile Technology Selection Guide controls against current ADRs. Do not infer verification from historical checkmarks. |
-| M1-02 | Open | Planning consolidation is complete. Finish reconciling README, architecture, deployment, integrations, security, FIPS, scale and performance instructions against current source. Remove retired VulnDB/production-compose claims, obsolete commands and unsupported superiority/capacity claims. Preserve dated evidence and link the current contract. |
+| M1-02 | Open | Planning consolidation and the bounded fresh-development guide/receipt above are complete. Finish reconciling README, architecture, deployment, integrations, security, FIPS, scale and performance instructions against current source. Remove retired VulnDB/production-compose claims, obsolete commands and unsupported superiority/capacity claims. Preserve dated evidence and link the current contract. |
 | M1-03 | Open | Publish one supported profile: Kubernetes/CNI/kernel/architecture, policy families, identity modes, scanner tools, storage topology, federation scope and known exclusions. Distinguish supported behavior from experimental paths and design targets. |
 
 **Exit:** every original requirement has an explicit disposition and the supported
