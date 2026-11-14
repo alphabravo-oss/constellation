@@ -9,7 +9,7 @@
 # binary, so bump deploy/docker/go-tools/go.mod with the Go toolchain.
 # Refresh digests with: docker buildx imagetools inspect <image:tag>
 ARG GO_VERSION
-ARG GO_IMAGE_DIGEST=sha256:5c3e9b43cfd3bb95c7937462e29d87ada57b481a96fa23ad0eb61778d7a00110
+ARG GO_IMAGE_DIGEST=sha256:4fa7c968ba93f1635670522dbb01a2c78150443e1385746924566079f36570ea
 ARG ALPINE_DIGEST=sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
 
 FROM golang:${GO_VERSION}-bookworm@${GO_IMAGE_DIGEST} AS tools
@@ -22,7 +22,7 @@ RUN go build -ldflags="-s -w" -o /out/age filippo.io/age/cmd/age \
  && go build -ldflags="-s -w -X k8s.io/client-go/pkg/version.gitVersion=${KUBECTL_VERSION} -X k8s.io/component-base/version.gitVersion=${KUBECTL_VERSION}" -o /out/kubectl ./kubectl \
  && /out/kubectl version --client >/dev/null && /out/age --version >/dev/null
 
-# rclone: the upstream release binary is built with go1.26.9 (< 1.27.3, which is the
+# rclone: the upstream release binary is built with go1.26.9 (< 1.27.4, which is the
 # floor for the eMudhra intermediate-CA distrust); rebuilt from its verified tag commit.
 FROM golang:${GO_VERSION}-bookworm@${GO_IMAGE_DIGEST} AS rclone
 ARG RCLONE_VERSION=v1.75.2

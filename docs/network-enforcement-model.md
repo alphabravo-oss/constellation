@@ -1,7 +1,7 @@
 # Network Enforcement Model (D-1 resolution / NET-INLINE-22)
 
 > Records the historical **D-1** design resolution for **NET-INLINE-22**.
-> The [current readiness plan](readiness-and-parity-plan.md) tracks qualification
+> The [current readiness plan](../PLAN.md) tracks qualification
 > separately: Cilium uses CNI-native policy; inline WAF/DLP remains unavailable.
 
 ## The two backends

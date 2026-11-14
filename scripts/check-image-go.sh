@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Every Go binary inside every release image must be built with go >= MIN_GO
-# (eMudhra intermediate-CA compromise: go1.27.2 accepts the chain, go1.27.3 rejects it).
-# Usage: scripts/check-image-go.sh <image-ref>...    MIN_GO (default 1.27.3)
+# Go 1.27.4 fixes GO-2026-6859 (net/http); it also retains the eMudhra CA fix.
+# Usage: scripts/check-image-go.sh <image-ref>...    MIN_GO (default 1.27.4)
 set -euo pipefail
-min="${MIN_GO:-1.27.3}"
+min="${MIN_GO:-1.27.4}"
 command -v go >/dev/null
 ver_ge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" = "$2" ]; }
 fail=0

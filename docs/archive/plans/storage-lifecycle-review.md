@@ -1,6 +1,10 @@
+> **Archived 2026-11-14.** Historical record, not an active work queue.
+> [PLAN.md](../../../PLAN.md) is the only current working plan.
+> Original: `docs/storage-lifecycle-review.md` at `de4ca4090`. Dates, results and unchecked items below retain their original scope.
+
 # Storage lifecycle review (2026-09-27)
 
-**2026-10-23 implementation update:** [Audit archive catch-up](audit-archive.md)
+**2026-10-23 implementation update:** [Audit archive catch-up](../../audit-archive.md)
 now replaces the rolling-window exporter with signed ID segments and verified
 durable progress, and migration 191 protects TRUNCATE. The deployment observations
 below are historical; immutable storage, hot/cold retention and live recovery

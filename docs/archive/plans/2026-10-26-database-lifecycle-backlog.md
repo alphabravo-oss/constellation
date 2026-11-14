@@ -1,14 +1,18 @@
+> **Archived 2026-11-14.** Historical record, not an active work queue.
+> [PLAN.md](../../../PLAN.md) is the only current working plan.
+> Original: `docs/database-lifecycle-backlog.md` at `de4ca4090`. Dates, results and unchecked items below retain their original scope.
+
 # Database and storage lifecycle backlog
 
 **Latest local verification:** October 26 runtime-threat archive qualification, October 24 partitioned flow qualification and the reconciled register below; earlier [October 23 source results](#october-23-source-reverification) remain available. Operational and deployment gates remain separate.
 
-The [current readiness plan](readiness-and-parity-plan.md#m3--make-evidence-and-response-delivery-recoverable)
+The [current readiness plan](2026-10-26-readiness-and-parity-plan.md#m3--make-evidence-and-response-delivery-recoverable)
 tracks this backlog under M3, with release qualification under M5. DB-01–23 remain
 the acceptance IDs; ten implementation fixes do not close ten DB requirements.
 
 ## October 23 completion pass
 
-Current conservative decisions are recorded in [the retention policy](storage-retention-policy.md). Merged implementation is distinct from deployed operational acceptance.
+Current conservative decisions are recorded in [the retention policy](../../storage-retention-policy.md). Merged implementation is distinct from deployed operational acceptance.
 
 The owner requested completion of DB-01–23, including implementation and
 qualification. Work is tracked by the original IDs below, not by counting small
@@ -38,18 +42,18 @@ production caller is superseded.
 
 | IDs | Remaining completion work |
 | --- | --- |
-| DB-01–04 | Local [110,000-flow concurrent ingest/fold/raw-retention qualification](flow-rollup-retention.md#local-ingest-fold-and-raw-retention-qualification) preserves exact counts/bytes across separate partitions and late arrivals. Deployed behavior/policy and fold-lag notification remain deferred; historical loss is not repaired. |
+| DB-01–04 | Local [110,000-flow concurrent ingest/fold/raw-retention qualification](../../flow-rollup-retention.md#local-ingest-fold-and-raw-retention-qualification) preserves exact counts/bytes across separate partitions and late arrivals. Deployed behavior/policy and fold-lag notification remain deferred; historical loss is not repaired. |
 | DB-05 | Verify current scheduled recovery points with a fresh isolated restore, record RPO/RTO, and qualify failure notification; off-host and real node-failure gates remain deferred unless explicitly resumed. |
-| DB-06 | Decision complete: preserve all existing permanent audit receipts and consumers; no suppression or stream migration. See [retention decisions](storage-retention-policy.md). Archive capacity remains DB-07–09/23. |
+| DB-06 | Decision complete: preserve all existing permanent audit receipts and consumers; no suppression or stream migration. See [retention decisions](../../storage-retention-policy.md). Archive capacity remains DB-07–09/23. |
 | DB-07–09 | Qualify signed archive catch-up/read-back and independent verification; resolve the recorded historical chain discontinuity without rewriting hashes; design trusted query anchors before any hot-chain deletion. |
-| DB-10 | Explicit per-source Kubernetes-audit freshness/gap metrics and alerts are implemented and locally tested; no global latest-event shortcut. [Signed paged export and independent recovery](k8s-audit-archive.md) are now implemented; scheduled archival and hold-aware source retention remain open. |
-| DB-11 | [Signed runtime-threat export and independent packet recovery](runtime-threat-archives.md) are implemented and locally tested. Qualify existing PCAP maintenance; scheduled archival, case/forensics dependency recovery and hold-aware retention remain open. |
-| DB-12 | [Hourly retention](flow-rollup-retention.md) is implemented with a separate policy, raw-boundary gate, monotonic unavailable-history boundary, late-ingest exclusion and HTTP 410 for expired map/CSV ranges. Existing settings remain holds; live qualification remains open. |
+| DB-10 | Explicit per-source Kubernetes-audit freshness/gap metrics and alerts are implemented and locally tested; no global latest-event shortcut. [Signed paged export and independent recovery](../../k8s-audit-archive.md) are now implemented; scheduled archival and hold-aware source retention remain open. |
+| DB-11 | [Signed runtime-threat export and independent packet recovery](../../runtime-threat-archives.md) are implemented and locally tested. Qualify existing PCAP maintenance; scheduled archival, case/forensics dependency recovery and hold-aware retention remain open. |
+| DB-12 | [Hourly retention](../../flow-rollup-retention.md) is implemented with a separate policy, raw-boundary gate, monotonic unavailable-history boundary, late-ingest exclusion and HTTP 410 for expired map/CSV ranges. Existing settings remain holds; live qualification remains open. |
 | DB-13 | Preserve open/triaged findings; implement eligible resolved/orphaned archival and bounded storage. |
-| DB-14–15 | [Reference protections](scan-evidence-retention.md) now preserve newest/referenced jobs and results, all findings and inventory/attestation evidence; bounded cleanup rechecks references under locks. Signed single-inventory export, offline verification and explicit scoped recovery now pass independent-database tests. Named-history and complete payload/dependency archival/restoration remain open; no pruning is authorized. |
+| DB-14–15 | [Reference protections](../../scan-evidence-retention.md) now preserve newest/referenced jobs and results, all findings and inventory/attestation evidence; bounded cleanup rechecks references under locks. Signed single-inventory export, offline verification and explicit scoped recovery now pass independent-database tests. Named-history and complete payload/dependency archival/restoration remain open; no pruning is authorized. |
 | DB-16 | Local 400,000-row cleanup/foreground-concurrency qualification passed with live state and audit preservation; active-worker stalled/failure rules are locally evaluated. Scheduled capacity is explicitly distinguished from burst SQL throughput. Live deployment/delivery remain deferred. |
-| DB-17 | Per-family [retention classification](storage-retention-policy.md) is recorded. Existing support-bundle payload expiration is bounded; explicit admission-history clears now have row/time budgets and atomic audit receipts. Delivery/compliance/restart archives and bounded retained metadata remain open. |
-| DB-18–20 | Real KEV/EPSS replay qualification passed (394,803 rows, no replay rewrites/WAL). Historical source/KEV semantics and opt-in resumable NVD backfill are implemented; measured catalog indexing keeps PostgreSQL. Source deployment and full NVD mirror traversal remain operational gates. See [catalog decision](cve-catalog-capacity.md) and [feed contract](cve-feed-checkpoints.md). |
+| DB-17 | Per-family [retention classification](../../storage-retention-policy.md) is recorded. Existing support-bundle payload expiration is bounded; explicit admission-history clears now have row/time budgets and atomic audit receipts. Delivery/compliance/restart archives and bounded retained metadata remain open. |
+| DB-18–20 | Real KEV/EPSS replay qualification passed (394,803 rows, no replay rewrites/WAL). Historical source/KEV semantics and opt-in resumable NVD backfill are implemented; measured catalog indexing keeps PostgreSQL. Source deployment and full NVD mirror traversal remain operational gates. See [catalog decision](../../cve-catalog-capacity.md) and [feed contract](../../cve-feed-checkpoints.md). |
 | DB-21 | Real Trivy/Grype package matching passed across two network-isolated container starts using unchanged private DB copies; missing DBs fail closed. Live topology, refresh/extraction headroom and notifications remain separate gates. |
 | DB-22 | Scheduled destinations upload/read-back and bounded local retention are implemented. The copy floor requires available files and keeps remote/failed receipts; manual successful local backups already share this policy. Independent signed local-file and local-object-store configuration restoration into a separate database now pass. Remote lifecycle/off-host durability remain open, separate from PostgreSQL PITR. |
 | DB-23 | Complete remaining lag/WAL signals, activate/qualify monitoring, and measure supported workload/capacity with failure recovery. |
@@ -59,7 +63,7 @@ pass. Local code/test success alone does not close operational gates.
 
 Reviewed 2026-09-27 against the checked-in code and the existing local k3s
 release. This originated as the detailed register for OPS-2 in the retired parity
-plan; its current parent is [M3](readiness-and-parity-plan.md#m3--make-evidence-and-response-delivery-recoverable).
+plan; its current parent is [M3](2026-10-26-readiness-and-parity-plan.md#m3--make-evidence-and-response-delivery-recoverable).
 It does not mark the parent milestone complete. The
 retired `constellation-vulndb` integration is tracked separately and is not a
 proposed destination for current CVE data.
@@ -84,7 +88,7 @@ twice. Deployment and operational acceptance remain open, especially the fold
 lag alarm and measured lock contention. This does not repair historical loss.
 
 DB-05 has chart plugin/recovery support and a local RustFS/CNPG rehearsal
-([runbook](cnpg-recovery.md)). An independent full restore of the existing
+([runbook](../../cnpg-recovery.md)). An independent full restore of the existing
 database also passed migration 168 with unchanged raw-flow, rollup, event and
 audit counts. The live StatefulSet remains unchanged; off-host copies, HA,
 failure alerts and existing-history integrity remain unproved. The later local
@@ -101,7 +105,7 @@ rehearsal now verifies an encrypted registry credential through the scanner API,
 wrong-KEK rejection and recovery after the correct key returns, source audit-anchor
 preservation, full fixture-chain verification and a database-pod restart. Local
 pod deletion through authenticated recovery took 315 seconds. The
-[recovery runbook](cnpg-recovery.md#october-12-credential-and-process-recovery-qualification)
+[recovery runbook](../../cnpg-recovery.md#october-12-credential-and-process-recovery-qualification)
 records exact images and limits.
 
 The existing-data restore fails chain verification at audit row 53. Read-only
@@ -321,13 +325,13 @@ deployment was changed; DB-23 remains open for broader profiling and alarms.
 
 | ID | Status | Required fix or decision | Acceptance gate |
 | --- | --- | --- | --- |
-| DB-06 | **Decision complete: retain all permanent receipts** | Runtime detection and scan completion receipts remain in the append-only audit chain with existing consumers. No suppression or stream migration is authorized by this retention policy. | The [classification decision](storage-retention-policy.md) preserves audit semantics. Archive capacity and query/pruning work remain DB-07–09/23. |
-| DB-07 | **Implemented/tested; deployment qualification open** | Version-2 archive segments use bounded ID catch-up, destination-specific locked progress, canonical row replay, signed boundary/checksum metadata and verified S3 read-back. See [archive contract](audit-archive.md). | Local PostgreSQL tests cover missed runs, backdated rows, rollback sequence gaps, replicas and safe replay after upload/read-back/commit failure. Actual destination capacity, compatibility and sustained catch-up remain deployment gates. |
+| DB-06 | **Decision complete: retain all permanent receipts** | Runtime detection and scan completion receipts remain in the append-only audit chain with existing consumers. No suppression or stream migration is authorized by this retention policy. | The [classification decision](../../storage-retention-policy.md) preserves audit semantics. Archive capacity and query/pruning work remain DB-07–09/23. |
+| DB-07 | **Implemented/tested; deployment qualification open** | Version-2 archive segments use bounded ID catch-up, destination-specific locked progress, canonical row replay, signed boundary/checksum metadata and verified S3 read-back. See [archive contract](../../audit-archive.md). | Local PostgreSQL tests cover missed runs, backdated rows, rollback sequence gaps, replicas and safe replay after upload/read-back/commit failure. Actual destination capacity, compatibility and sustained catch-up remain deployment gates. |
 | DB-08 | **Offline complete-chain verification implemented; external durability gates open** | Downloaded segments and complete linked chains verify offline using an independently trusted key and head digest. Bounds, signatures, checksums, IDs, predecessor links and chain hashes are checked. | Local independent replay/tamper/missing-segment tests pass. The historical row-53 discontinuity is not bypassed. Fresh-host recovery, immutable object policy and long-term availability remain unproven. |
 | DB-09 | **TRUNCATE protected; hot/cold pruning design open** | Migration 191 closes the TRUNCATE gap; UPDATE/DELETE remain blocked, and demo seeding preserves audit rows. Full source verification still starts at genesis; no pruning or trusted hot/cold query anchor is introduced. | Local PostgreSQL rejects UPDATE/DELETE/TRUNCATE and preserves the chain. After DB-07/08 deployment acceptance, design trusted archive anchors and preserve audit, timeline, support, exception-history and admission-hit queries before pruning. |
 | DB-10 | **Per-source health and paged recovery implemented; retention open** | Explicit organization/cluster source configuration detects missing, stale, delayed and unknown-reported timestamps independently. No global latest-event shortcut or fabricated reported timestamp remains for new ingress. | PostgreSQL and PromQL failure/recovery tests pass. Signed export/offline verification and independent-database scoped restore pass local tests. Scheduled archival and hold-aware source retention remain open; live delivery is deferred. |
 | DB-11 | **PCAP maintenance wired; broader evidence lifecycle open** | The runtime maintenance caller invokes bounded PCAP expiry only with a verified durable store. The earlier claim that it had no production caller is superseded. Threats, packet bytes and forensic snapshots need separate case-evidence/archive handling. | Existing file/receipt failure behavior is tested. No new age-only threat or forensic deletion is introduced; selected evidence restoration and broader lifecycle remain open. |
-| DB-12 | **Implemented/local tests passed; live gates deferred** | Migration 196 and the [hourly retention contract](flow-rollup-retention.md) provide a separate window, bounded raw-boundary-gated cleanup, monotonic unavailable-history boundary and late-ingest exclusion. | Existing values remain holds; new defaults are 90 days. PostgreSQL and HTTP tests preserve counts and return 410 for expired map/conversation/CSV ranges. Live rollout remains deferred. |
+| DB-12 | **Implemented/local tests passed; live gates deferred** | Migration 196 and the [hourly retention contract](../../flow-rollup-retention.md) provide a separate window, bounded raw-boundary-gated cleanup, monotonic unavailable-history boundary and late-ingest exclusion. | Existing values remain holds; new defaults are 90 days. PostgreSQL and HTTP tests preserve counts and return 410 for expired map/conversation/CSV ranges. Live rollout remains deferred. |
 | DB-13 | **Preservation policy set; archive/layout open** | Define lifecycle-aware retention for `findings`. All current findings land in a DEFAULT child despite time partitioning; open findings and triage must not vanish by age alone (`internal/server/database/migrations/004_findings_partitioned.sql`). | Resolved/orphaned findings archive by policy; open/suppressed/accepted decisions remain visible; partitions or another bounded layout avoid default-child bloat. |
 | DB-14 | **Reference protection implemented; named-history archive open** | Bounded job/result/repository maintenance locks candidates and rechecks references under READ COMMITTED. Latest/live/referenced records and all findings survive. | Real reference-race and boundary tests pass. Full named-result/job-history archival and dependency-aware restoration remain open; age alone does not authorize evidence removal. |
 | DB-15 | **Single-inventory recovery implemented; complete graph lifecycle open** | Signed package-inventory export/offline verification/scoped restore has an independent-database recovery test and atomic audit receipt. It neither deletes source evidence nor archives complete SBOM/result/attestation dependency graphs. | Size/signature/scope/conflict/rollback tests pass for the single-record primitive. Full dependency restoration, durable archive scheduling and payload cleanup remain open. |
@@ -338,7 +342,7 @@ deployment was changed; DB-23 remains open for broader profiling and alarms.
 
 | ID | Status | Required fix or decision | Acceptance gate |
 | --- | --- | --- | --- |
-| DB-18 | **Implemented; real-feed replay locally qualified** | Conditional merged writes and durable checkpoints avoid identical/sparse rewrites. Real KEV/EPSS replay covered 394,803 rows with no replay rewrites or extra WAL; malformed/partial/restart/replica regressions pass. | Production cadence and fleet WAL/dead-tuple growth remain deferred. The local fixture is not fleet capacity proof; see the [feed contract](cve-feed-checkpoints.md). |
+| DB-18 | **Implemented; real-feed replay locally qualified** | Conditional merged writes and durable checkpoints avoid identical/sparse rewrites. Real KEV/EPSS replay covered 394,803 rows with no replay rewrites or extra WAL; malformed/partial/restart/replica regressions pass. | Production cadence and fleet WAL/dead-tuple growth remain deferred. The local fixture is not fleet capacity proof; see the [feed contract](../../cve-feed-checkpoints.md). |
 | DB-19 | **Historical semantics/backfill implemented; full traversal unqualified** | Sources, aliases and KEV preserve historical observations; EPSS freshness uses its score timestamp. Opt-in resumable NVD bootstrap covers historical modified windows while current updates retain priority. | Withdrawal/sparse-update/replay tests pass. Full real NVD mirror traversal and source deployment remain operational qualification work. |
 | DB-20 | **Storage decision complete: retain PostgreSQL** | A restored 412,772-row catalog profile justified targeted indexing, not another database format. The measured default page improved from about 497 ms to 0.258 ms with about 26 MiB additional index allocation. | Local catalog/restore evidence supports the decision; broader workload/fleet capacity is DB-23. Retired VulnDB is not reintroduced. |
 | DB-21 | **Topology/health and offline process recovery qualified; live capacity open** | Explicit pod-local/single-PVC topology and diagnostics are implemented. Real Trivy/Grype matching passed twice in fresh network-isolated containers with unchanged private copies of 4,954,046,907 DB bytes; missing databases fail closed. | This proves local package matching across process replacement, not live PVC attachment, full image extraction, refresh overlap headroom or notification delivery. No claim that 8 GiB is sufficient. |
@@ -370,17 +374,17 @@ storage optimization.
 Migration 169 adds persistent ordered producer cursors. Event/flow agents now use
 bounded node disk queues, matching durable acknowledgements and Retry-After;
 ingestion batches PostgreSQL writes and commits flow rule hits with the raw rows.
-See [telemetry delivery](telemetry-delivery.md) for exact guarantees and gaps.
+See [telemetry delivery](../../telemetry-delivery.md) for exact guarantees and gaps.
 Independent rollup progress, byte/rate quotas, durable side effects, 24-hour fleet
 qualification and live rollout remain open. The separately requested
-[ClickHouse plan](CLICKHOUSE-PLAN.md) specifies a measured analytical-store
+[ClickHouse plan](https://github.com/alphabravo-oss/constellation/blob/388ad8ce861989e4604d1649a27499dc74b8af7c/docs/CLICKHOUSE-PLAN.md) specifies a measured analytical-store
 evaluation, not an installed second database.
 
 
 ## October 23 source reverification
 
 Source baseline `f63b06072f09424660f1a456f3adae3882cb4e9f` was reviewed alongside
-H9–H12 in the [ten-item continuation](security-testing.md#ten-item-security-and-lifecycle-continuation-2026-10-23).
+H9–H12 in the [ten-item continuation](../../security-testing.md#ten-item-security-and-lifecycle-continuation-2026-10-23).
 These are fresh source/database checks, not a new deployment or capacity claim.
 They do not close rollout, alarms, recovery, off-host or load acceptance gates.
 
@@ -406,13 +410,13 @@ Ten diagnostic implementation items now cover exclusive probes, probe cleanup
 errors, path-state classification, filesystem byte capacity, inode headroom,
 bounded directory enumeration, root confinement/special-file exclusion, explicit
 partial usage, stable records/checked totals, and API propagation. See the
-[contract and validation](scanner-cache-diagnostics.md). This supplies DB-21/23
+[contract and validation](../../scanner-cache-diagnostics.md). This supplies DB-21/23
 prerequisites without selecting topology, deploying alerts, evicting caches or
 claiming refresh/restart/offline capacity qualification.
 
 ## October 23 scanner-cache monitoring continuation
 
-Ten [scanner-cache monitoring items](scanner-cache-monitoring.md) now supply
+Ten [scanner-cache monitoring items](../../scanner-cache-monitoring.md) now supply
 read-only byte/inode capacity, explicit path states, serialized TTL collection,
 failed-sample invalidation, bounded private labels and scoped pressure,
 configuration, collection and discovery alerts. The chart's existing scanner
@@ -422,7 +426,7 @@ and live scrape/notification acceptance remain open. No live resources changed.
 
 ## October 23 storage-alert isolation continuation
 
-Ten [storage-alert isolation fixes](storage-health.md#ten-storage-alert-isolation-fixes-2026-10-23)
+Ten [storage-alert isolation fixes](../../storage-health.md#ten-storage-alert-isolation-fixes-2026-10-23)
 now retain optional cluster/Prometheus labels across nine data-alert health joins,
 suppress stale data after failed scrapes and expose missing/failed exporters per
 discovered target. The rendered rules pass 75 executable PromQL scenarios; restoring
@@ -432,7 +436,7 @@ queries, retention policies and live deployments were not changed.
 
 ## October 23 scanner cache topology continuation
 
-Ten [cache topology/lifecycle fixes](scanner-cache-topology.md) make pod-local
+Ten [cache topology/lifecycle fixes](../../scanner-cache-topology.md) make pod-local
 storage explicit, reject incompatible persistence, isolate managed claim identities
 and scanner Service routing by release, support external claims/retained managed
 claims and add optional cache/tmp limits. Existing persistent installations must

@@ -2,7 +2,7 @@
 // with the repository's Go toolchain, so the scanner image never ships upstream binaries that
 // embed vulnerable dependencies. Lock layout (deploy/docker/scanner-tools):
 //
-//	sources.json             {"go": "go1.27.3", "patchRevision": "...", "tools": [{name, module, version, sum, commit, patchRevision?, patches?}]}
+//	sources.json             {"go": "go1.27.4", "patchRevision": "...", "tools": [{name, module, version, sum, commit, patchRevision?, patches?}]}
 //	<tool>/go.mod, go.sum    reviewed dependency locks copied over the upstream module
 //
 // Flags mirror the Dockerfile and workflow call sites:

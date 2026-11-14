@@ -1,9 +1,13 @@
+> **Archived 2026-11-14.** Historical record, not an active work queue.
+> [PLAN.md](../../../PLAN.md) is the only current working plan.
+> Original: `docs/scale-hardening.md` at `de4ca4090`. Dates, results and unchecked items below retain their original scope.
+
 # Scale hardening guide
 
 **Historical design guidance, not a qualified production profile.** Several
 implementation/default claims below require reconciliation under M1-02 of the
-[readiness plan](readiness-and-parity-plan.md). Use [efficiency measurements](efficiency.md),
-[storage lifecycle status](database-lifecycle-backlog.md) and current chart values
+[readiness plan](2026-10-26-readiness-and-parity-plan.md). Use [efficiency measurements](../../efficiency.md),
+[storage lifecycle status](2026-10-26-database-lifecycle-backlog.md) and current chart values
 for bounded evidence. The scale numbers and RPO below are not measured capacity
 or agreed service objectives.
 

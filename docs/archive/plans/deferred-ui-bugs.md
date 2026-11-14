@@ -1,3 +1,7 @@
+> **Archived 2026-11-14.** Historical record, not an active work queue.
+> [PLAN.md](../../../PLAN.md) is the only current working plan.
+> Original: `frontend/e2e/deferred-bugs.md` at `de4ca4090`. Dates, results and unchecked items below retain their original scope.
+
 # Deferred UI bugs
 
 Bugs discovered during the Playwright deep-ui walk that were NOT fixed because the

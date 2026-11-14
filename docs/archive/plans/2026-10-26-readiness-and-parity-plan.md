@@ -1,9 +1,13 @@
+> **Archived 2026-11-14.** Historical record, not an active work queue.
+> [PLAN.md](../../../PLAN.md) is the only current working plan.
+> Original: `docs/readiness-and-parity-plan.md` at `de4ca4090`. Dates, results and unchecked items below retain their original scope.
+
 # Product readiness and NeuVector comparison plan
 
 Reviewed **2026-10-26** against main
 [`4aa704a035eaf149eab2ffe55e20e9651956f372`](https://github.com/alphabravo-oss/constellation/commit/4aa704a035eaf149eab2ffe55e20e9651956f372).
-This is the current acceptance register. The [database lifecycle backlog](database-lifecycle-backlog.md)
-owns the detailed DB-01–23 work; [architecture decisions](decisions/) govern the
+This is the current acceptance register. The [database lifecycle backlog](2026-10-26-database-lifecycle-backlog.md)
+owns the detailed DB-01–23 work; [architecture decisions](../../decisions) govern the
 implementation. Dated test records remain evidence for their stated scope.
 
 **Assessment:** Constellation is a substantial pre-release security platform with
@@ -19,15 +23,15 @@ those claims. There is no defensible overall completion percentage yet.
   deferred. Off-host recovery and real node-failure testing also remain deferred.
   These are recorded boundaries, not requests to enable workflows or deploy.
 - Preserve audit evidence, open findings, referenced scans and recoverable backup
-  copies under the [retention decisions](storage-retention-policy.md). No additional
+  copies under the [retention decisions](../../storage-retention-policy.md). No additional
   legal period, legal hold or RPO/RTO target has been supplied. Measure recovery
   performance before proposing service objectives; do not invent an agreed target.
-- Follow [ADR 0002](decisions/0002-adopt-guide-stack.md): domain layers, sqlc,
+- Follow [ADR 0002](../../decisions/0002-adopt-guide-stack.md): domain layers, sqlc,
   incremental Connect-RPC/generated clients, react-hook-form/Zod and TanStack
   Router. The retired REST/TanStack Form convergence programme is not reinstated.
-- [ADR 0007](decisions/0007-helm-only-deployment.md) controls deployment;
-  [ADR 0010](decisions/0010-oidc-relying-party.md) and its local-account successor
-  [ADR 0011](decisions/0011-local-accounts.md) control identity. Native LDAP/SAML
+- [ADR 0007](../../decisions/0007-helm-only-deployment.md) controls deployment;
+  [ADR 0010](../../decisions/0010-oidc-relying-party.md) and its local-account successor
+  [ADR 0011](../../decisions/0011-local-accounts.md) control identity. Native LDAP/SAML
   providers are an intentional difference, not a task to restore removed code.
 
 The old `NEUVECTOR-PARITY-PLAN.md` was removed on October 20 during the approved
@@ -61,14 +65,14 @@ overlapping test suites into a unique-test total or count opt-in skips as passes
 
 | Area | Established evidence | Remaining acceptance boundary |
 | --- | --- | --- |
-| Historical high-severity defects | [H1–H12](SECURITY-BACKLOG.md) are recorded fixed, including closure by removal/replacement where applicable; most were reverified October 23. | This is closure of a historical list, not a complete vulnerability assessment. Fresh source/dependency/image security qualification remains M5-01. |
+| Historical high-severity defects | [H1–H12](2026-10-23-security-backlog.md) are recorded fixed, including closure by removal/replacement where applicable; most were reverified October 23. | This is closure of a historical list, not a complete vulnerability assessment. Fresh source/dependency/image security qualification remains M5-01. |
 | Local code quality | PR #52's final `make check` reported 3,278 tests, 9 skipped; integration reported 5,186 tests, 19 skipped. Lint, vet, formatting, shell and frontend type/build checks passed. | Suites overlap. Native, real-kernel, provider, real-tool and load opt-ins need their own receipts. No fresh security, browser or live acceptance run was performed for this assessment. |
 | Frontend | The October 26 assessment run passed 159 files / 2,440 tests. | It emitted 19,820 environment-`act` warnings and 42,277 unwrapped-`act` warnings. These are repeated messages, not 62,097 distinct defects; eliminate the warning causes and qualify real operator flows under M5-02. |
-| Scanning | [Scanner evidence](scanner-evidence.md), [job leases](scan-job-leases.md), scoped private-registry credentials and [offline matching](offline-scanning.md) have bounded proofs. Trivy/Grype matched real packages across two network-isolated starts. | Engine count and finding count do not prove accuracy. Complete provider/format coverage, matched-data false-positive/false-negative comparisons, and a full disconnected lifecycle remain open. |
-| Runtime and network | Process/file controls, native DP policy distribution, CNI-native policy and scoped Cilium/Calico traffic proofs exist; see [enforcement model](network-enforcement-model.md) and dated [security evidence](security-testing.md). | Configuration must be traced to actual verdict/action, acknowledgement and audit under failure and restart. Cilium inline WAF/DLP is unavailable in this design. No blanket CNI/kernel/platform qualification follows. |
+| Scanning | [Scanner evidence](../../scanner-evidence.md), [job leases](../../scan-job-leases.md), scoped private-registry credentials and [offline matching](../../offline-scanning.md) have bounded proofs. Trivy/Grype matched real packages across two network-isolated starts. | Engine count and finding count do not prove accuracy. Complete provider/format coverage, matched-data false-positive/false-negative comparisons, and a full disconnected lifecycle remain open. |
+| Runtime and network | Process/file controls, native DP policy distribution, CNI-native policy and scoped Cilium/Calico traffic proofs exist; see [enforcement model](../../network-enforcement-model.md) and dated [security evidence](../../security-testing.md). | Configuration must be traced to actual verdict/action, acknowledgement and audit under failure and restart. Cilium inline WAF/DLP is unavailable in this design. No blanket CNI/kernel/platform qualification follows. |
 | Evidence and retention | Signed audit, inventory, Kubernetes-audit and runtime-threat exports have independent verification/recovery proofs; DB-01–23 records precise progress. | Scheduled archives, dependencies, immutable remote copies, hold-aware expiry and trusted hot/cold query anchors remain incomplete. The historical audit chain break at row 53 remains unresolved. |
-| Delivery | [Event/flow spools and receipt transactions](telemetry-delivery.md) provide bounded raw-data replay protection. | Response callbacks, notifications and other effects lack a transactional delivery outbox. DPI/inventory/session lanes retain best-effort behavior; node/disk loss can destroy unacknowledged local evidence. |
-| Efficiency | [Query budgets](efficiency.md) cover 25 hot handlers with 10,000-row fixtures and a 250,000-byte gzip entry budget. Local flow, session and feed qualifications exercised 110,000, 400,000 and 394,803 rows respectively. | These are workload-specific results, not fleet SLOs. The May performance baseline and [scale guide](scale-hardening.md) do not establish production capacity or superiority over NeuVector. |
+| Delivery | [Event/flow spools and receipt transactions](../../telemetry-delivery.md) provide bounded raw-data replay protection. | Response callbacks, notifications and other effects lack a transactional delivery outbox. DPI/inventory/session lanes retain best-effort behavior; node/disk loss can destroy unacknowledged local evidence. |
+| Efficiency | [Query budgets](../../efficiency.md) cover 25 hot handlers with 10,000-row fixtures and a 250,000-byte gzip entry budget. Local flow, session and feed qualifications exercised 110,000, 400,000 and 394,803 rows respectively. | These are workload-specific results, not fleet SLOs. The May performance baseline and [scale guide](scale-hardening.md) do not establish production capacity or superiority over NeuVector. |
 | Deployment and recovery | The last recorded live database observation, October 23, was one healthy CNPG instance at migration 190 with successful WAL archiving and a completed scheduled backup. | The reviewed source requires migration 198. The live state was not rechecked for this assessment. One instance is not HA, and local recovery is not off-host or node-loss qualification. Actions remained disabled on October 26. |
 
 The three local logs for the first code/frontend rows are retained under
@@ -82,7 +86,7 @@ published release artifacts:
 | `assessment-frontend.log` | `227fbece98ce10a58a66cfe4b6a109e182aba4f9f04f5e5587b89cc06c7c7bde` |
 
 `make check` does **not** include the frontend unit suite, security scans or
-browser/live acceptance. [CLAUDE.md](../CLAUDE.md) and the [Makefile](../Makefile)
+browser/live acceptance. [CLAUDE.md](../../../CLAUDE.md) and the [Makefile](../../../Makefile)
 define current commands; older entries in the security log may refer to retired
 tooling. Preserve those entries as history, not instructions for a new run.
 
@@ -117,7 +121,7 @@ Review responsibility: runtime, policy, identity and scanner maintainers.
 | M2-03 | Open | Build a versioned, labeled scanning corpus with matched image/package data and feed timestamps. Measure false positives, false negatives, unsupported formats, failure reporting and resource use. A NeuVector accuracy/performance comparison must run both products under comparable conditions. |
 | M2-04 | Implemented / unverified; live portion deferred | Prove on-demand/scheduled benchmark execution, two-cluster isolation, report provenance and external event routing. Include dependency failures, attempt leases, duplicate reports and receiver errors. Live IdP/cloud/registry/SIEM delivery qualification is separate from local parser/fixture tests. |
 | M2-05 | Open | Complete the ADR 0002 domain-by-domain contract work and security proof: generated API/client contracts, configuration provenance/revision/consumer acknowledgement, centralized authorization, secret lifecycle and current local/OIDC/RBAC behavior. Inventory what is already done before implementation; retain a proof for each migrated domain. |
-| M2-06 | Open | Review the vendored native engine against current upstream releases/advisories; record relevant changes, local patches and maintenance ownership, then run native regressions for adopted changes. Meet [ADR 0003](decisions/0003-vendored-neuvector-dataplane.md)'s quarterly review/re-vendoring obligation. An older vendor date alone is not evidence of a specific vulnerability. |
+| M2-06 | Open | Review the vendored native engine against current upstream releases/advisories; record relevant changes, local patches and maintenance ownership, then run native regressions for adopted changes. Meet [ADR 0003](../../decisions/0003-vendored-neuvector-dataplane.md)'s quarterly review/re-vendoring obligation. An older vendor date alone is not evidence of a specific vulnerability. |
 
 **Exit:** each supported security control has a reproducible positive effect and
 a defined, tested failure outcome. Unsupported controls are visible as such.
@@ -223,7 +227,7 @@ product is defect-free.
   effective verdicts, policy semantics, failure modes and measured overhead.
 - **Native engine:** Constellation vendors NeuVector DP revision
   `4247e24561a9cd225db73a7cfaf5c7b2c99ba0a5`, tagged
-  `v5.5.1-rc4-33-g4247e245`, dated May 14 in the [NOTICE](../third_party/neuvector/NOTICE).
+  `v5.5.1-rc4-33-g4247e245`, dated May 14 in the [NOTICE](../../../third_party/neuvector/NOTICE).
   This creates an upstream maintenance obligation; it is not an independent
   detection-engine superiority claim.
 - **Identity:** local accounts/TOTP and one OIDC provider are supported choices.
