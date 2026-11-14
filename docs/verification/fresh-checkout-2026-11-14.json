@@ -1,0 +1,206 @@
+{
+  "schema_version": 1,
+  "verified_on": "2026-11-14",
+  "purpose": "Rebuild current development source and start a new development API without this workstation's private state.",
+  "repository": "https://github.com/alphabravo-oss/constellation",
+  "source_revision": "b9eacb34a399a14ca79acd8e114b89729e9eb4e3",
+  "source_scope": "Application/native/frontend builds and startup used a clean clone of this GitHub main revision. Host quality/tool installation checks used the same application source plus the two script changes whose hashes are recorded below; accompanying guide/plan/receipt edits are documentation.",
+  "profile": {
+    "os_arch": "linux/amd64",
+    "go": "1.27.4",
+    "node": "24.22.0",
+    "npm": "11.19.1",
+    "typescript_cli": "7.0.2",
+    "go_image": "golang:1.27.4-bookworm@sha256:4fa7c968ba93f1635670522dbb01a2c78150443e1385746924566079f36570ea",
+    "node_image": "node:24.22.0-bookworm@sha256:925de64a85319052d6971ae81ef2417da956e8a3a2c4a0fac732327970f017f5",
+    "host_quality_tools": {
+      "golangci-lint": "2.15.0",
+      "gosec": "2.29.0",
+      "govulncheck": "1.9.0",
+      "gitleaks": "8.30.1",
+      "gotestsum": "1.13.0",
+      "actionlint": "1.7.11",
+      "shellcheck": "0.11.0"
+    },
+    "optional_air_install": "1.67.4"
+  },
+  "isolation": {
+    "clone_from_github": true,
+    "go_workspace": "off",
+    "private_credentials_supplied_to_builds": false,
+    "sibling_repositories_required": false,
+    "host_dependency_or_build_caches_mounted_in_build_containers": false,
+    "preexisting_node_modules_in_clone": false,
+    "prebuilt_bpf_object_supplied": false,
+    "network_for_dependency_installation": "enabled; public Go/npm/GitHub/container/package sources",
+    "native_stages": "Docker --no-cache; existing base layers may be reused; source compilation ran again"
+  },
+  "checks": [
+    {
+      "name": "go-build",
+      "command": "GOWORK=off GOFLAGS=-p=4 go mod download; go mod verify; make build tools-build",
+      "environment": "fresh Go container, fresh GitHub clone",
+      "result": "passed",
+      "binary_count": 23,
+      "production_binary_count": 20,
+      "helper_binary_count": 3,
+      "api_and_cli_help_smoke": "passed"
+    },
+    {
+      "name": "frontend-build",
+      "command": "npm ci --strict-peer-deps --no-audit --no-fund; npm run lint; npm run build; ./node_modules/.bin/tsc --version",
+      "environment": "fresh Node container, fresh GitHub clone",
+      "result": "passed",
+      "initial_javascript_gzip_bytes": 232251,
+      "budget_bytes": 250000,
+      "existing_fast_refresh_warnings": 129
+    },
+    {
+      "name": "bpf-build",
+      "command": "docker build --no-cache --target bpf-build --build-arg GO_VERSION=1.27.4 -f deploy/docker/Dockerfile.runtime-agent .",
+      "environment": "fresh GitHub clone",
+      "result": "passed"
+    },
+    {
+      "name": "dataplane-build",
+      "command": "docker build --no-cache --target dp-build --build-arg GO_VERSION=1.27.4 -f deploy/docker/Dockerfile.runtime-agent .",
+      "environment": "fresh GitHub clone",
+      "result": "passed"
+    },
+    {
+      "name": "tool-installer",
+      "command": "CI_TOOLS_BIN=<empty tools directory> bash scripts/install-ci-tools.sh",
+      "environment": "host; explicit govulncheck/actionlint versions from this change",
+      "result": "passed",
+      "note": "An additional installation from the GitHub clone verified golangci-lint, shellcheck, gotestsum and optional Air. Tool installation can use the host Go cache; cold dependency claims apply to the application build containers."
+    },
+    {
+      "name": "quality-gate",
+      "command": "GOWORK=off GOFLAGS=-p=4 make check",
+      "environment": "host with newly installed tools first on PATH",
+      "result": "passed",
+      "go_tests_total": 3278,
+      "go_tests_skipped": 9,
+      "includes": [
+        "Go lint/vet/format",
+        "shellcheck",
+        "frontend lint/type/build/bundle budget",
+        "Go race/shuffle unit suite"
+      ],
+      "excludes": [
+        "full frontend unit suite",
+        "integration suite",
+        "security scans",
+        "browser tests"
+      ]
+    },
+    {
+      "name": "workflow-lint",
+      "command": "actionlint",
+      "result": "passed"
+    },
+    {
+      "name": "empty-database-api-startup",
+      "result": "passed",
+      "sequence": [
+        "Generate disposable age key and password/TOTP credentials privately",
+        "Create Docker internal network with no published ports",
+        "Start fresh tmpfs pgvector PostgreSQL database",
+        "Start freshly built constellation-api with the temporary DATABASE_URL, CONSTELLATION_AGE_KEY and LOCAL_BOOTSTRAP_* variables",
+        "GET /healthz and /readyz",
+        "POST /api/v1/auth/local with password/TOTP and required browser-origin headers",
+        "GET /api/v1/auth/me with issued session cookie",
+        "Run constellation-api --check-schema",
+        "Remove temporary containers, network and credential files"
+      ],
+      "observed": {
+        "scope": "isolated development API; empty disposable PostgreSQL; no published ports",
+        "source_revision": "b9eacb34a399a14ca79acd8e114b89729e9eb4e3",
+        "outbound_network": "disabled by Docker internal network",
+        "database_image_id": "sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b",
+        "ready": {
+          "status": "ready"
+        },
+        "health": {
+          "status": "ok"
+        },
+        "auth_providers": {
+          "break_glass": true,
+          "local": true,
+          "oidc": false,
+          "totp_policy": "everyone"
+        },
+        "local_totp_login_http_200": true,
+        "session_cookie_issued": true,
+        "authenticated_me_http_200": true,
+        "schema_check_exit_code": 0,
+        "migration": 198,
+        "result": "passed",
+        "temporary_resources_removed": true
+      }
+    }
+  ],
+  "verification_input_sha256": {
+    "scripts/install-ci-tools.sh": "845978acc6a9bda0a5934eefea7280cb2db77f7dcce98e42bd3ffdb858882447",
+    "scripts/dev.sh": "b43e6f6ecad55a6ad746c54e00449d78dceda4a42d953a0b49dc86c80cffd423",
+    "Makefile": "35f5964354bcb61058fa76b25ceb41362ffe219f4359c9f2326b1187c7e4870b",
+    "go.mod": "a36fd724e536fa5f86eb1ca31457ab62c01a93f02663e48f3385ebdd4ebfe50a",
+    "go.sum": "a9e1afb795a028d4e0ed516eebae91aa5c81734a5606a5eeef81e2c2ef7260b1",
+    "frontend/package.json": "1479eaa01393a7f67e5c3973bdeada83c7d971c4c1e02e1a214228c129c92068",
+    "frontend/package-lock.json": "e5a020da5b3e3836303962d75799c06a43d6c047186e57ecab01f3930e63a9e3",
+    "deploy/docker/Dockerfile.runtime-agent": "5356a2854af4bfb1b7a02497f281b967164ca0fbde3ebdf66786f5287fef5568"
+  },
+  "local_log_directory": "/root/constellation-fresh-node-20261114",
+  "local_logs": {
+    "clone.log": {
+      "bytes": 63,
+      "sha256": "9bf996d6e51d71c0c1ebf9c9daa5df8753118a8a5ed69dc7480955f688beb9f0"
+    },
+    "go-build.log": {
+      "bytes": 3496,
+      "sha256": "6219dbe7683e2502cc6b01fa73ceae75ba6b5b18df9d443f7b2266f383536d43"
+    },
+    "frontend-build.log": {
+      "bytes": 65908,
+      "sha256": "52219c89d871e9db6b650377cd14d75be0fdab20361821b5be204453502b5cba"
+    },
+    "bpf-build.log": {
+      "bytes": 35949,
+      "sha256": "fff91c0165485cfdb79c5e09a3ae45cb3aba00621603b33e552034e801b9fa9d"
+    },
+    "dp-build.log": {
+      "bytes": 57328,
+      "sha256": "79443495fb41e8220a09674c7fcd16b032eaa8322c3c10d8a76caae94973f38e"
+    },
+    "tools-install.log": {
+      "bytes": 594,
+      "sha256": "0e81e7f29fac6f3a2577f5bbea672f411747f0e16665c478a992a1371e002bd8"
+    },
+    "tools-pinned-install.log": {
+      "bytes": 488,
+      "sha256": "b49fb3c8a15ed163f05928b5dfab495d78d80cef93006b50606ad3c26974f5a3"
+    },
+    "check.log": {
+      "bytes": 72513,
+      "sha256": "4004369f529785b6eb701e29b5fac2ee015d363b1bff0ef34e20c7ea091faa3c"
+    },
+    "actionlint.log": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "startup-result.json": {
+      "bytes": 732,
+      "sha256": "afdfa0bfcacad91130ce03d63c9468dabb577bc0dc6ed6f142fb309415e71557"
+    }
+  },
+  "evidence_custody": "This summary is committed. Original logs are local workstation artifacts; their hashes do not archive their bytes. Use separate durable storage to preserve originals.",
+  "limits": [
+    "Fresh checkout on the existing Docker host, not a physically independent node or off-host recovery drill.",
+    "Source continuity only: database/WAL, object archives, audit/evidence data, private keys, credentials and .env.dev.local require separate protected backups.",
+    "No signed release image publication, deployment or full production-stack qualification. GitHub Actions remains disabled.",
+    "No disconnected dependency bootstrap, complete air-gap lifecycle, other-architecture, kernel/CNI enforcement or browser qualification.",
+    "Native assets were compiled, not run with enforcement privileges. API startup is a disposable development proof.",
+    "The full frontend and database integration suites were not repeated for these script/documentation changes; their previous dated receipts remain in PLAN.md.",
+    "Existing Fast Refresh/React diagnostics, advisory findings, intermittent Cosign fixture issue and remaining milestones are not closed by this receipt."
+  ]
+}

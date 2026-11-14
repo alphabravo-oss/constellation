@@ -17,7 +17,7 @@ require_dev_tools() {
   for tool in docker go air node npx; do
     if ! command -v "$tool" >/dev/null 2>&1; then
       case $tool in
-        air) hint="go install github.com/air-verse/air@latest" ;;
+        air) hint="bash scripts/install-ci-tools.sh air" ;;
         docker) hint="https://docs.docker.com/engine/install/" ;;
         node|npx) hint="https://nodejs.org (24 LTS, see .node-version)" ;;
         *) hint="https://go.dev/dl" ;;
@@ -69,7 +69,7 @@ wait_for_pg() {
 migrate_db() { go run ./cmd/constellation-api --migrate-only; }
 
 seed_data() {
-  # Seed data only. Human sign-in uses configured OIDC or explicit TOTP break-glass.
+  # Seed data only. Human sign-in uses configured local bootstrap credentials or OIDC.
   go run ./cmd/constellation-seed >> "$LOG_DIR/seed.log" 2>&1 \
     && echo "seeded demo data (see $LOG_DIR/seed.log)"
 }
@@ -108,7 +108,7 @@ Constellation dev stack is up:
   scanner    http://localhost:${SCANNER_LISTEN_ADDR#:}/healthz
   postgres   $DATABASE_URL
   grafana    http://localhost:3000   prometheus http://localhost:9090   tempo :3200   loki :3100
-  login      configure OIDC or explicit TOTP break-glass
+  login      configure local bootstrap credentials or OIDC (docs/development.md)
 Logs: $0 logs [api|operator|scanner|web]
 MSG
 }
