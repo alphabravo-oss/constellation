@@ -2,6 +2,8 @@
 // hook-rules + react-refresh hygiene. The TS plugin's typed rules require a parserOptions.project
 // pointer which we deliberately omit (vitest+vite tsconfig juggling is more pain than it's worth
 // at v1; tsc --noEmit catches type errors).
+// TypeScript 7 supplies `tsc`; the `typescript` alias supplies Microsoft's TypeScript 6
+// API for this parser, following the supported side-by-side setup in docs/development.md.
 //
 // Globals come from the `globals` package: the previous hand-written list drifted behind the DOM
 // surface the app actually uses (17 no-undef errors), and js.configs.recommended keeps no-undef on

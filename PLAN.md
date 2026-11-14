@@ -11,7 +11,8 @@ documents describe contracts and dated evidence; they are not separate plans.
 The [archive index](docs/archive/plans/README.md) preserves superseded plans and
 links earlier plans already removed from the tree.
 
-On November 14, local main and GitHub main both pointed to `de4ca4090`, the merge
+At the start of the November 14 reconciliation, local main and GitHub main
+both pointed to `de4ca4090`, the merge
 of the October 26 plan update; no subsequent product implementation had landed.
 The current consolidation also qualifies pending dependency updates. Repository
 synchronization is distinct from deployed qualification. The October test and
@@ -111,8 +112,10 @@ The integration includes dependency PRs **#54, #57, #59–64 and #69–71**, the
 TanStack Table 9 wrapper migration, a server-confirmed lock-timeout regression
 fix, and the Go 1.27.4 / follow-redirects 1.16.3 security patches. The code baseline
 is [`382263946615d73af7a9ca30812f8bc67c21a3ec`](https://github.com/alphabravo-oss/constellation/commit/382263946615d73af7a9ca30812f8bc67c21a3ec);
-the remaining consolidation changes are documentation. PR #58 is excluded for
-M5-06's compiler/parser incompatibility. Eight superseded documents retain their
+the remaining consolidation changes are documentation. PR #58 was excluded from
+that batch because a direct compiler/API replacement broke ESLint. The follow-up
+qualification below resolves this through the supported upstream package layout.
+Eight superseded documents retain their
 original bodies in the archive, and all thirteen earlier source snapshots were
 verified in Git history.
 
@@ -158,6 +161,43 @@ No new browser, native/kernel, fleet, signed-release, live alert, off-host or
 node-loss evidence is claimed. Actions remains disabled. Previously published
 CNPG/Barman images still use Go 1.27.3 and must be rebuilt and qualified before
 any future rollout; their existing digest pins were not relabeled.
+
+## TypeScript 7 follow-up qualification — PR #58
+
+Source: [`6ed61b98645761a7d2dddd242ed6ba2dd8c611b3`](https://github.com/alphabravo-oss/constellation/commit/6ed61b98645761a7d2dddd242ed6ba2dd8c611b3).
+The earlier blocker applied to replacing the JavaScript compiler API directly.
+Microsoft documents a supported package arrangement that preserves that API for
+ESLint while using the native TypeScript 7 compiler for application type-checking
+and builds. The [development guide](docs/development.md#frontend-typescript-toolchain)
+records the packages and upgrade checks. Strict peer resolution succeeds; no lint
+rules, compiler strictness or test timeouts were relaxed.
+
+Receipts: `/root/constellation-typescript58-20261114/`.
+
+| Check | Result |
+| --- | --- |
+| Install and tool identity | Clean `npm ci --strict-peer-deps` and `npm ls` passed. Local and Docker `tsc` resolve to 7.0.2; the ESLint parser resolves the TypeScript 6.0.3 API. |
+| Quality gate | Final `make check` passed, including 3,278 Go tests with 9 opt-in skips. Lint/type/build checks retain the existing 129 Fast Refresh warnings; M5-02 remains open. |
+| Frontend regression | All 159 files / 2,440 tests passed with two workers. Native compiler rejects a deliberately invalid assignment; ESLint rejects a conditional React hook and accepts the valid TSX fixture. |
+| Build | Host production bundle and the frontend Docker build stage passed. Host initial JavaScript: 232,242 gzip bytes / 250,000-byte gate. Container tool identity was verified with networking disabled. |
+
+| Receipt | SHA-256 |
+| --- | --- |
+| `check-final.log` | `ffe777b2cdcbed0e73946b7835ded954e6f87305648b408e6a0f6a7e40614cb9` |
+| `frontend-tests.log` | `0630047131ab29e70cb4ddbc0262d6e2e6c85c432637727a289b1b21bbb73a0c` |
+| `toolchain.json` | `a218c0d716bf29cfb9ef8682b0773566649c37caa21eaf9ff1ea907985841bc0` |
+| `negative-checks.json` | `24a0b37c39d4c3770796b02015def195329404e308504bcb73a9f9596a77fec1` |
+| `docker-build.log` | `87a64139121d9d6f4a7f5352ff9554d3fba06bb0ce4e1e387f32384638fe6b09` |
+| `docker-toolchain.log` | `c5ee41a610cb3d6148fef292af6afd99b03f86e92ca7f5f11c51228fc142f666` |
+
+The production npm audit remains clean. The eight development-only dependency
+entries associated with the minimatch advisory remain M5-01 work. The initial
+`make check` encountered `text file busy` while executing an unchanged temporary
+Cosign test script (`pkg/sigverify`, `TestVerifyAttestationParsesCosignOutput`).
+Twenty shuffled, race-enabled repetitions of that package passed. Preserve the
+initial `check.log` and investigate fixture reliability under M5-01; the later
+full result does not establish that the intermittent failure is fixed.
+Actions remains disabled, and no release image was published or deployed.
 
 ## Remaining milestones
 
@@ -234,12 +274,12 @@ Review responsibility: release, frontend, security and operations maintainers.
 
 | ID | State | Completion criterion |
 | --- | --- | --- |
-| M5-01 | Open; hosted/release portion deferred | Run current lint/unit/integration/frontend/native/security gates on a recorded source revision. Scan exact image digests and dependencies, preserve findings and resolve release blockers. Review the November 14 development-only minimatch advisory and non-imported OpenPGP module advisory below. Rebuild and qualify every eventual release/helper image at the Go 1.27.4 floor, including CNPG/Barman, then update signed digest references. Verify source-bound provenance/signatures. Local green checks are not hosted CI or signed-release evidence. |
+| M5-01 | Open; hosted/release portion deferred | Run current lint/unit/integration/frontend/native/security gates on a recorded source revision. Scan exact image digests and dependencies, preserve findings and resolve release blockers. Review the November 14 development-only minimatch advisory, non-imported OpenPGP module advisory and intermittent Cosign test-fixture failure recorded above. Rebuild and qualify every eventual release/helper image at the Go 1.27.4 floor, including CNPG/Barman, then update signed digest references. Verify source-bound provenance/signatures. Local green checks are not hosted CI or signed-release evidence. |
 | M5-02 | Open | Fix frontend asynchronous-test/environment warnings, load-sensitive waits and the remaining Fast Refresh lint warnings without blanket suppression. Define a reproducible worker budget, then run the full suite with a clean diagnostic contract. Verify production-serving browser flows and accessibility for migration, identity, policy, scanning, evidence and recovery. Earlier browser receipts do not qualify the new source automatically. |
 | M5-03 | Open; fleet portion deferred | Measure supported load, p95/p99 latency, CPU/memory, database growth, ingest lag/backpressure and recovery under concurrent readers/writers. Retain the 24-hour fleet soak and failure matrix. Define capacity from measurements; 100 clusters / 10,000 nodes / 100M findings is a design target. |
 | M5-04 | Open; live portion deferred | Qualify disconnected first boot, core workflows, feed/tool updates, upgrade and full restore with closed egress; qualify each claimed CPU architecture. Go FIPS build/runtime guards do not establish whole-product certification or deployed compliance. |
 | M5-05 | Deferred | After an explicit change to the current operating scope, qualify the signed release on the supported deployment profile, including alert delivery, failover, off-host recovery and real node loss. Keep Actions disabled and make no live rollout in the current scope. |
-| M5-06 | Blocked on upstream tooling | Upgrade TypeScript only when the supported ESLint/parser toolchain accepts the compiler version, then pass installation, lint, type/build and full frontend regression gates. [PR #58](https://github.com/alphabravo-oss/constellation/pull/58) proposes TypeScript 7.0.2; on November 14 the latest `@typescript-eslint/parser` and plugin (8.72.2) declare TypeScript `>=4.8.4 <6.1.0`. Keep 6.0.3; do not override peer constraints or merge an unsupported compiler. |
+| M5-06 | Verified, bounded | [PR #58](https://github.com/alphabravo-oss/constellation/pull/58) uses the [documented Microsoft package layout](docs/development.md#frontend-typescript-toolchain): `@typescript/native` aliases TypeScript 7.0.2 for `tsc`, while `typescript` aliases `@typescript/typescript6` and exposes the supported 6.0.3 API to ESLint. Strict installation, native type/build, unchanged lint rules and full frontend regression evidence are recorded above. No unsupported peer override is needed. Requalify the API dependency when upstream tooling supports the native API. |
 
 **Exit:** a specific version, image set and supported profile have complete
 release evidence and stated limitations. Local completion alone does not close

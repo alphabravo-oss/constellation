@@ -44,6 +44,24 @@ Install the Go tools once: `go install github.com/air-verse/air@latest` and
 Bring your own database for integration tests with
 `CONSTELLATION_TEST_DATABASE_URL=postgres://... make test-integration`.
 
+## Frontend TypeScript toolchain
+
+The frontend uses TypeScript **7.0.2** for `tsc`, including `npm run type-check`
+and the production build. ESLint's parser still requires the TypeScript 6
+JavaScript API. Follow Microsoft's documented
+[side-by-side configuration](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/#running-side-by-side-with-typescript-6-0):
+
+- `@typescript/native` aliases `typescript@7.0.2` and provides `tsc`.
+- `typescript` aliases `@typescript/typescript6@6.0.2`, which provides `tsc6`
+  and forwards the compiler API to `@typescript/old` (TypeScript 6.0.3 in the lockfile).
+
+Keep these roles distinct when updating dependencies. Replacing the API alias
+directly with TypeScript 7 breaks the current ESLint parser. Install with
+`npm ci --strict-peer-deps` from `frontend/`; `npx --no-install tsc --version`
+must report 7.0.2, while `node -p "require('typescript').version"` reports 6.0.3.
+The normal lint rules and strict type-checking remain enabled. Re-evaluate the
+API dependency when typescript-eslint supports the native compiler API.
+
 ## Images and release
 
 `make image-<role>` builds one role image; `GO_VERSION` is read from `go.mod` and passed as
