@@ -1,9 +1,12 @@
 import { type ReactNode, type Key, useEffect, useMemo, useRef, useState } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
-  useReactTable,
-  getCoreRowModel,
-  getSortedRowModel,
+  useTable,
+  tableFeatures,
+  columnOrderingFeature,
+  columnVisibilityFeature,
+  rowSortingFeature,
+  createSortedRowModel,
   type ColumnDef,
   type SortingState,
 } from "@tanstack/react-table";
@@ -17,6 +20,13 @@ import { TableCellContent } from "./table-cell-content";
 import { arrangeColumns, pinnedOffsets, sanitizeArrangement, type TableArrangement } from "./data-table-arrangement";
 import { ColumnResizeHandle } from "./data-table-resize";
 import { ColumnLayoutMenu } from "./data-table-layout-menu";
+
+const dataTableFeatures = tableFeatures({
+  columnOrderingFeature,
+  columnVisibilityFeature,
+  rowSortingFeature,
+  sortedRowModel: createSortedRowModel(),
+});
 
 export type Density = "compact" | "cozy" | "comfy";
 export type TableSort = { id: string; dir: "asc" | "desc" };
@@ -128,7 +138,7 @@ const TABLE_PAGE_SIZE = 100;
  * and exposes a small `Column<T>` facade so pages never hand-roll a table.
  * Sticky header · semantic alignment · resizing/order/pinning · scoped preferences.
  */
-export function DataTable<T>(props: DataTableProps<T>) {
+export function DataTable<T extends object>(props: DataTableProps<T>) {
   const identity = useTablePreferencesIdentity();
   const scopedKey = identity && props.preferencesKey
     ? JSON.stringify([identity.org_id, identity.user_id, props.preferencesKey])
@@ -139,7 +149,7 @@ export function DataTable<T>(props: DataTableProps<T>) {
     {...props} preferencesKey={scopedKey} showColumnChooser={props.showColumnChooser ?? !!props.preferencesKey} />;
 }
 
-function DataTableView<T>({
+function DataTableView<T extends object>({
   rows,
   columns,
   rowKey,
@@ -284,13 +294,13 @@ function DataTableView<T>({
   // threading the facade through TanStack column meta typing).
   const colById = useMemo(() => new Map(visibleColumns.map((c) => [c.id, c])), [visibleColumns]);
 
-  const columnDefs = useMemo<ColumnDef<T>[]>(
+  const columnDefs = useMemo<ColumnDef<typeof dataTableFeatures, T>[]>(
     () =>
       columns.map((c) => ({
         id: c.id,
         accessorFn: (row: T) => row,
         enableSorting: !!c.sort,
-        sortingFn: c.sort ? (a, b) => c.sort!(a.original, b.original) : "auto",
+        sortFn: c.sort ? (a, b) => c.sort!(a.original, b.original) : "auto",
         sortDescFirst: true,
         header: c.id,
         cell: () => null,
@@ -298,13 +308,12 @@ function DataTableView<T>({
     [columns],
   );
 
-  const table = useReactTable({
+  const table = useTable({
+    features: dataTableFeatures,
     data: rows,
     columns: columnDefs,
     state: { sorting, columnVisibility, columnOrder: orderedColumns.map(column => column.id) },
     onSortingChange: handleSortingChange,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
     manualSorting,
     getRowId: (row) => String(rowKey(row)),
     enableSortingRemoval: true,
