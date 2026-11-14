@@ -2,7 +2,7 @@
 
 Syft 1.54.1, Grype 0.120.1, and Cosign 3.1.3 upstream binaries embed older Go
 runtimes and libraries. These locks retain the upstream tool versions while
-rebuilding with the compiler pinned in `sources.json` (currently Go 1.27.3) and
+rebuilding with the compiler pinned in `sources.json` (currently Go 1.27.4) and
 patched dependencies. Trivy and ORAS are also rebuilt with this compiler from
 verified upstream tag commits in the scanner Dockerfile.
 

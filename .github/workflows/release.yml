@@ -115,7 +115,7 @@ jobs:
         env:
           IMAGE: ghcr.io/alphabravo-oss/constellation/${{ matrix.role }}@${{ steps.build.outputs.digest }}
         run: scripts/check-image-size.sh "${{ matrix.role }}" "$IMAGE"
-      - name: Go toolchain floor (every Go binary in the image >= go1.27.3)
+      - name: Go toolchain floor (every Go binary in the image >= go1.27.4)
         env:
           IMAGE: ghcr.io/alphabravo-oss/constellation/${{ matrix.role }}@${{ steps.build.outputs.digest }}
         run: scripts/check-image-go.sh "$IMAGE"

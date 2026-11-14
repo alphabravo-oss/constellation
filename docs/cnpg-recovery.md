@@ -467,12 +467,17 @@ recovers to the previous checkpoint instead.
 The CloudNativePG operator and the Barman Cloud plugin are installed outside the Helm
 release (namespace `cnpg-system`), but their images are release artifacts:
 `deploy/cnpg/build-images.sh` rebuilds CNPG 1.30.1 and plugin-barman-cloud 0.15.1 from
-their verified tag commits on the repository Go toolchain (go >= 1.27.3, the eMudhra
-floor), applies the reviewed `golang.org/x` bumps, and runs the release gate,
+their verified tag commits on the repository Go toolchain (go >= 1.27.4, including
+the net/http and eMudhra fixes), applies the reviewed `golang.org/x` bumps, and runs the release gate,
 `scripts/check-image-go.sh` and cosign signing. The pinned references are in
 `deploy/cnpg/images.env`; the operand is the release `postgres:16.15-v<appVersion>` image.
 
-Roll them in this order (take a `Backup` first; archiving must stay green):
+The existing references in `images.env` remain the previously published Go 1.27.3
+artifacts. They do not satisfy the new Go 1.27.4 release floor. Rebuild, qualify,
+sign and update their digest references under [PLAN.md M5-01](../PLAN.md#remaining-milestones)
+before a future rollout; publishing and deployment remain deferred.
+
+Once qualified, roll them in this order (take a `Backup` first; archiving must stay green):
 
 ```sh
 . deploy/cnpg/images.env
