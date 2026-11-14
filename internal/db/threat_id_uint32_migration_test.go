@@ -4,15 +4,16 @@ package db
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/alphabravocompany/constellation/internal/server/database"
 
 	"github.com/alphabravocompany/constellation/internal/testutil/pgtest"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/alphabravocompany/constellation/internal/testutil/pgfixture"
@@ -107,10 +108,24 @@ func TestThreatUint32MigrationLocksBeforeSchema(t *testing.T) {
 	if _, err = lock.Exec(ctx, `SELECT 1 FROM network_flow_rollup_state FOR SHARE`); err != nil {
 		t.Fatal(err)
 	}
-	blocked, cancel := context.WithTimeout(ctx, 80*time.Millisecond)
-	defer cancel()
-	if _, err = p.Exec(blocked, threatMigration(t)); err == nil {
-		t.Fatal("migration bypassed state lock")
+	// Wait for PostgreSQL to reject the blocked statement before releasing the
+	// lock. A client timeout can return while its cancellation is still in flight,
+	// allowing the migration to run after the lock is released.
+	blocked, err := p.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = blocked.Rollback(context.WithoutCancel(ctx)) })
+	if _, err = blocked.Exec(ctx, `SET LOCAL lock_timeout = '80ms'`); err != nil {
+		t.Fatal(err)
+	}
+	_, err = blocked.Exec(ctx, threatMigration(t))
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "55P03" {
+		t.Fatalf("expected PostgreSQL lock timeout, got %v", err)
+	}
+	if err = blocked.Rollback(ctx); err != nil {
+		t.Fatal(err)
 	}
 	if err = lock.Rollback(ctx); err != nil {
 		t.Fatal(err)
